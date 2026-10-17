@@ -57,3 +57,7 @@ class FinalDeclaringPrimary({final int? value}) extends NamedBase {
 class VarDeclaringPrimary({var int? value}) extends NamedBase {
   this : super(value: value);
 }
+
+class RepeatedArgument extends Base {
+  RepeatedArgument(int a) : super.two(a, a);
+}

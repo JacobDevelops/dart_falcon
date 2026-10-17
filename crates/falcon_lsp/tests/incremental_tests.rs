@@ -102,7 +102,7 @@ fn only_changed_file_is_reanalyzed() {
     assert_eq!(counts(&state, URI_B), (1, 1), "other file untouched");
 }
 
-/// Syntax-only rules analyze the open AST directly without parsing closed files
+/// Syntax-only rules analyze the open CST directly without parsing closed files
 /// or constructing project-wide semantic indexes.
 #[test]
 fn non_resolving_rules_keep_the_single_document_fast_path() {
@@ -833,9 +833,9 @@ fn malformed_suppression_reported_in_lsp() {
     );
 }
 
-/// Config reload re-analyzes every open document against its cached AST —
+/// Config reload re-analyzes every open document against its cached CST —
 /// rule set changes take effect with zero re-parses. This is the
-/// stale-AST-with-new-config guard from the design doc.
+/// stale-CST-with-new-config guard from the design doc.
 #[test]
 fn config_reload_reuses_cached_asts() {
     let (mut state, dir) = state_with_config(
@@ -859,7 +859,7 @@ fn config_reload_reuses_cached_asts() {
     let (_, diags_a) = results.iter().find(|(uri, _)| uri == URI_A).unwrap();
     assert!(
         diags_a.iter().all(|d| d.rule != "avoid-dynamic"),
-        "new config must apply to cached AST: {diags_a:?}"
+        "new config must apply to cached CST: {diags_a:?}"
     );
     assert_eq!(counts(&state, URI_A), (1, 2), "re-analyzed, NOT re-parsed");
     assert_eq!(counts(&state, URI_B), (1, 2), "re-analyzed, NOT re-parsed");

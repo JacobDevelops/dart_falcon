@@ -24,7 +24,7 @@ macro_rules! typed_node {
                 self.0
             }
 
-            pub fn span(self) -> $crate::ast::Span {
+            pub fn span(self) -> $crate::cst::Span {
                 self.0.span()
             }
         }

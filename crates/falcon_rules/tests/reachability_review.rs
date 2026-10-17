@@ -74,7 +74,7 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
     use std::path::Path;
 
     let path = Path::new("/unloaded_project/main.dart");
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
         tree,

@@ -105,14 +105,14 @@ mod tests {
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,
         });
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(imported);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(imported);
         let dependency = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: imported.into(),
             tree,

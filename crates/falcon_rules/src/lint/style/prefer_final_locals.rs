@@ -454,7 +454,7 @@ mod tests {
     use falcon_analyze::{ParsedFile, RuleAnalysis};
 
     fn lines(source: &str) -> Vec<usize> {
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -496,7 +496,7 @@ mod tests {
   var [first, second] = [inferred, typed];
   print(first + second);
 }"#;
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),

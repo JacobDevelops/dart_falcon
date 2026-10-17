@@ -77,7 +77,7 @@ fn file_marker_precedes_package_language_for_switch_grammar() {
 #[test]
 fn legacy_switch_labels_keep_full_expression_ast() {
     let source = "// @dart = 2.19\nvoid f(Object o) { switch (o) {\ncase 1 + 2: break;\ncase true ? 1 : 2: break;\ncase 1 is int: break;\ncase -x: break;\ncase !b: break;\ncase 1 == 2: break;\ncase x ?? 2: break;\ncase 'text'.length: break;\n} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let program = tree.program(source);
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Function(function) = program.declarations().first().unwrap() else {

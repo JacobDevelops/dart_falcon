@@ -154,22 +154,26 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         // Every positional super argument must be a distinct positional formal,
         // in declaration order. Other constructor parameters may precede it.
-        if args.positional().all(|arg| matches!(arg, Expr::Ident(_))) {
+        if !args.positional().is_empty()
+            && args.positional().all(|arg| matches!(arg, Expr::Ident(_)))
+        {
+            let mut parameters_by_name = HashMap::with_capacity(ctor.params.params().len());
+            for (index, parameter) in ctor.params.params().enumerate() {
+                parameters_by_name
+                    .entry(parameter.name().name())
+                    .or_insert((index, parameter));
+            }
+            let mut parameters = ctor.params.params();
             let mut seen = HashSet::with_capacity(args.positional().len());
             let mut previous = 0;
             for argument in args.positional() {
                 let Expr::Ident(identifier) = argument else {
                     unreachable!()
                 };
-                let Some(index) = ctor
-                    .params
-                    .params()
-                    .position(|param| param.name().name() == identifier.name())
-                else {
+                let Some(&(index, parameter)) = parameters_by_name.get(identifier.name()) else {
                     conversion.positional.push(PositionalCheck::Invalid);
                     break;
                 };
-                let parameter = ctor.params.params().nth(index).unwrap();
                 if matches!(parameter.kind(), ParamKind::Named { .. }) || !seen.insert(index) {
                     conversion.positional.push(PositionalCheck::Invalid);
                     break;
@@ -178,12 +182,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     conversion.positional.push(PositionalCheck::Blocked);
                     break;
                 }
-                for parameter in ctor
-                    .params
-                    .params()
-                    .skip(previous)
-                    .take(index + 1 - previous)
-                {
+                for parameter in parameters.by_ref().take(index + 1 - previous) {
                     conversion.positional.push(match parameter.initializing() {
                         Some(InitializingFormal::Super) => PositionalCheck::Invalid,
                         Some(InitializingFormal::This) => PositionalCheck::Blocked,

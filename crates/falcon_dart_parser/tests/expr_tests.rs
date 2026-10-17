@@ -1,6 +1,6 @@
 //! Regression tests for expression-level parser gaps (group `exprs`): each
 //! construct must parse with zero errors (unless the gap is specifically about a
-//! *missing* diagnostic) and produce a faithful AST shape.
+//! *missing* diagnostic) and produce a faithful CST view shape.
 
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;

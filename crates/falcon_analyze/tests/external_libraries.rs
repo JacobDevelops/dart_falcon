@@ -115,7 +115,6 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
         let falcon_dart_parser::ParseResult {
             tree: parsed_tree,
             errors,
-            ..
         } = parse(source);
         let parsed = Arc::new(ParsedFile {
             source: source.to_string().into_boxed_str(),
@@ -166,7 +165,6 @@ fn indexes_sdk_and_dependency_declarations() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -294,7 +292,6 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -305,7 +302,6 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
     let falcon_dart_parser::ParseResult {
         tree: other_parsed_tree,
         errors,
-        ..
     } = parse(other_source);
     let other_parsed = Arc::new(ParsedFile {
         source: (other_source).to_string().into_boxed_str(),
@@ -455,7 +451,6 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -558,7 +553,6 @@ fn compact_external_types_do_not_collide_with_project_names() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -652,7 +646,6 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -773,7 +766,6 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -837,7 +829,6 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -983,7 +974,6 @@ fn compact_external_const_constructors_preserve_instance_values() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -1159,7 +1149,6 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -1327,7 +1316,6 @@ abstract class EquivalentDiamond implements SameLeft, SameRight {}
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -1425,7 +1413,6 @@ fn doc_imports_share_the_transitive_external_loader() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -1465,7 +1452,6 @@ fn unindexed_project_package_imports_and_exports_in_dependencies_remain_uncertai
         let falcon_dart_parser::ParseResult {
             tree: parsed_tree,
             errors,
-            ..
         } = parse(source);
         let parsed = Arc::new(ParsedFile {
             source: source.to_string().into_boxed_str(),
@@ -1546,7 +1532,6 @@ fn external_doc_imports_keep_package_fallback_unless_configuration_proves_absenc
         let falcon_dart_parser::ParseResult {
             tree: parsed_tree,
             errors,
-            ..
         } = parse(source);
         let parsed = Arc::new(ParsedFile {
             source: source.to_string().into_boxed_str(),
@@ -2009,7 +1994,6 @@ fn transitive_libraries_and_parts_reload_after_project_buffers_close_without_sdk
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -2112,7 +2096,6 @@ fn executable_library_names_preserve_collisions_without_documentation_imports() 
             let falcon_dart_parser::ParseResult {
                 tree: parsed_tree,
                 errors,
-                ..
             } = parse(text);
             let parsed = Arc::new(ParsedFile {
                 source: text.to_string().into_boxed_str(),
@@ -2195,7 +2178,6 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -2397,7 +2379,6 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -2591,7 +2572,6 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
             let falcon_dart_parser::ParseResult {
                 tree: parsed_tree,
                 errors,
-                ..
             } = parse(text);
             let parsed = Arc::new(ParsedFile {
                 source: text.to_string().into_boxed_str(),
@@ -2720,7 +2700,6 @@ fn different_entrypoints_of_one_nondivergent_package_keep_copyless_identities() 
         let falcon_dart_parser::ParseResult {
             tree: parsed_tree,
             errors,
-            ..
         } = parse(text);
         let parsed = Arc::new(ParsedFile {
             source: text.to_string().into_boxed_str(),
@@ -2846,7 +2825,6 @@ fn documentation_imports_split_shared_dependency_instances() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -3003,7 +2981,6 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -3158,7 +3135,6 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),
@@ -3323,7 +3299,6 @@ fn shared_dependency_doc_imports_use_first_loaded_sdk_availability() {
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
-        ..
     } = parse(source);
     let parsed = Arc::new(ParsedFile {
         source: source.to_string().into_boxed_str(),

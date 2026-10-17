@@ -48,7 +48,7 @@ impl CrossFileRule for UnusedCode {
         let pkg = detect_package(files);
 
         // name → set of file indices that mention it. Usage is detected by a
-        // lexer identifier scan (not an AST walk): it never misses a reference —
+        // lexer identifier scan (not a syntax-tree walk): it never misses a reference —
         // type segments, `case` patterns, member access, combinators — and stays
         // correct even when a file's parse recovers partially. String-literal and
         // comment contents are excluded because the lexer tokenizes them apart.
@@ -189,7 +189,7 @@ fn collect_exported_files(
 /// `(byte offset, byte length)` of every identifier a file *uses*. This is
 /// deliberately over-inclusive — a spurious extra name only suppresses a flag,
 /// keeping the rule low-false-positive — and, being purely lexical, it captures
-/// references the AST walker would miss (type-name segments, `case` patterns,
+/// references the syntax-tree walker would miss (type-name segments, `case` patterns,
 /// member access, `show`/`hide` combinators) and survives partial parses.
 ///
 /// Retained identifiers include both simple and braced string interpolations,

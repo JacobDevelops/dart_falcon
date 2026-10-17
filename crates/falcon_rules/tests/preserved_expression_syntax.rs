@@ -19,7 +19,7 @@ use falcon_rules::lint::style::unnecessary_parenthesis::UnnecessaryParenthesis;
 use falcon_rules::lint::suspicious::no_equal_arguments::NoEqualArguments;
 
 fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
         tree,
@@ -247,7 +247,7 @@ void pattern<T>(T? value) {
   if (value case final captured /* ! */ !) {}
 }
 ";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
         tree,

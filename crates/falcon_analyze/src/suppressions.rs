@@ -9,7 +9,7 @@
 //! the next line of code (Biome semantics). Falcon does **not** read Dart's own
 //! `// ignore:` / `// ignore_for_file:` comments — those belong to the analyzer.
 //!
-//! Comments are read from the retained lexical stream (not a naive line scan),
+//! Comments are read from the CST's tokens (not a naive line scan),
 //! so a suppression phrase sitting inside a string literal is never mistaken
 //! for a real directive.
 //!

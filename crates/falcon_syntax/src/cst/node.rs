@@ -2,9 +2,9 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Range;
 
+use super::Span;
 use super::kind::NodeKind;
 use super::tree::{Element, NodeData, NodeId, SyntaxTree, TokenId};
-use crate::ast::Span;
 use crate::token::TokenKind;
 
 #[derive(Clone, Copy)]
@@ -32,6 +32,9 @@ impl<'a> SyntaxNode<'a> {
     }
     pub fn span(self) -> Span {
         self.data().span
+    }
+    pub(crate) fn param_kind(self) -> super::ParamKind {
+        self.data().param_kind()
     }
     pub fn recovery_span(self) -> Option<Span> {
         let spans = &self.tree.recovery_spans;
@@ -63,7 +66,10 @@ impl<'a> SyntaxNode<'a> {
         &self.source[span.start..span.end]
     }
     pub fn parent(self) -> Option<Self> {
-        self.data().parent.map(|id| Self { id, ..self })
+        self.data().parent.map(|link| Self {
+            id: link.id(),
+            ..self
+        })
     }
     pub fn ancestors(self) -> impl Iterator<Item = Self> + Clone {
         std::iter::successors(Some(self), |node| node.parent())
@@ -71,7 +77,7 @@ impl<'a> SyntaxNode<'a> {
     pub fn children_with_tokens(self) -> SyntaxElementChildren<'a> {
         SyntaxElementChildren {
             parent: self,
-            elements: self.tree.elements[self.data().children.clone()].iter(),
+            elements: self.tree.elements[self.data().child_range()].iter(),
         }
     }
     pub fn children(self) -> SyntaxNodeChildren<'a> {
@@ -80,13 +86,13 @@ impl<'a> SyntaxNode<'a> {
         }
     }
     pub fn descendants(self) -> impl DoubleEndedIterator<Item = Self> + ExactSizeIterator + Clone {
-        (self.id.0 as usize..self.data().subtree_end).map(move |index| Self {
+        (self.id.0 as usize..self.data().subtree_end as usize).map(move |index| Self {
             id: NodeId(index as u32),
             ..self
         })
     }
     pub fn tokens(self) -> SyntaxTokens<'a> {
-        SyntaxTokens::new(self.tree, self.source, self.data().tokens.clone())
+        SyntaxTokens::new(self.tree, self.source, self.data().token_range())
     }
     pub fn significant_tokens(self) -> impl DoubleEndedIterator<Item = SyntaxToken<'a>> + Clone {
         self.tokens()
@@ -99,20 +105,30 @@ impl<'a> SyntaxNode<'a> {
         self.tokens().next_back()
     }
     pub fn prev_sibling(self) -> Option<Self> {
-        self.parent()?
-            .children()
-            .take_while(|node| node.id != self.id)
-            .last()
+        self.data().previous_sibling.map(|link| Self {
+            id: link.id(),
+            ..self
+        })
     }
     pub fn next_sibling(self) -> Option<Self> {
-        let mut children = self.parent()?.children();
-        children.find(|node| node.id == self.id)?;
-        children.next()
+        let parent = self.data().parent?;
+        let index = self.data().subtree_end as usize;
+        let next = self.tree.nodes.get(index)?;
+        (next.parent == Some(parent)).then_some(Self {
+            id: NodeId(index as u32),
+            ..self
+        })
     }
     pub fn child_token(self, kind: TokenKind) -> Option<SyntaxToken<'a>> {
-        self.children_with_tokens()
-            .filter_map(SyntaxElement::into_token)
-            .find(|token| token.kind() == kind)
+        self.tree.elements[self.data().child_range()]
+            .iter()
+            .filter_map(|element| element.as_token())
+            .find(|id| self.tree.tokens[id.index()].kind == kind)
+            .map(|id| SyntaxToken {
+                tree: self.tree,
+                source: self.source,
+                id,
+            })
     }
 }
 

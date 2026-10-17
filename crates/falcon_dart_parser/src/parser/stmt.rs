@@ -1,56 +1,38 @@
 use falcon_syntax::Feature;
-use falcon_syntax::ast::*;
 use falcon_syntax::cst::NodeKind;
 use falcon_syntax::token::TokenKind;
 
-use super::{Marker, Parser, expr::Brackets};
+use super::{CompletedMarker, Marker, Parser, expr::Brackets};
 
 impl<'src> Parser<'src> {
-    pub(super) fn parse_block(&mut self) -> Block {
+    pub(super) fn parse_block(&mut self) -> CompletedMarker {
         let marker = self.start();
-        let start = self.cur().offset();
         self.expect(TokenKind::LBrace);
-        let mut stmts = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            stmts.push(self.parse_stmt());
+            self.parse_stmt();
         }
         self.expect(TokenKind::RBrace);
-        marker.complete(self, NodeKind::Block);
-        Block {
-            stmts,
-            span: self.span_from(start),
-        }
+        marker.complete(self, NodeKind::Block)
     }
 
-    pub(super) fn parse_stmt(&mut self) -> Stmt {
+    pub(super) fn parse_stmt(&mut self) -> CompletedMarker {
         let marker = self.start();
         let stmt = self.guarded(
             |p| {
-                let span = p.cur_span();
                 let error = p.start();
                 p.advance();
                 error.complete(p, NodeKind::ErrorExpr);
-                Stmt::Expr(ExprStmt {
-                    expr: Expr::Error { span },
-                    span,
-                })
+                Err(NodeKind::ExprStmt)
             },
             |p| {
-                let start = p.cur().offset();
-
                 // A statement-leading `label:` is unambiguous; labels may nest.
                 if p.at(TokenKind::Ident) && p.peek(1).kind == TokenKind::Colon {
                     let name_marker = p.start();
-                    let tok = p.advance();
+                    p.advance();
                     name_marker.complete(p, NodeKind::Identifier);
-                    let label = p.tok_ident(&tok);
                     p.advance(); // :
-                    let stmt = p.parse_stmt();
-                    return Stmt::Labeled(LabeledStmt {
-                        label,
-                        stmt: Box::new(stmt),
-                        span: p.span_from(start),
-                    });
+                    p.parse_stmt();
+                    return Err(NodeKind::LabeledStmt);
                 }
 
                 // Reject sync-body `await for`, recovering as an ordinary for-loop.
@@ -59,16 +41,16 @@ impl<'src> Parser<'src> {
                         p.error("'await for' is only allowed in an async function body");
                     }
                     p.advance(); // await
-                    return p.parse_for_stmt(p.ctx.body.is_async(), start);
+                    return Err(p.parse_for_stmt(p.ctx.body.is_async()));
                 }
 
-                match p.cur().kind {
+                Err(match p.cur().kind {
                     TokenKind::LBrace => {
                         // Gate speculation on `=` so ordinary blocks retain diagnostics.
                         if p.map_pattern_assign_ahead()
-                            && let Some(stmt) = p.try_parse_pattern_assign(start)
+                            && let Some(stmt) = p.try_parse_pattern_assign()
                         {
-                            return stmt;
+                            return Err(stmt);
                         }
                         // A literal-led brace group is a collection unless it contains
                         // a top-level semicolon, which only a block may contain.
@@ -85,11 +67,11 @@ impl<'src> Parser<'src> {
                         if looks_like_collection {
                             p.parse_expr_or_local_decl_stmt()
                         } else {
-                            Stmt::Block(p.parse_block())
+                            return Ok(p.parse_block());
                         }
                     }
                     TokenKind::If => p.parse_if_stmt(),
-                    TokenKind::For => p.parse_for_stmt(false, start),
+                    TokenKind::For => p.parse_for_stmt(false),
                     TokenKind::While => p.parse_while_stmt(),
                     TokenKind::Do => p.parse_do_while_stmt(),
                     TokenKind::Switch => p.parse_switch_stmt(),
@@ -97,122 +79,67 @@ impl<'src> Parser<'src> {
                     TokenKind::Return => p.parse_return_stmt(),
                     TokenKind::Throw => {
                         p.advance();
-                        let value = p.parse_expr();
+                        p.parse_expr();
                         p.eat(TokenKind::Semicolon);
-                        Stmt::Throw(ThrowStmt {
-                            value,
-                            span: p.span_from(start),
-                        })
+                        NodeKind::ThrowStmt
                     }
                     TokenKind::Break => {
                         p.advance();
-                        let label = p.parse_ident();
+                        p.parse_ident();
                         p.eat(TokenKind::Semicolon);
-                        Stmt::Break(BreakStmt {
-                            label,
-                            span: p.span_from(start),
-                        })
+                        NodeKind::BreakStmt
                     }
                     TokenKind::Continue => {
                         p.advance();
-                        let label = p.parse_ident();
+                        p.parse_ident();
                         p.eat(TokenKind::Semicolon);
-                        Stmt::Continue(ContinueStmt {
-                            label,
-                            span: p.span_from(start),
-                        })
+                        NodeKind::ContinueStmt
                     }
                     TokenKind::Assert => p.parse_assert_stmt(),
                     // Outside generators, `yield` remains an ordinary identifier.
                     TokenKind::Yield if p.ctx.body.is_generator() => p.parse_yield_stmt(),
                     TokenKind::Rethrow => {
-                        let token = p.advance();
-                        let mut span = Self::tok_span(&token);
-                        if let Some(semicolon) = p.eat(TokenKind::Semicolon) {
-                            span.end = semicolon.offset() + semicolon.len();
-                        }
-                        Stmt::Rethrow(span)
+                        p.advance();
+                        p.eat(TokenKind::Semicolon);
+                        NodeKind::RethrowStmt
                     }
                     TokenKind::Semicolon => {
-                        let token = p.advance();
-                        Stmt::Empty(Self::tok_span(&token))
+                        p.advance();
+                        NodeKind::EmptyStmt
                     }
                     _ => p.parse_expr_or_local_decl_stmt(),
-                }
+                })
             },
         );
-        self.complete_stmt(marker, &stmt);
-        stmt
-    }
-
-    fn complete_stmt(&mut self, marker: Marker, stmt: &Stmt) {
-        let kind = match stmt {
-            Stmt::Block(_) => {
+        match stmt {
+            Ok(block) => {
                 marker.abandon(self);
-                return;
+                block
             }
-            Stmt::If(_) => NodeKind::IfStmt,
-            Stmt::For(_) => NodeKind::ForStmt,
-            Stmt::While(_) => NodeKind::WhileStmt,
-            Stmt::DoWhile(_) => NodeKind::DoWhileStmt,
-            Stmt::Switch(_) => NodeKind::SwitchStmt,
-            Stmt::TryCatch(_) => NodeKind::TryCatchStmt,
-            Stmt::Return(_) => NodeKind::ReturnStmt,
-            Stmt::Throw(_) => NodeKind::ThrowStmt,
-            Stmt::Rethrow(_) => NodeKind::RethrowStmt,
-            Stmt::Empty(_) => NodeKind::EmptyStmt,
-            Stmt::Break(_) => NodeKind::BreakStmt,
-            Stmt::Continue(_) => NodeKind::ContinueStmt,
-            Stmt::LocalVar(_) => NodeKind::LocalVarDecl,
-            Stmt::PatternDecl(_) => NodeKind::PatternDeclaration,
-            Stmt::PatternAssign(_) => NodeKind::PatternAssignStmt,
-            Stmt::Labeled(_) => NodeKind::LabeledStmt,
-            Stmt::LocalFunc(_) => NodeKind::LocalFuncDecl,
-            Stmt::Assert(_) => NodeKind::AssertStmt,
-            Stmt::Yield(_) => NodeKind::YieldStmt,
-            Stmt::Expr(_) => NodeKind::ExprStmt,
-            Stmt::Error(_) => NodeKind::ErrorNode,
-        };
-        marker.complete(self, kind);
+            Err(kind) => marker.complete(self, kind),
+        }
     }
 
-    fn parse_if_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_if_stmt(&mut self) -> NodeKind {
         self.advance(); // if
-        let condition = self.parse_if_condition();
-        let then_branch = self.parse_stmt();
-        let else_branch = if self.eat(TokenKind::Else).is_some() {
-            Some(Box::new(self.parse_stmt()))
-        } else {
-            None
-        };
-        Stmt::If(IfStmt {
-            condition,
-            then_branch: Box::new(then_branch),
-            else_branch,
-            span: self.span_from(start),
-        })
+        self.parse_if_condition();
+        self.parse_stmt();
+        if self.eat(TokenKind::Else).is_some() {
+            self.parse_stmt();
+        }
+        NodeKind::IfStmt
     }
 
-    fn parse_for_stmt(&mut self, is_await: bool, start: usize) -> Stmt {
+    fn parse_for_stmt(&mut self, is_await: bool) -> NodeKind {
         if is_await {
             self.missing(NodeKind::AwaitFor);
         }
         self.advance(); // for
         self.expect(TokenKind::LParen);
-        let (init, condition, update) = self.parse_for_clauses();
-        self.check_await_for_header(is_await, &init);
-        let body = self.parse_stmt();
-        Stmt::For(ForStmt {
-            is_await,
-            header: ForHeader {
-                init,
-                condition,
-                updates: update,
-            },
-            body: Box::new(body),
-            span: self.span_from(start),
-        })
+        let is_for_in = self.parse_for_clauses();
+        self.check_await_for_header(is_await, is_for_in);
+        self.parse_stmt();
+        NodeKind::ForStmt
     }
 
     /// Lookahead (positioned at `final`/`var`): does an ident-led object pattern
@@ -237,37 +164,20 @@ impl<'src> Parser<'src> {
         }
     }
 
-    pub(super) fn parse_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
+    pub(super) fn parse_for_clauses(&mut self) -> bool {
         let header = self.start();
         let init_marker = self.start();
-        let annotations = self.parse_annotations();
-        let (mut init, condition, updates) = self.parse_unannotated_for_clauses(init_marker);
-        match &mut init {
-            Some(ForInit::VarDecl(decl)) => decl.annotations = annotations,
-            Some(
-                ForInit::ForIn {
-                    annotations: metadata,
-                    ..
-                }
-                | ForInit::PatternForIn {
-                    annotations: metadata,
-                    ..
-                },
-            ) => *metadata = annotations,
-            _ => {}
-        }
+        self.parse_annotations();
+        let is_for_in = self.parse_unannotated_for_clauses(init_marker);
         header.complete(self, NodeKind::ForHeader);
-        (init, condition, updates)
+        is_for_in
     }
 
-    fn parse_unannotated_for_clauses(
-        &mut self,
-        init_marker: Marker,
-    ) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
+    fn parse_unannotated_for_clauses(&mut self, init_marker: Marker) -> bool {
         // Empty for (;;)
         if self.at(TokenKind::Semicolon) {
             init_marker.abandon(self);
-            return self.finish_for_clauses(None);
+            return self.finish_for_clauses();
         }
 
         // Dart 3 pattern for-in: `for (final (a, b) in xs)`. The keyword must be
@@ -280,119 +190,61 @@ impl<'src> Parser<'src> {
                 self.peek(1).kind,
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
             ) || self.ident_led_object_pattern_ahead())
-            && let Some(header) = self.speculate(|p| {
-                let keyword = Self::var_keyword(false, p.at(TokenKind::Final));
+            && let Some(is_for_in) = self.speculate(|p| {
                 p.advance();
-                let pattern = p.parse_binding_pattern();
+                p.parse_binding_pattern();
                 p.eat(TokenKind::In)?;
-                let iterable = p.parse_expr();
+                p.parse_expr();
                 init_marker.complete(p, NodeKind::PatternForInInit);
                 p.expect(TokenKind::RParen);
-                Some((
-                    Some(ForInit::PatternForIn {
-                        annotations: Vec::new(),
-                        keyword,
-                        pattern: Box::new(pattern),
-                        iterable: Box::new(iterable),
-                    }),
-                    None,
-                    Vec::new(),
-                ))
+                Some(true)
             })
         {
-            return header;
+            return is_for_in;
         }
 
         let saved = self.checkpoint();
 
         // var / final / const → definitely a decl
         if self.at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const]) {
-            let keyword_span = Some(self.cur_span());
-            let is_const = self.at(TokenKind::Const);
-            let is_final = self.at(TokenKind::Final);
             self.advance();
-            let var_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
+            self.try_parse_type_followed_by(TokenKind::is_identifier_like);
             let name = self.expect_ident();
             if self.eat(TokenKind::In).is_some() {
-                let iterable = self.parse_expr();
+                self.parse_expr();
                 init_marker.complete(self, NodeKind::ForInInit);
                 self.expect(TokenKind::RParen);
-                return (
-                    Some(ForInit::ForIn {
-                        annotations: Vec::new(),
-                        declares_variable: true,
-                        keyword: Self::var_keyword(is_const, is_final),
-                        var_type,
-                        name,
-                        iterable: Box::new(iterable),
-                    }),
-                    None,
-                    Vec::new(),
-                );
+                return true;
             }
-            return self.finish_c_style_for(
-                init_marker,
-                false,
-                Self::var_keyword(is_const, is_final),
-                var_type,
-                keyword_span,
-                name,
-            );
+            return self.finish_c_style_for(init_marker, name);
         }
 
         // late final Type name in / late final Type name = ...
         if self.at(TokenKind::Late) {
-            let is_late = true;
             self.advance();
-            let keyword_span = self
-                .at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const])
-                .then(|| self.cur_span());
             let is_const = self.eat(TokenKind::Const).is_some();
-            let is_final = !is_const && self.eat(TokenKind::Final).is_some();
-            let _ = self.eat(TokenKind::Var);
-            let var_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
+            if !is_const {
+                self.eat(TokenKind::Final);
+            }
+            self.eat(TokenKind::Var);
+            self.try_parse_type_followed_by(TokenKind::is_identifier_like);
             let name = self.expect_ident();
-            return self.finish_c_style_for(
-                init_marker,
-                is_late,
-                Self::var_keyword(is_const, is_final),
-                var_type,
-                keyword_span,
-                name,
-            );
+            return self.finish_c_style_for(init_marker, name);
         }
 
         // Try `Type name in` — typed for-in without var/final
         if self.is_type_start() {
-            let ty = self.parse_type();
+            self.parse_type();
             if self.cur().kind.is_identifier_like() {
                 let name = self.expect_ident();
                 if self.eat(TokenKind::In).is_some() {
-                    let iterable = self.parse_expr();
+                    self.parse_expr();
                     init_marker.complete(self, NodeKind::ForInInit);
                     self.expect(TokenKind::RParen);
-                    return (
-                        Some(ForInit::ForIn {
-                            annotations: Vec::new(),
-                            declares_variable: true,
-                            keyword: VarKeyword::Var,
-                            var_type: Some(ty),
-                            name,
-                            iterable: Box::new(iterable),
-                        }),
-                        None,
-                        Vec::new(),
-                    );
+                    return true;
                 }
                 // C-style with type+name
-                return self.finish_c_style_for(
-                    init_marker,
-                    false,
-                    VarKeyword::Var,
-                    Some(ty),
-                    None,
-                    name,
-                );
+                return self.finish_c_style_for(init_marker, name);
             }
             // Rollback — couldn't parse as decl
             self.restore_cursor(saved);
@@ -401,82 +253,44 @@ impl<'src> Parser<'src> {
         // Expression(s) for-loop init, or bare `ident in expr`
         let expr = self.parse_expr();
         if self.eat(TokenKind::In).is_some() {
-            let name = match expr {
-                Expr::Ident(id) => id,
-                _ => {
-                    self.error("expected identifier in for-in");
-                    self.missing(NodeKind::Identifier);
-                    Identifier::new("<error>", self.cur_span())
-                }
-            };
-            let iterable = self.parse_expr();
+            if expr.kind() != NodeKind::Identifier {
+                self.error("expected identifier in for-in");
+                self.missing(NodeKind::Identifier);
+            }
+            self.parse_expr();
             init_marker.complete(self, NodeKind::ForInInit);
             self.expect(TokenKind::RParen);
-            return (
-                Some(ForInit::ForIn {
-                    annotations: Vec::new(),
-                    declares_variable: false,
-                    keyword: VarKeyword::Var,
-                    var_type: None,
-                    name,
-                    iterable: Box::new(iterable),
-                }),
-                None,
-                Vec::new(),
-            );
+            return true;
         }
         // C-style: expr ; cond ; update
-        let mut exprs = vec![expr];
         while self.eat(TokenKind::Comma).is_some() {
-            exprs.push(self.parse_expr());
+            self.parse_expr();
         }
         init_marker.complete(self, NodeKind::ForExprsInit);
-        self.finish_for_clauses(Some(ForInit::Exprs(exprs)))
+        self.finish_for_clauses()
     }
 
-    fn finish_c_style_for(
-        &mut self,
-        init_marker: Marker,
-        is_late: bool,
-        keyword: VarKeyword,
-        var_type: Option<DartType>,
-        keyword_span: Option<Span>,
-        first_name: Identifier,
-    ) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
-        let decl_start = first_name.span.start;
-        let declarators = self.parse_declarators(first_name);
-        let span = self.span_from(decl_start);
+    fn finish_c_style_for(&mut self, init_marker: Marker, first_name: CompletedMarker) -> bool {
+        self.parse_declarators(first_name);
         init_marker.complete(self, NodeKind::LocalVarDecl);
-        self.finish_for_clauses(Some(ForInit::VarDecl(LocalVarDecl {
-            annotations: Vec::new(),
-            keyword,
-            keyword_span,
-            is_late,
-            var_type,
-            declarators,
-            span,
-            full_span: span,
-        })))
+        self.finish_for_clauses()
     }
 
     /// Finish a C-style header after its initializer, starting at the first `;`.
-    fn finish_for_clauses(
-        &mut self,
-        init: Option<ForInit>,
-    ) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
+    fn finish_for_clauses(&mut self) -> bool {
         self.expect(TokenKind::Semicolon);
         let condition_marker = self.start();
-        let cond = self.parse_optional_expr_before(TokenKind::Semicolon);
+        self.parse_optional_expr_before(TokenKind::Semicolon);
         condition_marker.complete(self, NodeKind::ForCondition);
         self.expect(TokenKind::Semicolon);
         let updates_marker = self.start();
-        let update = self.parse_expr_list_until(TokenKind::RParen);
+        self.parse_expr_list_until(TokenKind::RParen);
         updates_marker.complete(self, NodeKind::ForUpdates);
         self.expect(TokenKind::RParen);
-        (init, cond, update)
+        false
     }
 
-    fn parse_optional_expr_before(&mut self, stop: TokenKind) -> Option<Expr> {
+    fn parse_optional_expr_before(&mut self, stop: TokenKind) -> Option<CompletedMarker> {
         if self.at(stop) {
             None
         } else {
@@ -484,67 +298,51 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_expr_list_until(&mut self, stop: TokenKind) -> Vec<Expr> {
-        let mut exprs = Vec::new();
+    fn parse_expr_list_until(&mut self, stop: TokenKind) {
         while self.cur().kind != stop && !self.at(TokenKind::Eof) {
-            exprs.push(self.parse_expr());
+            self.parse_expr();
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
         }
-        exprs
     }
 
-    fn parse_while_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_while_stmt(&mut self) -> NodeKind {
         self.advance(); // while
         self.expect(TokenKind::LParen);
-        let condition = self.parse_expr();
+        self.parse_expr();
         self.expect(TokenKind::RParen);
-        let body = self.parse_stmt();
-        Stmt::While(WhileStmt {
-            condition,
-            body: Box::new(body),
-            span: self.span_from(start),
-        })
+        self.parse_stmt();
+        NodeKind::WhileStmt
     }
 
-    fn parse_do_while_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_do_while_stmt(&mut self) -> NodeKind {
         self.advance(); // do
-        let body = self.parse_stmt();
+        self.parse_stmt();
         self.expect(TokenKind::While);
         self.expect(TokenKind::LParen);
-        let condition = self.parse_expr();
+        self.parse_expr();
         self.expect(TokenKind::RParen);
         self.eat(TokenKind::Semicolon);
-        Stmt::DoWhile(DoWhileStmt {
-            body: Box::new(body),
-            condition,
-            span: self.span_from(start),
-        })
+        NodeKind::DoWhileStmt
     }
 
-    fn parse_switch_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_switch_stmt(&mut self) -> NodeKind {
         self.advance(); // switch
         self.expect(TokenKind::LParen);
-        let subject = self.parse_expr();
+        self.parse_expr();
         self.expect(TokenKind::RParen);
         self.expect(TokenKind::LBrace);
-        let mut cases = Vec::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let case_start = self.cur().offset();
             let case_marker = self.start();
-            let mut case_kinds = Vec::new();
-            let mut labels = Vec::new();
+            let mut has_case = false;
 
             loop {
                 // A case may carry statement labels used as `continue label;`
                 // targets: `label: case 2:` / `label: default:`. Retain them.
                 while self.at(TokenKind::Ident) && self.peek(1).kind == TokenKind::Colon {
-                    labels.push(self.expect_ident()); // label
+                    self.expect_ident(); // label
                     self.advance(); // :
                 }
                 if self.at(TokenKind::Case) {
@@ -553,26 +351,23 @@ impl<'src> Parser<'src> {
                     // Before patterns (Dart < 3.0) a case operand is a constant
                     // expression, not a pattern: `case 1 + 2:`, `case -x:`.
                     if !self.version.supports(Feature::Patterns) {
-                        let expr = self.parse_expr();
+                        self.parse_expr();
                         self.expect(TokenKind::Colon);
-                        case_kinds.push(SwitchCaseKind::Expr(Box::new(expr)));
                         label_marker.complete(self, NodeKind::CaseExprLabel);
                     } else {
-                        let pattern = self.parse_pattern();
-                        let guard = if self.eat(TokenKind::When).is_some() {
-                            Some(Box::new(self.parse_expr()))
-                        } else {
-                            None
-                        };
+                        self.parse_pattern();
+                        if self.eat(TokenKind::When).is_some() {
+                            self.parse_expr();
+                        }
                         self.expect(TokenKind::Colon);
-                        case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), guard));
                         label_marker.complete(self, NodeKind::CasePatternLabel);
                     }
+                    has_case = true;
                 } else if self.at(TokenKind::Default) {
                     let label_marker = self.start();
                     self.advance();
                     self.expect(TokenKind::Colon);
-                    case_kinds.push(SwitchCaseKind::Default);
+                    has_case = true;
                     label_marker.complete(self, NodeKind::DefaultLabel);
                 } else {
                     break;
@@ -585,7 +380,7 @@ impl<'src> Parser<'src> {
                 }
             }
 
-            if case_kinds.is_empty() {
+            if !has_case {
                 self.error(format!(
                     "expected case or default, got {:?}",
                     self.cur().kind
@@ -595,30 +390,19 @@ impl<'src> Parser<'src> {
                 continue;
             }
 
-            let mut body = Vec::new();
             while !self.at(TokenKind::Case)
                 && !self.at(TokenKind::Default)
                 && !self.at(TokenKind::RBrace)
                 && !self.at(TokenKind::Eof)
                 && !self.at_labeled_case()
             {
-                body.push(self.parse_stmt());
+                self.parse_stmt();
             }
             case_marker.complete(self, NodeKind::SwitchCase);
-            cases.push(SwitchCase {
-                labels,
-                cases: case_kinds,
-                body,
-                span: self.span_from(case_start),
-            });
         }
 
         self.expect(TokenKind::RBrace);
-        Stmt::Switch(SwitchStmt {
-            subject,
-            cases,
-            span: self.span_from(start),
-        })
+        NodeKind::SwitchStmt
     }
 
     /// True when the cursor is at one or more `label:` prefixes that lead into a
@@ -632,147 +416,74 @@ impl<'src> Parser<'src> {
         i > self.pos && matches!(self.kind_at(i), TokenKind::Case | TokenKind::Default)
     }
 
-    fn parse_try_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_try_stmt(&mut self) -> NodeKind {
         self.advance(); // try
-        let body = self.parse_block();
-        let mut catches = Vec::new();
+        self.parse_block();
 
         while self.at(TokenKind::On) || self.at(TokenKind::Catch) {
-            let catch_start = self.cur().offset();
             let catch_marker = self.start();
-            let exception_type = if self.at(TokenKind::On) {
+            if self.at(TokenKind::On) {
                 self.advance(); // on
-                Some(self.parse_type())
-            } else {
-                None
-            };
-            let (exception_var, stack_trace_var) = if self.eat(TokenKind::Catch).is_some() {
+                self.parse_type();
+            }
+            if self.eat(TokenKind::Catch).is_some() {
                 self.expect(TokenKind::LParen);
-                let e = self.expect_ident();
-                let s = if self.eat(TokenKind::Comma).is_some() {
-                    Some(self.expect_ident())
-                } else {
-                    None
-                };
+                self.expect_ident();
+                if self.eat(TokenKind::Comma).is_some() {
+                    self.expect_ident();
+                }
                 self.expect(TokenKind::RParen);
-                (Some(e), s)
-            } else {
-                (None, None)
-            };
-            let catch_body = self.parse_block();
+            }
+            self.parse_block();
             catch_marker.complete(self, NodeKind::CatchClause);
-            catches.push(CatchClause {
-                exception_type,
-                exception_var,
-                stack_trace_var,
-                body: catch_body,
-                span: self.span_from(catch_start),
-            });
         }
 
-        let finally = if self.eat(TokenKind::Finally).is_some() {
-            Some(self.parse_block())
-        } else {
-            None
-        };
-
-        Stmt::TryCatch(TryCatchStmt {
-            body,
-            catches,
-            finally,
-            span: self.span_from(start),
-        })
+        if self.eat(TokenKind::Finally).is_some() {
+            self.parse_block();
+        }
+        NodeKind::TryCatchStmt
     }
 
-    fn parse_return_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_return_stmt(&mut self) -> NodeKind {
         self.advance(); // return
-        let value = if !self.at(TokenKind::Semicolon)
-            && !self.at(TokenKind::RBrace)
-            && !self.at(TokenKind::Eof)
+        if !self.at(TokenKind::Semicolon) && !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof)
         {
-            Some(self.parse_expr())
-        } else {
-            None
-        };
+            self.parse_expr();
+        }
         self.eat(TokenKind::Semicolon);
-        Stmt::Return(ReturnStmt {
-            value,
-            span: self.span_from(start),
-        })
+        NodeKind::ReturnStmt
     }
 
-    fn parse_assert_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_assert_stmt(&mut self) -> NodeKind {
         self.advance(); // assert
         self.expect(TokenKind::LParen);
-        let condition = self.parse_expr();
-        let message = if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
-            Some(self.parse_expr())
-        } else {
-            None
-        };
+        self.parse_expr();
+        if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
+            self.parse_expr();
+        }
         self.eat(TokenKind::Comma); // optional trailing comma
         self.expect(TokenKind::RParen);
         self.eat(TokenKind::Semicolon);
-        Stmt::Assert(AssertStmt {
-            condition,
-            message,
-            span: self.span_from(start),
-        })
+        NodeKind::AssertStmt
     }
 
-    fn parse_yield_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset();
+    fn parse_yield_stmt(&mut self) -> NodeKind {
         self.advance(); // yield
-        let is_star = self.eat(TokenKind::Star).is_some();
-        let value = self.parse_expr();
+        self.eat(TokenKind::Star);
+        self.parse_expr();
         self.eat(TokenKind::Semicolon);
-        Stmt::Yield(YieldStmt {
-            is_star,
-            value,
-            span: self.span_from(start),
-        })
+        NodeKind::YieldStmt
     }
 
-    fn parse_expr_or_local_decl_stmt(&mut self) -> Stmt {
-        let start_index = self.pos;
-        let start = self.cur().offset();
-
-        let mut annotations = Vec::new();
+    fn parse_expr_or_local_decl_stmt(&mut self) -> NodeKind {
+        let unannotated = !self.at(TokenKind::At);
         while self.at(TokenKind::At) {
-            annotations.extend(self.parse_annotations());
+            self.parse_annotations();
         }
-        let unannotated = annotations.is_empty();
-        let mut stmt = self.parse_local_decl_or_expr_stmt(start, unannotated);
-        // Metadata belongs to the local variable or function it precedes.
-        match &mut stmt {
-            Stmt::LocalVar(decl) => {
-                decl.annotations = annotations;
-                if let Some(start) = self.local_documentation_start(start_index) {
-                    decl.full_span.start = start;
-                }
-            }
-            Stmt::LocalFunc(decl) => decl.annotations = annotations,
-            Stmt::PatternDecl(decl) => decl.annotations = annotations,
-            _ => {}
-        }
-        stmt
+        self.parse_local_decl_or_expr_stmt(unannotated)
     }
 
-    /// Recover attached documentation from retained trivia before a local declaration.
-    fn local_documentation_start(&self, declaration_index: usize) -> Option<usize> {
-        let trivia_start = declaration_index.checked_sub(1).map_or(0, |index| {
-            let token = &self.tokens[index];
-            token.offset() + token.len()
-        });
-        let trivia_end = self.tokens[declaration_index].offset();
-        self.syntax
-            .documentation_start(Span::new(trivia_start, trivia_end), self.src)
-    }
-
-    fn parse_local_decl_or_expr_stmt(&mut self, start: usize, unannotated: bool) -> Stmt {
+    fn parse_local_decl_or_expr_stmt(&mut self, unannotated: bool) -> NodeKind {
         // Dart 3 pattern-variable declaration: `(var|final) <pattern> = expr;`.
         // Destructuring starts with a group or an object-pattern type; require
         // `=` after the pattern to distinguish record-typed variable declarations.
@@ -781,7 +492,7 @@ impl<'src> Parser<'src> {
                 self.peek(1).kind,
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
             ) || self.object_pattern_assign_ahead(self.pos + 1))
-            && let Some(stmt) = self.try_parse_pattern_declaration(start)
+            && let Some(stmt) = self.try_parse_pattern_declaration()
         {
             return stmt;
         }
@@ -794,14 +505,14 @@ impl<'src> Parser<'src> {
         if unannotated
             && (self.at_any(&[TokenKind::LParen, TokenKind::LBracket])
                 || self.object_pattern_assign_ahead(self.pos))
-            && let Some(stmt) = self.try_parse_pattern_assign(start)
+            && let Some(stmt) = self.try_parse_pattern_assign()
         {
             return stmt;
         }
 
         // late / final / var → definitely a var decl
         if self.at(TokenKind::Late) || self.at_any(&[TokenKind::Final, TokenKind::Var]) {
-            return self.parse_local_var_decl(start);
+            return self.parse_local_var_decl();
         }
         // `const` can be either a var decl or a const expression (constructor/collection).
         //   `const Type name` or `const name =` → var decl
@@ -810,7 +521,7 @@ impl<'src> Parser<'src> {
         // A `const` that does not begin a const expression is a var decl; when it
         // does (constructor/collection), fall through to expression parsing.
         if self.at(TokenKind::Const) && !self.const_starts_expr() {
-            return self.parse_local_var_decl(start);
+            return self.parse_local_var_decl();
         }
 
         // Try to parse as typed local decl or function.
@@ -824,41 +535,22 @@ impl<'src> Parser<'src> {
         if self.is_type_start()
             && !self.at_any(&[TokenKind::Await, TokenKind::Yield])
             && let Some(stmt) = self.speculate(|p| {
-                let ty = p.parse_type();
+                p.parse_type();
                 let name = p.parse_ident()?;
                 if p.at_any(&[TokenKind::LParen, TokenKind::Lt]) {
-                    let type_params = p.parse_type_params();
-                    let params = p.parse_formal_param_list();
+                    p.parse_type_params();
+                    p.parse_formal_param_list();
                     let async_marker = p.parse_async_marker();
-                    let body = p.parse_function_body(async_marker)?;
-                    Some(Stmt::LocalFunc(LocalFuncDecl {
-                        annotations: Vec::new(),
-                        return_type: Some(ty),
-                        name,
-                        type_params,
-                        params,
-                        async_marker,
-                        body,
-                        span: p.span_from(start),
-                    }))
+                    p.parse_function_body(async_marker)?;
+                    Some(NodeKind::LocalFuncDecl)
                 } else if p.at_any(&[TokenKind::Eq, TokenKind::Semicolon, TokenKind::Comma]) {
-                    let declarators = p.parse_declarators(name);
+                    p.parse_declarators(name);
                     // A colon exposes a ternary misread as a nullable type.
                     if !p.at_any(&[TokenKind::Semicolon, TokenKind::RBrace, TokenKind::Eof]) {
                         return None;
                     }
                     p.eat(TokenKind::Semicolon);
-                    let span = p.span_from(start);
-                    Some(Stmt::LocalVar(LocalVarDecl {
-                        annotations: Vec::new(),
-                        keyword: VarKeyword::Var,
-                        keyword_span: None,
-                        is_late: false,
-                        var_type: Some(ty),
-                        declarators,
-                        span,
-                        full_span: span,
-                    }))
+                    Some(NodeKind::LocalVarDecl)
                 } else {
                     None
                 }
@@ -874,17 +566,14 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Ident)
             && matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt)
             && self.untyped_local_func_ahead()
-            && let Some(stmt) = self.try_parse_untyped_local_func(start)
+            && let Some(stmt) = self.try_parse_untyped_local_func()
         {
             return stmt;
         }
 
-        let expr = self.parse_expr();
+        self.parse_expr();
         self.eat(TokenKind::Semicolon);
-        Stmt::Expr(ExprStmt {
-            expr,
-            span: self.span_from(start),
-        })
+        NodeKind::ExprStmt
     }
 
     /// True when a statement-leading `const` begins a const *expression*
@@ -928,60 +617,41 @@ impl<'src> Parser<'src> {
         matches!(kind(i), Some(TokenKind::LParen | TokenKind::Dot))
     }
 
-    fn parse_local_var_decl(&mut self, start: usize) -> Stmt {
-        let is_late = self.eat(TokenKind::Late).is_some();
-        let keyword_span = self
-            .at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const])
-            .then(|| self.cur_span());
+    fn parse_local_var_decl(&mut self) -> NodeKind {
+        self.eat(TokenKind::Late);
         let is_const = self.eat(TokenKind::Const).is_some();
-        let is_final = !is_const && self.eat(TokenKind::Final).is_some();
-        let _ = self.eat(TokenKind::Var);
-
-        let var_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
-
+        if !is_const {
+            self.eat(TokenKind::Final);
+        }
+        self.eat(TokenKind::Var);
+        self.try_parse_type_followed_by(TokenKind::is_identifier_like);
         let name = self.expect_ident();
-        let declarators = self.parse_declarators(name);
+        self.parse_declarators(name);
         self.eat(TokenKind::Semicolon);
-        let span = self.span_from(start);
-        Stmt::LocalVar(LocalVarDecl {
-            annotations: Vec::new(),
-            keyword: Self::var_keyword(is_const, is_final),
-            keyword_span,
-            is_late,
-            var_type,
-            declarators,
-            span,
-            full_span: span,
-        })
+        NodeKind::LocalVarDecl
     }
 
     /// Speculatively parse a Dart 3 pattern-variable declaration
     /// `(var|final) <pattern> = expr ;`. Returns `None` (restoring position and
     /// errors) when what follows the keyword is not a destructuring pattern
     /// followed by `=` — e.g. a record-typed variable declaration.
-    fn try_parse_pattern_declaration(&mut self, start: usize) -> Option<Stmt> {
+    fn try_parse_pattern_declaration(&mut self) -> Option<NodeKind> {
         self.speculate(|p| {
             let errors = p.errors.len();
-            let is_final = p.at(TokenKind::Final);
-            let keyword_span = p.cur_span();
             p.advance();
             let pattern = p.parse_binding_pattern();
             if p.errors.len() > errors
-                || matches!(pattern, Pattern::Variable { .. } | Pattern::Wildcard { .. })
+                || matches!(
+                    pattern.kind(),
+                    NodeKind::VariablePattern | NodeKind::WildcardPattern
+                )
             {
                 return None;
             }
             p.eat(TokenKind::Eq)?;
-            let init = p.parse_expr();
+            p.parse_expr();
             p.eat(TokenKind::Semicolon);
-            Some(Stmt::PatternDecl(PatternDeclaration {
-                annotations: Vec::new(),
-                keyword: Self::var_keyword(false, is_final),
-                keyword_span,
-                pattern,
-                init,
-                span: p.span_from(start),
-            }))
+            Some(NodeKind::PatternDeclaration)
         })
     }
 
@@ -1015,23 +685,22 @@ impl<'src> Parser<'src> {
     }
 
     // Failed pattern trials must retain neither tokens nor diagnostics.
-    fn try_parse_pattern_assign(&mut self, start: usize) -> Option<Stmt> {
+    fn try_parse_pattern_assign(&mut self) -> Option<NodeKind> {
         self.speculate(|p| {
             let errors = p.errors.len();
             let pattern = p.parse_binding_pattern();
             if p.errors.len() > errors
-                || matches!(pattern, Pattern::Variable { .. } | Pattern::Wildcard { .. })
+                || matches!(
+                    pattern.kind(),
+                    NodeKind::VariablePattern | NodeKind::WildcardPattern
+                )
             {
                 return None;
             }
             p.eat(TokenKind::Eq)?;
-            let value = p.parse_expr();
+            p.parse_expr();
             p.eat(TokenKind::Semicolon);
-            Some(Stmt::PatternAssign(PatternAssignStmt {
-                pattern,
-                value,
-                span: p.span_from(start),
-            }))
+            Some(NodeKind::PatternAssignStmt)
         })
     }
 
@@ -1089,85 +758,17 @@ impl<'src> Parser<'src> {
     }
 
     // A header without a body falls back to an ordinary call expression.
-    fn try_parse_untyped_local_func(&mut self, start: usize) -> Option<Stmt> {
+    fn try_parse_untyped_local_func(&mut self) -> Option<NodeKind> {
         self.speculate(|p| {
-            let name = p.expect_ident();
-            let type_params = p.parse_type_params();
+            p.expect_ident();
+            p.parse_type_params();
             if !p.at(TokenKind::LParen) {
                 return None;
             }
-            let params = p.parse_formal_param_list();
+            p.parse_formal_param_list();
             let async_marker = p.parse_async_marker();
-            let body = p.parse_function_body(async_marker)?;
-            Some(Stmt::LocalFunc(LocalFuncDecl {
-                annotations: Vec::new(),
-                async_marker,
-                return_type: None,
-                name,
-                type_params,
-                params,
-                body,
-                span: p.span_from(start),
-            }))
+            p.parse_function_body(async_marker)?;
+            Some(NodeKind::LocalFuncDecl)
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::parse;
-
-    #[test]
-    fn statement_cst_matches_ast() {
-        for source in [
-            r#"void f(dynamic x) {
-                ;
-                label: while (true) { break label; }
-                do { continue; } while (false);
-                if (x case final y when y != null) return y; else throw x;
-                switch (x) {
-                    target: case 1: case 2 when true: break;
-                    default: continue target;
-                }
-                try { rethrow; } on Exception catch (e, s) { throw e; } finally {}
-                assert(x != null, 'message');
-                var (a, b) = x;
-                (a, b) = x;
-                /// Attached documentation.
-                @deprecated late final int value = 1, other = 2;
-                @deprecated int local<T>(T t) => 1;
-                untyped() async { return; }
-                x();
-            }"#,
-            r#"Stream<int> f(dynamic xs) async* {
-                await for (final x in xs) { yield x; }
-                yield* xs;
-                for (;;) break;
-                for (var i = 0; i < 3; i++, i += 1) {}
-                for (late final int i = 0; ; ) {}
-                for (int i = 0; i < 3; i++) {}
-                for (i = 0, j = 0; ; i++, j++) {}
-                for (x in xs) {}
-                for (int x in xs) {}
-                for (@deprecated final (a, b) in xs) {}
-                for (@deprecated final int x in xs) {}
-                for (@deprecated final i = 0; ; ) {}
-            }"#,
-            "// @dart=2.19\nvoid f(x) { switch (x) { label: case 1 + 2: break; default: return; } }",
-            "void f() { await for (x in xs) {} }",
-            "class C { @deprecated static }",
-            "void f() { for (var (a, b) = (1, 2); a < 3; a++) {} }",
-            "void f() { for (final ; ;) {} for (late ; ;) {} for (a.b in xs) {} }",
-            ")",
-            "class A {} }",
-        ] {
-            let parsed = parse(source);
-            assert!(parsed.tree.is_lossless(source));
-            assert_eq!(
-                format!("{:#?}", parsed.program),
-                format!("{:#?}", parsed.tree.program(source)),
-                "{source}",
-            );
-        }
     }
 }

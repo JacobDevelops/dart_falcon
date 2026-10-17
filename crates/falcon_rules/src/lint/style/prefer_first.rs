@@ -31,7 +31,7 @@ impl Rule for PreferFirst {
 }
 
 /// Detection runs on every expression the shared walker reaches. The walker is
-/// exhaustive over the AST, so a violation cannot hide inside newer syntax.
+/// exhaustive over the syntax tree, so a violation cannot hide inside newer syntax.
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,

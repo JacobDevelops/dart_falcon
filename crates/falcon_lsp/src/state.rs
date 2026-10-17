@@ -380,7 +380,7 @@ impl LspState {
             if language_version == doc.language_version {
                 continue;
             }
-            let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            let falcon_dart_parser::ParseResult { tree, errors } =
                 parse_for_package(doc.text(), Some(language_version));
             if let Some(parsed) = Arc::get_mut(&mut doc.parsed) {
                 parsed.tree = tree;
@@ -450,7 +450,6 @@ impl LspState {
         let falcon_dart_parser::ParseResult {
             tree,
             errors: parse_errors,
-            ..
         } = parse_for_package(&text, package_version);
         let language_version = self.environment.language_version(&path, &text);
         let mut syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
@@ -519,7 +518,6 @@ impl LspState {
         let falcon_dart_parser::ParseResult {
             tree,
             errors: parse_errors,
-            ..
         } = parse_for_package(&text, package_version);
         doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
         doc.source_rejected = source_error.is_some();
@@ -585,7 +583,7 @@ impl LspState {
         }
     }
 
-    /// Run the enabled rules over the cached AST of `uri`. Diagnostics are
+    /// Run the enabled rules over the cached CST of `uri`. Diagnostics are
     /// sorted by span for deterministic publishing.
     pub fn analyze(&mut self, uri: &str) -> Vec<Diagnostic> {
         if !self.documents.contains_key(uri) {
@@ -697,7 +695,7 @@ impl LspState {
     }
 
     /// Reload config and rule set, then re-analyze every open document
-    /// against its cached AST (no re-parse). Returns per-document results
+    /// against its cached CST (no re-parse). Returns per-document results
     /// for the caller to publish.
     pub fn reload_config(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
         self.config = load_from(self.config_path.as_deref());
@@ -776,7 +774,7 @@ impl LspState {
     }
 
     /// Build the cross-file diagnostics for the whole workspace, grouped by file
-    /// path. Open buffers contribute their in-memory text and cached AST; every
+    /// path. Open buffers contribute their in-memory text and cached CST; every
     /// other `.dart` file under the workspace root is read and parsed from disk.
     fn cross_file_diagnostics(&mut self) -> HashMap<String, Vec<Diagnostic>> {
         // Rejected references are unknown, not absent: a partial workspace must
@@ -950,7 +948,7 @@ impl LspState {
             }
             match falcon_analyze::source::read_source(path) {
                 Ok(source) => {
-                    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                    let falcon_dart_parser::ParseResult { tree, errors } =
                         parse_for_package(&source, self.environment.package_language_version(path));
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
@@ -1141,7 +1139,7 @@ impl LspState {
     }
 
     /// Assemble the [`ProjectFile`] set: every non-excluded `.dart` file under
-    /// the workspace root, preferring an open buffer's text + cached AST over the
+    /// the workspace root, preferring an open buffer's text + cached CST over the
     /// on-disk copy. Semantic analysis also includes open buffers that do not exist
     /// on disk yet. Cross-file analysis can additionally include package manifests.
     /// The boolean is false when oversized ingestion left the workspace incomplete;
@@ -1642,7 +1640,7 @@ mod dependency_tests {
         std::fs::write(outer.join("pubspec.yaml"), "name: outer\n").unwrap();
         std::fs::write(nested.join("pubspec.yaml"), [0xff, 0xfe]).unwrap();
         let path = nested.join("lib/main.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = falcon_dart_parser::parse("");
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse("");
         let files = [ProjectFile {
             path: path.clone(),
             parsed: Arc::new(ParsedFile {

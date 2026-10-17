@@ -25,7 +25,7 @@ pub(crate) fn documented_node_span<'a>(
             .last()
             .map_or(start, |token| token.offset());
         ctx.tree()
-            .documentation_start(Span::new(gap_start, start), ctx.source)
+            .documentation_start(ctx.source, Span::new(gap_start, start))
     };
     let body_start = annotations
         .clone()
@@ -436,7 +436,7 @@ mod tests {
                 };
                 let variants = if kind == "Enum" { "value;" } else { "" };
                 let source = format!("{header} {{ {variants} {member_source} }}");
-                let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(&source);
+                let falcon_dart_parser::ParseResult { errors, tree } = parse(&source);
                 assert!(errors.is_empty(), "{name}/{kind}: {errors:?}");
                 let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
                     source: source.into_boxed_str(),

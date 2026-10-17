@@ -142,8 +142,7 @@ mod tests {
     #[test]
     fn exact_block_end_excludes_following_comment_and_preserves_inner_comment() {
         let source = "void empty() {} /* trailing } */\nvoid intentional() { /* } */ }\n";
-        let falcon_dart_parser::ParseResult { errors, tree, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),

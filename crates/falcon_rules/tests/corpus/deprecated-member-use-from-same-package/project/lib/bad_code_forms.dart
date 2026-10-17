@@ -60,6 +60,10 @@ void useForms(CodeForms forms) {
   local(); /* expect: deprecated-member-use-from-same-package */
   void localParameters(int current, [@deprecated int old = 0]) {}
   localParameters(1, 2); /* expect: deprecated-member-use-from-same-package */
+  void localSparse([@deprecated int first = 0, int middle = 0, @deprecated int last = 0]) {}
+  localSparse(1, 2, 3); /* expect: deprecated-member-use-from-same-package */ /* expect: deprecated-member-use-from-same-package */
+  localSparse(1); /* expect: deprecated-member-use-from-same-package */
+  localSparse();
   void localNamed({@deprecated int old = 0}) {}
   localNamed(old: 2); /* expect: deprecated-member-use-from-same-package */
   1.old(); /* expect: deprecated-member-use-from-same-package */

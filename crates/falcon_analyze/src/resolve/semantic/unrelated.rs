@@ -935,8 +935,7 @@ mod tests {
               @override
               Future<void> onLoad() async {}
             }";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(crate::ParsedFile {
             source: source.into(),

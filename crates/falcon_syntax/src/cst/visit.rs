@@ -1,5 +1,4 @@
 use super::*;
-use crate::ast::Span;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatementListKind {
     Block,

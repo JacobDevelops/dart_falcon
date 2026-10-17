@@ -155,7 +155,7 @@ class Child extends Values {
   bool inheritedFieldEqual() => value == value;
 }
 "#;
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),

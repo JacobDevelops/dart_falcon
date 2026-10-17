@@ -1225,7 +1225,7 @@ mod tests {
 
     fn with_resolver(source: &str, check: impl FnOnce(&DocResolver<'_, '_>, &DocScopes)) {
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),

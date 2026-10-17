@@ -181,7 +181,6 @@ fn part_only_indexes_uri_owner_siblings_and_imports() {
     let falcon_dart_parser::ParseResult {
         tree: program_tree,
         errors,
-        ..
     } = falcon_dart_parser::parse(source);
     let program_parsed = Arc::new(ParsedFile {
         source: (source).into(),
@@ -250,7 +249,6 @@ fn requested_parts_are_not_disk_companions_but_their_unopened_parts_are() {
     let falcon_dart_parser::ParseResult {
         tree: owner_program_tree,
         errors,
-        ..
     } = falcon_dart_parser::parse(owner_source);
     let owner_program_parsed = Arc::new(ParsedFile {
         source: (owner_source).into(),
@@ -261,7 +259,6 @@ fn requested_parts_are_not_disk_companions_but_their_unopened_parts_are() {
     let falcon_dart_parser::ParseResult {
         tree: part_program_tree,
         errors,
-        ..
     } = falcon_dart_parser::parse(part_source);
     let part_program_parsed = Arc::new(ParsedFile {
         source: (part_source).into(),
@@ -298,7 +295,6 @@ fn closing_an_unimported_root_removes_its_disk_companions() {
     let falcon_dart_parser::ParseResult {
         tree: program_tree,
         errors,
-        ..
     } = falcon_dart_parser::parse(source);
     let program_parsed = Arc::new(ParsedFile {
         source: (source).into(),
@@ -309,7 +305,6 @@ fn closing_an_unimported_root_removes_its_disk_companions() {
     let falcon_dart_parser::ParseResult {
         tree: empty_tree,
         errors,
-        ..
     } = falcon_dart_parser::parse("");
     let empty_parsed = Arc::new(ParsedFile {
         source: ("").into(),
@@ -351,7 +346,6 @@ fn failed_local_import_targets_remain_available_for_file_watches() {
     let falcon_dart_parser::ParseResult {
         tree: program_tree,
         errors,
-        ..
     } = falcon_dart_parser::parse(source);
     let program_parsed = Arc::new(ParsedFile {
         source: (source).into(),

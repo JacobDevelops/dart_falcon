@@ -222,8 +222,7 @@ mod tests {
     #[test]
     fn doc_imports_use_literal_segments_and_import_spans() {
         let source = "/// @docImport r'dart:' '\\x63ollection';\n/// @docImport r'dart:' '\\x61sync';\nlibrary;\n";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let imports: Vec<_> = library_doc_imports(tree.program(source), source, &tree).collect();
         assert_eq!(imports.len(), 2);
@@ -264,8 +263,7 @@ mod tests {
     #[test]
     fn doc_import_span_excludes_trailing_comment_trivia() {
         let source = "/// @docImport 'dart:async'; /* trailing trivia */\r\nlibrary;\r\n";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let imports: Vec<_> = library_doc_imports(tree.program(source), source, &tree).collect();
         assert_eq!(imports.len(), 1);

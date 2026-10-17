@@ -966,7 +966,7 @@ fn test_raw_string_with_backslash_in_interpolation() {
     );
 
     // And it parses cleanly end-to-end, recording the interpolation.
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let init = match prog.declarations().first().unwrap() {
@@ -1013,7 +1013,7 @@ fn line_comments_end_at_every_dart_line_ending() {
                 .count(),
             3
         );
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(&source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(tree.program(&source).declarations().len(), 2);
     }

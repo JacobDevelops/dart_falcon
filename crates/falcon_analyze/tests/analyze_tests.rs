@@ -256,7 +256,6 @@ fn test_end_to_end_parse_analyze_serialize() {
     let falcon_dart_parser::ParseResult {
         tree,
         errors: parse_errors,
-        ..
     } = falcon_dart_parser::parse(source);
     assert!(
         parse_errors.is_empty(),
@@ -307,7 +306,7 @@ fn test_context_diagnostic_uses_file_and_warning_default() {
 #[test]
 fn context_reuses_per_file_analysis_facts() {
     let source = "int value = 0; void main() { while (value < 2) { value++; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = Arc::new(ParsedFile {
         source: source.into(),

@@ -12,9 +12,12 @@ All 142 official lints from the 1.0 catalog are registered. Against `dart analyz
 
 Falcon's default set has been re-chosen independently of upstream presets, with 165 of 290 shipped rules recommended. Enable other rules explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
 
+Falcon uses an arena concrete syntax tree that retains every token and trivia, so syntax rules read from one tree without parser changes.
+
+- **Engine checklist complete.** Per-package-context library identity and the concrete syntax tree are shipped; see [`docs/v1-checklist.md`](docs/v1-checklist.md#engine).
+
 ### Remaining
 
-- **Engine checklist.** Per-package-context library identity and a concrete syntax tree; see [`docs/v1-checklist.md`](docs/v1-checklist.md#engine).
 - **Rule-catalog expansion.** Two sources remain in the checklist:
   - **DCM-inspired rules: 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
     These are candidates from the DCM survey, not current pricing claims.

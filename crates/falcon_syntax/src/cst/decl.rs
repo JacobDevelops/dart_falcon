@@ -1005,27 +1005,7 @@ view!(FormalParam {
 });
 impl<'a> FormalParam<'a> {
     pub fn kind(self) -> ParamKind {
-        let mut kind = ParamKind::Positional;
-        if let Some(parent) = self.0.parent() {
-            for token in parent
-                .children_with_tokens()
-                .filter_map(SyntaxElement::into_token)
-                .filter(|t| t.span().start < self.span().start)
-            {
-                match token.kind() {
-                    TokenKind::LBracket => kind = ParamKind::OptionalPositional,
-                    TokenKind::LBrace => kind = ParamKind::Named { required: false },
-                    _ => {}
-                }
-            }
-        }
-        if matches!(kind, ParamKind::Named { .. }) {
-            ParamKind::Named {
-                required: has(self.0, TokenKind::Required),
-            }
-        } else {
-            kind
-        }
+        self.0.param_kind()
     }
     pub fn initializing(self) -> Option<InitializingFormal> {
         if has(self.0, TokenKind::This) {

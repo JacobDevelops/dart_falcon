@@ -1,7 +1,6 @@
 use std::{borrow::Cow, fmt};
 
 use super::*;
-pub use crate::ast::{StringDelimiter, parse_string_delimiter};
 use crate::token::TokenKind;
 
 fn child<'a, T: AstNode<'a>>(node: SyntaxNode<'a>, index: usize) -> T {

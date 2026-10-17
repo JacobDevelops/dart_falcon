@@ -3527,23 +3527,6 @@ fn setter_parameter_contracts(name: &str, is_covariant: bool) -> Arc<[ParameterC
     }])
 }
 
-fn parameter_contracts(params: FormalParamList<'_>) -> Arc<[ParameterContract]> {
-    if params.params().is_empty() {
-        return empty_parameter_contracts();
-    }
-    params
-        .params()
-        .map(|param| ParameterContract {
-            name: param.name().name().to_owned(),
-            kind: param.kind(),
-            is_covariant: param.is_covariant(),
-            default_value_code: param
-                .default_value()
-                .map(default_syntax::default_syntax_key),
-        })
-        .collect()
-}
-
 #[derive(Debug, Clone)]
 pub struct ResolvedSignature {
     pub owner_parameters: Vec<TypeParameterId>,
@@ -3647,7 +3630,15 @@ impl ResolvedSignature {
         params: FormalParamList<'_>,
         model: &SemanticModel<'_>,
     ) -> Self {
-        signature(scope, &[], type_params, Some(params), None, None, model)
+        signature(
+            scope,
+            &[],
+            type_params,
+            Some(params),
+            None,
+            SignatureContext::Function,
+            model,
+        )
     }
     /// Whether the declared function type uses the owner's type parameters,
     /// directly or through a bound of its own type parameters. The analyzer
@@ -4381,10 +4372,12 @@ impl SignatureIndex {
             let model = SemanticModel::from_file(*file, parsed, identities, Some(types));
             index.add_declarations(parsed.program(), &model, *analyze_bodies);
         }
+        tracing::debug!("signature declarations built");
         if index.external.is_none() {
             index.add_fallback_signatures();
         }
         index.finish();
+        tracing::debug!("signature tables finished");
         let programs: Vec<_> = all
             .iter()
             .map(|(file, parsed, _)| {
@@ -4395,6 +4388,7 @@ impl SignatureIndex {
             })
             .collect();
         index.infer_programs(&programs);
+        tracing::debug!("signature inference finished");
         index.mark_library_subclasses();
         index.mark_field_forwarders(identities, Some(types));
         index
@@ -5464,7 +5458,7 @@ impl SignatureIndex {
                                 function.type_params(),
                                 function.params(),
                                 function.return_type(),
-                                None,
+                                SignatureContext::Function,
                                 model,
                             ),
                         );
@@ -5607,7 +5601,7 @@ impl SignatureIndex {
                                     method.type_params(),
                                     Some(method.params()),
                                     method.return_type(),
-                                    None,
+                                    SignatureContext::Function,
                                     model,
                                 );
                                 parameters.pop();
@@ -5621,7 +5615,7 @@ impl SignatureIndex {
                                     AstChildren::<TypeParam<'_>>::empty(),
                                     Some(operator.params()),
                                     operator.return_type(),
-                                    None,
+                                    SignatureContext::Function,
                                     model,
                                 ),
                             )),
@@ -5926,56 +5920,97 @@ impl SignatureIndex {
         program: Program<'_>,
         model: &SemanticModel<'_>,
     ) -> bool {
-        let mut resolved = false;
-        for _ in 0..program.declarations().len() {
-            let mut changed = false;
-            for declaration in program.declarations() {
-                if !model.owns_top_level_declaration(declaration) {
-                    continue;
-                }
-                if let TopLevelDecl::ClassTypeAlias(alias) = declaration {
-                    changed |= self.forward_alias_constructors(alias.name().name(), model);
-                    continue;
-                }
-                let members = match declaration {
-                    TopLevelDecl::Class(class) => class.element_members(),
-                    TopLevelDecl::MixinClass(class) => class.element_members(),
-                    TopLevelDecl::Enum(enumeration) => {
-                        EffectiveMembers::declared(enumeration.members())
-                    }
-                    TopLevelDecl::ExtensionType(extension) => extension.element_members(),
-                    _ => continue,
-                };
-                if !members.constructors().any(|constructor| {
+        enum Work<'a> {
+            Alias(&'a str),
+            Declaration {
+                identity: DeclarationIdentity,
+                superclass: Option<ResolvedType>,
+                constructors: Vec<falcon_syntax::cst::ConstructorRef<'a>>,
+            },
+        }
+
+        // Syntax and model ownership do not change during refinement. Cache the
+        // participating constructors, but retain the full declaration-count bound
+        // and source order for aliases and super-formal dependency chains.
+        let mut declaration_count = 0;
+        let mut work = Vec::new();
+        for declaration in program.declarations() {
+            declaration_count += 1;
+            if !model.owns_top_level_declaration(declaration) {
+                continue;
+            }
+            if let TopLevelDecl::ClassTypeAlias(alias) = declaration {
+                work.push(Work::Alias(alias.name().name()));
+                continue;
+            }
+            let (name, type_parameters, superclass, members) = match declaration {
+                TopLevelDecl::Class(class) => (
+                    class.name().name(),
+                    class.type_params(),
+                    class.extends(),
+                    class.element_members(),
+                ),
+                TopLevelDecl::MixinClass(class) => (
+                    class.name().name(),
+                    class.type_params(),
+                    class.extends(),
+                    class.element_members(),
+                ),
+                TopLevelDecl::Enum(enumeration) => (
+                    enumeration.name().name(),
+                    enumeration.type_params(),
+                    None,
+                    EffectiveMembers::declared(enumeration.members()),
+                ),
+                TopLevelDecl::ExtensionType(extension) => (
+                    extension.name().name(),
+                    extension.type_params(),
+                    None,
+                    extension.element_members(),
+                ),
+                _ => continue,
+            };
+            let constructors: Vec<_> = members
+                .constructors()
+                .filter(|constructor| {
                     constructor
                         .params
                         .params()
                         .any(|parameter| parameter.initializing().is_some())
-                }) {
-                    continue;
-                }
-                let (name, type_parameters, superclass) = match declaration {
-                    TopLevelDecl::Class(class) => {
-                        (class.name().name(), class.type_params(), class.extends())
+                })
+                .collect();
+            if constructors.is_empty() {
+                continue;
+            }
+            let Some(identity) = model.resolve_name(name) else {
+                continue;
+            };
+            let mut scope = TypeParameterScope::default();
+            scope.push(type_parameters, model);
+            let superclass = superclass.map(|ty| model.resolve_type_in(ty, &scope));
+            work.push(Work::Declaration {
+                identity,
+                superclass,
+                constructors,
+            });
+        }
+
+        let mut resolved = false;
+        for _ in 0..declaration_count {
+            let mut changed = false;
+            for item in &work {
+                let (identity, superclass, constructors) = match item {
+                    Work::Alias(name) => {
+                        changed |= self.forward_alias_constructors(name, model);
+                        continue;
                     }
-                    TopLevelDecl::MixinClass(class) => {
-                        (class.name().name(), class.type_params(), class.extends())
-                    }
-                    TopLevelDecl::Enum(enumeration) => {
-                        (enumeration.name().name(), enumeration.type_params(), None)
-                    }
-                    TopLevelDecl::ExtensionType(extension) => {
-                        (extension.name().name(), extension.type_params(), None)
-                    }
-                    _ => continue,
+                    Work::Declaration {
+                        identity,
+                        superclass,
+                        constructors,
+                    } => (identity, superclass, constructors),
                 };
-                let Some(identity) = model.resolve_name(name) else {
-                    continue;
-                };
-                let mut scope = TypeParameterScope::default();
-                scope.push(type_parameters, model);
-                let superclass = superclass.map(|ty| model.resolve_type_in(ty, &scope));
-                for constructor in members.constructors() {
+                for constructor in constructors {
                     let constructor_name = constructor
                         .constructor_name
                         .map(|name| name.name())
@@ -5987,7 +6022,7 @@ impl SignatureIndex {
                             continue;
                         }
                         let Some(ty) = self
-                            .member_entry(&identity, parameter.name().name())
+                            .member_entry(identity, parameter.name().name())
                             .filter(|entry| {
                                 entry.facts.iter().any(|fact| {
                                     matches!(fact.kind, MemberKind::Field { .. }) && !fact.is_static
@@ -5999,14 +6034,14 @@ impl SignatureIndex {
                             continue;
                         };
                         changed |= self.update_constructor_parameter_type(
-                            &identity,
+                            identity,
                             constructor_name,
                             constructor.params,
                             parameter,
                             ty,
                         );
                     }
-                    let Some(superclass) = &superclass else {
+                    let Some(superclass) = superclass else {
                         continue;
                     };
                     let super_constructor = constructor
@@ -6040,7 +6075,7 @@ impl SignatureIndex {
                             )
                         {
                             changed |= self.inherit_super_default(
-                                (&identity, constructor_name),
+                                (identity, constructor_name),
                                 parameter.name().name(),
                                 (superclass, super_constructor),
                                 formal,
@@ -6058,7 +6093,7 @@ impl SignatureIndex {
                             continue;
                         };
                         changed |= self.update_constructor_parameter_type(
-                            &identity,
+                            identity,
                             constructor_name,
                             constructor.params,
                             parameter,
@@ -6286,6 +6321,7 @@ impl SignatureIndex {
         parameter: FormalParam<'_>,
         ty: ResolvedType,
     ) -> bool {
+        let parameter_name = parameter.name();
         let mut changed = false;
         if let Some(signature) = self
             .constructors
@@ -6296,15 +6332,15 @@ impl SignatureIndex {
                 parameter.kind(),
                 falcon_syntax::cst::ParamKind::Named { .. }
             ) {
-                if signature.named.get(parameter.name().name()) != Some(&ty) {
+                if signature.named.get(parameter_name.name()) != Some(&ty) {
                     signature
                         .named
-                        .insert(parameter.name().name().to_owned(), ty.clone());
+                        .insert(parameter_name.name().to_owned(), ty.clone());
                     changed = true;
                 }
             } else if let Some(index) = params
                 .positional()
-                .position(|candidate| candidate.name().span() == parameter.name().span())
+                .position(|candidate| candidate.name().span() == parameter_name.span())
                 && signature.positional.get(index) != Some(&ty)
             {
                 signature.positional[index] = ty.clone();
@@ -6319,7 +6355,7 @@ impl SignatureIndex {
             && let Some(parameter) = constructor
                 .parameters
                 .iter_mut()
-                .find(|candidate| candidate.name == parameter.name().name())
+                .find(|candidate| candidate.name == parameter_name.name())
             && parameter.ty != ty
         {
             parameter.ty = ty;
@@ -6982,25 +7018,26 @@ impl SignatureIndex {
                         &scope,
                     ));
                     entry.is_instance_method |= !method.is_static();
+                    let mut facts = MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: MemberKind::Method,
+                        is_static: method.is_static(),
+                        // An `external` method has no body but is concrete.
+                        is_abstract: method.is_abstract() && !method.is_external(),
+                        positional_parameter_names: Vec::new(),
+                        annotations: resolve_annotations(method.annotations(), model),
+                        parameter_contracts: None,
+                    };
                     entry.signature = Some(signature(
                         &scope,
                         &owner_parameters,
                         method.type_params(),
                         Some(method.params()),
                         method.return_type(),
-                        None,
+                        SignatureContext::Member(&mut facts),
                         model,
                     ));
-                    entry.facts.push(MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Method,
-                        is_static: method.is_static(),
-                        // An `external` method has no body but is concrete.
-                        is_abstract: method.is_abstract() && !method.is_external(),
-                        positional_parameter_names: positional_parameter_names(method.params()),
-                        annotations: resolve_annotations(method.annotations(), model),
-                        parameter_contracts: Some(parameter_contracts(method.params())),
-                    });
+                    entry.facts.push(facts);
                     scope.pop();
                 }
                 ClassMember::Constructor(constructor) => {
@@ -7018,7 +7055,7 @@ impl SignatureIndex {
                                 AstChildren::empty(),
                                 Some(constructor.params()),
                                 None,
-                                Some(&field_types),
+                                SignatureContext::Constructor(&field_types),
                                 model,
                             ),
                         );
@@ -7125,24 +7162,25 @@ impl SignatureIndex {
                         AstChildren::empty(),
                         &scope,
                     ));
+                    let mut facts = MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: MemberKind::Operator,
+                        is_static: false,
+                        is_abstract: operator.body().is_none() && !operator.is_external(),
+                        positional_parameter_names: Vec::new(),
+                        annotations: resolve_annotations(operator.annotations(), model),
+                        parameter_contracts: None,
+                    };
                     entry.signature = Some(signature(
                         &scope,
                         &owner_parameters,
                         AstChildren::empty(),
                         Some(operator.params()),
                         operator.return_type(),
-                        None,
+                        SignatureContext::Member(&mut facts),
                         model,
                     ));
-                    entry.facts.push(MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Operator,
-                        is_static: false,
-                        is_abstract: operator.body().is_none() && !operator.is_external(),
-                        positional_parameter_names: positional_parameter_names(operator.params()),
-                        annotations: resolve_annotations(operator.annotations(), model),
-                        parameter_contracts: Some(parameter_contracts(operator.params())),
-                    });
+                    entry.facts.push(facts);
                 }
                 // Indexed through the constructor it completes (`element_members`).
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
@@ -7184,7 +7222,7 @@ impl SignatureIndex {
                 AstChildren::empty(),
                 Some(primary.params()),
                 None,
-                Some(&field_types),
+                SignatureContext::Constructor(&field_types),
                 model,
             );
             for parameter in primary.params().named().filter(|parameter| {
@@ -9894,13 +9932,6 @@ fn infer_const_initializer_type(
     }
 }
 
-fn positional_parameter_names(params: FormalParamList<'_>) -> Vec<String> {
-    params
-        .positional()
-        .map(|parameter| parameter.name().name().to_string())
-        .collect()
-}
-
 fn same_library(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
     matches!(
         (left, right),
@@ -9949,15 +9980,27 @@ fn inherits_method_types(member: ClassMember<'_>) -> bool {
         })
 }
 
+enum SignatureContext<'a> {
+    Function,
+    Constructor(&'a HashMap<String, ResolvedType>),
+    Member(&'a mut MemberFacts),
+}
+
+/// Resolves a callable, collecting declaration facts only when requested.
 fn signature<'a>(
     scope: &TypeParameterScope,
     owner_parameters: &[TypeParameterId],
     call_parameters: impl Iterator<Item = TypeParam<'a>> + Clone,
     params: Option<FormalParamList<'_>>,
     return_type: Option<DartType<'_>>,
-    field_types: Option<&HashMap<String, ResolvedType>>,
+    context: SignatureContext<'_>,
     model: &SemanticModel<'_>,
 ) -> ResolvedSignature {
+    let (field_types, mut facts) = match context {
+        SignatureContext::Function => (None, None),
+        SignatureContext::Constructor(fields) => (Some(fields), None),
+        SignatureContext::Member(facts) => (None, Some(facts)),
+    };
     let parameter_type = |param: FormalParam<'_>, initializing, name: &str| {
         if param.param_type().is_some() || param.function_params().is_some() {
             model.resolve_formal_parameter_in(param, scope)
@@ -9976,11 +10019,23 @@ fn signature<'a>(
     result.owner_parameters = owner_parameters.to_vec();
     result.call_parameters = parameter_ids(scope, call_parameters.clone());
     let mut required_named = Vec::new();
+    let mut contracts = Vec::new();
     for param in params.into_iter().flat_map(|params| params.params()) {
         let name = param.name().name();
         let kind = param.kind();
         let initializing = param.initializing();
         let default_value = param.default_value();
+        if let Some(facts) = facts.as_deref_mut() {
+            if !matches!(kind, ParamKind::Named { .. }) {
+                facts.positional_parameter_names.push(name.to_string());
+            }
+            contracts.push(ParameterContract {
+                name: name.to_string(),
+                kind,
+                is_covariant: param.is_covariant(),
+                default_value_code: default_value.map(default_syntax::default_syntax_key),
+            });
+        }
         let optional = matches!(
             kind,
             ParamKind::OptionalPositional | ParamKind::Named { required: false }
@@ -10027,6 +10082,13 @@ fn signature<'a>(
         if let Some(default) = default {
             result.defaults.insert(name.to_string(), default);
         }
+    }
+    if let Some(facts) = facts {
+        facts.parameter_contracts = Some(if contracts.is_empty() {
+            empty_parameter_contracts()
+        } else {
+            contracts.into()
+        });
     }
     result.shape = FunctionTypeShape::from_scope(required_named, call_parameters, scope);
     result.return_type = return_type
@@ -10084,7 +10146,7 @@ fn record_bound_declarations<'a>(
 #[derive(Debug, Clone, PartialEq)]
 struct FlowBinding {
     declared: ResolvedType,
-    /// Source identity of an AST binding, absent for synthetic bindings.
+    /// Source identity of a syntax binding, absent for synthetic bindings.
     declaration: Option<Span>,
     /// Dart's promotion chain: each type a subtype of the previous; the last is current.
     promoted: Vec<ResolvedType>,
@@ -10178,7 +10240,7 @@ impl TypeEnvironment {
         }
     }
 
-    /// Declares an AST binding, retaining its lexical declaration identity.
+    /// Declares a syntax binding, retaining its lexical declaration identity.
     pub fn declare_at(&mut self, name: impl Into<String>, ty: ResolvedType, span: Span) {
         self.declare_binding(name.into(), ty, true).declaration = Some(span);
     }
@@ -11565,7 +11627,7 @@ impl TypeEnvironment {
         ty
     }
 
-    /// Reuses an immediate receiver already inferred by a shared AST visitor.
+    /// Reuses an immediate receiver already inferred by a shared syntax visitor.
     /// A null-shorted selector chain makes the result nullable.
     fn infer_in_context(
         &self,
@@ -14609,7 +14671,7 @@ mod tests {
             .unwrap();
             std::fs::write(path, source).unwrap();
         }
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = Arc::new(crate::ParsedFile {
             source: source.into(),
             tree,
@@ -14941,7 +15003,6 @@ final partial = [first, unresolved];
         let falcon_dart_parser::ParseResult {
             tree: old_program_tree,
             errors,
-            ..
         } = parse(old_source);
         let old_program_parsed = Arc::new(crate::ParsedFile {
             source: old_source.into(),
@@ -14952,7 +15013,6 @@ final partial = [first, unresolved];
         let falcon_dart_parser::ParseResult {
             tree: new_program_tree,
             errors,
-            ..
         } = parse(new_source);
         let new_program_parsed = Arc::new(crate::ParsedFile {
             source: new_source.into(),
@@ -16276,7 +16336,7 @@ class SetterChild extends SetterApplication {
 
     fn with_model(source: &str, test: impl FnOnce(Program<'_>, &SemanticModel<'_>)) {
         let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = Arc::new(crate::ParsedFile {
             source: source.into(),
             tree,
@@ -16651,7 +16711,7 @@ final integer = integers.first;
         let path = root.join("app/lib/main.dart");
         std::fs::write(&path, source).unwrap();
         let path = crate::canonical_or_lexical(&path);
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = Arc::new(crate::ParsedFile {
             source: source.into(),
             tree,
@@ -17187,7 +17247,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: main_tree,
             errors,
-            ..
         } = parse(main_source);
         let main_parsed = Arc::new(crate::ParsedFile {
             source: main_source.into(),
@@ -17200,7 +17259,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: origin_tree,
             errors,
-            ..
         } = parse(origin_source);
         let origin_parsed = Arc::new(crate::ParsedFile {
             source: origin_source.into(),
@@ -17642,7 +17700,7 @@ final integer = integers.first;
                 for (actual, expected) in actual.arguments().iter().zip(*arguments) {
                     let expected = expected.map_or(ResolvedType::Unknown, |ty| {
                         let program_source = format!("{ty} expected;");
-                        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                        let falcon_dart_parser::ParseResult { tree, errors } =
                             parse(&program_source);
                         let parsed = Arc::new(crate::ParsedFile {
                             source: program_source.into(),
@@ -18301,7 +18359,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: base_tree,
             errors: base_errors,
-            ..
         } = parse(base_source);
         let base_parsed = Arc::new(crate::ParsedFile {
             source: base_source.into(),
@@ -18311,7 +18368,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: alias_tree,
             errors: alias_errors,
-            ..
         } = parse(alias_source);
         let alias_parsed = Arc::new(crate::ParsedFile {
             source: alias_source.into(),
@@ -19469,7 +19525,7 @@ final integer = integers.first;
         let parsed: Vec<_> = inputs
             .iter()
             .map(|(_, source)| {
-                let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+                let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
                 let parsed = Arc::new(crate::ParsedFile {
                     source: (*source).into(),
                     tree,
@@ -19718,6 +19774,7 @@ final integer = integers.first;
         with_model(
             "class A { void m(covariant int first, [int second]) {} \
              void n({required int named, int optional = 1 + 1}) {} \
+             void empty() {} int operator +(covariant int other) => other; \
              int get value => 0; set value(covariant int incoming) {} }",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
@@ -19732,6 +19789,7 @@ final integer = integers.first;
                     }
                 ));
                 let facts = &signatures.declared_member_facts(&identity, "m")[0];
+                assert_eq!(facts.positional_parameter_names, ["first", "second"]);
                 let contracts = facts.parameter_contracts.as_ref().unwrap();
                 assert_eq!(contracts[0].name, "first");
                 assert_eq!(contracts[0].kind, ParamKind::Positional);
@@ -19744,14 +19802,32 @@ final integer = integers.first;
                     contracts,
                     cloned_facts.parameter_contracts.as_ref().unwrap(),
                 ));
-                let contracts = signatures.declared_member_facts(&identity, "n")[0]
-                    .parameter_contracts
-                    .as_ref()
-                    .unwrap();
+                let facts = &signatures.declared_member_facts(&identity, "n")[0];
+                assert!(facts.positional_parameter_names.is_empty());
+                let contracts = facts.parameter_contracts.as_ref().unwrap();
                 assert_eq!(contracts[0].name, "named");
                 assert_eq!(contracts[0].kind, ParamKind::Named { required: true });
                 assert_eq!(contracts[1].name, "optional");
                 assert!(contracts[1].default_value_code.is_some());
+                let empty = signatures.member(&identity, "empty").unwrap();
+                assert!(empty.positional.is_empty());
+                assert!(empty.named.is_empty());
+                assert!(empty.defaults.is_empty());
+                let facts = &signatures.declared_member_facts(&identity, "empty")[0];
+                assert!(facts.positional_parameter_names.is_empty());
+                assert!(facts.parameter_contracts.as_ref().unwrap().is_empty());
+                let operator = signatures.member(&identity, "+").unwrap();
+                assert_eq!(operator.positional, [model.core_type("int", false)]);
+                assert_eq!(operator.optional_positional, 0);
+                let facts = &signatures.declared_member_facts(&identity, "+")[0];
+                assert_eq!(facts.kind, MemberKind::Operator);
+                assert_eq!(facts.positional_parameter_names, ["other"]);
+                let contracts = facts.parameter_contracts.as_ref().unwrap();
+                assert_eq!(contracts.len(), 1);
+                assert_eq!(contracts[0].name, "other");
+                assert_eq!(contracts[0].kind, ParamKind::Positional);
+                assert!(contracts[0].is_covariant);
+                assert!(contracts[0].default_value_code.is_none());
                 let accessors = &signatures.member_entry(&identity, "value").unwrap().facts;
                 let getter = accessors
                     .iter()
@@ -19797,6 +19873,14 @@ final integer = integers.first;
                     Some(ParameterDefault::Null)
                 ));
                 assert!(positional.non_optional_defaults.is_empty());
+                let facts = &signatures.declared_member_facts(&identity, "m")[0];
+                assert_eq!(
+                    facts.positional_parameter_names,
+                    ["first", "second", "third"]
+                );
+                let contracts = facts.parameter_contracts.as_ref().unwrap();
+                assert!(contracts[1].default_value_code.is_some());
+                assert!(contracts[2].default_value_code.is_none());
                 let named = signatures.member(&identity, "n").unwrap();
                 assert!(named.positional_parameter_names.is_empty());
                 assert!(named.positional.is_empty());
@@ -21373,7 +21457,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: root_tree,
             errors: root_errors,
-            ..
         } = parse(root_source);
         let root_parsed = Arc::new(crate::ParsedFile {
             source: root_source.into(),
@@ -21383,7 +21466,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: part_tree,
             errors: part_errors,
-            ..
         } = parse(part_source);
         let part_parsed = Arc::new(crate::ParsedFile {
             source: part_source.into(),
@@ -21456,7 +21538,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: base_tree,
             errors: base_errors,
-            ..
         } = parse(base_source);
         let base_parsed = Arc::new(crate::ParsedFile {
             source: base_source.into(),
@@ -21466,7 +21547,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: child_program_tree,
             errors: child_errors,
-            ..
         } = parse(child_program_source);
         let child_program_parsed = Arc::new(crate::ParsedFile {
             source: child_program_source.into(),
@@ -21544,7 +21624,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: base_tree,
             errors: base_errors,
-            ..
         } = parse(base_source);
         let base_parsed = Arc::new(crate::ParsedFile {
             source: base_source.into(),
@@ -21555,7 +21634,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: middle_tree,
             errors: middle_errors,
-            ..
         } = parse(middle_source);
         let middle_parsed = Arc::new(crate::ParsedFile {
             source: middle_source.into(),
@@ -21724,7 +21802,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: base_tree,
             errors: base_errors,
-            ..
         } = parse(base_source);
         let base_parsed = Arc::new(crate::ParsedFile {
             source: base_source.into(),
@@ -21735,7 +21812,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: middle_tree,
             errors: middle_errors,
-            ..
         } = parse(middle_source);
         let middle_parsed = Arc::new(crate::ParsedFile {
             source: middle_source.into(),
@@ -21745,7 +21821,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: leaf_tree,
             errors: leaf_errors,
-            ..
         } = parse(leaf_source);
         let leaf_parsed = Arc::new(crate::ParsedFile {
             source: leaf_source.into(),
@@ -21815,7 +21890,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: a_tree,
             errors: a_errors,
-            ..
         } = parse(a_source);
         let a_parsed = Arc::new(crate::ParsedFile {
             source: a_source.into(),
@@ -21825,7 +21899,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: b_tree,
             errors: b_errors,
-            ..
         } = parse(b_source);
         let b_parsed = Arc::new(crate::ParsedFile {
             source: b_source.into(),
@@ -21888,7 +21961,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: other_tree,
             errors: other_errors,
-            ..
         } = parse(other_source);
         let other_parsed = Arc::new(crate::ParsedFile {
             source: other_source.into(),
@@ -21898,7 +21970,6 @@ final integer = integers.first;
         let falcon_dart_parser::ParseResult {
             tree: fake_tree,
             errors: fake_errors,
-            ..
         } = parse(fake_source);
         let fake_parsed = Arc::new(crate::ParsedFile {
             source: fake_source.into(),

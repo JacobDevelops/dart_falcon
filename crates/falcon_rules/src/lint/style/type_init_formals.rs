@@ -293,8 +293,7 @@ mod tests {
     #[test]
     fn duplicate_class_names_check_only_the_last_declaration_once() {
         let source = "class C { int x; C(int this.x); }\nclass C { int y; C(int this.y); }";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),

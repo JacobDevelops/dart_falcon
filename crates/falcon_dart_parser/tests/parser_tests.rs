@@ -8,7 +8,7 @@ use common_expr::first_stmt_expr;
 
 #[test]
 fn test_empty_program() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse("");
+    let falcon_dart_parser::ParseResult { tree, errors } = parse("");
     let prog = tree.program("");
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(prog.declarations().is_empty());
@@ -17,7 +17,7 @@ fn test_empty_program() {
 #[test]
 fn test_import_simple() {
     let src = r#"import 'dart:core';"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.imports().len(), 1);
@@ -27,7 +27,7 @@ fn test_import_simple() {
 #[test]
 fn test_import_with_as() {
     let src = r#"import 'foo.dart' as foo;"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.imports().len(), 1);
@@ -47,7 +47,7 @@ fn test_import_with_as() {
 #[test]
 fn test_import_with_show() {
     let src = r#"import 'pkg.dart' show foo, bar;"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
@@ -56,7 +56,7 @@ fn test_import_with_show() {
 #[test]
 fn test_import_with_hide() {
     let src = r#"import 'pkg.dart' hide Secret;"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
@@ -65,7 +65,7 @@ fn test_import_with_hide() {
 #[test]
 fn test_import_deferred() {
     let src = r#"import 'pkg.dart' deferred as lazy;"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(prog.imports().next().unwrap().is_deferred());
@@ -74,7 +74,7 @@ fn test_import_deferred() {
 #[test]
 fn test_export_simple() {
     let src = r#"export 'foo.dart';"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.exports().len(), 1);
@@ -83,7 +83,7 @@ fn test_export_simple() {
 #[test]
 fn test_library_directive() {
     let src = "library my.lib;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(prog.library_directive().is_some());
@@ -92,7 +92,7 @@ fn test_library_directive() {
 #[test]
 fn test_part_directive() {
     let src = r#"part 'foo.dart';"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.part_directives().len(), 1);
@@ -101,7 +101,7 @@ fn test_part_directive() {
 #[test]
 fn test_class_empty() {
     let src = "class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.declarations().len(), 1);
@@ -115,7 +115,7 @@ fn test_class_empty() {
 #[test]
 fn test_class_with_field() {
     let src = "class Foo { int x; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -132,7 +132,7 @@ fn test_class_with_field() {
 #[test]
 fn test_class_with_multiple_fields() {
     let src = "class Foo { int x, y; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -147,7 +147,7 @@ fn test_class_with_multiple_fields() {
 #[test]
 fn test_class_with_method() {
     let src = "class Foo { void bar() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -163,7 +163,7 @@ fn test_class_with_method() {
 #[test]
 fn test_class_with_constructor() {
     let src = "class Foo { Foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -178,7 +178,7 @@ fn test_class_with_constructor() {
 #[test]
 fn test_class_extends() {
     let src = "class Child extends Parent {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -190,7 +190,7 @@ fn test_class_extends() {
 #[test]
 fn test_class_with_clause() {
     let src = "class Child with Mixin1, Mixin2 {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -202,7 +202,7 @@ fn test_class_with_clause() {
 #[test]
 fn test_class_implements() {
     let src = "class Foo implements Bar, Baz {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -214,7 +214,7 @@ fn test_class_implements() {
 #[test]
 fn test_class_abstract() {
     let src = "abstract class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -225,7 +225,7 @@ fn test_class_abstract() {
 
 #[test]
 fn test_class_abstract_base_modifiers_are_independent() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse("abstract base class Foo {}");
+    let falcon_dart_parser::ParseResult { tree, errors } = parse("abstract base class Foo {}");
     let prog = tree.program("abstract base class Foo {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -246,7 +246,7 @@ fn test_class_abstract_base_modifiers_are_independent() {
 #[test]
 fn test_class_interface() {
     let src = "interface class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -261,7 +261,7 @@ fn test_class_interface() {
 #[test]
 fn test_class_final() {
     let src = "final class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -273,7 +273,7 @@ fn test_class_final() {
 #[test]
 fn test_class_sealed() {
     let src = "sealed class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -285,7 +285,7 @@ fn test_class_sealed() {
 #[test]
 fn test_class_generic() {
     let src = "class Box<T> {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -297,7 +297,7 @@ fn test_class_generic() {
 #[test]
 fn test_mixin_simple() {
     let src = "mixin M {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Mixin(m) = prog.declarations().next().unwrap() else {
@@ -309,7 +309,7 @@ fn test_mixin_simple() {
 #[test]
 fn test_mixin_with_on() {
     let src = "mixin M on Base {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Mixin(m) = prog.declarations().next().unwrap() else {
@@ -321,7 +321,7 @@ fn test_mixin_with_on() {
 #[test]
 fn test_mixin_class() {
     let src = "mixin class M {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(matches!(
@@ -333,7 +333,7 @@ fn test_mixin_class() {
 #[test]
 fn test_enum_simple() {
     let src = "enum Color { red, green, blue }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Enum(en) = prog.declarations().next().unwrap() else {
@@ -346,7 +346,7 @@ fn test_enum_simple() {
 #[test]
 fn test_enum_enhanced_with_members() {
     let src = "enum Status { active, inactive; final int code; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Enum(en) = prog.declarations().next().unwrap() else {
@@ -358,7 +358,7 @@ fn test_enum_enhanced_with_members() {
 #[test]
 fn test_extension_simple() {
     let src = "extension IntParsing on String { }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     // Extensions might not be fully supported yet; check they don't panic
     assert!(!prog.declarations().is_empty() || !errors.is_empty());
@@ -367,7 +367,7 @@ fn test_extension_simple() {
 #[test]
 fn test_extension_with_name() {
     let src = "extension NumberParsing on String { }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     // Extensions might not be fully supported yet; check they don't panic
     assert!(!prog.declarations().is_empty() || !errors.is_empty());
@@ -376,7 +376,7 @@ fn test_extension_with_name() {
 #[test]
 fn test_extension_type() {
     let src = "extension type UserId(int value) {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(matches!(
@@ -388,7 +388,7 @@ fn test_extension_type() {
 #[test]
 fn test_function_void_no_params() {
     let src = "void foo() {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -400,7 +400,7 @@ fn test_function_void_no_params() {
 #[test]
 fn test_function_with_return_type() {
     let src = "int add(int a, int b) { return a + b; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -412,7 +412,7 @@ fn test_function_with_return_type() {
 #[test]
 fn test_function_async() {
     let src = "void foo() async {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -424,7 +424,7 @@ fn test_function_async() {
 #[test]
 fn test_function_generator() {
     let src = "Iterable<int> foo() sync* {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -436,7 +436,7 @@ fn test_function_generator() {
 #[test]
 fn test_function_arrow() {
     let src = "int double(int x) => x * 2;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -451,7 +451,6 @@ fn test_top_level_var() {
     let falcon_dart_parser::ParseResult {
         tree,
         errors: _errors,
-        ..
     } = parse(src);
     let prog = tree.program(src);
     // Parser may not support bare var at top level without type context
@@ -461,7 +460,7 @@ fn test_top_level_var() {
 #[test]
 fn test_top_level_final() {
     let src = "final int x = 42;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
@@ -473,7 +472,7 @@ fn test_top_level_final() {
 #[test]
 fn test_top_level_const() {
     let src = "const int x = 42;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
@@ -485,7 +484,7 @@ fn test_top_level_const() {
 #[test]
 fn test_top_level_late() {
     let src = "late int x;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
@@ -498,7 +497,7 @@ fn test_top_level_late() {
 fn test_top_level_late_final_typed() {
     // `late final` is the correct Dart modifier order (late precedes final).
     let src = "late final int x = 1;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
@@ -512,7 +511,7 @@ fn test_top_level_late_final_typed() {
 #[test]
 fn test_top_level_late_final_untyped() {
     let src = "late final x;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
@@ -525,7 +524,7 @@ fn test_top_level_late_final_untyped() {
 #[test]
 fn test_static_late_final_field() {
     let src = "class C { static late final int x; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(c) = prog.declarations().next().unwrap() else {
@@ -542,7 +541,7 @@ fn test_static_late_final_field() {
 #[test]
 fn test_typedef_function_type() {
     let src = "typedef Callback = void Function(int);";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(matches!(
@@ -554,7 +553,7 @@ fn test_typedef_function_type() {
 #[test]
 fn test_stmt_if() {
     let src = "main() { if (true) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -575,7 +574,7 @@ fn test_stmt_if() {
 #[test]
 fn test_stmt_if_else() {
     let src = "main() { if (true) { } else { } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -595,7 +594,7 @@ fn test_stmt_if_else() {
 #[test]
 fn test_stmt_if_case() {
     let src = "main() { if (x case 42) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -615,7 +614,7 @@ fn test_stmt_if_case() {
 #[test]
 fn test_stmt_while() {
     let src = "main() { while (true) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -632,7 +631,7 @@ fn test_stmt_while() {
 #[test]
 fn test_stmt_do_while() {
     let src = "main() { do {} while (true); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -649,7 +648,7 @@ fn test_stmt_do_while() {
 #[test]
 fn test_stmt_for() {
     let src = "main() { for (var i = 0; i < 10; i++) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -666,7 +665,7 @@ fn test_stmt_for() {
 #[test]
 fn test_stmt_for_in() {
     let src = "main() { for (var x in list) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -686,7 +685,7 @@ fn test_stmt_for_in() {
 #[test]
 fn test_stmt_for_await_in() {
     let src = "main() async { for (var x in stream) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -706,7 +705,7 @@ fn test_stmt_for_await_in() {
 #[test]
 fn test_stmt_switch() {
     let src = "main() { switch (x) { case 1: break; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -723,7 +722,7 @@ fn test_stmt_switch() {
 #[test]
 fn test_stmt_try_catch() {
     let src = "main() { try {} catch (e) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -740,7 +739,7 @@ fn test_stmt_try_catch() {
 #[test]
 fn test_stmt_try_catch_finally() {
     let src = "main() { try {} catch (e) {} finally {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -760,7 +759,7 @@ fn test_stmt_try_catch_finally() {
 #[test]
 fn test_stmt_return() {
     let src = "main() { return 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -780,7 +779,7 @@ fn test_stmt_return() {
 #[test]
 fn test_stmt_throw() {
     let src = "main() { throw Exception(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -797,7 +796,7 @@ fn test_stmt_throw() {
 #[test]
 fn test_stmt_break() {
     let src = "main() { for (;;) { break; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -822,7 +821,7 @@ fn test_stmt_break() {
 #[test]
 fn test_stmt_continue() {
     let src = "main() { for (;;) { continue; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -847,7 +846,7 @@ fn test_stmt_continue() {
 #[test]
 fn test_stmt_assert() {
     let src = "main() { assert(x > 0); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -864,7 +863,7 @@ fn test_stmt_assert() {
 #[test]
 fn test_stmt_yield() {
     let src = "gen() sync* { yield 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -881,7 +880,7 @@ fn test_stmt_yield() {
 #[test]
 fn test_stmt_yield_star() {
     let src = "gen() sync* { yield* other; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -901,7 +900,7 @@ fn test_stmt_yield_star() {
 #[test]
 fn test_stmt_local_var() {
     let src = "main() { int x = 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -918,7 +917,7 @@ fn test_stmt_local_var() {
 #[test]
 fn test_expr_integer_literal() {
     let src = "main() { 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -938,7 +937,7 @@ fn test_expr_integer_literal() {
 #[test]
 fn test_expr_string_literal() {
     let src = r#"main() { "hello"; }"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -958,7 +957,7 @@ fn test_expr_string_literal() {
 #[test]
 fn test_expr_bool_literal() {
     let src = "main() { true; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -978,7 +977,7 @@ fn test_expr_bool_literal() {
 #[test]
 fn test_expr_null_literal() {
     let src = "main() { null; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -998,7 +997,7 @@ fn test_expr_null_literal() {
 #[test]
 fn test_expr_identifier() {
     let src = "main() { foo; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1018,7 +1017,7 @@ fn test_expr_identifier() {
 #[test]
 fn test_expr_this() {
     let src = "main() { this; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1038,7 +1037,7 @@ fn test_expr_this() {
 #[test]
 fn test_expr_super() {
     let src = "main() { super; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1058,7 +1057,7 @@ fn test_expr_super() {
 #[test]
 fn test_expr_binary_add() {
     let src = "main() { a + b; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1078,7 +1077,7 @@ fn test_expr_binary_add() {
 #[test]
 fn test_expr_unary_minus() {
     let src = "main() { -x; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1098,7 +1097,7 @@ fn test_expr_unary_minus() {
 #[test]
 fn test_expr_field_access() {
     let src = "main() { obj.field; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1118,7 +1117,7 @@ fn test_expr_field_access() {
 #[test]
 fn test_expr_null_safe_field_access() {
     let src = "main() { obj?.field; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1142,7 +1141,7 @@ fn test_expr_null_safe_field_access() {
 #[test]
 fn test_expr_index_access() {
     let src = "main() { arr[0]; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1162,7 +1161,7 @@ fn test_expr_index_access() {
 #[test]
 fn test_expr_call() {
     let src = "main() { foo(1, 2); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1182,7 +1181,7 @@ fn test_expr_call() {
 #[test]
 fn test_expr_cascade() {
     let src = "main() { obj..foo()..bar; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1202,7 +1201,7 @@ fn test_expr_cascade() {
 #[test]
 fn test_expr_conditional() {
     let src = "main() { a ? b : c; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1222,7 +1221,7 @@ fn test_expr_conditional() {
 #[test]
 fn test_expr_is_type() {
     let src = "main() { x is int; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1242,7 +1241,7 @@ fn test_expr_is_type() {
 #[test]
 fn test_expr_is_not_type() {
     let src = "main() { x is! int; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1266,7 +1265,7 @@ fn test_expr_is_not_type() {
 #[test]
 fn test_expr_as_cast() {
     let src = "main() { (x as int); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1290,7 +1289,7 @@ fn test_expr_as_cast() {
 #[test]
 fn test_expr_list_literal() {
     let src = "main() { [1, 2, 3]; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1310,7 +1309,7 @@ fn test_expr_list_literal() {
 #[test]
 fn test_expr_map_literal() {
     let src = "main() { {'a': 1, 'b': 2}; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1330,7 +1329,7 @@ fn test_expr_map_literal() {
 #[test]
 fn test_expr_set_literal() {
     let src = "main() { {1, 2, 3}; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1350,7 +1349,7 @@ fn test_expr_set_literal() {
 #[test]
 fn test_expr_record_literal() {
     let src = "main() { (1, 2, x: 3); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1370,7 +1369,7 @@ fn test_expr_record_literal() {
 #[test]
 fn test_expr_await() {
     let src = "main() async { await foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1390,7 +1389,7 @@ fn test_expr_await() {
 #[test]
 fn test_expr_new() {
     let src = "main() { new Foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1410,7 +1409,7 @@ fn test_expr_new() {
 #[test]
 fn test_expr_const_new() {
     let src = "main() { const Foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1434,7 +1433,7 @@ fn test_expr_const_new() {
 #[test]
 fn test_expr_switch_expression() {
     let src = "main() { x switch { 1 => 'a', _ => 'b' }; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1592,7 +1591,7 @@ fn test_double_digit_separator_literal() {
 #[test]
 fn test_pattern_wildcard() {
     let src = "main() { if (x case _) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1650,7 +1649,6 @@ fn test_error_recovery_partial_class() {
     let falcon_dart_parser::ParseResult {
         tree,
         errors: _errors,
-        ..
     } = parse(src);
     let prog = tree.program(src);
     // Parser should still produce some AST even with errors
@@ -1663,7 +1661,7 @@ fn test_error_recovery_partial_class() {
 #[test]
 fn test_error_recovery_malformed_function() {
     let src = "void foo() {";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     // Parser should not panic
     assert!(!prog.declarations().is_empty() || !errors.is_empty());
@@ -1672,7 +1670,7 @@ fn test_error_recovery_malformed_function() {
 #[test]
 fn test_annotation_override() {
     let src = "class Foo { @override void bar() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -1687,7 +1685,7 @@ fn test_annotation_override() {
 #[test]
 fn test_named_parameter() {
     let src = "main({required int x}) {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1704,7 +1702,7 @@ fn test_named_parameter() {
 #[test]
 fn test_optional_positional_parameter() {
     let src = "main([int x]) {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
@@ -1721,7 +1719,7 @@ fn test_optional_positional_parameter() {
 #[test]
 fn test_nullable_type() {
     let src = "int? x;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
@@ -1733,7 +1731,7 @@ fn test_nullable_type() {
 #[test]
 fn test_generic_single_param() {
     let src = "class Box<T> {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -1745,7 +1743,7 @@ fn test_generic_single_param() {
 #[test]
 fn test_generic_multiple_params() {
     let src = "class Map<K, V> {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -1763,7 +1761,7 @@ fn test_nested_generic_type() {
 
 #[test]
 fn snap_class_simple() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse("class Foo {}");
+    let falcon_dart_parser::ParseResult { tree, errors } = parse("class Foo {}");
     let prog = tree.program("class Foo {}");
     assert!(errors.is_empty());
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1771,7 +1769,7 @@ fn snap_class_simple() {
 
 #[test]
 fn snap_class_with_field_and_method() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("class Point { int x; void move(int dx) {} }");
     let prog = tree.program("class Point { int x; void move(int dx) {} }");
     assert!(errors.is_empty());
@@ -1780,8 +1778,7 @@ fn snap_class_with_field_and_method() {
 
 #[test]
 fn snap_top_level_function() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
-        parse("int add(int a, int b) => a + b;");
+    let falcon_dart_parser::ParseResult { tree, errors } = parse("int add(int a, int b) => a + b;");
     let prog = tree.program("int add(int a, int b) => a + b;");
     assert!(errors.is_empty());
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1789,7 +1786,7 @@ fn snap_top_level_function() {
 
 #[test]
 fn snap_import_directive() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("import 'dart:core' show List, Map;");
     let prog = tree.program("import 'dart:core' show List, Map;");
     assert!(errors.is_empty());
@@ -1798,8 +1795,7 @@ fn snap_import_directive() {
 
 #[test]
 fn snap_enum_simple() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
-        parse("enum Color { red, green, blue }");
+    let falcon_dart_parser::ParseResult { tree, errors } = parse("enum Color { red, green, blue }");
     let prog = tree.program("enum Color { red, green, blue }");
     assert!(errors.is_empty());
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1807,7 +1803,7 @@ fn snap_enum_simple() {
 
 #[test]
 fn snap_typedef_function() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("typedef Callback = void Function(int);");
     let prog = tree.program("typedef Callback = void Function(int);");
     assert!(errors.is_empty());
@@ -1816,7 +1812,7 @@ fn snap_typedef_function() {
 
 #[test]
 fn snap_abstract_class_with_getter() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("abstract class Shape { double get area; }");
     let prog = tree.program("abstract class Shape { double get area; }");
     assert!(errors.is_empty());
@@ -1825,7 +1821,7 @@ fn snap_abstract_class_with_getter() {
 
 #[test]
 fn snap_switch_expression() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("String f(int x) => x switch { 1 => 'one', _ => 'other' };");
     let prog = tree.program("String f(int x) => x switch { 1 => 'one', _ => 'other' };");
     assert!(errors.is_empty());
@@ -1834,7 +1830,7 @@ fn snap_switch_expression() {
 
 #[test]
 fn snap_sealed_class() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse("sealed class Result<T> {}");
+    let falcon_dart_parser::ParseResult { tree, errors } = parse("sealed class Result<T> {}");
     let prog = tree.program("sealed class Result<T> {}");
     assert!(errors.is_empty());
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1842,7 +1838,7 @@ fn snap_sealed_class() {
 
 #[test]
 fn snap_extension() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("extension StringX on String { bool get isBlank => length == 0; }");
     let prog = tree.program("extension StringX on String { bool get isBlank => length == 0; }");
     assert!(errors.is_empty());
@@ -1851,7 +1847,7 @@ fn snap_extension() {
 
 #[test]
 fn snap_mixin_declaration() {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         parse("mixin Serializable on Object { Map<String, dynamic> toJson(); }");
     let prog = tree.program("mixin Serializable on Object { Map<String, dynamic> toJson(); }");
     assert!(errors.is_empty(), "errors: {errors:?}");
@@ -1861,7 +1857,7 @@ fn snap_mixin_declaration() {
 #[test]
 fn snap_class_extends_with_implements() {
     let src = "class Dog extends Animal with Barker implements Pet { final String name; Dog(this.name); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1870,7 +1866,7 @@ fn snap_class_extends_with_implements() {
 #[test]
 fn snap_named_constructor() {
     let src = "class Vec2 { final double x; final double y; Vec2(this.x, this.y); Vec2.zero() : x = 0, y = 0; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1879,7 +1875,7 @@ fn snap_named_constructor() {
 #[test]
 fn snap_factory_constructor() {
     let src = "class Singleton { static final Singleton _i = Singleton._(); factory Singleton() => _i; Singleton._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1889,7 +1885,7 @@ fn snap_factory_constructor() {
 fn snap_async_function() {
     let src =
         "Future<String> fetchName() async { await Future.delayed(Duration.zero); return 'dart'; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1898,7 +1894,7 @@ fn snap_async_function() {
 #[test]
 fn snap_generic_function() {
     let src = "T identity<T>(T value) => value;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1907,7 +1903,7 @@ fn snap_generic_function() {
 #[test]
 fn snap_record_return_type() {
     let src = "(String, int) pair() => ('hello', 42);";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1916,7 +1912,7 @@ fn snap_record_return_type() {
 #[test]
 fn snap_annotation_with_args() {
     let src = "@Deprecated('Use newFn instead')\nvoid oldFn() {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1925,7 +1921,7 @@ fn snap_annotation_with_args() {
 #[test]
 fn snap_late_final_field() {
     let src = "class Lazy { late final String value; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1934,7 +1930,7 @@ fn snap_late_final_field() {
 #[test]
 fn snap_typed_list_literal() {
     let src = "List<String> names() => <String>['Alice', 'Bob'];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1943,7 +1939,7 @@ fn snap_typed_list_literal() {
 #[test]
 fn snap_collection_for() {
     let src = "List<int> doubled(List<int> xs) => [for (final x in xs) x * 2];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1952,7 +1948,7 @@ fn snap_collection_for() {
 #[test]
 fn snap_switch_pattern_guard() {
     let src = r#"String classify(int n) => switch (n) { < 0 => 'neg', 0 => 'zero', _ => 'pos' };"#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1961,7 +1957,7 @@ fn snap_switch_pattern_guard() {
 #[test]
 fn snap_enum_with_members() {
     let src = "enum Color { red, green, blue; bool get isPrimary => this != Color.green; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1970,7 +1966,7 @@ fn snap_enum_with_members() {
 #[test]
 fn snap_typedef_function_type() {
     let src = "typedef Predicate<T> = bool Function(T value);";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -1979,7 +1975,7 @@ fn snap_typedef_function_type() {
 #[test]
 fn snap_const_class_field() {
     let src = "class Config { static const int maxRetries = 3; static const String baseUrl = 'https://api.example.com'; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_debug_snapshot!(prog.declarations().next().unwrap());
@@ -2011,7 +2007,7 @@ fn first_fn_arrow_or_block_expr(prog: Program<'_>) -> Expr<'_> {
 fn test_bug_collection_if_case_keeps_all_elements() {
     // if-element with a `case` pattern must not truncate later elements.
     let src = "f(e) => [ if (e.x case final y?) ...[1] , other, elements ];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
@@ -2024,7 +2020,7 @@ fn test_bug_collection_if_case_keeps_all_elements() {
 #[test]
 fn test_bug_collection_if_case_with_when_guard() {
     let src = "f(e) => [ if (e.x case final y? when y > 0) y, other, elements ];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
@@ -2037,7 +2033,7 @@ fn test_bug_collection_if_case_with_when_guard() {
 #[test]
 fn test_bug_collection_for_record_destructuring() {
     let src = "f(list) => [ for (final (i, s) in list.indexed) widget(i, s), tail ];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
@@ -2050,7 +2046,7 @@ fn test_bug_collection_for_record_destructuring() {
 #[test]
 fn test_bug_map_comprehension_for_element() {
     let src = "f(xs) => { for (final x in xs) x.id: x };";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(
@@ -2063,7 +2059,7 @@ fn test_bug_map_comprehension_for_element() {
 #[test]
 fn test_bug_map_comprehension_for_pattern() {
     let src = "f(xs) => { for (final (k, v) in xs) k: v };";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(
@@ -2083,7 +2079,7 @@ class W {
   Widget build(BuildContext context) => X();
 }
 "#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -2118,7 +2114,7 @@ class _SessionTile extends StatelessWidget {
   Widget build(final BuildContext context) => SessionCard(session: session);
 }
 "#;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
@@ -2144,7 +2140,7 @@ fn test_bug_collection_nested_spreads_after_pattern_constructs() {
     // Spreads following both a case-if and a pattern-for must survive.
     let src =
         "f(a, b, xs) => [ if (a case final y?) ...[y], for (final (i, s) in xs) ...[i, s], ...b ];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
@@ -2165,7 +2161,7 @@ fn assert_parses(src: &str) {
 #[test]
 fn test_closure_final_param() {
     let src = "void f() { list.map((final x) => x.y); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     // Drill to the closure argument and confirm it is a function expression.
@@ -2185,7 +2181,7 @@ fn test_closure_final_param() {
 #[test]
 fn test_closure_var_param() {
     let src = "void f() { g((var x) => x); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let arg = first_call_first_arg(prog);
@@ -2200,7 +2196,7 @@ fn test_closure_var_param() {
 #[test]
 fn test_closure_final_typed_param() {
     let src = "void f() { g((final int x) => x); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let arg = first_call_first_arg(prog);
@@ -2237,7 +2233,7 @@ fn test_closure_await_final_param() {
 fn test_is_type_ternary() {
     // `x is T ? a : b` — the `?` is the conditional operator, not a nullable type.
     let src = "void f() { final b = x is Foo ? x : y; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let init = first_local_var_init(prog);
@@ -2251,7 +2247,7 @@ fn test_is_type_ternary() {
 fn test_is_nullable_type_still_parses() {
     // A genuine nullable type-test keeps the `?` on the type.
     let src = "void f() { g(x is String?); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let arg = first_call_first_arg(prog);
@@ -2278,7 +2274,7 @@ fn test_generic_method_call_in_closure() {
 #[test]
 fn test_c_style_for_in_list_literal() {
     let src = "void f() { final l = [for (var i = 0; i < n; i++) i]; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::List(list) = first_local_var_init(prog).expect("init") else {
@@ -2308,7 +2304,7 @@ fn test_c_style_for_in_map_literal() {
 #[test]
 fn test_async_getter() {
     let src = "class A { Future<int> get token async { return 1; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let getter = prog
@@ -2337,7 +2333,7 @@ fn test_nullable_function_type_param() {
 #[test]
 fn test_generic_function_expression() {
     let src = "void f() { final g = <T extends Object>(final T x) { return x; }; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let init = first_local_var_init(prog).expect("init");
@@ -2429,7 +2425,7 @@ fn first_local_var_init(prog: Program<'_>) -> Option<Expr<'_>> {
 fn test_pattern_decl_record_final() {
     // `final (a, b) = expr;` — the jfit construct (recovery_trend_chart.dart).
     let src = "void f(row) { final (color, valueOf) = row; use(color, valueOf); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Stmt::PatternDecl(decl) = first_fn_body_stmts(prog).next().unwrap() else {
@@ -2458,7 +2454,7 @@ fn test_pattern_decl_record_final() {
 fn test_pattern_decl_var_named_shorthand() {
     // `var (x, :y) = ..;` — positional + `:name` shorthand field.
     let src = "void f(p) { var (x, :y) = p; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Stmt::PatternDecl(decl) = first_fn_body_stmts(prog).next().unwrap() else {
@@ -2483,7 +2479,7 @@ fn test_pattern_decl_var_named_shorthand() {
 fn test_pattern_decl_switch_initializer() {
     // `final (label, color) = switch (status) { ... };` (scheduling_shared_widgets.dart).
     let src = "void f(status) { final (label, color) = switch (status) { _ => (1, 2) }; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Stmt::PatternDecl(decl) = first_fn_body_stmts(prog).next().unwrap() else {
@@ -2497,7 +2493,7 @@ fn test_pattern_decl_switch_initializer() {
 fn test_pattern_decl_does_not_shadow_record_typed_var() {
     // `final (int, String) rec = ..;` is a record-TYPED var decl, not a pattern.
     let src = "void f() { final (int, String) rec = (1, 'a'); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(
@@ -2511,7 +2507,7 @@ fn test_pattern_decl_does_not_shadow_record_typed_var() {
 fn test_for_statement_pattern_destructuring() {
     // `for (final (index, slot) in slots.indexed) { .. }` (recovery_trend_chart.dart).
     let src = "void f(slots) { for (final (index, slot) in slots.indexed) { use(index, slot); } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Stmt::For(for_stmt) = first_fn_body_stmts(prog).next().unwrap() else {
@@ -2540,7 +2536,7 @@ fn test_for_statement_pattern_destructuring() {
 fn test_null_aware_list_element() {
     // `[?weightLabel, ...]` (logged_exercise_card.dart).
     let src = "f(weightLabel) => <String>[?weightLabel, 'reps'];";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
@@ -2565,7 +2561,7 @@ fn test_null_aware_list_element() {
 fn test_null_aware_set_element() {
     // `{?activeType}` (exercise_picker_page.dart) — a set, not a map.
     let src = "f(activeType) => {?activeType};";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::Set(node) = first_fn_arrow_or_block_expr(prog) else {
@@ -2586,7 +2582,7 @@ fn test_null_aware_set_element() {
 fn test_null_aware_map_key_and_value() {
     // `{?k: v}` and `{?k: ?v}` — null-aware key and/or value on a map entry.
     let src = "f(k, v) => {?k: v, a: ?v};";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let Expr::Map(node) = first_fn_arrow_or_block_expr(prog) else {

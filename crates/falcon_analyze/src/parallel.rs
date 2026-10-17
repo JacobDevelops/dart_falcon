@@ -40,7 +40,6 @@ fn analyze_file(
     let falcon_dart_parser::ParseResult {
         errors: parse_errors,
         tree,
-        ..
     } = parse_for_package(source, package_version);
     let parsed = Arc::new(ParsedFile {
         source: source.into(),
@@ -108,7 +107,6 @@ fn parse_one<'src>(path: &'src Path, source: Box<str>, workspace: Workspace<'_>)
     let falcon_dart_parser::ParseResult {
         errors: parse_errors,
         tree,
-        ..
     } = parse_for_package(&source, workspace.package_language_version(path));
     Parsed {
         path,
@@ -217,6 +215,7 @@ fn analyze_indexed(
         None,
         Some(&grouping),
     );
+    tracing::debug!("identity index built");
     let mut type_index = TypeIndex::from_resolved_files(
         semantic_parsed.iter().enumerate().map(|(i, p)| {
             (
@@ -233,6 +232,7 @@ fn analyze_indexed(
     if let Some((libraries, _, _)) = &externals {
         type_index.add_external(libraries, &identities);
     }
+    tracing::debug!("type index built");
     let signature_files: Vec<_> = project_files
         .into_iter()
         .zip(&semantic_parsed)

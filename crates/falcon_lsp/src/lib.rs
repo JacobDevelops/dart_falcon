@@ -1,7 +1,7 @@
 //! LSP server implementation (JSON-RPC 2.0, LSP 3.17).
 //!
 //! Single-threaded message loop over `lsp-server`; full-text document sync;
-//! per-document AST cache with config-driven rule reloads.
+//! per-document CST cache with config-driven rule reloads.
 //!
 //! Handlers: initialize/initialized/shutdown, textDocument/didOpen,
 //! didChange (debounced), didSave, didClose, textDocument/hover, and

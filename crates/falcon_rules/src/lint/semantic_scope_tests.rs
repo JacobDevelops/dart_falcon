@@ -14,7 +14,7 @@ fn generic_predicate_closure_keeps_completed_input_context() {
     let source = "bool predicate<T>(bool Function(T) callback) => true; \
                   void use() { predicate((trace) { trace as StackTrace; return true; }); }";
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -119,7 +119,7 @@ class GenericLookup {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -374,7 +374,7 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -518,7 +518,7 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
 
     let source = "// @dart=2.19\nvoid f(int x) { switch (x) { case 7: break; } }";
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -577,7 +577,7 @@ extension type E(int? y) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -681,7 +681,7 @@ void run(Numeric number) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -752,7 +752,7 @@ void assertedCascade(C value) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -851,7 +851,7 @@ fn finds_nested_returns_without_crossing_function_boundaries() {
             () { return 13; };
             return () { return 14; };
         }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -875,7 +875,7 @@ fn finds_nested_returns_without_crossing_function_boundaries() {
 #[test]
 fn returns_borrowed_block_and_arrow_expressions() {
     let source = "int block() { return 1; } int arrow() => 2;";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),

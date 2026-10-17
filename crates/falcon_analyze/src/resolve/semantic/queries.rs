@@ -431,7 +431,7 @@ mod tests {
         source: &str,
         test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
     ) {
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = Arc::new(crate::ParsedFile {
             source: source.into(),
             tree,
@@ -466,7 +466,7 @@ mod tests {
         ];
         for (expression, expected) in cases {
             let source = format!("dynamic probe(dynamic a) => {expression};");
-            let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(&source);
+            let falcon_dart_parser::ParseResult { tree, errors } = parse(&source);
             let program = tree.program(&source);
             assert!(errors.is_empty(), "{expression}: {errors:?}");
             let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {

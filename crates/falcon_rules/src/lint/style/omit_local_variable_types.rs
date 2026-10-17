@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn annotation_spans_exclude_trailing_comments_and_whitespace() {
         let source = "void f() { List<int> /* named */ a; int Function() /* function */ b; (int, String) /* record */ c; }";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),

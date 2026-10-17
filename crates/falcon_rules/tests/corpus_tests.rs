@@ -64,7 +64,7 @@ fn run_rule(
     let diagnostics = if inference::requires_sdk(file) {
         inference::analyze(rule, file, source, config)
     } else {
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
             tree,
@@ -725,7 +725,7 @@ fn cross_file_corpus_matches_expectations() {
                     path.extension().and_then(|extension| extension.to_str()) == Some("dart")
                 })
                 .map(|(path, source)| {
-                    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+                    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
                     ProjectFile {
                         path: path.clone(),
                         parsed: Arc::new(ParsedFile {

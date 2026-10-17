@@ -605,7 +605,7 @@ mod tests {
     use falcon_dart_parser::parse;
 
     fn count(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         UnnecessaryNullable
             .analyze_project(

@@ -1,9 +1,9 @@
-use super::{InterpolationRegion, lex_syntax, visit_interpolations};
+use super::{InterpolationRegion, lex_region, visit_interpolations};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use falcon_syntax::LanguageVersion;
-use falcon_syntax::ast::{Expr, Span, Stmt};
-use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
+use falcon_syntax::cst::{NodeKind, Span, SyntaxTree};
+use falcon_syntax::token::TokenKind;
 
 fn expression_span(source: &str, expression: &str) -> Span {
     let start = source.find(expression).unwrap();
@@ -11,37 +11,41 @@ fn expression_span(source: &str, expression: &str) -> Span {
 }
 
 #[test]
-fn retains_nested_streams_with_absolute_offsets_and_trivia() {
+fn retains_nested_tokens_with_absolute_offsets_and_trivia() {
     let source = r#"'prefix ${ /* outer */ "nested ${value + 1}" } suffix'"#;
-    let syntax = lex_syntax(source);
-    let outer_span = expression_span(source, " /* outer */ \"nested ${value + 1}\" ");
-    let outer = syntax.interpolation(outer_span).unwrap();
+    let tree = crate::lex_tree(source);
+    assert!(tree.is_lossless(source));
     assert!(
-        outer
-            .tokens()
-            .iter()
-            .any(|token| token.kind == TokenKind::BlockComment)
+        tree.tokens(source)
+            .any(|token| token.kind() == TokenKind::BlockComment)
     );
     let inner_span = expression_span(source, "value + 1");
-    let inner = outer.interpolation(inner_span).unwrap();
-    assert_eq!(inner.tokens().first().unwrap().offset(), inner_span.start);
-    assert_eq!(inner.tokens().last().unwrap().offset(), inner_span.end);
-    assert_eq!(inner.tokens().last().unwrap().kind, TokenKind::Eof);
-
-    let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+    assert!(
+        tree.tokens(source)
+            .any(|token| token.kind() == TokenKind::Ident
+                && token.text() == "value"
+                && token.offset() == inner_span.start)
+    );
+    let inner = lex_region(source, inner_span);
+    assert_eq!(inner.first().unwrap().offset(), inner_span.start);
+    assert_eq!(inner.last().unwrap().offset(), inner_span.end);
+    assert_eq!(inner.last().unwrap().kind, TokenKind::Eof);
+    let tokens = Lexer::new(source).tokenize();
+    let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
     let expression = parser.parse_expr();
     assert!(parser.errors.is_empty(), "{:?}", parser.errors);
-    assert_eq!(*expression.span(), Span::new(0, source.len()));
+    assert_eq!(expression.span(), Span::new(0, source.len()));
 }
 
 #[test]
-fn raw_and_escaped_dollars_do_not_retain_expression_streams() {
+fn raw_and_escaped_dollars_do_not_create_interpolation_regions() {
     for source in [r#"r'${ignored}'"#, r#"'\${ignored}'"#] {
-        let syntax = lex_syntax(source);
+        let tree = crate::lex_tree(source);
         assert!(
-            syntax
-                .interpolation(expression_span(source, "ignored"))
-                .is_none()
+            !tree
+                .root(source)
+                .descendants()
+                .any(|node| node.kind() == NodeKind::StringInterpolation)
         );
         let mut count = 0;
         visit_interpolations(source, 0, |_| count += 1);
@@ -52,37 +56,38 @@ fn raw_and_escaped_dollars_do_not_retain_expression_streams() {
 #[test]
 fn adjacent_literals_and_simple_identifiers_keep_distinct_regions() {
     let source = r#"'$left$right' '${third}'"#;
-    let syntax = lex_syntax(source);
-    assert!(
-        syntax
-            .interpolation(expression_span(source, "third"))
-            .is_some()
-    );
-    let first = syntax
-        .tokens()
+    let tokens = Lexer::new(source).tokenize();
+    let first = tokens
         .iter()
         .find(|token| token.kind == TokenKind::StringLit)
         .unwrap();
-    let mut identifiers = Vec::new();
+    let mut identifiers = Vec::with_capacity(2);
     visit_interpolations(first.text(source), first.offset(), |region| {
         if let InterpolationRegion::Identifier(span) = region {
             identifiers.push(&source[span.start..span.end]);
         }
     });
     assert_eq!(identifiers, ["left", "right"]);
-    let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
-    assert!(!matches!(parser.parse_expr(), Expr::Error { .. }));
+    let tree = crate::lex_tree(source);
+    assert_eq!(
+        tree.identifier_tokens(source)
+            .map(|token| token.text())
+            .collect::<Vec<_>>(),
+        ["left", "right", "third"]
+    );
+    let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
+    assert_ne!(parser.parse_expr().kind(), NodeKind::ErrorExpr);
     assert!(parser.errors.is_empty(), "{:?}", parser.errors);
 }
 
 #[test]
 fn malformed_outer_strings_preserve_lexer_tokens() {
     for source in [r#"'${missing'"#, r#"'unterminated"#] {
-        let syntax = lex_syntax(source);
+        let tree = crate::lex_tree(source);
         let original = Lexer::new(source).tokenize();
-        assert_eq!(syntax.tokens().len(), original.len());
-        for (retained, original) in syntax.tokens().iter().zip(original) {
-            assert_eq!(retained.kind, original.kind);
+        assert_eq!(tree.tokens(source).len(), original.len());
+        for (retained, original) in tree.tokens(source).zip(original) {
+            assert_eq!(retained.kind(), original.kind);
             assert_eq!(retained.offset(), original.offset());
             assert_eq!(retained.len(), original.len());
         }
@@ -92,32 +97,40 @@ fn malformed_outer_strings_preserve_lexer_tokens() {
 #[test]
 fn empty_braced_interpolation_remains_silent() {
     let source = "'${}'";
-    let syntax = lex_syntax(source);
-    assert!(syntax.interpolation(Span::new(3, 3)).is_some());
-    let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
-    let string = parser.parse_string_lit();
-    assert!(string.interpolations.is_empty());
+    let tokens = Lexer::new(source).tokenize();
+    let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
+    parser.parse_string_lit();
     assert!(parser.errors.is_empty());
+    assert!(!parser.events.iter().any(|event| matches!(
+        event,
+        falcon_syntax::cst::Event::Start {
+            kind: NodeKind::StringInterpolation,
+            ..
+        }
+    )));
 }
 
 #[test]
 fn interpolation_diagnostics_match_standalone_expression_offsets() {
     let source = "'prefix ${1 + } suffix'";
     let span = expression_span(source, "1 + ");
-    let syntax = lex_syntax(source);
-    let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
-    let string = parser.parse_string_lit();
-    assert!(string.interpolations.is_empty());
-
-    let mut tokens = Lexer::new(&source[span.start..span.end]).tokenize();
-    for token in &mut tokens {
-        *token = Token::new(
-            token.kind,
-            token.offset().checked_add(span.start).unwrap(),
-            token.len(),
-        );
-    }
-    let standalone = SyntaxStore::new(tokens);
+    let tokens = Lexer::new(source).tokenize();
+    let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
+    parser.parse_string_lit();
+    assert!(!parser.events.iter().any(|event| matches!(
+        event,
+        falcon_syntax::cst::Event::Start {
+            kind: NodeKind::StringInterpolation,
+            ..
+        }
+    )));
+    let standalone = Lexer::new(&source[span.start..span.end])
+        .tokenize()
+        .into_iter()
+        .map(|token| {
+            falcon_syntax::token::Token::new(token.kind, token.offset() + span.start, token.len())
+        })
+        .collect::<Vec<_>>();
     let mut baseline = Parser::new(&standalone, source, LanguageVersion::CURRENT);
     baseline.parse_expr();
     assert!(!baseline.errors.is_empty());
@@ -133,27 +146,29 @@ fn interpolation_diagnostics_match_standalone_expression_offsets() {
 #[test]
 fn local_documentation_extends_only_full_span() {
     let source = "{ /** old block */ /// attached line\n final value = 1; }";
-    let syntax = lex_syntax(source);
-    let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
-    let block = parser.parse_block();
+    let tokens = Lexer::new(source).tokenize();
+    let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
+    parser.parse_block();
     assert!(parser.errors.is_empty(), "{:?}", parser.errors);
-    let Stmt::LocalVar(declaration) = &block.stmts[0] else {
-        panic!("expected local variable declaration");
-    };
-    assert_eq!(declaration.span.start, source.find("final").unwrap());
-    assert_eq!(declaration.full_span.start, source.find("///").unwrap());
-    assert_eq!(declaration.full_span.end, declaration.span.end);
+    let tree = SyntaxTree::build(source, &tokens, parser.events);
+    let declaration = tree
+        .root(source)
+        .descendants()
+        .find_map(falcon_syntax::cst::LocalVarDecl::cast)
+        .unwrap();
+    assert_eq!(declaration.span().start, source.find("final").unwrap());
+    assert_eq!(declaration.full_span().start, source.find("///").unwrap());
+    assert_eq!(declaration.full_span().end, declaration.span().end);
 }
 
 #[test]
 fn identifier_queries_include_simple_and_nested_interpolations() {
     let source = r#"'$left ${"$nested ${right}"}'"#;
-    let syntax = lex_syntax(source);
-    let mut identifiers = syntax
-        .identifier_tokens()
-        .map(|token| (token.offset(), token.text(source)))
+    let tree = crate::lex_tree(source);
+    let identifiers = tree
+        .identifier_tokens(source)
+        .map(|token| (token.offset(), token.text()))
         .collect::<Vec<_>>();
-    identifiers.sort_unstable();
     assert_eq!(
         identifiers,
         [
@@ -162,26 +177,6 @@ fn identifier_queries_include_simple_and_nested_interpolations() {
             (source.find("right").unwrap(), "right"),
         ]
     );
-    assert!(
-        !syntax
-            .significant_tokens()
-            .any(|token| { matches!(token.text(source), "left" | "nested") })
-    );
-}
-
-#[test]
-fn lexer_only_entry_retains_manifest_interpolation_identifiers() {
-    let source = "name: workspace\nvalue: '$Simple ${Braced} ${\"$Nested\"}'\n";
-    let syntax = crate::parser::lex_syntax(source);
-    let identifiers = syntax
-        .identifier_tokens()
-        .map(|token| token.text(source))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        identifiers,
-        ["name", "workspace", "value", "Simple", "Braced", "Nested"]
-    );
-    assert_eq!(syntax.tokens().last().unwrap().kind, TokenKind::Eof);
 }
 
 #[test]
@@ -220,29 +215,26 @@ fn lexical_tree_uses_scanned_interpolation_boundaries() {
                 token.kind() == TokenKind::RBrace && token.offset() == source.rfind('}').unwrap()
             })
             .unwrap();
-        assert_eq!(
-            closing.parent().kind(),
-            falcon_syntax::cst::NodeKind::StringInterpolation
-        );
+        assert_eq!(closing.parent().kind(), NodeKind::StringInterpolation);
     }
 }
 
 #[test]
-fn lexer_only_entry_retains_deep_interpolation_streams() {
+fn lexer_only_entry_retains_deep_interpolation_tokens() {
     let depth = 512;
     let source = format!("{}Name{}", "'${".repeat(depth), "}'".repeat(depth));
-    let syntax = crate::parser::lex_syntax(&source);
-    let mut nested = &syntax;
-    for level in 0..depth {
-        nested = nested
-            .interpolation(Span::new((level + 1) * 3, source.len() - (level + 1) * 2))
-            .expect("every nested expression must retain its lexical store");
-    }
-    assert_eq!(nested.tokens()[0].text(&source), "Name");
+    let tree = crate::lex_tree(&source);
+    assert!(tree.is_lossless(&source));
     assert_eq!(
-        syntax
-            .identifier_tokens()
-            .map(|token| token.text(&source))
+        tree.root(&source)
+            .descendants()
+            .filter(|node| node.kind() == NodeKind::StringInterpolation)
+            .count(),
+        depth
+    );
+    assert_eq!(
+        tree.identifier_tokens(&source)
+            .map(|token| token.text())
             .collect::<Vec<_>>(),
         ["Name"]
     );

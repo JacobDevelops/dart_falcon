@@ -338,7 +338,7 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
         .unwrap();
         let path = app.join("lib/main.dart");
         std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,

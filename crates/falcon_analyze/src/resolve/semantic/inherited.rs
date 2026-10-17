@@ -997,7 +997,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn parsed(source: &str) -> Arc<crate::ParsedFile> {
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         Arc::new(crate::ParsedFile {
             source: source.into(),

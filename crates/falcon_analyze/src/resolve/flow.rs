@@ -1,4 +1,4 @@
-//! Flow transfers used by the shared syntax visitor; no independent AST walk.
+//! Flow transfers used by the shared syntax visitor; no independent syntax-tree walk.
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
 use falcon_syntax::cst::{
     AstChildren, BinaryOp, DartType, Expr, ForInit, ListPatternElement, LiteralPatternValue,

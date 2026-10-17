@@ -269,7 +269,7 @@ void shadowed() {
 "#;
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
         tree,

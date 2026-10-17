@@ -610,7 +610,7 @@ mod tests {
     fn catch_diagnostic_covers_only_the_exception_type() {
         let source = "import 'dart:js_interop'; void f() { try {} on JSAny catch (error) {} }";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
         let parsed = std::sync::Arc::new(ParsedFile {
             source: source.into(),
             tree,

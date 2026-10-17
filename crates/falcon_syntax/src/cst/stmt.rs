@@ -596,7 +596,7 @@ impl<'a> LocalVarDecl<'a> {
         Span::new(
             self.0
                 .tree()
-                .documentation_start(Span::new(start, span.start), self.0.source())
+                .documentation_start(self.0.source(), Span::new(start, span.start))
                 .unwrap_or(span.start),
             span.end,
         )

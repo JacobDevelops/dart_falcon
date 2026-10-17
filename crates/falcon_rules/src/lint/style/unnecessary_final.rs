@@ -10,7 +10,7 @@
 //! analyzer does not visit.
 //! Parameters are checked only before Dart 3.13: with primary constructors a
 //! parameter's `final` declares a field instead.
-//! Local keyword spans come from the AST, not matching words in documentation
+//! Local keyword spans come from the syntax tree, not matching words in documentation
 //! or annotation arguments.
 //!
 //! ```dart

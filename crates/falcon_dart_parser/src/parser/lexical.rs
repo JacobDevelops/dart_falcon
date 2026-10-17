@@ -1,34 +1,7 @@
-use falcon_syntax::ast::Span;
-use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
+use falcon_syntax::cst::Span;
+use falcon_syntax::token::{Token, TokenKind};
 
 use crate::lexer::{Lexer, scan::interp_close};
-
-/// Lex source without parsing, retaining trivia and identifiers inside string
-/// interpolations. Each region gets one tokenization pass, using a heap-backed
-/// work stack rather than recursion for nested interpolation expressions.
-/// Scanning enclosing string literals still revisits nested literal contents.
-///
-/// # Panics
-///
-/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
-pub fn lex_syntax(source: &str) -> SyntaxStore {
-    let mut pending = vec![lex_region(source, Span::new(0, source.len()))];
-    loop {
-        if let Some(span) = pending.last_mut().unwrap().expressions.next() {
-            pending.push(lex_region(source, span));
-            continue;
-        }
-        let region = pending.pop().unwrap();
-        let syntax = SyntaxStore::new(region.tokens)
-            .with_interpolations(region.interpolations)
-            .with_simple_interpolations(region.simple_interpolations);
-        if let Some(parent) = pending.last_mut() {
-            parent.interpolations.push((region.span, syntax));
-        } else {
-            return syntax;
-        }
-    }
-}
 
 /// Lex source into a lossless syntax tree without parsing declarations.
 ///
@@ -38,9 +11,9 @@ pub fn lex_syntax(source: &str) -> SyntaxStore {
 pub fn lex_tree(source: &str) -> falcon_syntax::cst::SyntaxTree {
     use falcon_syntax::cst::{Event, NodeKind, SyntaxTree};
 
-    let syntax = lex_syntax(source);
+    let lexical = Lexer::new(source).tokenize();
     let mut regions = Vec::new();
-    let tokens = cst_tokens_with_regions(&syntax, source, |span| regions.push(span));
+    let tokens = cst_tokens_with_regions(&lexical, source, &[], None, |span| regions.push(span));
     if regions.is_empty() {
         return SyntaxTree::build(source, &tokens, Vec::new());
     }
@@ -76,51 +49,6 @@ pub fn lex_tree(source: &str) -> falcon_syntax::cst::SyntaxTree {
     }
     events.push(Event::Finish);
     SyntaxTree::build(source, &tokens, events)
-}
-
-struct LexedRegion {
-    span: Span,
-    tokens: Vec<Token>,
-    expressions: std::vec::IntoIter<Span>,
-    interpolations: Vec<(Span, SyntaxStore)>,
-    simple_interpolations: Vec<Token>,
-}
-
-fn lex_region(source: &str, span: Span) -> LexedRegion {
-    let mut tokens = Lexer::new(&source[span.start..span.end]).tokenize();
-    let mut expressions = Vec::new();
-    let mut simple_interpolations = Vec::new();
-    for token in &mut tokens {
-        *token = Token::new(
-            token.kind,
-            token
-                .offset()
-                .checked_add(span.start)
-                .expect("token offset exceeds source capacity"),
-            token.len(),
-        );
-        if token.kind == TokenKind::StringLit {
-            visit_interpolations(token.text(source), token.offset(), |region| match region {
-                InterpolationRegion::Expression(span) => {
-                    expressions.push(span);
-                }
-                InterpolationRegion::Identifier(span) => {
-                    simple_interpolations.push(Token::new(
-                        TokenKind::Ident,
-                        span.start,
-                        span.end - span.start,
-                    ));
-                }
-            });
-        }
-    }
-    LexedRegion {
-        span,
-        tokens,
-        expressions: expressions.into_iter(),
-        interpolations: Vec::new(),
-        simple_interpolations,
-    }
 }
 
 pub(super) enum InterpolationRegion {
@@ -188,24 +116,41 @@ fn is_interp_ident_continue(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
-pub(super) fn cst_tokens(syntax: &SyntaxStore, source: &str) -> Vec<Token> {
-    cst_tokens_with_regions(syntax, source, |_| {})
+pub(super) fn cst_tokens(
+    tokens: &[Token],
+    source: &str,
+    regions: &[(Span, Vec<Token>)],
+) -> Vec<Token> {
+    cst_tokens_with_regions(
+        tokens,
+        source,
+        regions,
+        Some(super::Parser::MAX_PARSE_DEPTH),
+        |_| {},
+    )
+}
+
+fn lex_region(source: &str, span: Span) -> Vec<Token> {
+    Lexer::new(&source[span.start..span.end])
+        .tokenize()
+        .into_iter()
+        .map(|token| Token::new(token.kind, token.offset() + span.start, token.len()))
+        .collect()
 }
 
 fn cst_tokens_with_regions(
-    syntax: &SyntaxStore,
+    tokens: &[Token],
     source: &str,
+    regions: &[(Span, Vec<Token>)],
+    depth_limit: Option<usize>,
     mut visit: impl FnMut(Span),
 ) -> Vec<Token> {
-    let mut output = Vec::with_capacity(syntax.tokens().len());
-    let mut roots = syntax.tokens().iter().copied();
+    let mut output = Vec::with_capacity(tokens.len());
+    let mut roots = tokens.iter().copied().map(|token| (token, 0));
     let mut pending = Vec::new();
     let mut pieces = Vec::new();
-    while let Some((token, store)) = pending
-        .pop()
-        .or_else(|| roots.next().map(|token| (token, syntax)))
-    {
-        if token.kind != TokenKind::StringLit {
+    while let Some((token, depth)) = pending.pop().or_else(|| roots.next()) {
+        if token.kind != TokenKind::StringLit || depth_limit.is_some_and(|limit| depth >= limit) {
             output.push(token);
             continue;
         }
@@ -220,28 +165,33 @@ fn cst_tokens_with_regions(
             };
             let start = span.start - prefix_len;
             if cursor < start {
-                pieces.push((
-                    Token::new(TokenKind::StringPart, cursor, start - cursor),
-                    store,
-                ));
+                pieces.push(Token::new(TokenKind::StringPart, cursor, start - cursor));
             }
-            pieces.push((Token::new(prefix, start, prefix_len), store));
+            pieces.push(Token::new(prefix, start, prefix_len));
             if prefix == TokenKind::InterpolationStart {
-                if let Some(nested) = store.interpolation(span) {
+                if let Ok(index) = regions.binary_search_by_key(&span.start, |(span, _)| span.start)
+                {
                     pieces.extend(
-                        nested
-                            .tokens()
+                        regions[index]
+                            .1
                             .iter()
-                            .filter(|t| t.kind != TokenKind::Eof)
-                            .map(|t| (*t, nested)),
+                            .copied()
+                            .filter(|t| t.kind != TokenKind::Eof),
+                    );
+                } else {
+                    pieces.extend(
+                        lex_region(source, span)
+                            .into_iter()
+                            .filter(|t| t.kind != TokenKind::Eof),
                     );
                 }
-                pieces.push((Token::new(TokenKind::RBrace, span.end, 1), store));
+                pieces.push(Token::new(TokenKind::RBrace, span.end, 1));
                 cursor = span.end + 1;
             } else {
-                pieces.push((
-                    Token::new(TokenKind::Ident, span.start, span.end - span.start),
-                    store,
+                pieces.push(Token::new(
+                    TokenKind::Ident,
+                    span.start,
+                    span.end - span.start,
                 ));
                 cursor = span.end;
             }
@@ -251,26 +201,16 @@ fn cst_tokens_with_regions(
         } else {
             let end = token.offset() + token.len();
             if cursor < end {
-                pieces.push((
-                    Token::new(TokenKind::StringPart, cursor, end - cursor),
-                    store,
-                ));
+                pieces.push(Token::new(TokenKind::StringPart, cursor, end - cursor));
             }
-            pending.extend(pieces.drain(..).rev());
+            pending.extend(pieces.drain(..).rev().map(|token| (token, depth + 1)));
         }
     }
     output
 }
 
 impl super::Parser<'_> {
-    pub(super) fn scan_string_interpolations(
-        &mut self,
-        token: &Token,
-    ) -> (
-        Vec<falcon_syntax::ast::StringInterpolation>,
-        Vec<super::ParseError>,
-    ) {
-        use falcon_syntax::ast::{Expr, Identifier, StringInterpolation};
+    pub(super) fn scan_string_interpolations(&mut self, token: &Token) {
         use falcon_syntax::cst::{Event, NodeKind};
 
         let mut regions = Vec::new();
@@ -278,7 +218,7 @@ impl super::Parser<'_> {
             regions.push(region)
         });
         if regions.is_empty() {
-            return (Vec::new(), Vec::new());
+            return;
         }
         assert!(matches!(
             self.events.pop(),
@@ -288,8 +228,6 @@ impl super::Parser<'_> {
             })
         ));
         let mut cursor = token.offset();
-        let mut interpolations = Vec::with_capacity(regions.len());
-        let mut errors = Vec::new();
         for region in regions {
             let (span, prefix, prefix_len) = match region {
                 InterpolationRegion::Expression(span) => (span, TokenKind::InterpolationStart, 2),
@@ -311,22 +249,23 @@ impl super::Parser<'_> {
             });
             let mut valid = prefix != TokenKind::InterpolationStart;
             if prefix == TokenKind::InterpolationStart {
-                let retained = self
-                    .syntax
-                    .interpolation(span)
-                    .expect("retained interpolation stream");
                 if span.start < span.end {
-                    let mut sub = super::Parser::new(retained, self.src, self.version);
+                    let tokens = lex_region(self.src, span);
+                    let mut sub = super::Parser::new(&tokens, self.src, self.version);
+                    sub.depth = self.depth;
+                    sub.depth_limit_hit = self.depth_limit_hit;
                     let expr = sub.parse_expr();
                     if sub.errors.is_empty()
                         && sub.at(TokenKind::Eof)
-                        && !matches!(expr, Expr::Error { .. })
+                        && expr.kind() != NodeKind::ErrorExpr
                     {
                         valid = true;
-                        interpolations.push(StringInterpolation { expr, span });
                     }
+                    self.depth_limit_hit = sub.depth_limit_hit;
                     self.events.extend(sub.events);
-                    errors.extend(sub.errors);
+                    self.errors.extend(sub.errors);
+                    self.interpolation_tokens.extend(sub.interpolation_tokens);
+                    self.interpolation_tokens.push((span, tokens));
                 }
                 self.events.push(Event::Token {
                     kind: TokenKind::RBrace,
@@ -348,12 +287,6 @@ impl super::Parser<'_> {
                     len: span.end - span.start,
                 });
                 ident.complete(self, kind);
-                let expr = if name == "this" {
-                    Expr::This { span }
-                } else {
-                    Expr::Ident(Identifier::new(name, span))
-                };
-                interpolations.push(StringInterpolation { expr, span });
                 cursor = span.end;
             }
             marker.complete(
@@ -373,7 +306,6 @@ impl super::Parser<'_> {
                 len: end - cursor,
             });
         }
-        (interpolations, errors)
     }
 }
 

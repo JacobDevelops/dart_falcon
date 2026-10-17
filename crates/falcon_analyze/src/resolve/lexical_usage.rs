@@ -773,7 +773,7 @@ mod tests {
     #[test]
     fn legacy_case_expression_reads_parameters() {
         // Source-semantics compatibility: parameter references need not be
-        // legal constants to exercise lexical usage in both case AST forms.
+        // legal constants to exercise lexical usage in both pattern syntaxes.
         for version in ["2.19", "3.13"] {
             let source = format!(
                 "// @dart = {version}\nvoid f(int value, Object input) {{ switch (input) {{ case const [value]: break; }} }}"

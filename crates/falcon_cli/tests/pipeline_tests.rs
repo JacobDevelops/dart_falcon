@@ -266,7 +266,7 @@ fn test_parse_error_surfaces_as_syntax_error() {
     assert_eq!(out.exit_code, 1, "syntax errors must fail the run");
 }
 
-/// Lints on the recovered AST still fire, but the syntax error is listed first
+/// Lints on the recovered syntax tree still fire, but the syntax error is listed first
 /// for the file.
 #[test]
 fn test_syntax_error_listed_before_lints() {
@@ -280,7 +280,7 @@ fn test_syntax_error_listed_before_lints() {
 
     assert!(
         out.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
-        "lints on the recovered AST still fire"
+        "lints on the recovered syntax tree still fire"
     );
     let first_for_file = out
         .diagnostics

@@ -119,7 +119,7 @@ mod tests {
     fn qualified_constant_patterns_report_the_complete_pattern_span() {
         let source = "class A { static const ty = String; }\nvoid f(Object o, Type type) {\n  if (o case A.ty) {}\n  if (o case const (String)) {}\n  if (type case A.ty) {}\n  if (o case int?) {}\n}";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,

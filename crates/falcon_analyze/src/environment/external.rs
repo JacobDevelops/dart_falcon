@@ -1206,7 +1206,7 @@ fn read_source(
     source: &str,
     package_version: Option<LanguageVersion>,
 ) -> std::io::Result<ExternalFile> {
-    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+    let falcon_dart_parser::ParseResult { tree, errors } =
         try_parse_for_package(source, package_version)?;
     let program = tree.program(source);
     let has_parse_errors = !declarations_intact(program, &errors);

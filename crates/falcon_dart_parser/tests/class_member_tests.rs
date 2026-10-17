@@ -3,7 +3,7 @@
 //! `.`) equals the enclosing type name. Any other untyped member is a method
 //! with no return type. Mixins and plain extensions cannot declare constructors,
 //! so their untyped members are always methods. Each case must parse with zero
-//! errors and produce the faithful AST shape.
+//! errors and produce the faithful CST view shape.
 
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
@@ -25,7 +25,7 @@ fn assert_clean(errors: &[falcon_dart_parser::parser::ParseError]) {
 #[test]
 fn test_untyped_member_is_method_not_constructor() {
     let source = "class C { foo() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -44,7 +44,7 @@ fn test_untyped_member_is_method_not_constructor() {
 fn test_test_prefixed_member_is_method() {
     // The ubiquitous real-world case: `test_x() {}` in a test class.
     let source = "class MyTest { test_login() {} test_logout() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let c = only_class(prog);
@@ -59,7 +59,7 @@ fn test_test_prefixed_member_is_method() {
 #[test]
 fn test_untyped_member_with_body_and_params_is_method() {
     let source = "class C { doWork(int a, int b) { return; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -81,7 +81,7 @@ fn test_untyped_member_with_body_and_params_is_method() {
 fn test_untyped_abstract_member_is_method() {
     // No body → abstract method, still classified as a method (name != type).
     let source = "class C { foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -98,7 +98,7 @@ fn test_untyped_abstract_member_is_method() {
 #[test]
 fn test_unnamed_constructor_still_constructor() {
     let source = "class C { C() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -115,7 +115,7 @@ fn test_unnamed_constructor_still_constructor() {
 #[test]
 fn test_named_constructor_still_constructor() {
     let source = "class C { C.named() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -130,7 +130,7 @@ fn test_named_constructor_still_constructor() {
 #[test]
 fn test_unnamed_and_named_constructor_with_initializers() {
     let source = "class C { int x; C(this.x); C.zero() : x = 0; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let c = only_class(prog);
@@ -147,7 +147,7 @@ fn test_unnamed_and_named_constructor_with_initializers() {
 #[test]
 fn test_const_constructor_still_constructor() {
     let source = "class C { const C(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -162,7 +162,7 @@ fn test_const_constructor_still_constructor() {
 #[test]
 fn test_factory_constructor_still_constructor() {
     let source = "class C { factory C.make() => C._(); C._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -178,7 +178,7 @@ fn test_factory_constructor_still_constructor() {
 fn test_generic_untyped_member_named_like_type_is_method() {
     // A constructor cannot declare type parameters, so `C<T>()` is a method.
     let source = "class C { C<T>() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -195,7 +195,7 @@ fn test_generic_untyped_member_named_like_type_is_method() {
 fn test_async_untyped_member_named_like_type_is_method() {
     // A constructor cannot be async, so `C() async {}` is a method.
     let source = "class C { C() async {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -211,7 +211,7 @@ fn test_async_untyped_member_named_like_type_is_method() {
 #[test]
 fn test_enum_untyped_member_is_method() {
     let source = "enum E { a, b; foo() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match prog.declarations().next().unwrap() {
@@ -229,7 +229,7 @@ fn test_enum_untyped_member_is_method() {
 #[test]
 fn test_enum_constructor_is_constructor() {
     let source = "enum E { a(1), b(2); final int n; const E(this.n); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match prog.declarations().next().unwrap() {
@@ -252,7 +252,7 @@ fn test_enum_constructor_is_constructor() {
 fn test_mixin_untyped_member_is_method() {
     // Even a member named after the mixin is a method — mixins have no ctors.
     let source = "mixin M { M() {} foo() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match prog.declarations().next().unwrap() {
@@ -271,7 +271,7 @@ fn test_mixin_untyped_member_is_method() {
 #[test]
 fn test_extension_untyped_member_is_method() {
     let source = "extension E on int { foo() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match prog.declarations().next().unwrap() {
@@ -289,7 +289,7 @@ fn test_extension_untyped_member_is_method() {
 #[test]
 fn test_extension_type_untyped_member_is_method() {
     let source = "extension type E(int it) { foo() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match prog.declarations().next().unwrap() {
@@ -307,7 +307,7 @@ fn test_extension_type_untyped_member_is_method() {
 #[test]
 fn test_extension_type_named_constructor_is_constructor() {
     let source = "extension type E(int it) { E.zero() : it = 0; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match prog.declarations().next().unwrap() {
@@ -349,7 +349,7 @@ fn arrow_closure_field_then_more_members() {
 fn enum_constant_named_constructor() {
     let src = "enum E { a.foo(1); const E.foo(this.n); final int n; }";
     let source = src;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_eq!(errors.len(), 0, "errors: {errors:?}");
     let en = match prog.declarations().next().unwrap() {
@@ -393,7 +393,7 @@ fn static_record_return_type_with_generic_args() {
     // `static (A<int>, B<int>) m()` — a record return type carrying generic args,
     // reached through the modifier-prefixed member path.
     let source = "class C { static (A<int>, B<int>) m() => x; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -414,7 +414,7 @@ fn static_record_return_type_with_generic_args() {
 fn static_nullable_named_record_return_type() {
     // `static ({int a})? m()` — a nullable named-field record return type.
     let source = "class C { static ({int a})? m() => x; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -431,7 +431,7 @@ fn late_record_typed_field() {
     // `late (int, int) r;` — `late` must stay a modifier, not be read as the
     // member's own name when a record type follows.
     let source = "class C { late (int, int) r; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -449,7 +449,7 @@ fn annotation_before_nullable_record_return_type() {
     // `@override ()? m()` — the `()?` is the nullable empty-record return type, not
     // the annotation's argument list.
     let source = "class C { @override ()? m() => x; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -476,7 +476,7 @@ fn builtin_override_identifier_as_field_name() {
     // `const override = 1;` — `override` is the field's own name here, not a
     // modifier to be silently consumed.
     let source = "class C { const override = 1; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -497,7 +497,7 @@ fn builtin_override_identifier_as_field_name() {
 #[test]
 fn test_member_named_external_with_async_body() {
     let source = "class C { external() async {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -514,7 +514,7 @@ fn test_member_named_external_with_async_body() {
 #[test]
 fn test_member_named_late_with_async_body() {
     let source = "class C { late() async {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -530,7 +530,7 @@ fn test_member_named_late_with_async_body() {
 #[test]
 fn test_member_named_covariant_with_sync_star_body() {
     let source = "class C { covariant() sync* {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -546,7 +546,7 @@ fn test_member_named_covariant_with_sync_star_body() {
 fn test_static_record_return_type_still_modifier() {
     // Control: a genuine record return type keeps `static` as a modifier.
     let source = "class C { static (int, int) m() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -568,7 +568,7 @@ fn test_static_record_return_type_still_modifier() {
 #[test]
 fn test_static_record_return_method_named_async() {
     let source = "class C { static (int, int) async() => (1, 2); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -588,7 +588,7 @@ fn test_static_record_return_method_named_async() {
 #[test]
 fn test_external_record_return_method_named_sync() {
     let source = "class C { external (int, int) sync(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -605,7 +605,7 @@ fn test_external_record_return_method_named_sync() {
 #[test]
 fn test_late_record_typed_field_named_async() {
     let source = "class C { late (int, int) async; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -623,7 +623,7 @@ fn test_factory_is_field_name() {
     // `factory` followed by `=`/`;`/`,` is the field's own name, not the factory
     // keyword — the SDK accepts a field named `factory`.
     let source = "class C { late final factory = 1; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -640,7 +640,7 @@ fn test_factory_is_field_name() {
 fn test_factory_constructor_still_parses() {
     // Control: a genuine factory constructor (name follows `factory`) is intact.
     let source = "class C { factory C() => C._(); C._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     assert!(matches!(
@@ -654,7 +654,7 @@ fn test_private_named_initializing_formal_accepted() {
     // `{required this._x}` is valid from language 3.12 (private named
     // parameters); the parser accepts it regardless of language version.
     let source = "class C { final int _x; C({required this._x}); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert_clean(&errors);
 }
@@ -662,7 +662,7 @@ fn test_private_named_initializing_formal_accepted() {
 #[test]
 fn test_private_named_super_formal_accepted() {
     let source = "class C extends B { C({super._x}); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert_clean(&errors);
 }
@@ -672,7 +672,7 @@ fn test_private_positional_initializing_formal_ok() {
     // Control: a *positional* private initializing formal is legal — the feature
     // only gates named private formals.
     let source = "class C { final int _x; C(this._x); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert_clean(&errors);
 }
@@ -681,7 +681,7 @@ fn test_private_positional_initializing_formal_ok() {
 fn test_public_named_initializing_formal_ok() {
     // Control: a public named initializing formal is always legal.
     let source = "class C { int x; C({required this.x}); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert_clean(&errors);
 }
@@ -691,7 +691,7 @@ fn test_missing_semicolon_after_getter_arrow_body() {
     // `num get a => 42` with no `;` before the next member must ERROR — falcon
     // used to silently recover the missing terminator.
     let source = "class A { num get a => 42 int get b => 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert!(!errors.is_empty(), "expected a missing-semicolon error");
     assert!(errors.iter().any(|e| e.message.contains("Semicolon")));
@@ -701,7 +701,7 @@ fn test_missing_semicolon_after_getter_arrow_body() {
 fn test_getter_arrow_body_with_semicolon_ok() {
     // Control: the terminated form parses clean.
     let source = "class A { int get b => 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert_clean(&errors);
 }
@@ -709,7 +709,7 @@ fn test_getter_arrow_body_with_semicolon_ok() {
 #[test]
 fn test_const_factory_preserves_is_const() {
     let source = "class C { const factory C.i() = D; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -726,7 +726,7 @@ fn test_const_factory_preserves_is_const() {
 fn test_non_const_factory_is_not_const() {
     // Control: a plain factory keeps `is_const: false`.
     let source = "class C { factory C.i() = D; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     match only_class(prog).members().next().unwrap() {
@@ -742,7 +742,7 @@ fn test_non_const_factory_is_not_const() {
 fn test_constructor_call_block_is_initializer_lambda() {
     // Keep this odd recovery outcome pinned until a deliberate parser-behavior change.
     let source = "class C { var g; C(): g = (e) { f(); } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let ClassMember::Constructor(ctor) = only_class(prog).members().nth(1).unwrap() else {
@@ -788,7 +788,7 @@ fn test_constructor_call_block_is_initializer_lambda() {
 fn test_leading_async_method_splits_await_and_operand_statements() {
     // The AST marker does not reserve body keywords without a trailing marker.
     let source = "class Foo { async void bar() { await x; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let ClassMember::Method(method) = only_class(prog).members().next().unwrap() else {
@@ -819,7 +819,7 @@ fn test_leading_async_method_splits_await_and_operand_statements() {
 fn test_async_sync_star_method_has_async_star_ast_marker() {
     // The combined AST marker differs from the trailing marker used in the body.
     let source = "class C { async m() sync* { yield 1; } }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let ClassMember::Method(method) = only_class(prog).members().next().unwrap() else {
@@ -844,7 +844,7 @@ fn test_async_sync_star_method_has_async_star_ast_marker() {
 fn test_async_constructor_initializer_keeps_synchronous_body() {
     let src = "class C { var f; C(bool async) : f = async { var await = 1; await; } }";
     let source = src;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let ClassMember::Constructor(ctor) = only_class(prog).members().nth(1).unwrap() else {
@@ -913,7 +913,7 @@ fn ctor_name<'a>(ctor: ConstructorDecl<'a>) -> Option<&'a str> {
 fn test_new_unnamed_constructor() {
     let src = "class C { new(this.x) : assert(x > 0); final int x; }";
     let source = src;
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert!(!ctor.is_factory() && !ctor.is_const());
@@ -930,7 +930,7 @@ fn test_new_unnamed_constructor() {
 #[test]
 fn test_const_new_constructor() {
     let source = "class C { const new() : super(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert!(ctor.is_const() && !ctor.is_factory());
@@ -941,7 +941,7 @@ fn test_const_new_constructor() {
 #[test]
 fn test_new_named_constructor() {
     let source = "class C { new internal(int x) : this.other(x); C.other(int x); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert_eq!(ctor.name().name(), "C");
@@ -951,7 +951,7 @@ fn test_new_named_constructor() {
 #[test]
 fn test_factory_unnamed_constructor() {
     let source = "class C { factory(int x) => C._(); C._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert!(ctor.is_factory());
@@ -962,7 +962,7 @@ fn test_factory_unnamed_constructor() {
 #[test]
 fn test_factory_named_constructor() {
     let source = "class C { factory make(String m) => C._(); C._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert!(ctor.is_factory());
@@ -973,7 +973,7 @@ fn test_factory_named_constructor() {
 #[test]
 fn test_const_redirecting_factory_named_constructor() {
     let source = "class C { const factory make() = C._; const C._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert!(ctor.is_factory() && ctor.is_const() && ctor.redirect().is_some());
@@ -983,7 +983,7 @@ fn test_const_redirecting_factory_named_constructor() {
 #[test]
 fn test_classic_factory_keeps_type_name() {
     let source = "class C { factory C(int x) => C._(); C._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert_eq!(ctor.name().name(), "C");
@@ -993,7 +993,7 @@ fn test_classic_factory_keeps_type_name() {
 #[test]
 fn test_factory_in_mixin_is_method() {
     let source = "mixin M { factory() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     assert!(
@@ -1004,7 +1004,7 @@ fn test_factory_in_mixin_is_method() {
 #[test]
 fn test_semicolon_empty_class_body() {
     let source = "abstract class Marker;\nmixin M;\nclass After {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     assert!(only_class_named(prog, "Marker").members().is_empty());
@@ -1023,7 +1023,7 @@ fn only_class_named<'a>(prog: Program<'a>, name: &str) -> ClassDecl<'a> {
 #[test]
 fn test_native_member_bodies() {
     let source = "class C { int get length native; void f() native \"g\"; }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     let ClassMember::Getter(getter) = only_class(prog).members().next().unwrap() else {
@@ -1036,7 +1036,7 @@ fn test_native_member_bodies() {
 fn test_setter_parameter_metadata_and_function_type() {
     let source =
         "class C { set length(@nullCheck covariant int v) {} set onPause(void handler()?) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
     assert_eq!(only_class(prog).members().len(), 2);
@@ -1071,7 +1071,7 @@ fn test_setter_parameter_metadata_and_function_type() {
 #[test]
 fn test_extension_type_representation_trailing_comma() {
     let source = "extension type E(\n  p.T _value,\n) implements Object {}";
-    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let _prog = tree.program(source);
     assert_clean(&errors);
 }

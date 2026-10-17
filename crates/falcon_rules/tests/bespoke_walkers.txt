@@ -1,4 +1,4 @@
-# Hand-rolled AST walkers, pinned by tests/no_new_bespoke_walkers.rs.
+# Hand-rolled syntax-tree walkers, pinned by tests/no_new_bespoke_walkers.rs.
 # This list may only shrink. Build new rules on falcon_syntax::cst::visit.
 cross_file/unnecessary_nullable.rs::visit_expr
 lint/style/no_magic_number.rs::root_name

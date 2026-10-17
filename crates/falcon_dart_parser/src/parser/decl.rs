@@ -1,56 +1,37 @@
 use falcon_syntax::Feature;
-use falcon_syntax::ast::*;
-use falcon_syntax::cst::NodeKind;
-use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::cst::{AsyncMarker, NodeKind};
+use falcon_syntax::token::TokenKind;
 
-use super::Parser;
+use super::{CompletedMarker, Parser};
 
 #[derive(Clone, Copy, Default)]
 struct MemberModifiers {
-    is_static: bool,
-    is_abstract: bool,
-    is_external: bool,
-    is_covariant: bool,
     is_late: bool,
     is_final: bool,
     is_const: bool,
-    is_async: bool,
-}
-
-impl MemberModifiers {
-    fn keyword(self) -> VarKeyword {
-        Parser::var_keyword(self.is_const, self.is_final)
-    }
 }
 
 impl<'src> Parser<'src> {
-    pub(super) fn try_parse_library_directive(&mut self) -> Option<LibraryDirective> {
+    pub(super) fn try_parse_library_directive(&mut self) -> Option<CompletedMarker> {
         // May be preceded by metadata: `@Deprecated('x') library foo;`.
         if self.peek_kind_after_annotations() != TokenKind::Library {
             return None;
         }
         let marker = self.start();
-        let start = self.cur().offset();
-        let annotations = self.parse_annotations();
+        self.parse_annotations();
         self.advance(); // library
         // Dart 3 allows bare `library;` with no name.
-        let mut name = Vec::new();
         if self.cur().kind.is_identifier_like() {
-            name.push(self.expect_ident());
+            self.expect_ident();
             while self.eat(TokenKind::Dot).is_some() {
-                name.push(self.expect_ident());
+                self.expect_ident();
             }
         }
         self.expect(TokenKind::Semicolon);
-        marker.complete(self, NodeKind::LibraryDirective);
-        Some(LibraryDirective {
-            annotations,
-            name,
-            span: self.span_from(start),
-        })
+        Some(marker.complete(self, NodeKind::LibraryDirective))
     }
 
-    pub(super) fn try_parse_part_of(&mut self) -> Option<PartOfDirective> {
+    pub(super) fn try_parse_part_of(&mut self) -> Option<CompletedMarker> {
         // `part of …`, optionally preceded by metadata: `@A part of foo;`.
         let i = self.index_after_annotations(self.pos);
         let part = self.tokens.get(i);
@@ -61,33 +42,24 @@ impl<'src> Parser<'src> {
             return None;
         }
         let marker = self.start();
-        let start = self.cur().offset();
-        let annotations = self.parse_annotations();
+        self.parse_annotations();
         self.advance(); // part
         self.advance(); // of
-        let (uri, name) = if matches!(self.cur().kind, TokenKind::StringLit) {
-            (Some(self.parse_adjacent_strings()), vec![])
+        if matches!(self.cur().kind, TokenKind::StringLit) {
+            self.parse_adjacent_strings();
         } else {
-            let mut segs = vec![self.expect_ident()];
+            self.expect_ident();
             while self.eat(TokenKind::Dot).is_some() {
-                segs.push(self.expect_ident());
+                self.expect_ident();
             }
-            (None, segs)
-        };
+        }
         self.expect(TokenKind::Semicolon);
-        marker.complete(self, NodeKind::PartOfDirective);
-        Some(PartOfDirective {
-            annotations,
-            uri,
-            name,
-            span: self.span_from(start),
-        })
+        Some(marker.complete(self, NodeKind::PartOfDirective))
     }
 
-    pub(super) fn try_parse_part(&mut self) -> Option<PartDirective> {
+    pub(super) fn try_parse_part(&mut self) -> Option<CompletedMarker> {
         let marker = self.start();
-        let start = self.cur().offset();
-        let annotations = self.parse_annotations();
+        self.parse_annotations();
         self.expect(TokenKind::Part);
         if !matches!(self.cur().kind, TokenKind::StringLit) {
             self.error("expected string literal in part directive");
@@ -95,174 +67,107 @@ impl<'src> Parser<'src> {
             marker.complete(self, NodeKind::Error);
             return None;
         }
-        let uri = self.parse_adjacent_strings();
+        self.parse_adjacent_strings();
         self.expect(TokenKind::Semicolon);
-        marker.complete(self, NodeKind::PartDirective);
-        Some(PartDirective {
-            annotations,
-            uri,
-            span: self.span_from(start),
-        })
+        Some(marker.complete(self, NodeKind::PartDirective))
     }
 
-    pub(super) fn parse_import(&mut self) -> ImportDirective {
+    pub(super) fn parse_import(&mut self) -> CompletedMarker {
         let marker = self.start();
-        let start = self.cur().offset();
-        let annotations = self.parse_annotations();
+        self.parse_annotations();
         self.expect(TokenKind::Import);
-        let uri = self.parse_adjacent_strings();
-        let configurable_uris = self.parse_configurable_uris();
-        let is_deferred = self.eat(TokenKind::Deferred).is_some();
-        let as_name = self.eat(TokenKind::As).map(|_| self.expect_ident());
-        let combinators = self.parse_import_combinators();
-        self.expect(TokenKind::Semicolon);
-        marker.complete(self, NodeKind::ImportDirective);
-        ImportDirective {
-            annotations,
-            uri,
-            configurable_uris,
-            is_deferred,
-            as_name,
-            combinators,
-            span: self.span_from(start),
+        self.parse_adjacent_strings();
+        self.parse_configurable_uris();
+        self.eat(TokenKind::Deferred);
+        if self.eat(TokenKind::As).is_some() {
+            self.expect_ident();
         }
+        self.parse_import_combinators();
+        self.expect(TokenKind::Semicolon);
+        marker.complete(self, NodeKind::ImportDirective)
     }
 
-    pub(super) fn parse_export(&mut self) -> ExportDirective {
+    pub(super) fn parse_export(&mut self) -> CompletedMarker {
         let marker = self.start();
-        let start = self.cur().offset();
-        let annotations = self.parse_annotations();
+        self.parse_annotations();
         self.expect(TokenKind::Export);
-        let uri = self.parse_adjacent_strings();
-        let configurable_uris = self.parse_configurable_uris();
-        let combinators = self.parse_import_combinators();
+        self.parse_adjacent_strings();
+        self.parse_configurable_uris();
+        self.parse_import_combinators();
         self.expect(TokenKind::Semicolon);
-        marker.complete(self, NodeKind::ExportDirective);
-        ExportDirective {
-            annotations,
-            uri,
-            configurable_uris,
-            combinators,
-            span: self.span_from(start),
-        }
+        marker.complete(self, NodeKind::ExportDirective)
     }
 
     /// Parse zero or more configurable-URI clauses:
     /// `if (dotted.name [== 'value']) 'uri'`.
-    fn parse_configurable_uris(&mut self) -> Vec<ConfigurableUri> {
-        let mut uris = Vec::new();
+    fn parse_configurable_uris(&mut self) {
         while self.at(TokenKind::If) {
             let marker = self.start();
-            let start = self.cur().offset();
             self.advance(); // if
             self.expect(TokenKind::LParen);
-            let mut test = vec![self.expect_ident()];
+            self.expect_ident();
             while self.eat(TokenKind::Dot).is_some() {
-                test.push(self.expect_ident());
+                self.expect_ident();
             }
-            let value = self.eat(TokenKind::EqEq).map(|_| self.parse_string_lit());
+            if self.eat(TokenKind::EqEq).is_some() {
+                self.parse_string_lit();
+            }
             self.expect(TokenKind::RParen);
-            let uri = self.parse_adjacent_strings();
-            uris.push(ConfigurableUri {
-                test,
-                value,
-                uri,
-                span: self.span_from(start),
-            });
+            self.parse_adjacent_strings();
             marker.complete(self, NodeKind::ConfigurableUri);
         }
-        uris
     }
 
-    fn parse_import_combinators(&mut self) -> Vec<ImportCombinator> {
-        let mut combinators = Vec::new();
+    fn parse_import_combinators(&mut self) {
         loop {
-            if self.at(TokenKind::Show) {
+            if self.at(TokenKind::Show) || self.at(TokenKind::Hide) {
                 let marker = self.start();
-                let start = self.cur().offset();
                 self.advance();
-                let names = self.parse_ident_list();
-                combinators.push(ImportCombinator::Show(names, self.span_from(start)));
-                marker.complete(self, NodeKind::Combinator);
-            } else if self.at(TokenKind::Hide) {
-                let marker = self.start();
-                let start = self.cur().offset();
-                self.advance();
-                let names = self.parse_ident_list();
-                combinators.push(ImportCombinator::Hide(names, self.span_from(start)));
+                self.parse_ident_list();
                 marker.complete(self, NodeKind::Combinator);
             } else {
                 break;
             }
         }
-        combinators
     }
 
-    fn parse_ident_list(&mut self) -> Vec<Identifier> {
-        let mut ids = vec![self.expect_ident()];
+    fn parse_ident_list(&mut self) {
+        self.expect_ident();
         while self.eat(TokenKind::Comma).is_some() {
             if self.cur().kind.is_identifier_like() {
-                ids.push(self.expect_ident());
+                self.expect_ident();
             }
         }
-        ids
     }
 
-    pub(super) fn parse_top_level_decl(&mut self) -> Option<TopLevelDecl> {
+    pub(super) fn parse_top_level_decl(&mut self) -> Option<CompletedMarker> {
         let marker = self.start();
-        let declaration = self.parse_top_level_decl_inner();
-        let kind = match &declaration {
-            Some(TopLevelDecl::Class(_)) => NodeKind::ClassDecl,
-            Some(TopLevelDecl::ClassTypeAlias(_)) => NodeKind::ClassTypeAliasDecl,
-            Some(TopLevelDecl::Mixin(_)) => NodeKind::MixinDecl,
-            Some(TopLevelDecl::MixinClass(_)) => NodeKind::MixinClassDecl,
-            Some(TopLevelDecl::Enum(_)) => NodeKind::EnumDecl,
-            Some(TopLevelDecl::Extension(_)) => NodeKind::ExtensionDecl,
-            Some(TopLevelDecl::ExtensionType(_)) => NodeKind::ExtensionTypeDecl,
-            Some(TopLevelDecl::TypeAlias(_)) => NodeKind::TypeAliasDecl,
-            Some(TopLevelDecl::Function(_)) => NodeKind::FunctionDecl,
-            Some(TopLevelDecl::Variable(_)) => NodeKind::TopLevelVarDecl,
-            _ => {
-                marker.abandon(self);
-                return declaration;
-            }
-        };
-        marker.complete(self, kind);
-        declaration
+        if let Some(kind) = self.parse_top_level_decl_inner() {
+            Some(marker.complete(self, kind))
+        } else {
+            marker.abandon(self);
+            None
+        }
     }
 
-    fn parse_top_level_decl_inner(&mut self) -> Option<TopLevelDecl> {
-        let annotations = self.parse_annotations();
-        let start = self.cur().offset();
-
-        let mut modifiers = ClassModifiers::default();
-
+    fn parse_top_level_decl_inner(&mut self) -> Option<NodeKind> {
+        self.parse_annotations();
+        let mut is_final = false;
         loop {
             match self.cur().kind {
                 TokenKind::Abstract => {
-                    modifiers.is_abstract = true;
                     self.advance();
                 }
-                TokenKind::Interface => {
-                    modifiers.restriction = Some(ClassRestriction::Interface);
-                    self.advance();
-                }
-                TokenKind::Base => {
-                    modifiers.restriction = Some(ClassRestriction::Base);
+                TokenKind::Interface | TokenKind::Base | TokenKind::Sealed => {
+                    is_final = false;
                     self.advance();
                 }
                 TokenKind::Final => {
-                    modifiers.restriction = Some(ClassRestriction::Final);
+                    is_final = true;
                     self.advance();
                 }
-                TokenKind::Sealed => {
-                    modifiers.restriction = Some(ClassRestriction::Sealed);
-                    self.advance();
-                }
-                // `static` is only legal on class members. At top level it is an
-                // extraneous modifier — unless it is actually the name of a
-                // top-level function (`static() => ...`, `static<T>() ...`), where
-                // a `(`/`<` follows. Report and recover by skipping it.
+                // `static` is only legal on class members. A following `(`/`<`
+                // instead makes it the name of a top-level function.
                 TokenKind::Static
                     if !matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt) =>
                 {
@@ -272,208 +177,118 @@ impl<'src> Parser<'src> {
                 _ => break,
             }
         }
-
-        let is_base = modifiers.restriction == Some(ClassRestriction::Base);
-        let is_final = modifiers.restriction == Some(ClassRestriction::Final);
-
-        match self.cur().kind {
-            TokenKind::Class => Some(self.parse_class_or_type_alias(annotations, modifiers, start)),
+        Some(match self.cur().kind {
+            TokenKind::Class => self.parse_class_or_type_alias(),
             TokenKind::Mixin => {
-                // `mixin class` → MixinClass
                 if self.peek(1).kind == TokenKind::Class {
                     self.advance(); // mixin
-                    Some(TopLevelDecl::MixinClass(self.parse_mixin_class(
-                        annotations,
-                        modifiers.is_abstract,
-                        is_base,
-                        start,
-                    )))
+                    self.parse_mixin_class();
+                    NodeKind::MixinClassDecl
                 } else {
-                    Some(TopLevelDecl::Mixin(self.parse_mixin(
-                        annotations,
-                        is_base,
-                        start,
-                    )))
+                    self.parse_mixin();
+                    NodeKind::MixinDecl
                 }
             }
-            TokenKind::Enum => Some(TopLevelDecl::Enum(self.parse_enum(annotations, start))),
+            TokenKind::Enum => {
+                self.parse_enum();
+                NodeKind::EnumDecl
+            }
             TokenKind::Extension => {
-                // `extension type` or plain `extension`
                 if self.peek(1).kind == TokenKind::Type {
-                    Some(TopLevelDecl::ExtensionType(
-                        self.parse_extension_type(annotations, start),
-                    ))
+                    self.parse_extension_type();
+                    NodeKind::ExtensionTypeDecl
                 } else {
-                    Some(TopLevelDecl::Extension(
-                        self.parse_extension(annotations, start),
-                    ))
+                    self.parse_extension();
+                    NodeKind::ExtensionDecl
                 }
             }
-            TokenKind::Typedef => Some(TopLevelDecl::TypeAlias(
-                self.parse_typedef(annotations, start),
-            )),
-            _ => {
-                // Could be top-level function or variable
-                self.try_parse_top_level_func_or_var(annotations, start, is_final)
+            TokenKind::Typedef => {
+                self.parse_typedef();
+                NodeKind::TypeAliasDecl
             }
-        }
+            _ => return self.try_parse_top_level_func_or_var(is_final),
+        })
     }
 
-    fn parse_class_or_type_alias(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: ClassModifiers,
-        start: usize,
-    ) -> TopLevelDecl {
+    fn parse_class_or_type_alias(&mut self) -> NodeKind {
         self.expect(TokenKind::Class);
-        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
-
+        let (name, has_primary_constructor) = self.parse_name_maybe_primary(false);
         // Mixin-application class: `class MA = Super with M [implements I];`
-        if primary_constructor.is_none() && self.eat(TokenKind::Eq).is_some() {
+        if !has_primary_constructor && self.eat(TokenKind::Eq).is_some() {
             let superclass_marker = self.start();
-            let superclass = self.parse_type();
+            self.parse_type();
             superclass_marker.complete(self, NodeKind::ExtendsClause);
-            // A mixin-application class requires a `with` clause; without it this is
-            // not a valid class type alias.
             let with_marker = self.start();
             self.expect(TokenKind::With);
-            let with_clause = self.parse_type_list();
+            self.parse_type_list();
             with_marker.complete(self, NodeKind::WithClause);
-            let implements = self.parse_type_clause(TokenKind::Implements);
+            self.parse_type_clause(TokenKind::Implements);
             self.expect(TokenKind::Semicolon);
-            return TopLevelDecl::ClassTypeAlias(ClassTypeAliasDecl {
-                annotations,
-                modifiers,
-                name,
-                type_params,
-                superclass,
-                with_clause,
-                implements,
-                span: self.span_from(start),
-            });
+            return NodeKind::ClassTypeAliasDecl;
         }
-
-        let extends = self.parse_extends_clause();
-        let with_clause = self.parse_type_clause(TokenKind::With);
-        let implements = self.parse_type_clause(TokenKind::Implements);
-        let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
-        TopLevelDecl::Class(ClassDecl {
-            annotations,
-            modifiers,
-            name,
-            type_params,
-            primary_constructor,
-            extends,
-            with_clause,
-            implements,
-            members,
-            span: self.span_from(start),
-        })
+        self.parse_extends_clause();
+        self.parse_type_clause(TokenKind::With);
+        self.parse_type_clause(TokenKind::Implements);
+        self.parse_class_body_in(Some(name.text(self)));
+        NodeKind::ClassDecl
     }
 
     /// `<classNameMaybePrimary>`: `[const] Name<T>`, optionally followed by a
     /// Dart 3.13 primary constructor `[.name](params)`.
-    fn parse_name_maybe_primary(
-        &mut self,
-        representation: bool,
-    ) -> (Identifier, Vec<TypeParam>, Option<PrimaryConstructor>) {
-        let start = self.cur().offset();
+    fn parse_name_maybe_primary(&mut self, representation: bool) -> (CompletedMarker, bool) {
         let is_const = self.eat(TokenKind::Const).is_some();
         let name = self.expect_ident();
-        let type_params = self.parse_type_params();
+        self.parse_type_params();
         let named = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
         if !(is_const || named || self.at(TokenKind::LParen)) {
-            return (name, type_params, None);
+            return (name, false);
         }
         if !representation && !self.version.supports(Feature::PrimaryConstructors) {
             self.error("This requires the 'primary-constructors' language feature");
         }
         let marker = self.start();
-        let constructor_name = named.then(|| {
+        if named {
             self.advance(); // .
-            self.expect_ctor_name()
-        });
-        let params = self.parse_formal_param_list();
-        let span = Span::new(start, params.span.end);
-        let primary_constructor = PrimaryConstructor {
-            is_const,
-            name_span: name.span,
-            constructor_name,
-            params,
-            span,
-        };
+            self.expect_ctor_name();
+        }
+        self.parse_formal_param_list();
         marker.complete(self, NodeKind::PrimaryConstructor);
-        (name, type_params, Some(primary_constructor))
+        (name, true)
     }
 
-    fn parse_mixin(
-        &mut self,
-        annotations: Vec<Annotation>,
-        is_base: bool,
-        start: usize,
-    ) -> MixinDecl {
+    fn parse_mixin(&mut self) {
         self.expect(TokenKind::Mixin);
-        let name = self.expect_ident();
-        let type_params = self.parse_type_params();
-        let on_clause = self.parse_type_clause(TokenKind::On);
-        let implements = self.parse_type_clause(TokenKind::Implements);
-        let members = self.parse_class_body_in(None);
-        MixinDecl {
-            annotations,
-            is_base,
-            name,
-            type_params,
-            on_clause,
-            implements,
-            members,
-            span: self.span_from(start),
-        }
+        self.expect_ident();
+        self.parse_type_params();
+        self.parse_type_clause(TokenKind::On);
+        self.parse_type_clause(TokenKind::Implements);
+        self.parse_class_body_in(None);
     }
 
-    fn parse_mixin_class(
-        &mut self,
-        annotations: Vec<Annotation>,
-        is_abstract: bool,
-        is_base: bool,
-        start: usize,
-    ) -> MixinClassDecl {
+    fn parse_mixin_class(&mut self) {
         self.expect(TokenKind::Class);
-        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
-        let extends = self.parse_extends_clause();
-        let with_clause = self.parse_type_clause(TokenKind::With);
-        let implements = self.parse_type_clause(TokenKind::Implements);
-        let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
-        MixinClassDecl {
-            annotations,
-            is_abstract,
-            is_base,
-            name,
-            type_params,
-            primary_constructor,
-            extends,
-            with_clause,
-            implements,
-            members,
-            span: self.span_from(start),
-        }
+        let (name, _) = self.parse_name_maybe_primary(false);
+        self.parse_extends_clause();
+        self.parse_type_clause(TokenKind::With);
+        self.parse_type_clause(TokenKind::Implements);
+        self.parse_class_body_in(Some(name.text(self)));
     }
 
-    fn parse_extends_clause(&mut self) -> Option<DartType> {
+    fn parse_extends_clause(&mut self) {
         if !self.at(TokenKind::Extends) {
-            return None;
+            return;
         }
         let marker = self.start();
         self.advance();
-        let ty = self.parse_type();
+        self.parse_type();
         marker.complete(self, NodeKind::ExtendsClause);
-        Some(ty)
     }
 
-    fn parse_type_clause(&mut self, keyword: TokenKind) -> Vec<DartType> {
+    fn parse_type_clause(&mut self, keyword: TokenKind) {
         if self.at(keyword) {
             let marker = self.start();
             self.advance();
-            let types = self.parse_type_list();
+            self.parse_type_list();
             let kind = match keyword {
                 TokenKind::With => NodeKind::WithClause,
                 TokenKind::Implements => NodeKind::ImplementsClause,
@@ -481,20 +296,16 @@ impl<'src> Parser<'src> {
                 _ => unreachable!("type clause keyword"),
             };
             marker.complete(self, kind);
-            types
-        } else {
-            Vec::new()
         }
     }
 
-    fn parse_type_list(&mut self) -> Vec<DartType> {
-        let mut types = vec![self.parse_type()];
+    fn parse_type_list(&mut self) {
+        self.parse_type();
         while self.eat(TokenKind::Comma).is_some() {
             if self.is_type_start() {
-                types.push(self.parse_type());
+                self.parse_type();
             }
         }
-        types
     }
 
     /// With a `(` at `self.peek(offset)`, scan to its matching `)` and decide
@@ -529,12 +340,10 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_class_body(&mut self) -> Vec<ClassMember> {
-        let mut members = Vec::new();
+    fn parse_class_body(&mut self) {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            members.push(self.parse_class_member());
+            self.parse_class_member();
         }
-        members
     }
 
     /// Parse a braced class body with the enclosing-constructor-name context
@@ -542,7 +351,7 @@ impl<'src> Parser<'src> {
     /// enclosing declaration may declare constructors, or `None` for
     /// mixins/extensions whose untyped members are always methods. Dart 3.13
     /// also accepts `;` for an empty body (`abstract class Marker;`).
-    fn parse_class_body_in(&mut self, ctor_name: Option<&'src str>) -> Vec<ClassMember> {
+    fn parse_class_body_in(&mut self, ctor_name: Option<&'src str>) {
         if let Some(semicolon) = self.eat(TokenKind::Semicolon) {
             if !self.version.supports(Feature::PrimaryConstructors) {
                 self.error_at(
@@ -550,12 +359,11 @@ impl<'src> Parser<'src> {
                     "This requires the 'primary-constructors' language feature",
                 );
             }
-            return Vec::new();
+            return;
         }
         self.expect(TokenKind::LBrace);
-        let members = self.with_ctx(|ctx| ctx.ctor_name = ctor_name, Self::parse_class_body);
+        self.with_ctx(|ctx| ctx.ctor_name = ctor_name, Self::parse_class_body);
         self.expect(TokenKind::RBrace);
-        members
     }
 
     fn parse_member_modifiers(&mut self) -> MemberModifiers {
@@ -588,19 +396,15 @@ impl<'src> Parser<'src> {
             }
             match self.cur().kind {
                 TokenKind::Static => {
-                    modifiers.is_static = true;
                     self.advance();
                 }
                 TokenKind::Abstract => {
-                    modifiers.is_abstract = true;
                     self.advance();
                 }
                 TokenKind::External => {
-                    modifiers.is_external = true;
                     self.advance();
                 }
                 TokenKind::Covariant => {
-                    modifiers.is_covariant = true;
                     self.advance();
                 }
                 TokenKind::Late => {
@@ -624,7 +428,6 @@ impl<'src> Parser<'src> {
                         TokenKind::LParen | TokenKind::Lt | TokenKind::Semicolon | TokenKind::Eq
                     ) =>
                 {
-                    modifiers.is_async = true;
                     self.advance();
                 }
                 // @override is handled via annotations, but 'override' as a built-in
@@ -650,40 +453,27 @@ impl<'src> Parser<'src> {
         modifiers
     }
 
-    fn parse_class_member(&mut self) -> ClassMember {
+    fn parse_class_member(&mut self) -> CompletedMarker {
         let marker = self.start();
-        let member = self.parse_class_member_inner();
-        let kind = match &member {
-            ClassMember::Field(_) => NodeKind::FieldDecl,
-            ClassMember::Method(_) => NodeKind::MethodDecl,
-            ClassMember::Getter(_) => NodeKind::GetterDecl,
-            ClassMember::Setter(_) => NodeKind::SetterDecl,
-            ClassMember::Operator(_) => NodeKind::OperatorDecl,
-            ClassMember::Constructor(_) => NodeKind::ConstructorDecl,
-            ClassMember::PrimaryConstructorBody(_) => NodeKind::PrimaryConstructorBody,
-            ClassMember::Error(_) => NodeKind::ErrorNode,
-        };
-        marker.complete(self, kind);
-        member
+        let kind = self.parse_class_member_inner();
+        marker.complete(self, kind)
     }
 
-    fn parse_class_member_inner(&mut self) -> ClassMember {
-        let start = self.cur().offset();
-        let annotations = self.parse_annotations();
+    fn parse_class_member_inner(&mut self) -> NodeKind {
+        self.parse_annotations();
         let modifiers = self.parse_member_modifiers();
-
         if self.at(TokenKind::Get) && self.peek(1).kind.is_identifier_like() {
-            return ClassMember::Getter(self.parse_getter(annotations, modifiers, None, start));
+            self.parse_getter();
+            return NodeKind::GetterDecl;
         }
-
         if self.at(TokenKind::Set) && self.peek(1).kind.is_identifier_like() {
-            return ClassMember::Setter(self.parse_setter(annotations, modifiers, start));
+            self.parse_setter();
+            return NodeKind::SetterDecl;
         }
-
         if self.at_operator_decl() {
-            return ClassMember::Operator(self.parse_operator(annotations, modifiers, None, start));
+            self.parse_operator();
+            return NodeKind::OperatorDecl;
         }
-
         // Body part of a primary constructor: `this : x = 1 { ... }`, `this;`.
         if self.at(TokenKind::This)
             && self.ctx.ctor_name.is_some()
@@ -695,40 +485,20 @@ impl<'src> Parser<'src> {
             if !self.version.supports(Feature::PrimaryConstructors) {
                 self.error("This requires the 'primary-constructors' language feature");
             }
-            let this_token = self.advance();
-            let this_span = Span::new(this_token.offset(), this_token.offset() + this_token.len());
-            let initializers = self.parse_constructor_initializers();
-            let body = self.parse_function_body(AsyncMarker::Sync);
-            return ClassMember::PrimaryConstructorBody(PrimaryConstructorBody {
-                annotations,
-                this_span,
-                initializers,
-                body,
-                span: self.span_from(start),
-            });
+            self.advance();
+            self.parse_constructor_initializers();
+            self.parse_function_body(AsyncMarker::Sync);
+            return NodeKind::PrimaryConstructorBody;
         }
-
-        // Dart 3.13 generative constructor syntax: `new(...)`, `new name(...)`,
-        // with the usual `const`/`external` modifiers.
+        // Dart 3.13 generative constructor syntax: `new(...)`, `new name(...)`.
         if self.at(TokenKind::New) && self.ctx.ctor_name.is_some() {
             if !self.version.supports(Feature::PrimaryConstructors) {
                 self.error("This requires the 'primary-constructors' language feature");
             }
-            return ClassMember::Constructor(self.parse_new_constructor(
-                annotations,
-                modifiers,
-                start,
-            ));
+            self.parse_new_constructor();
+            return NodeKind::ConstructorDecl;
         }
-
-        // Factory constructor. `factory` is a built-in identifier, so shipped code
-        // also uses it as a plain member name (`late final factory = 1;`, a getter
-        // `factory<T>`). A real factory keyword is followed by the enclosing type
-        // name, by a constructor name (`factory name(`), or — in a type that
-        // declares constructors, from Dart 3.13 (the `factory()` head of the
-        // primary-constructors feature) — directly by its parameters
-        // (`factory(`); when it is followed by `=`/`;`/`,`/`<` (or by `(`
-        // otherwise) it is the member's own name.
+        // `factory` can also be a plain member name.
         if self.at(TokenKind::Factory)
             && match self.peek(1).kind {
                 TokenKind::Eq | TokenKind::Semicolon | TokenKind::Comma | TokenKind::Lt => false,
@@ -739,26 +509,15 @@ impl<'src> Parser<'src> {
                 _ => true,
             }
         {
-            return ClassMember::Constructor(self.parse_factory_constructor(
-                annotations,
-                modifiers,
-                start,
-            ));
+            self.parse_factory_constructor();
+            return NodeKind::ConstructorDecl;
         }
-
-        // `var` keyword — untyped mutable field
         if self.eat(TokenKind::Var).is_some() {
             let name = self.expect_ident();
-            return ClassMember::Field(self.finish_field(
-                annotations,
-                modifiers,
-                None,
-                name,
-                start,
-            ));
+            self.finish_field(name);
+            return NodeKind::FieldDecl;
         }
-
-        self.parse_field_or_method(annotations, modifiers, start)
+        self.parse_field_or_method(modifiers)
     }
 
     /// True when the `operator` keyword at the cursor actually declares an
@@ -778,411 +537,186 @@ impl<'src> Parser<'src> {
         self.peek(offset).kind.is_identifier_like() || self.peek(offset).kind == TokenKind::New
     }
 
-    pub(super) fn expect_ctor_name(&mut self) -> Identifier {
+    pub(super) fn expect_ctor_name(&mut self) -> CompletedMarker {
         if self.at(TokenKind::New) {
             let marker = self.start();
-            let tok = self.advance();
-            marker.complete(self, NodeKind::Identifier);
-            return self.tok_ident(&tok);
+            self.advance();
+            return marker.complete(self, NodeKind::Identifier);
         }
         self.expect_ident()
     }
 
-    fn parse_getter(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        return_type: Option<DartType>,
-        start: usize,
-    ) -> GetterDecl {
-        let MemberModifiers {
-            is_static,
-            is_abstract,
-            is_external,
-            ..
-        } = modifiers;
+    fn parse_getter(&mut self) {
         self.advance(); // get
-        let name = self.expect_ident();
-        // A getter body may carry an `async` marker (`get x async { ... }`).
+        self.expect_ident();
         let async_marker = self.parse_async_marker();
-        let body = self.parse_function_body(async_marker);
-        GetterDecl {
-            annotations,
-            is_static,
-            // Like methods, a body-less non-external getter is abstract.
-            is_abstract: is_abstract || (body.is_none() && !is_external),
-            is_external,
-            async_marker,
-            return_type,
-            name,
-            body,
-            span: self.span_from(start),
-        }
+        self.parse_function_body(async_marker);
     }
 
-    fn parse_setter(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        start: usize,
-    ) -> SetterDecl {
-        let MemberModifiers {
-            is_static,
-            is_abstract,
-            is_external,
-            ..
-        } = modifiers;
+    fn parse_setter(&mut self) {
         self.advance(); // set
-        let name = self.expect_ident();
+        self.expect_ident();
         self.expect(TokenKind::LParen);
-        // A setter's single value parameter accepts the same leading modifiers as
-        // any formal (`set x(covariant final T v)`) and a trailing comma
-        // (`set x(int a,)`), which method parameter lists already allow.
+        // A setter's single value parameter accepts the same leading modifiers
+        // and trailing comma as other formal parameters.
         let parameter_marker = self.start();
-        let param_annotations = self.parse_annotations();
-        let is_covariant = self.eat(TokenKind::Covariant).is_some();
-        let _ = self.eat(TokenKind::Final);
-        let _ = self.eat(TokenKind::Var);
-        let mut param_type = if self.peek(1).kind != TokenKind::RParen {
-            self.try_parse_type_followed_by(TokenKind::is_identifier_like)
-        } else {
-            None
-        };
-        let param = self.expect_ident();
-        let type_params = self.parse_type_params();
+        self.parse_annotations();
+        self.eat(TokenKind::Covariant);
+        self.eat(TokenKind::Final);
+        self.eat(TokenKind::Var);
+        if self.peek(1).kind != TokenKind::RParen {
+            self.try_parse_type_followed_by(TokenKind::is_identifier_like);
+        }
+        self.expect_ident();
+        self.parse_type_params();
         if self.at(TokenKind::LParen) {
-            let params = self.parse_formal_param_list();
-            let is_nullable = self.eat(TokenKind::Qmark).is_some();
-            let type_start = param_type
-                .as_ref()
-                .map_or(param.span.start, |ty| ty.span().start);
-            param_type = Some(DartType::Function(Box::new(FunctionType {
-                return_type: param_type.map(Box::new),
-                type_params,
-                params: Self::formals_to_function_type_params(&params),
-                is_nullable,
-                span: self.span_from(type_start),
-            })));
+            self.parse_formal_param_list();
+            self.eat(TokenKind::Qmark);
         }
         parameter_marker.complete(self, NodeKind::SetterParameter);
         self.eat(TokenKind::Comma); // optional trailing comma
         self.expect(TokenKind::RParen);
-        let body = self.parse_function_body(AsyncMarker::Sync);
-        SetterDecl {
-            annotations,
-            is_static,
-            is_abstract: is_abstract || (body.is_none() && !is_external),
-            is_external,
-            is_covariant,
-            param_type,
-            param_annotations,
-            name,
-            param,
-            body,
-            span: self.span_from(start),
-        }
+        self.parse_function_body(AsyncMarker::Sync);
     }
 
-    fn parse_operator(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        return_type: Option<DartType>,
-        start: usize,
-    ) -> OperatorDecl {
-        let MemberModifiers { is_external, .. } = modifiers;
+    fn parse_operator(&mut self) {
         self.advance(); // operator
-        // `[]` and `[]=` are lexed as separate bracket tokens; all other operators
-        // are a single token.
-        let op = if self.at(TokenKind::LBracket) {
+        // `[]` and `[]=` are lexed as separate bracket tokens.
+        if self.at(TokenKind::LBracket) {
             self.advance(); // [
             self.expect(TokenKind::RBracket); // ]
-            if self.eat(TokenKind::Eq).is_some() {
-                "[]=".to_string()
-            } else {
-                "[]".to_string()
-            }
+            self.eat(TokenKind::Eq);
         } else {
-            let op = self.cur_text().to_owned();
             self.advance();
-            op
-        };
-        let params = self.parse_formal_param_list();
+        }
+        self.parse_formal_param_list();
         let marker = self.parse_async_marker();
-        let body = self.parse_function_body(marker);
-        OperatorDecl {
-            annotations,
-            is_external,
-            return_type,
-            op,
-            params,
-            async_marker: marker,
-            body,
-            span: self.span_from(start),
-        }
+        self.parse_function_body(marker);
     }
 
-    fn parse_factory_constructor(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        start: usize,
-    ) -> ConstructorDecl {
-        let MemberModifiers {
-            is_external,
-            is_const,
-            ..
-        } = modifiers;
-        let keyword = self.advance(); // factory
-        let (name, constructor_name) = self.parse_declared_ctor_name(&keyword);
-        let params = self.parse_formal_param_list();
+    fn parse_factory_constructor(&mut self) {
+        self.advance(); // factory
+        self.parse_declared_ctor_name();
+        self.parse_formal_param_list();
         // Redirecting factory: `factory C() = D;` / `= D.named;` / `= D<int>;`.
-        let redirect = if self.at(TokenKind::Eq) {
-            Some(self.parse_redirected_constructor())
-        } else {
-            None
-        };
-        let body = if redirect.is_some() {
-            // A redirecting factory has no body but must be terminated: `= D;`.
+        if self.at(TokenKind::Eq) {
+            self.parse_redirected_constructor();
             self.expect(TokenKind::Semicolon);
-            None
         } else {
-            self.parse_function_body(AsyncMarker::Sync)
-        };
-        ConstructorDecl {
-            annotations,
-            is_const,
-            is_factory: true,
-            is_external,
-            name,
-            constructor_name,
-            params,
-            initializers: Vec::new(),
-            redirect,
-            body,
-            span: self.span_from(start),
+            self.parse_function_body(AsyncMarker::Sync);
         }
     }
 
-    /// `new(...)` / `new name(...)`: a generative constructor in Dart 3.13
-    /// syntax, mapped onto the classic `C(...)` / `C.name(...)` shape.
-    fn parse_new_constructor(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        start: usize,
-    ) -> ConstructorDecl {
-        let MemberModifiers {
-            is_external,
-            is_const,
-            ..
-        } = modifiers;
-        let keyword = self.advance(); // new
-        let (name, constructor_name) = self.parse_declared_ctor_name(&keyword);
-        let params = self.parse_formal_param_list();
-        let initializers = self.parse_constructor_initializers();
-        let body = self.parse_function_body(AsyncMarker::Sync);
-        ConstructorDecl {
-            annotations,
-            is_const,
-            is_factory: false,
-            is_external,
-            name,
-            constructor_name,
-            params,
-            initializers,
-            redirect: None,
-            body,
-            span: self.span_from(start),
-        }
+    /// `new(...)` / `new name(...)`: a generative constructor in Dart 3.13.
+    fn parse_new_constructor(&mut self) {
+        self.advance(); // new
+        self.parse_declared_ctor_name();
+        self.parse_formal_param_list();
+        self.parse_constructor_initializers();
+        self.parse_function_body(AsyncMarker::Sync);
     }
 
-    /// The type and constructor names after a `new`/`factory` keyword. Classic
-    /// syntax spells the enclosing type (`factory C(`, `factory C.name(`); Dart
-    /// 3.13 syntax omits it (`new(`, `new name(`, `factory(`, `factory name(`),
-    /// in which case the type name is the enclosing type's, spanning the keyword.
-    fn parse_declared_ctor_name(&mut self, keyword: &Token) -> (Identifier, Option<Identifier>) {
+    /// Parse an explicit type/constructor name or the Dart 3.13 implicit form.
+    fn parse_declared_ctor_name(&mut self) {
         if let Some(type_name) = self.ctx.ctor_name {
-            let implicit = Identifier::new(type_name, Self::tok_span(keyword));
             if self.at(TokenKind::LParen) {
-                return (implicit, None);
+                return;
             }
             if self.cur().kind.is_identifier_like()
                 && self.cur_text() != type_name
                 && self.peek(1).kind != TokenKind::Dot
             {
-                return (implicit, Some(self.expect_ident()));
+                self.expect_ident();
+                return;
             }
         }
-        let name = self.expect_ident();
-        let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
-        (name, constructor_name)
+        self.expect_ident();
+        if self.eat(TokenKind::Dot).is_some() {
+            self.expect_ctor_name();
+        }
     }
 
     /// Parse a redirecting-factory target after `=`: `Type[.name]`.
-    fn parse_redirected_constructor(&mut self) -> RedirectedConstructor {
+    fn parse_redirected_constructor(&mut self) -> CompletedMarker {
         let marker = self.start();
-        let start = self.cur().offset();
         self.expect(TokenKind::Eq);
-        let type_ = self.parse_type();
-        let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
-        marker.complete(self, NodeKind::RedirectedConstructor);
-        RedirectedConstructor {
-            type_,
-            constructor_name,
-            span: self.span_from(start),
+        self.parse_type();
+        if self.eat(TokenKind::Dot).is_some() {
+            self.expect_ctor_name();
         }
+        marker.complete(self, NodeKind::RedirectedConstructor)
     }
 
-    fn parse_field_or_method(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        start: usize,
-    ) -> ClassMember {
+    fn parse_field_or_method(&mut self, modifiers: MemberModifiers) -> NodeKind {
         let MemberModifiers {
-            is_static,
-            is_abstract,
-            is_external,
             is_late,
             is_final,
             is_const,
-            is_async: outer_is_async,
-            ..
         } = modifiers;
         let saved = self.checkpoint();
-
         if is_final || is_const || is_late {
-            // Const constructor: `const ClassName(` or `const ClassName.name(`.
-            // Only when the enclosing type admits constructors and the name is a
-            // dotted (named) form or matches the enclosing type — otherwise this
-            // is a const field and falls through below.
+            // Only the enclosing type's name can introduce a const constructor.
             if is_const && self.cur().kind.is_identifier_like() && self.ctx.ctor_name.is_some() {
                 let name_text = self.cur_text();
                 let p1 = self.peek(1).kind;
                 let dotted = p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2);
-                // Both the dotted (`C.named(`) and parenthesized (`C(`) forms name a
-                // constructor only when the leading name is the enclosing type.
                 let is_ctor =
                     self.ctx.ctor_name == Some(name_text) && (dotted || p1 == TokenKind::LParen);
                 if is_ctor {
                     let ctor_saved = self.checkpoint();
-                    let name_tok = *self.cur();
                     let name_marker = self.start();
                     self.advance();
                     name_marker.complete(self, NodeKind::Identifier);
-                    let name = self.tok_ident(&name_tok);
-                    let constructor_name =
-                        self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
-                    if self.at(TokenKind::LParen) {
-                        let params = self.parse_formal_param_list();
-                        let initializers = self.parse_constructor_initializers();
-                        let body = self.parse_function_body(AsyncMarker::Sync);
-                        return ClassMember::Constructor(ConstructorDecl {
-                            annotations,
-                            is_const: true,
-                            is_factory: false,
-                            is_external,
-                            name,
-                            constructor_name,
-                            params,
-                            initializers,
-                            redirect: None,
-                            body,
-                            span: self.span_from(start),
-                        });
+                    if self.eat(TokenKind::Dot).is_some() {
+                        self.expect_ctor_name();
                     }
-                    // Not a constructor (e.g. `const qualified.Type field = ...`) — rollback
+                    if self.at(TokenKind::LParen) {
+                        self.parse_formal_param_list();
+                        self.parse_constructor_initializers();
+                        self.parse_function_body(AsyncMarker::Sync);
+                        return NodeKind::ConstructorDecl;
+                    }
                     self.restore_cursor(ctor_saved);
                 }
             }
-            let field_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
+            self.try_parse_type_followed_by(TokenKind::is_identifier_like);
             let name = self.expect_ident();
-            return ClassMember::Field(self.finish_field(
-                annotations,
-                modifiers,
-                field_type,
-                name,
-                start,
-            ));
+            self.finish_field(name);
+            return NodeKind::FieldDecl;
         }
 
         if self.is_type_start() {
-            let ty = self.parse_type();
-
-            // Typed getter: `ReturnType get name ...`
+            self.parse_type();
             if self.at(TokenKind::Get) && self.peek(1).kind.is_identifier_like() {
-                return ClassMember::Getter(self.parse_getter(
-                    annotations,
-                    modifiers,
-                    Some(ty),
-                    start,
-                ));
+                self.parse_getter();
+                return NodeKind::GetterDecl;
             }
-            // Typed setter: `ReturnType set name ...`
             if self.at(TokenKind::Set) && self.peek(1).kind.is_identifier_like() {
-                return ClassMember::Setter(self.parse_setter(annotations, modifiers, start));
+                self.parse_setter();
+                return NodeKind::SetterDecl;
             }
-            // Typed operator: `ReturnType operator ...`
             if self.at_operator_decl() {
-                return ClassMember::Operator(self.parse_operator(
-                    annotations,
-                    modifiers,
-                    Some(ty),
-                    start,
-                ));
+                self.parse_operator();
+                return NodeKind::OperatorDecl;
             }
-
             if self.cur().kind.is_identifier_like() {
-                let name_tok = *self.cur();
                 let name_marker = self.start();
                 self.advance();
-                name_marker.complete(self, NodeKind::Identifier);
-                // Method
+                let name = name_marker.complete(self, NodeKind::Identifier);
                 if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                    let name = self.tok_ident(&name_tok);
-                    let type_params = self.parse_type_params();
-                    let params = self.parse_formal_param_list();
+                    self.parse_type_params();
+                    self.parse_formal_param_list();
                     let body_marker = self.parse_async_marker();
-                    let async_marker = match (outer_is_async, body_marker) {
-                        (true, AsyncMarker::Sync) => AsyncMarker::Async,
-                        (true, AsyncMarker::SyncStar) => AsyncMarker::AsyncStar,
-                        (_, marker) => marker,
-                    };
-                    let body = self.parse_function_body(body_marker);
-                    let is_method_abstract = is_abstract || body.is_none();
-                    return ClassMember::Method(MethodDecl {
-                        annotations,
-                        is_static,
-                        is_abstract: is_method_abstract,
-                        is_external,
-                        async_marker,
-                        return_type: Some(ty),
-                        name,
-                        type_params,
-                        params,
-                        body,
-                        span: self.span_from(start),
-                    });
+                    self.parse_function_body(body_marker);
+                    return NodeKind::MethodDecl;
                 }
-                let field_name = self.tok_ident(&name_tok);
-                return ClassMember::Field(self.finish_field(
-                    annotations,
-                    modifiers,
-                    Some(ty),
-                    field_name,
-                    start,
-                ));
+                self.finish_field(name);
+                return NodeKind::FieldDecl;
             }
             self.restore_cursor(saved);
         }
 
-        // No type prefix — `name(...)`, `name.ctor(...)`, or `name<T>(...)`.
-        // With no return type this is a constructor only when the enclosing type
-        // admits constructors AND the name is a dotted (named) form or equals the
-        // enclosing type name; type parameters or an `async`/`sync*` marker (which
-        // a constructor may not have) also force a method. Everything else — e.g.
-        // `foo() {}` in `class C` — is an untyped method with no return type.
+        // Type parameters or an async/sync marker force an untyped method.
         if self.cur().kind.is_identifier_like() {
             let name_tok = *self.cur();
             let name_text = self.tok_text(&name_tok);
@@ -1191,107 +725,43 @@ impl<'src> Parser<'src> {
             name_marker.complete(self, NodeKind::Identifier);
             let has_ctor_dot = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
             if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) || has_ctor_dot {
-                let name = self.tok_ident(&name_tok);
-                let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
+                if self.eat(TokenKind::Dot).is_some() {
+                    self.expect_ctor_name();
+                }
                 let type_params = self.parse_type_params();
                 if self.at(TokenKind::LParen) {
-                    let params = self.parse_formal_param_list();
-                    let has_type_params = !type_params.is_empty();
+                    self.parse_formal_param_list();
+                    let has_type_params = type_params != 0;
                     let has_marker = matches!(self.cur().kind, TokenKind::Async | TokenKind::Sync);
-                    // A dotted (`C.named(`) or parenthesized (`C(`) form names a
-                    // constructor only when the leading name is the enclosing type —
-                    // `D.named()` in `class C` is not a constructor of C.
                     let is_constructor = self.ctx.ctor_name.is_some()
                         && !has_type_params
                         && !has_marker
                         && self.ctx.ctor_name == Some(name_text);
                     if !is_constructor {
                         let body_marker = self.parse_async_marker();
-                        let async_marker = match (outer_is_async, body_marker) {
-                            (true, AsyncMarker::Sync) => AsyncMarker::Async,
-                            (true, AsyncMarker::SyncStar) => AsyncMarker::AsyncStar,
-                            (_, marker) => marker,
-                        };
-                        let body = self.parse_function_body(body_marker);
-                        let is_method_abstract = is_abstract || body.is_none();
-                        return ClassMember::Method(MethodDecl {
-                            annotations,
-                            is_static,
-                            is_abstract: is_method_abstract,
-                            is_external,
-                            async_marker,
-                            return_type: None,
-                            name,
-                            type_params,
-                            params,
-                            body,
-                            span: self.span_from(start),
-                        });
+                        self.parse_function_body(body_marker);
+                        return NodeKind::MethodDecl;
                     }
-                    let initializers = self.parse_constructor_initializers();
-                    let body = self.parse_function_body(AsyncMarker::Sync);
-                    return ClassMember::Constructor(ConstructorDecl {
-                        annotations,
-                        is_const,
-                        is_factory: false,
-                        is_external,
-                        name,
-                        constructor_name,
-                        params,
-                        initializers,
-                        redirect: None,
-                        body,
-                        span: self.span_from(start),
-                    });
+                    self.parse_constructor_initializers();
+                    self.parse_function_body(AsyncMarker::Sync);
+                    return NodeKind::ConstructorDecl;
                 }
             }
             self.restore_cursor(saved);
         }
-
-        // Give up — emit error node and skip to next member
-        let span = self.cur_span();
+        // Give up — emit error node and skip to next member.
         let recovery = self.start();
         self.missing(NodeKind::Identifier);
         self.error("could not parse class member");
         self.synchronize(&[TokenKind::Semicolon, TokenKind::RBrace]);
         self.eat(TokenKind::Semicolon);
         recovery.complete(self, NodeKind::Error);
-        ClassMember::Error(ErrorNode {
-            message: "could not parse class member".into(),
-            span,
-        })
+        NodeKind::ErrorNode
     }
 
-    fn finish_field(
-        &mut self,
-        annotations: Vec<Annotation>,
-        modifiers: MemberModifiers,
-        field_type: Option<DartType>,
-        name: Identifier,
-        start: usize,
-    ) -> FieldDecl {
-        let MemberModifiers {
-            is_static,
-            is_abstract,
-            is_external,
-            is_covariant,
-            is_late,
-            ..
-        } = modifiers;
-        let declarators = self.parse_declarators(name);
+    fn finish_field(&mut self, name: CompletedMarker) {
+        self.parse_declarators(name);
         self.expect(TokenKind::Semicolon);
-        FieldDecl {
-            annotations,
-            is_static,
-            is_abstract,
-            is_external,
-            is_covariant,
-            is_late,
-            keyword: modifiers.keyword(),
-            field_type,
-            declarators,
-            span: self.span_from(start),
-        }
     }
 
     pub(super) fn parse_async_marker(&mut self) -> AsyncMarker {
@@ -1316,207 +786,129 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_constructor_initializers(&mut self) -> Vec<ConstructorInitializer> {
+    fn parse_constructor_initializers(&mut self) {
         if self.eat(TokenKind::Colon).is_none() {
-            return Vec::new();
+            return;
         }
-        let mut inits = Vec::new();
         loop {
             let marker = self.start();
-            let start = self.cur().offset();
-            let init = match self.cur().kind {
+            let kind = match self.cur().kind {
                 TokenKind::Super => {
                     self.advance();
-                    let call_name = self.eat(TokenKind::Dot).map(|_| self.expect_ident());
-                    let args = self.parse_arg_list();
-                    ConstructorInitializer::SuperCall {
-                        call_name,
-                        args,
-                        span: self.span_from(start),
+                    if self.eat(TokenKind::Dot).is_some() {
+                        self.expect_ident();
                     }
+                    self.parse_arg_list();
+                    NodeKind::SuperCallInitializer
                 }
                 TokenKind::This => {
                     self.advance();
                     let call_name = self.eat(TokenKind::Dot).map(|_| self.expect_ident());
                     if self.at(TokenKind::LParen) {
-                        let args = self.parse_arg_list();
-                        ConstructorInitializer::ThisCall {
-                            call_name,
-                            args,
-                            span: self.span_from(start),
-                        }
+                        self.parse_arg_list();
+                        NodeKind::ThisCallInitializer
                     } else {
                         // this.field = value
-                        let field = call_name.unwrap_or_else(|| {
+                        if call_name.is_none() {
                             self.missing(NodeKind::Identifier);
-                            Identifier::new("<error>", self.cur_span())
-                        });
-                        self.expect(TokenKind::Eq);
-                        let value = self.parse_ctor_init_value();
-                        ConstructorInitializer::FieldInit {
-                            field,
-                            value,
-                            span: self.span_from(start),
                         }
+                        self.expect(TokenKind::Eq);
+                        self.parse_ctor_init_value();
+                        NodeKind::FieldInitializer
                     }
                 }
                 TokenKind::Assert => {
                     self.advance();
                     self.expect(TokenKind::LParen);
-                    let condition = self.parse_expr();
-                    let message =
-                        if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
-                            let m = self.parse_expr();
-                            self.eat(TokenKind::Comma); // optional trailing comma
-                            Some(m)
-                        } else {
-                            None
-                        };
-                    self.expect(TokenKind::RParen);
-                    ConstructorInitializer::Assert {
-                        condition,
-                        message,
-                        span: self.span_from(start),
+                    self.parse_expr();
+                    if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
+                        self.parse_expr();
+                        self.eat(TokenKind::Comma); // optional trailing comma
                     }
+                    self.expect(TokenKind::RParen);
+                    NodeKind::AssertInitializer
                 }
                 _ => {
                     // field = value
-                    let field = self.expect_ident();
+                    self.expect_ident();
                     self.expect(TokenKind::Eq);
-                    let value = self.parse_ctor_init_value();
-                    ConstructorInitializer::FieldInit {
-                        field,
-                        value,
-                        span: self.span_from(start),
-                    }
+                    self.parse_ctor_init_value();
+                    NodeKind::FieldInitializer
                 }
             };
-            let kind = match &init {
-                ConstructorInitializer::SuperCall { .. } => NodeKind::SuperCallInitializer,
-                ConstructorInitializer::ThisCall { .. } => NodeKind::ThisCallInitializer,
-                ConstructorInitializer::FieldInit { .. } => NodeKind::FieldInitializer,
-                ConstructorInitializer::Assert { .. } => NodeKind::AssertInitializer,
-            };
             marker.complete(self, kind);
-            inits.push(init);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
         }
-        inits
     }
 
-    fn parse_ctor_init_value(&mut self) -> Expr {
+    fn parse_ctor_init_value(&mut self) -> CompletedMarker {
         self.with_ctx(|ctx| ctx.in_ctor_init_value = true, Self::parse_expr)
     }
 
-    fn parse_enum(&mut self, annotations: Vec<Annotation>, start: usize) -> EnumDecl {
+    fn parse_enum(&mut self) {
         self.expect(TokenKind::Enum);
-        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
-        let with_clause = self.parse_type_clause(TokenKind::With);
-        let implements = self.parse_type_clause(TokenKind::Implements);
-        let (variants, members) = if self.eat(TokenKind::Semicolon).is_some() {
-            (Vec::new(), Vec::new())
-        } else {
+        let (name, _) = self.parse_name_maybe_primary(false);
+        self.parse_type_clause(TokenKind::With);
+        self.parse_type_clause(TokenKind::Implements);
+        if self.eat(TokenKind::Semicolon).is_none() {
             self.expect(TokenKind::LBrace);
-            let ctor_name = &self.src[name.span.start..name.span.end];
-            let body = self.with_ctx(|ctx| ctx.ctor_name = Some(ctor_name), Self::parse_enum_body);
+            let ctor_name = name.text(self);
+            self.with_ctx(|ctx| ctx.ctor_name = Some(ctor_name), Self::parse_enum_body);
             self.expect(TokenKind::RBrace);
-            body
-        };
-        EnumDecl {
-            annotations,
-            name,
-            type_params,
-            primary_constructor,
-            with_clause,
-            implements,
-            variants,
-            members,
-            span: self.span_from(start),
         }
     }
-    fn parse_enum_body(&mut self) -> (Vec<EnumVariant>, Vec<ClassMember>) {
-        let mut variants = Vec::new();
-        let mut members = Vec::new();
 
+    fn parse_enum_body(&mut self) {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let marker = self.start();
-            let v_start = self.cur().offset();
-            let v_annotations = self.parse_annotations();
+            self.parse_annotations();
             if !self.cur().kind.is_identifier_like() {
                 marker.complete(self, NodeKind::Error);
                 break;
             }
-            let v_name = self.expect_ident();
-            let type_args = self.parse_type_args();
-            // Enhanced-enum constant invoking a named (or `.new`) constructor:
-            // `a.foo(1)`, `a.new(1)`.
-            let constructor_name = if self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1) {
+            self.expect_ident();
+            self.parse_type_args();
+            // Enhanced-enum constant invoking a named (or `.new`) constructor.
+            if self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1) {
                 self.advance(); // .
-                Some(self.expect_ctor_name())
-            } else {
-                None
-            };
-            let args = if self.at(TokenKind::LParen) {
-                Some(self.parse_arg_list())
-            } else {
-                None
-            };
-            variants.push(EnumVariant {
-                annotations: v_annotations,
-                name: v_name,
-                type_args,
-                constructor_name,
-                args,
-                span: self.span_from(v_start),
-            });
+                self.expect_ctor_name();
+            }
+            if self.at(TokenKind::LParen) {
+                self.parse_arg_list();
+            }
             marker.complete(self, NodeKind::EnumVariant);
             let has_comma = self.eat(TokenKind::Comma).is_some();
             if self.eat(TokenKind::Semicolon).is_some() {
-                members = self.parse_class_body();
+                self.parse_class_body();
                 break;
             }
             if !has_comma {
                 break;
             }
         }
-        (variants, members)
     }
 
-    fn parse_extension(&mut self, annotations: Vec<Annotation>, start: usize) -> ExtensionDecl {
+    fn parse_extension(&mut self) {
         self.expect(TokenKind::Extension);
-        let name = if self.cur().kind.is_identifier_like() && !self.at(TokenKind::On) {
-            Some(self.expect_ident())
-        } else {
-            None
-        };
-        let type_params = self.parse_type_params();
+        if self.cur().kind.is_identifier_like() && !self.at(TokenKind::On) {
+            self.expect_ident();
+        }
+        self.parse_type_params();
         let on_marker = self.start();
         self.eat(TokenKind::On);
-        let on_type = self.parse_type();
+        self.parse_type();
         on_marker.complete(self, NodeKind::OnClause);
-        let members = self.parse_class_body_in(None);
-        ExtensionDecl {
-            annotations,
-            name,
-            type_params,
-            on_type,
-            members,
-            span: self.span_from(start),
-        }
+        self.parse_class_body_in(None);
     }
 
-    fn parse_extension_type(
-        &mut self,
-        annotations: Vec<Annotation>,
-        start: usize,
-    ) -> ExtensionTypeDecl {
+    fn parse_extension_type(&mut self) {
         self.expect(TokenKind::Extension);
         self.expect(TokenKind::Type);
-        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(true);
+        let (name, has_primary_constructor) = self.parse_name_maybe_primary(true);
         // The representation constructor is mandatory; recover with an empty one.
-        let primary_constructor = primary_constructor.unwrap_or_else(|| {
+        if !has_primary_constructor {
             self.error("expected representation constructor");
             let marker = self.start();
             self.missing(NodeKind::Identifier);
@@ -1524,288 +916,93 @@ impl<'src> Parser<'src> {
             self.missing(NodeKind::Identifier);
             params_marker.complete(self, NodeKind::FormalParamList);
             marker.complete(self, NodeKind::PrimaryConstructor);
-            PrimaryConstructor {
-                is_const: false,
-                name_span: name.span,
-                constructor_name: None,
-                params: FormalParamList {
-                    params: Vec::new(),
-                    span: self.cur_span(),
-                },
-                span: self.cur_span(),
-            }
-        });
-        let implements = self.parse_type_clause(TokenKind::Implements);
-        let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
-        ExtensionTypeDecl {
-            annotations,
-            name,
-            type_params,
-            primary_constructor,
-            implements,
-            members,
-            span: self.span_from(start),
         }
+        self.parse_type_clause(TokenKind::Implements);
+        self.parse_class_body_in(Some(name.text(self)));
     }
 
-    fn parse_typedef(&mut self, annotations: Vec<Annotation>, start: usize) -> TypeAliasDecl {
+    fn parse_typedef(&mut self) {
         self.expect(TokenKind::Typedef);
         let saved = self.checkpoint();
-
         // Modern form: `typedef Name<T> = Type;`
         if self.cur().kind.is_identifier_like() {
-            let name = self.expect_ident();
-            let type_params = self.parse_type_params();
+            self.expect_ident();
+            self.parse_type_params();
             if self.eat(TokenKind::Eq).is_some() {
-                let aliased = self.parse_type();
+                self.parse_type();
                 self.expect(TokenKind::Semicolon);
-                return TypeAliasDecl {
-                    annotations,
-                    name,
-                    type_params,
-                    aliased,
-                    legacy_params: None,
-                    span: self.span_from(start),
-                };
+                return;
             }
             self.restore_cursor(saved);
         }
-
-        // Legacy form: `typedef [returnType] Name<T>(params);` — synthesize a
-        // function type from the return type and parameter list.
+        // Legacy form: `typedef [returnType] Name<T>(params);`
         let legacy_marker = self.start();
-        let leading = self.parse_type();
-        let ty_start = leading.span().start;
-        let (return_type, name, type_params) = if self.cur().kind.is_identifier_like() {
-            // `leading` was the return type; the name follows.
-            let name = self.expect_ident();
-            let type_params = self.parse_type_params();
-            (Some(leading), name, type_params)
-        } else {
-            // No return type; `leading` is the name (with type args as type params).
-            let (name, type_params) = Self::named_type_to_alias_head(leading);
-            (None, name, type_params)
-        };
-        let params = self.parse_formal_param_list();
+        self.parse_type();
+        if self.cur().kind.is_identifier_like() {
+            self.expect_ident();
+            self.parse_type_params();
+        }
+        self.parse_formal_param_list();
         legacy_marker.complete(self, NodeKind::LegacyTypedef);
         self.expect(TokenKind::Semicolon);
-        let fn_span = Span::new(ty_start, params.span.end);
-        let aliased = DartType::Function(Box::new(FunctionType {
-            return_type: return_type.map(Box::new),
-            type_params: Vec::new(),
-            params: Self::formals_to_function_type_params(&params),
-            is_nullable: false,
-            span: fn_span,
-        }));
-        TypeAliasDecl {
-            annotations,
-            name,
-            type_params,
-            aliased,
-            legacy_params: Some(params),
-            span: self.span_from(start),
+    }
+
+    fn try_parse_top_level_func_or_var(&mut self, outer_is_final: bool) -> Option<NodeKind> {
+        self.eat(TokenKind::External);
+        // `final` may already have been consumed by the outer modifier loop.
+        self.eat(TokenKind::Late);
+        if !outer_is_final {
+            self.eat(TokenKind::Final);
         }
-    }
-
-    /// Split a parsed named type into an alias head: its name and any type
-    /// arguments reinterpreted as type parameters (`Comparator<T>` → `Comparator`,
-    /// `[T]`). Used for legacy typedefs that lack a return type.
-    fn named_type_to_alias_head(ty: DartType) -> (Identifier, Vec<TypeParam>) {
-        match ty {
-            DartType::Named(n) => {
-                let span = n.span;
-                let name = n
-                    .segments
-                    .into_iter()
-                    .next_back()
-                    .unwrap_or_else(|| Identifier::new("<error>", span));
-                let type_params = n
-                    .type_args
-                    .into_iter()
-                    .map(|arg| {
-                        let sp = *arg.span();
-                        let tp_name = match arg {
-                            DartType::Named(mut a) => a
-                                .segments
-                                .pop()
-                                .unwrap_or_else(|| Identifier::new("<error>", sp)),
-                            other => Identifier::new("<error>", *other.span()),
-                        };
-                        TypeParam {
-                            annotations: Vec::new(),
-                            name: tp_name,
-                            bound: None,
-                            span: sp,
-                        }
-                    })
-                    .collect();
-                (name, type_params)
-            }
-            other => (Identifier::new("<error>", *other.span()), Vec::new()),
-        }
-    }
-
-    /// Convert a formal parameter list into function-type parameters for a
-    /// synthesized function type (legacy typedefs, etc.).
-    fn formals_to_function_type_params(params: &FormalParamList) -> Vec<FunctionTypeParam> {
-        params
-            .params
-            .iter()
-            .map(|p| FunctionTypeParam {
-                annotations: p.annotations.clone().into_boxed_slice(),
-                name: Some(p.name.clone()),
-                param_type: p
-                    .param_type
-                    .clone()
-                    .unwrap_or(DartType::Dynamic { span: p.span }),
-                is_required: matches!(
-                    p.kind,
-                    ParamKind::Positional | ParamKind::Named { required: true }
-                ),
-                is_named: matches!(p.kind, ParamKind::Named { .. }),
-            })
-            .collect()
-    }
-
-    fn try_parse_top_level_func_or_var(
-        &mut self,
-        annotations: Vec<Annotation>,
-        start: usize,
-        outer_is_final: bool,
-    ) -> Option<TopLevelDecl> {
-        let is_external = self.eat(TokenKind::External).is_some();
-
-        // Modifiers for variable. Dart orders these `late` before `final`/`const`
-        // (`late final int x`), so consume `late` first. `final` may already have
-        // been consumed by the outer modifier loop.
-        let is_late = self.eat(TokenKind::Late).is_some();
-        let is_final = outer_is_final || self.eat(TokenKind::Final).is_some();
-        let is_const = self.eat(TokenKind::Const).is_some();
-        let _ = self.eat(TokenKind::Var);
-
-        // Return type (optional). A bare `get`/`set` directly followed by the
-        // accessor name is an *untyped* top-level getter/setter (`get foo => 1;`),
-        // not a return type — leave the keyword for the getter/setter handling
-        // below, which the speculative type parse would otherwise consume as a
-        // type named `get`/`set`.
+        self.eat(TokenKind::Const);
+        self.eat(TokenKind::Var);
+        // Bare get/set before an accessor name is not a return type.
         let at_untyped_accessor = self.at_any(&[TokenKind::Get, TokenKind::Set])
             && self.peek(1).kind.is_identifier_like();
-        let return_type = if !at_untyped_accessor {
-            self.try_parse_type_followed_by(TokenKind::is_identifier_like)
-        } else {
-            None
-        };
-
-        // Top-level getter: `(ReturnType) get name { ... }`
+        if !at_untyped_accessor {
+            self.try_parse_type_followed_by(TokenKind::is_identifier_like);
+        }
         if self.at(TokenKind::Get) && self.peek(1).kind.is_identifier_like() {
             self.advance(); // get
-            let name = self.expect_ident();
+            self.expect_ident();
             let async_marker = self.parse_async_marker();
-            let body = self.parse_function_body(async_marker);
-            return Some(TopLevelDecl::Function(FunctionDecl {
-                annotations,
-                is_external,
-                async_marker,
-                kind: FunctionKind::Getter,
-                return_type,
-                name,
-                type_params: vec![],
-                body,
-                span: self.span_from(start),
-            }));
+            self.parse_function_body(async_marker);
+            return Some(NodeKind::FunctionDecl);
         }
-
-        // Top-level setter: `(ReturnType) set name(param) { ... }`
         if self.at(TokenKind::Set) && self.peek(1).kind.is_identifier_like() {
             self.advance(); // set
-            let name = self.expect_ident();
-            let params = self.parse_formal_param_list();
+            self.expect_ident();
+            self.parse_formal_param_list();
             let async_marker = self.parse_async_marker();
-            let body = self.parse_function_body(async_marker);
-            return Some(TopLevelDecl::Function(FunctionDecl {
-                annotations,
-                is_external,
-                async_marker,
-                kind: FunctionKind::Setter(params),
-                return_type,
-                name,
-                type_params: vec![],
-                body,
-                span: self.span_from(start),
-            }));
+            self.parse_function_body(async_marker);
+            return Some(NodeKind::FunctionDecl);
         }
-
         if !self.cur().kind.is_identifier_like() {
             return None;
         }
         let name = self.expect_ident();
-
         if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-            let type_params = self.parse_type_params();
-            let params = self.parse_formal_param_list();
+            self.parse_type_params();
+            self.parse_formal_param_list();
             let async_marker = self.parse_async_marker();
-            let body = self.parse_function_body(async_marker);
-            return Some(TopLevelDecl::Function(FunctionDecl {
-                annotations,
-                is_external,
-                async_marker,
-                kind: FunctionKind::Function(params),
-                return_type,
-                name,
-                type_params,
-                body,
-                span: self.span_from(start),
-            }));
+            self.parse_function_body(async_marker);
+            return Some(NodeKind::FunctionDecl);
         }
-
-        let declarators = self.parse_declarators(name);
+        self.parse_declarators(name);
         self.eat(TokenKind::Semicolon);
-        Some(TopLevelDecl::Variable(TopLevelVarDecl {
-            annotations,
-            is_external,
-            keyword: Self::var_keyword(is_const, is_final),
-            is_late,
-            var_type: return_type,
-            declarators,
-            span: self.span_from(start),
-        }))
+        Some(NodeKind::TopLevelVarDecl)
     }
 
-    pub(super) fn parse_string_lit(&mut self) -> StringLitNode {
+    pub(super) fn parse_string_lit(&mut self) -> CompletedMarker {
         let marker = self.start();
         let tok = *self.cur();
-        let raw = self.tok_text(&tok);
-        let span = Self::tok_span(&tok);
-        let is_string_lit = matches!(tok.kind, TokenKind::StringLit);
-        if is_string_lit {
+        if tok.kind == TokenKind::StringLit {
             self.advance();
+            self.scan_string_interpolations(&tok);
         } else {
             self.error("expected string literal");
             self.missing(NodeKind::Error);
         }
-        let interpolations = if is_string_lit {
-            let (interps, interp_errors) = self.scan_string_interpolations(&tok);
-            // Surface any interpolation sub-parse diagnostics to the enclosing
-            // program (their offsets are already absolute).
-            self.errors.extend(interp_errors);
-            interps
-        } else {
-            Vec::new()
-        };
-        let mut node = StringLitNode {
-            raw: raw.to_owned(),
-            is_adjacent: false,
-            segment_spans: Vec::new(),
-            has_raw_segment: raw.starts_with('r'),
-            value: String::new(),
-            span,
-            interpolations,
-        };
-        node.value = node
-            .delimiter()
-            .map_or_else(|| raw.strip_prefix('r').unwrap_or(raw), |lit| lit.content)
-            .to_owned();
-        marker.complete(self, NodeKind::StringLitNode);
-        node
+        marker.complete(self, NodeKind::StringLitNode)
     }
 }

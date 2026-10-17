@@ -787,7 +787,7 @@ fn config_rule_level_sets_published_severity() {
 }
 
 /// workspace/didChangeWatchedFiles reloads falcon.json and republishes
-/// every open document against its cached AST.
+/// every open document against its cached CST.
 #[test]
 fn watched_files_change_reloads_config() {
     let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;

@@ -63,3 +63,7 @@ class FieldWithNamed extends Base {
   final int field;
   FieldWithNamed(this.field, {int? x}) : super.both(field, x: x); /* expect: use-super-parameters */
 }
+
+class SkippedParameters extends Base {
+  SkippedParameters(String unused, int a, bool skipped, int b) : super.two(a, b); /* expect: use-super-parameters */
+}

@@ -2215,7 +2215,7 @@ mod tests {
     #[test]
     fn string_decoding_concatenates_decoded_adjacent_segments() {
         let source = r#"const value = 'a\n' r'\b' "\x63";"#;
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let program = tree.program(source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Variable(declaration) = program.declarations().next().unwrap() else {
@@ -2410,7 +2410,7 @@ const nonNullableCast = null as int;
 const futureOrCast = null as FutureOr<int?>;
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -2530,7 +2530,7 @@ const futureOrCast = null as FutureOr<int?>;
             ("const value = 1 + 0;", 1, Number::Int(1)),
             ("const value = integer;", 1, Number::Int(1)),
         ] {
-            let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+            let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
             assert!(errors.is_empty(), "{errors:?}");
             let program = tree.program(source);
             let TopLevelDecl::Variable(variable) = program.declarations().next().unwrap() else {
@@ -2671,7 +2671,7 @@ const futureOrCast = null as FutureOr<int?>;
         with_constants(|_, model, signatures| {
             let owner = model.resolve_name("Foo").unwrap();
             let source = "const expression = a;";
-            let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+            let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
             let program = tree.program(source);
             assert!(errors.is_empty());
             let TopLevelDecl::Variable(variable) = program.declarations().next().unwrap() else {
@@ -2713,7 +2713,7 @@ const futureOrCast = null as FutureOr<int?>;
         let parsed_files: Vec<_> = inputs
             .iter()
             .map(|(_, source)| {
-                let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+                let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
                 assert!(errors.is_empty(), "{errors:?}");
                 Arc::new(ParsedFile {
                     source: (*source).into(),

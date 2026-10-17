@@ -338,7 +338,12 @@ impl<'a> Collector<'a> {
         }
         if let Some(token) = name
             .token()
-            .prev_significant()
+            .or_else(|| {
+                self.ctx
+                    .tree()
+                    .token_at(self.ctx.source, name.syntax().span().start)
+            })
+            .and_then(|token| token.prev_significant())
             .filter(|token| matches!(token.kind(), TokenKind::Var | TokenKind::Final))
         {
             self.report(Span::new(token.offset(), token.offset() + token.len()));

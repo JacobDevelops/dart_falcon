@@ -7,7 +7,7 @@ Everything here must be resolved before falcon 1.0. Engine items are checked off
 - [x] **Per-package-context library identity.** When one repository holds several package contexts that resolve the same `package:` URI to different copies (for example two apps pinned to different versions of a dependency), every file resolves against the copy from its own package context. Shared dependencies split into separate per-context instances only when their import closures resolve differently; otherwise all contexts share one instance.
 - [x] **Don't cache failed parser-thread spawns.** If the parser thread can't start while loading a dependency or companion part, the empty result is cached as a real parse (companion directive cache, external-load "attempted" set). The LSP then keeps that library unresolved until the environment resets, and a part's import/part edges stay empty until its text changes.
 - [x] **Surface cross-file thread spawn failures in the LSP.** The error is attached to the first collected file only; when that file isn't an open document, the error never shows and cross-file rules silently report nothing.
-- [ ] **Concrete syntax tree.** Replace the AST plus retained token stream with an arena CST that keeps every token and trivia, so new rules read syntax from one tree and never need parser changes.
+- [x] **Concrete syntax tree.** An arena CST retains every token and trivia, so syntax rules read from one tree and do not need parser changes.
 
 ## Priorities
 
@@ -23,7 +23,7 @@ style | suspicious`.
 
 **Analysis types** (what a rule needs from the engine):
 
-- **syntax-only**: AST/token pass, no types.
+- **syntax-only**: syntax-tree pass, no types.
 - **needs-local-type-inference**: local flow/types.
 - **needs-full-type-resolution**: element model / SDK type hierarchies.
 - **needs-cross-file/project**: whole-program or pubspec/asset analysis.

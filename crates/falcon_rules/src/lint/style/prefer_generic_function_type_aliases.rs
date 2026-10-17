@@ -5,7 +5,7 @@
 //! modern syntax can. Rewriting it as `typedef F = int Function(int);` is more
 //! uniform, composes with generics, and reads consistently with other type
 //! aliases. Legacy declarations retain their written formal parameter list in
-//! the AST, distinguishing them from modern aliases.
+//! the syntax tree, distinguishing them from modern aliases.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -84,8 +84,7 @@ mod tests {
     #[test]
     fn incomplete_alias_without_parameter_list_is_not_a_legacy_function_alias() {
         let source = "typedef F;";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,

@@ -6,7 +6,7 @@
 //! with no argument (or an empty/whitespace-only string) is just as unhelpful,
 //! so both should be replaced with `@Deprecated("message")`. A `@Deprecated`
 //! whose positional argument is any non-empty expression is accepted. The rule
-//! also inspects field-level annotations, which the generic AST walk would
+//! also inspects field-level annotations, which the generic syntax-tree walk would
 //! otherwise skip.
 
 use falcon_analyze::{

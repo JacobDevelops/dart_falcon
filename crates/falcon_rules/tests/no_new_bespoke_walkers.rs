@@ -1,7 +1,7 @@
-//! Ratchet against hand-rolled AST traversal in rules.
+//! Ratchet against hand-rolled syntax-tree traversal in rules.
 //!
-//! Every rule that walks the AST itself re-implements the recursion, and every
-//! one of those walks ends in a `_ => {}` arm. That arm is silent by
+//! Every rule that walks the syntax tree itself re-implements the recursion, and
+//! every one of those walks ends in a `_ => {}` arm. That arm is silent by
 //! construction: when Dart gains syntax — a record-pattern declaration, a
 //! labeled statement, a generic tear-off — the walk simply stops there, the rule
 //! goes blind, and nothing warns or fails to compile. That is exactly how a
@@ -9,7 +9,7 @@
 //!
 //! `falcon_syntax::cst::visit` already provides an exhaustive walker plus the
 //! `for_each_expr` / `bound_names` helpers. A rule
-//! built on those cannot go blind, because the shared walker matches every AST
+//! built on those cannot go blind, because the shared walker matches every syntax
 //! variant with no catch-all.
 //!
 //! This test does not forbid the remaining hand-rolled walkers outright — there
@@ -58,7 +58,7 @@ fn block_body(src: &str, from: usize) -> Option<&str> {
     None
 }
 
-/// A hand-rolled walker: a self-recursive function that matches on AST nodes and
+/// A hand-rolled walker: a self-recursive function that matches on syntax nodes and
 /// has a catch-all arm. Recursive *predicates* (`is_literal`, `base_type_name`)
 /// trip this too; that is deliberate — a false positive costs one baseline line,
 /// whereas a missed walker costs a silent rule.
@@ -127,7 +127,7 @@ fn no_new_hand_rolled_ast_walkers() {
 
     if std::env::var("UPDATE_BESPOKE_WALKER_BASELINE").is_ok() {
         let mut out = String::from(
-            "# Hand-rolled AST walkers, pinned by tests/no_new_bespoke_walkers.rs.\n\
+            "# Hand-rolled syntax-tree walkers, pinned by tests/no_new_bespoke_walkers.rs.\n\
              # This list may only shrink. Build new rules on falcon_syntax::cst::visit.\n",
         );
         for entry in &current {
@@ -152,7 +152,7 @@ fn no_new_hand_rolled_ast_walkers() {
     let mut problems = String::new();
     if !added.is_empty() {
         problems.push_str(
-            "\nNew hand-rolled AST walker(s). These go blind on new Dart syntax —\n\
+            "\nNew hand-rolled syntax-tree walker(s). These go blind on new Dart syntax —\n\
              build on falcon_syntax::cst::visit instead (walk_expr / for_each_expr /\n\
              bound_names), which is exhaustive:\n",
         );

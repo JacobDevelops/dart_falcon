@@ -735,7 +735,7 @@ mod tests {
         std::fs::create_dir(&sources).unwrap();
         std::fs::write(package_root.join("pubspec.yaml"), "name: 'pkg' # comment\n").unwrap();
         std::os::unix::fs::symlink(&sources, package_root.join("lib")).unwrap();
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse("");
+        let falcon_dart_parser::ParseResult { tree, errors } = parse("");
         assert!(errors.is_empty());
         let package = detect_package(&[ProjectFile {
             path: package_root.join("test.dart"),
@@ -755,7 +755,7 @@ mod tests {
     #[test]
     fn program_reference_uris_yields_configurable_uris() {
         let src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
         assert!(errors.is_empty(), "{errors:?}");
         let uris: Vec<_> = program_reference_uris(tree.program(src)).collect();
         assert!(

@@ -936,7 +936,7 @@ mod test_directories {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("pubspec.yaml"), "name: example\n").unwrap();
         let source = "class Suite { test_example() {} solo_test_example() {} }";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),

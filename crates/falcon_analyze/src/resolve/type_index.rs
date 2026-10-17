@@ -1261,7 +1261,7 @@ mod tests {
     use std::sync::Arc;
 
     fn program(src: &str) -> Arc<ParsedFile> {
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         Arc::new(ParsedFile {
             source: src.into(),

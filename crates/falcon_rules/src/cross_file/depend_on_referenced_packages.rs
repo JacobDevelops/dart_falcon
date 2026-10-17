@@ -199,7 +199,7 @@ mod tests {
             .map(|relative| {
                 let path = root.join(relative);
                 let source = std::fs::read_to_string(&path).unwrap();
-                let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                let falcon_dart_parser::ParseResult { tree, errors } =
                     falcon_dart_parser::parse(&source);
                 assert!(errors.is_empty());
                 ProjectFile {

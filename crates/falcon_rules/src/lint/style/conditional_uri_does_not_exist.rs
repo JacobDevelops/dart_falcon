@@ -342,7 +342,7 @@ mod tests {
             if (dart.library.io) 'package:configured_app/src/present.dart?query'\n\
             if (dart.library.html) '?query'\n\
             if (dart.library.js_interop) 'package:configured_app/src/present.dart#fragment';";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+        let falcon_dart_parser::ParseResult { tree, errors } =
             falcon_dart_parser::parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {

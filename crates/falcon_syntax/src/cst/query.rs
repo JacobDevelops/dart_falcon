@@ -1,9 +1,9 @@
 use std::ops::Range;
 
+use super::Span;
 use super::kind::NodeKind;
 use super::node::{SyntaxNode, SyntaxToken, SyntaxTokens};
 use super::tree::{NodeId, SyntaxTree, TokenId};
-use crate::ast::Span;
 use crate::token::TokenKind;
 
 fn is_interpolation(node: SyntaxNode<'_>) -> bool {
@@ -50,9 +50,9 @@ impl TopLevelTokens<'_> {
             if reverse {
                 self.nodes.end = node.id().0 as usize;
             } else {
-                self.nodes.start = data.subtree_end;
+                self.nodes.start = data.subtree_end as usize;
             }
-            return Some(data.tokens.clone());
+            return Some(data.token_range());
         }
         None
     }
@@ -261,7 +261,7 @@ impl SyntaxTree {
         })
     }
 
-    pub fn documentation_start(&self, gap: Span, source: &str) -> Option<usize> {
+    pub fn documentation_start(&self, source: &str, gap: Span) -> Option<usize> {
         let mut start = None;
         let mut previous_block = false;
         for token in self
@@ -313,7 +313,7 @@ impl SyntaxTree {
                 .root(source)
                 .descendants()
                 .filter(|node| is_interpolation(*node))
-                .map(|node| self.nodes[node.id().0 as usize].tokens.clone())
+                .map(|node| self.nodes[node.id().0 as usize].token_range())
                 .filter(|range| !range.is_empty())
                 .peekable();
             let mut outer_stacks = Vec::new();
@@ -375,7 +375,7 @@ impl SyntaxTree {
 mod tests {
     use super::super::tree::Event;
     use super::*;
-    use crate::token::{SyntaxStore, Token, TokenId as StoreTokenId};
+    use crate::token::Token;
 
     fn fixture() -> (&'static str, Vec<Token>) {
         let source = "/// a\n/** b */\n/// c\nf([)] // tail\n";
@@ -409,28 +409,16 @@ mod tests {
     }
 
     #[test]
-    fn flat_queries_match_syntax_store() {
+    fn flat_queries_preserve_lexical_tokens_and_ranges() {
         let (source, tokens) = fixture();
-        let store = SyntaxStore::new(tokens.clone());
-        let tree = SyntaxTree::build(
-            source,
-            &tokens,
-            vec![
-                Event::Start {
-                    kind: NodeKind::Program,
-                    forward_parent: None,
-                    offset: 0,
-                },
-                Event::Finish,
-            ],
-        );
-        let spans = |tokens: Vec<SyntaxToken<'_>>| {
+        let tree = SyntaxTree::build(source, &tokens, vec![]);
+        let coordinates = |tokens: Vec<SyntaxToken<'_>>| {
             tokens
                 .into_iter()
                 .map(|token| (token.kind(), token.span()))
                 .collect::<Vec<_>>()
         };
-        let old = |tokens: Vec<&Token>| {
+        let expected = |tokens: Vec<&Token>| {
             tokens
                 .into_iter()
                 .map(|token| {
@@ -442,58 +430,72 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            spans(tree.tokens(source).collect()),
-            old(store.tokens().iter().collect())
+            coordinates(tree.tokens(source).collect()),
+            expected(tokens.iter().collect())
         );
-        assert_eq!(
-            spans(tree.significant_tokens(source).collect()),
-            old(store.significant_tokens().collect())
+        assert!(
+            tree.significant_tokens(source)
+                .map(|token| token.id().index())
+                .eq([6, 7, 8, 9, 10])
         );
-        assert_eq!(
-            spans(tree.comment_tokens(source).collect()),
-            old(store.comment_tokens().collect())
+        assert!(
+            tree.comment_tokens(source)
+                .map(|token| token.id().index())
+                .eq([0, 2, 4, 12])
         );
-        assert_eq!(
-            spans(tree.identifier_tokens(source).collect()),
-            old(store.identifier_tokens().collect())
+        assert!(
+            tree.identifier_tokens(source)
+                .map(|token| token.id().index())
+                .eq([6])
         );
         for start in 0..=source.len() {
             for end in start..=source.len() {
                 let span = Span::new(start, end);
-                assert_eq!(
-                    spans(tree.tokens_in(source, span).collect()),
-                    old(store.tokens_in(span).collect())
+                let contained = tokens.iter().filter(|token| {
+                    !token.is_empty()
+                        && token.offset() >= start
+                        && token.offset() + token.len() <= end
+                });
+                let coordinate = |token: &Token| {
+                    (
+                        token.kind,
+                        Span::new(token.offset(), token.offset() + token.len()),
+                    )
+                };
+                assert!(
+                    tree.tokens_in(source, span)
+                        .map(|token| (token.kind(), token.span()))
+                        .eq(contained.clone().map(coordinate))
                 );
-                assert_eq!(
-                    spans(tree.comments_in(source, span).collect()),
-                    old(store.comments_in(span).collect())
+                assert!(
+                    tree.comments_in(source, span)
+                        .map(|token| (token.kind(), token.span()))
+                        .eq(contained
+                            .clone()
+                            .filter(|token| token.kind.is_comment())
+                            .map(coordinate))
                 );
-                assert_eq!(
-                    spans(tree.keywords_in(source, span, TokenKind::Ident).collect()),
-                    old(store.keywords_in(span, TokenKind::Ident).collect())
-                );
-                assert_eq!(
-                    tree.documentation_start(span, source),
-                    store.documentation_start(span, source)
+                assert!(
+                    tree.keywords_in(source, span, TokenKind::Ident)
+                        .map(|token| (token.kind(), token.span()))
+                        .eq(contained
+                            .filter(|token| token.kind == TokenKind::Ident)
+                            .map(coordinate))
                 );
             }
         }
-        for index in 0..tokens.len() {
+        for (open, close) in [(7, 9), (8, 10)] {
             assert_eq!(
-                tree.closing_delimiter(source, TokenId(index as u32))
-                    .map(|token| token.id().0),
-                store
-                    .closing_delimiter(StoreTokenId(index as u32))
-                    .map(|id| id.0)
+                tree.closing_delimiter(source, TokenId(open)).unwrap().id(),
+                TokenId(close)
             );
             assert_eq!(
-                tree.opening_delimiter(source, TokenId(index as u32))
-                    .map(|token| token.id().0),
-                store
-                    .opening_delimiter(StoreTokenId(index as u32))
-                    .map(|id| id.0)
+                tree.opening_delimiter(source, TokenId(close)).unwrap().id(),
+                TokenId(open)
             );
         }
+        assert!(tree.closing_delimiter(source, TokenId(6)).is_none());
+        assert!(tree.opening_delimiter(source, TokenId(7)).is_none());
         let blocks: Vec<_> = tree
             .doc_blocks(source)
             .map(|block| {
@@ -504,20 +506,23 @@ mod tests {
                 )
             })
             .collect();
-        let expected: Vec<_> = store
-            .doc_blocks(source)
-            .map(|block| {
-                (
-                    block.start,
-                    block.next_token,
-                    block
-                        .tokens()
-                        .map(|token| token.text(source))
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-        assert_eq!(blocks, expected);
+        assert_eq!(blocks, [(6, 21, vec!["/** b */", "/// c"])]);
+        for (start, end, expected) in [
+            (0, 21, Some(15)),
+            (0, 5, Some(0)),
+            (1, 5, None),
+            (5, 14, Some(6)),
+            (6, 20, Some(15)),
+            (7, 20, Some(15)),
+            (15, 20, Some(15)),
+            (16, 21, None),
+            (0, 19, Some(6)),
+        ] {
+            assert_eq!(
+                tree.documentation_start(source, Span::new(start, end)),
+                expected
+            );
+        }
         for token in tree.tokens(source) {
             assert_eq!(tree.token_at(source, token.offset()), Some(token));
         }
@@ -676,5 +681,110 @@ mod tests {
         for close in [21, 22] {
             assert!(tree.opening_delimiter(&source, token(close).id()).is_none());
         }
+    }
+
+    #[test]
+    fn mixed_nullable_and_unclosed_delimiters_preserve_pairs() {
+        let source = "(?[{}])((]";
+        let tokens = [
+            Token::new(TokenKind::LParen, 0, 1),
+            Token::new(TokenKind::QmarkLBracket, 1, 2),
+            Token::new(TokenKind::LBrace, 3, 1),
+            Token::new(TokenKind::RBrace, 4, 1),
+            Token::new(TokenKind::RBracket, 5, 1),
+            Token::new(TokenKind::RParen, 6, 1),
+            Token::new(TokenKind::LParen, 7, 1),
+            Token::new(TokenKind::LParen, 8, 1),
+            Token::new(TokenKind::RBracket, 9, 1),
+        ];
+        let tree = SyntaxTree::build(source, &tokens, vec![]);
+        for (open, close) in [(0, 5), (1, 4), (2, 3)] {
+            assert_eq!(
+                tree.closing_delimiter(source, TokenId(open)).unwrap().id(),
+                TokenId(close)
+            );
+            assert_eq!(
+                tree.opening_delimiter(source, TokenId(close)).unwrap().id(),
+                TokenId(open)
+            );
+        }
+        for open in [6, 7] {
+            assert!(tree.closing_delimiter(source, TokenId(open)).is_none());
+        }
+        assert!(tree.opening_delimiter(source, TokenId(8)).is_none());
+    }
+
+    #[test]
+    fn ranges_exclude_partial_tokens_and_keep_stable_ids() {
+        let source = "abc de";
+        let tokens = [
+            Token::new(TokenKind::Ident, 0, 3),
+            Token::new(TokenKind::Whitespace, 3, 1),
+            Token::new(TokenKind::Ident, 4, 2),
+        ];
+        let tree = SyntaxTree::build(source, &tokens, vec![]);
+        let mut contained = tree.tokens_in(source, Span::new(1, 5));
+        assert_eq!(contained.next().unwrap().id(), TokenId(1));
+        assert!(contained.next().is_none());
+        assert_eq!(tree.token(source, TokenId(2)).unwrap().offset(), 4);
+        assert!(
+            tree.significant_tokens(source)
+                .map(|token| token.offset())
+                .eq([0, 4])
+        );
+    }
+
+    #[test]
+    fn documentation_groups_reset_at_block_comments_and_attach_through_eof() {
+        let parts = [
+            (TokenKind::DocComment, "/// first"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::LineComment, "// plain"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::DocComment, "/// second"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::Ident, "x"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::DocComment, "/// discarded"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::DocComment, "/** also discarded */"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::DocComment, "/** reset */"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::BlockComment, "/* skipped */"),
+            (TokenKind::Whitespace, " "),
+            (TokenKind::DocComment, "/// appended"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::Ident, "y"),
+            (TokenKind::Newline, "\n"),
+            (TokenKind::DocComment, "/// eof"),
+            (TokenKind::Newline, "\n"),
+        ];
+        let source: String = parts.iter().map(|(_, text)| *text).collect();
+        let mut offset = 0;
+        let mut tokens: Vec<_> = parts
+            .iter()
+            .map(|(kind, text)| {
+                let token = Token::new(*kind, offset, text.len());
+                offset += text.len();
+                token
+            })
+            .collect();
+        tokens.push(Token::new(TokenKind::Eof, source.len(), 0));
+        let tree = SyntaxTree::build(&source, &tokens, vec![]);
+        let mut blocks = tree.doc_blocks(&source);
+        for (indices, next) in [(&[0, 4][..], 6), (&[12, 16][..], 18), (&[20][..], 22)] {
+            let block = blocks.next().unwrap();
+            assert_eq!(block.start, tokens[indices[0]].offset());
+            assert_eq!(block.next_token, tokens[next].offset());
+            assert!(
+                block
+                    .tokens()
+                    .map(|token| token.id().index())
+                    .eq(indices.iter().copied())
+            );
+        }
+        assert!(blocks.next().is_none());
+        assert!(blocks.next().is_none());
     }
 }

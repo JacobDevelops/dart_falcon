@@ -61,7 +61,7 @@ fn check_double(value: &str, span: &Span, diags: &mut Vec<Diagnostic>, ctx: &Ana
 }
 
 /// Every double literal in the file, wherever it appears. The shared walker is
-/// exhaustive over the AST, so new syntax cannot silently hide a literal.
+/// exhaustive over the syntax tree, so new syntax cannot silently hide a literal.
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,

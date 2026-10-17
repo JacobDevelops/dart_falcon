@@ -154,13 +154,20 @@ struct Library {
 struct Import {
     target: ImportTarget,
     prefix: Option<String>,
-    combinators: Vec<NodeRef>,
+    combinators: Combinators,
 }
 
 #[derive(Debug, Clone)]
 struct Export {
     target: ImportTarget,
-    combinators: Vec<NodeRef>,
+    combinators: Combinators,
+}
+
+/// The intersection of all show lists, minus hides; without a show, the union of hides.
+#[derive(Debug, Clone)]
+enum Combinators {
+    Show(Vec<InternedString>),
+    Hide(Vec<InternedString>),
 }
 
 /// SDK and package identities use static builtin or index-owned shared names.
@@ -835,7 +842,6 @@ impl IdentityIndex {
                 });
             }
         }
-        drop(interner);
 
         let resolver = LibraryResolver {
             by_path: &by_path,
@@ -846,12 +852,10 @@ impl IdentityIndex {
             external_file_offsets: &external_file_offsets,
             project_library_count: external_library_start,
         };
-        for (ordinal, (&(path, program, _), &library)) in all.iter().zip(&file_library).enumerate()
-        {
+        for (&(path, program, _), &library) in all.iter().zip(&file_library) {
             let external_instance = library.0.checked_sub(external_library_start);
             let mut imports = Vec::with_capacity(program.imports().len());
             let mut implicit_core = true;
-            let file = &parsed[ordinal];
             for import in program.imports() {
                 if import.uri().value() == "dart:core" {
                     implicit_core = false;
@@ -859,24 +863,19 @@ impl IdentityIndex {
                 imports.push(Import {
                     target: resolver.resolve(path, external_instance, &import.uri().value()),
                     prefix: import.as_name().map(|id| id.name().to_owned()),
-                    combinators: import
-                        .combinators()
-                        .map(|node| NodeRef::new(Arc::clone(file), node.syntax().id()))
-                        .collect(),
+                    combinators: Combinators::collect(import.combinators(), &mut interner),
                 });
             }
             let exports = program.exports().map(|export| Export {
                 target: resolver.resolve(path, external_instance, &export.uri().value()),
-                combinators: export
-                    .combinators()
-                    .map(|node| NodeRef::new(Arc::clone(file), node.syntax().id()))
-                    .collect(),
+                combinators: Combinators::collect(export.combinators(), &mut interner),
             });
             let library = &mut libraries[library.0];
             library.implicit_core &= implicit_core;
             library.imports.extend(imports);
             library.exports.extend(exports);
         }
+        drop(interner);
         for ((file, source), &library) in files.iter().zip(sources).zip(&file_library) {
             // A doc import of a library that does not exist contributes nothing.
             let targets = doc_imports(file.parsed.program(), source)
@@ -2513,7 +2512,7 @@ pub fn library_doc_imports<'s>(
         .library_directive()
         .map_or(0, |directive| directive.span().start);
     let start = syntax
-        .documentation_start(Span::new(0, end), source)
+        .documentation_start(source, Span::new(0, end))
         .unwrap_or(end);
     let mut import_source = String::new();
     syntax
@@ -2611,13 +2610,47 @@ fn uri_missing(environment: &AnalysisEnvironment, from: &Path, uri: &str) -> boo
     !uri.contains(':') && from.parent().is_some_and(|dir| !dir.join(uri).exists())
 }
 
-fn allows(combinators: &[NodeRef], name: &str) -> bool {
-    combinators.iter().all(
-        |combinator| match combinator.cast::<ImportCombinator<'_>>() {
-            ImportCombinator::Show(names) => names.names().any(|id| id.name() == name),
-            ImportCombinator::Hide(names) => names.names().all(|id| id.name() != name),
-        },
-    )
+impl Combinators {
+    fn collect<'a>(
+        combinators: impl Iterator<Item = ImportCombinator<'a>>,
+        interner: &mut StringInterner,
+    ) -> Self {
+        let mut result = Self::Hide(Vec::new());
+        for combinator in combinators {
+            match (&mut result, combinator) {
+                (Self::Hide(hidden), ImportCombinator::Hide(names)) => {
+                    hidden.extend(names.names().map(|id| interner.intern(id.name())));
+                }
+                (Self::Hide(hidden), ImportCombinator::Show(names)) => {
+                    result = Self::Show(
+                        names
+                            .names()
+                            .filter(|id| !hidden.iter().any(|name| name == id.name()))
+                            .map(|id| interner.intern(id.name()))
+                            .collect(),
+                    );
+                }
+                (Self::Show(shown), ImportCombinator::Show(names)) => {
+                    shown.retain(|name| names.names().any(|id| name == id.name()));
+                }
+                (Self::Show(shown), ImportCombinator::Hide(names)) => {
+                    shown.retain(|name| names.names().all(|id| name != id.name()));
+                }
+            }
+        }
+        let (Self::Show(names) | Self::Hide(names)) = &mut result;
+        names.sort_unstable();
+        names.dedup();
+        result
+    }
+}
+
+fn allows(combinators: &Combinators, name: &str) -> bool {
+    let (Combinators::Show(names) | Combinators::Hide(names)) = combinators;
+    let contains = names
+        .binary_search_by(|candidate| candidate.as_str().cmp(name))
+        .is_ok();
+    contains == matches!(combinators, Combinators::Show(_))
 }
 
 fn resolve_uri(
@@ -3014,7 +3047,7 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -3182,7 +3215,7 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -3248,7 +3281,7 @@ mod tests {
         let parsed: Vec<_> = inputs
             .iter()
             .map(|(_, source)| {
-                let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+                let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
                 assert!(errors.is_empty(), "{errors:?}");
                 Arc::new(ParsedFile {
                     source: (*source).into(),
@@ -3584,6 +3617,88 @@ mod tests {
             index.resolve_imported_member(main, QualifiedName::prefixed("ambiguous", "immutable")),
             None
         );
+    }
+
+    #[test]
+    fn cached_combinators_match_ast_semantics_including_recovery() {
+        let mut interner = StringInterner::default();
+        for suffix in [
+            "",
+            "show Foo",
+            "hide Foo",
+            "show Foo, Bar, Foo show Bar, Baz",
+            "hide Foo hide Bar, Foo",
+            "hide Foo show Foo, Bar",
+            "show Foo, Bar hide Foo",
+            "show Foo hide Foo show Foo",
+            "show",
+            "hide",
+            "show Foo,",
+            "hide Foo,",
+            "show show Foo",
+            "hide show Foo",
+        ] {
+            for directive in ["import", "export"] {
+                let source = format!("{directive} 'a.dart' {suffix};");
+                let parsed = parse(&source);
+                let parsed = ParsedFile {
+                    source: source.clone().into_boxed_str(),
+                    tree: parsed.tree,
+                };
+                let program = parsed.program();
+                let combinators: Vec<_> = if directive == "import" {
+                    program.imports().next().unwrap().combinators().collect()
+                } else {
+                    program.exports().next().unwrap().combinators().collect()
+                };
+                let cached = Combinators::collect(combinators.iter().copied(), &mut interner);
+                for name in ["", "Foo", "Bar", "Baz", "Unknown"] {
+                    let expected = combinators.iter().all(|combinator| match combinator {
+                        ImportCombinator::Show(names) => names.names().any(|id| id.name() == name),
+                        ImportCombinator::Hide(names) => names.names().all(|id| id.name() != name),
+                    });
+                    assert_eq!(allows(&cached, name), expected, "{source}: {name:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn intersects_import_and_export_show_lists_and_unions_hides() {
+        let index = index(
+            &[
+                (
+                    "/project/lib/a.dart",
+                    "class Foo {} class Bar {} class Baz {}",
+                ),
+                (
+                    "/project/lib/b.dart",
+                    "export 'a.dart' show Foo, Bar, Baz show Bar, Baz hide Baz;",
+                ),
+                (
+                    "/project/lib/c.dart",
+                    "import 'b.dart' as p show Foo, Bar hide Foo; \
+                     import 'a.dart' as q hide Foo hide Baz;",
+                ),
+            ],
+            &[],
+        );
+        for prefix in ["p", "q"] {
+            for (name, expected) in [
+                ("Foo", NameIdentity::Unknown),
+                ("Bar", NameIdentity::Type),
+                ("Baz", NameIdentity::Unknown),
+            ] {
+                assert_eq!(
+                    resolve(
+                        &index,
+                        "/project/lib/c.dart",
+                        QualifiedName::prefixed(prefix, name),
+                    ),
+                    expected
+                );
+            }
+        }
     }
 
     #[test]
@@ -4069,7 +4184,7 @@ mod tests {
         let path = app.join("lib/main.dart");
         let source = "import 'package:dep/api.dart' as p; const _limit = 9;";
         std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),

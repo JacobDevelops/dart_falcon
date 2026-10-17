@@ -531,7 +531,7 @@ void use(Value value) {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -578,7 +578,7 @@ void use() {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -690,7 +690,7 @@ void use() {
 ";
         std::fs::write(&path, source).unwrap();
         let path = falcon_analyze::canonical_or_lexical(&path);
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -779,7 +779,7 @@ void cases(Factory owner, Object value) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),

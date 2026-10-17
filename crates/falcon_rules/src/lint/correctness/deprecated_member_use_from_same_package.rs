@@ -1797,12 +1797,12 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                 if let Expr::Ident(identifier) = callee
                     && let Some(index) = self.local(identifier.name(), identifier.span(), state)
                 {
+                    let mut positional = args.positional().enumerate();
                     for parameter in &self.locals[index].parameters {
                         let span = match parameter.position {
-                            Some(position) => args
-                                .positional()
-                                .nth(position)
-                                .map(|argument| argument.span()),
+                            Some(position) => positional
+                                .find(|(index, _)| *index == position)
+                                .map(|(_, argument)| argument.span()),
                             None => args
                                 .named()
                                 .find(|argument| argument.name().name() == parameter.name)
@@ -1889,7 +1889,7 @@ mod tests {
     use std::sync::Arc;
 
     fn analyze(source: &str, path: &Path) -> Vec<Diagnostic> {
-        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),

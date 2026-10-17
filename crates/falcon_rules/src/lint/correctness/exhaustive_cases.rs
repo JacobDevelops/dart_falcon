@@ -297,7 +297,7 @@ mod tests {
             "switch ( /* before */ (token) /* after */ )",
         );
         let source = source.as_str();
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("owner-dependencies.dart");
         let parsed = Arc::new(ParsedFile {
@@ -342,7 +342,7 @@ mod tests {
     fn missing_cases_follow_declaration_order_with_preferred_aliases() {
         let source =
             include_str!("../../../tests/corpus/exhaustive-cases/review_declaration_order.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("review_declaration_order.dart");
         let parsed = Arc::new(ParsedFile {

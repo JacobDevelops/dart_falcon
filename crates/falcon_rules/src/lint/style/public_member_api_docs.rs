@@ -477,8 +477,7 @@ mod tests {
     #[test]
     fn carriage_return_line_comments_do_not_hide_public_declarations() {
         let source = "// ordinary comment\rvoid visible() {}";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,
@@ -507,8 +506,7 @@ mod tests {
             sealed class Closed();\n\
             class _Private();\n\
             extension type Wrapper(int value) {}";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,
@@ -556,8 +554,7 @@ mod tests {
             class C();\n\
             /// Documents only the mixin class.\n\
             mixin class M();";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,
@@ -589,8 +586,7 @@ class Accessors {
 set top(int next) {}
 int get top => 0;
 ";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } =
-            falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
             source: source.into(),
             tree,

@@ -373,14 +373,14 @@ void use(dynamic value) {
         let path = Path::new("/project/lib/test.dart");
         let expect_path = Path::new("/project/lib/expect.dart");
         let expect_source = "void expect(dynamic actual) {}";
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(expect_source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(expect_source);
         assert!(errors.is_empty(), "{errors:?}");
         let expect_parsed = Arc::new(ParsedFile {
             source: expect_source.into(),
             tree,
         });
         let expect_program = expect_parsed.program();
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -461,7 +461,7 @@ void use(dynamic value) {
     fn reports_dynamic_operations_at_their_ast_receivers() {
         let source = "class Callbacks { final Function callback; Callbacks(this.callback); }\nvoid f(dynamic d, Function fn, Callbacks callbacks) {\n  d\n    ..x += 1;\n  d\n    ..a.b();\n  fn.call();\n  --d.z;\n  (d)();\n  d.toString();\n  (d as dynamic).foo();\n  callbacks\n      .callback();\n}";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -507,7 +507,7 @@ void use(dynamic value) {
     fn cascade_receivers_and_updates_keep_exact_spans_through_registry() {
         let source = "class SpanOps {\n  dynamic a;\n  Function f;\n  SpanOps(this.a, this.f);\n}\nvoid cascadeSpanWitness(SpanOps o, dynamic e) {\n  o..f.call();\n  ++e;\n  e--;\n  o..a.x += 1;\n  o..a.b();\n  o..a[0].x;\n  o..a[0].x += 1;\n}\n";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -600,7 +600,7 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),
@@ -695,7 +695,7 @@ void cases(dynamic d, Function fn, Holder h) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
             source: source.into(),

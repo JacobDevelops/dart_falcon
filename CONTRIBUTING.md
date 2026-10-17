@@ -90,9 +90,9 @@ notes, is in
 
    - `RulePreparation::Structural`: syntax rules return an independent `StructuralRuleVisitor` collector. Wrap the complete trait implementation in `falcon_analyze::structural_visitor!` so callback subscriptions are derived from its methods, not maintained separately. All enabled collectors share the source-order structural walk. Inspect nodes in `visit_*` callbacks, restore scoped state in matching `exit_*` callbacks, and return diagnostics from consuming `finish`. Do not recurse from callbacks. `StructuralTraversal::SkipChildren` and `route_child` suppress callbacks only for that collector, never for other rules.
    - `RulePreparation::Semantic`: type- or flow-aware rules return a `SemanticRuleVisitor` collector for the shared evaluation-order semantic walk.
-   - `RulePreparation::Diagnostics`: reserve immediate diagnostics for genuine whole-file, source/token, path, or directive checks, or for a rule gated off before collection. Do not run a rule-local primary AST traversal here.
+   - `RulePreparation::Diagnostics`: reserve immediate diagnostics for genuine whole-file, source/token, path, or directive checks, or for a rule gated off before collection. Do not run a rule-local primary syntax-tree traversal here.
 
-   Use the parsed `SyntaxStore` through `ctx.syntax` for tokens, delimiters, and comments; don't re-lex the file. Pass the parser's store to `AnalyzeContext::new(path, source, config, &syntax)`. Token ids belong to their store, so use `syntax_for_span(span)` for nested interpolations. Preserve literal spelling when comparing expressions.
+   Use `ctx.tree()` with `ctx.source` for tokens, delimiters, comments, and typed CST views; don't re-lex the file. Construct a context with `AnalyzeContext::new(file_path, config, &parsed)`, where `parsed` is an `Arc<ParsedFile>` owning the source and tree. Interpolation nodes and their tokens belong to that same tree and use absolute source spans; no separate syntax store is needed. Preserve literal spelling when comparing expressions.
 
    Use `ctx.local_writes(program)` or `ctx.mutated_declarations(program)` for mutation checks. They resolve declarations and handle shadowing; name-only write facts are not a substitute.
 

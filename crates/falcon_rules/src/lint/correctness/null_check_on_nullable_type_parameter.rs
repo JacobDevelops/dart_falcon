@@ -1,7 +1,7 @@
 //! Flags a null assertion `x!` on a nullable type parameter `T?` whose
 //! expected type is `T` or `T?` for a potentially nullable `T`, and
 //! null-assert patterns whose matched value is a nullable type parameter.
-//! Diagnostics underline only the terminal `!` of either AST assertion node.
+//! Diagnostics underline only the terminal `!` of either syntax-tree assertion node.
 //!
 //! As in the analyzer's expected-type helper, only these positions have an
 //! expected type:
