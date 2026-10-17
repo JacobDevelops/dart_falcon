@@ -4,9 +4,11 @@ wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
 
 # Rust comes from rustup via rust-toolchain.toml; mise installs every other tool at latest.
 [tools]
-bun                   = "latest"
-mr-boxington          = "latest"
-cargo-make            = "latest"
-taplo                 = "latest"
+bun          = "latest"
+mr-boxington = "latest"
+cargo-make   = "latest"
+taplo        = "latest"
+# Lets the cargo: backend download prebuilt binaries instead of compiling them.
+cargo-binstall        = "latest"
 "cargo:cargo-nextest" = { version = "latest", locked = true }
 "cargo:cargo-watch"   = { version = "latest", locked = true }
