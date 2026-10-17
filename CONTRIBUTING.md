@@ -147,8 +147,8 @@ Inline suppression is handled centrally by `crates/falcon_analyze/src/suppressio
 
 falcon versions its workspace crates together. To cut a release:
 
-1. Bump `version` under `[workspace.package]` in `Cargo.toml` (all workspace crates derive from it).
+1. Run `cargo xtask version X.Y.Z`. It bumps `version` under `[workspace.package]` in `Cargo.toml` (all workspace crates derive from it), refreshes `Cargo.lock`, and rewrites the pinned release URLs, archive names and mise pins in the root and `docs/` Markdown, plus the version in `website/src/data/cli.json`. A test fails if any of those drift from `Cargo.toml`; a pin in a new shape needs adding to `with_version_references` in `xtask/src/main.rs`.
 2. Commit, then tag: `git tag vX.Y.Z && git push --tags`.
 
-The tag triggers `.github/workflows/release.yml`, which builds the four platform binaries and publishes a GitHub Release with auto-generated notes (failing if the tag and `Cargo.toml` version disagree).
+The tag triggers `.github/workflows/release.yml`, which builds the four platform binaries and publishes a GitHub Release with auto-generated notes (failing if the tag and `Cargo.toml` version disagree). Each tarball ships twice: `falcon-X.Y.Z-<platform>.tar.gz` for pinned installs and `falcon-<platform>.tar.gz`, which the unpinned `releases/latest/download/` quick-start links rely on.
 

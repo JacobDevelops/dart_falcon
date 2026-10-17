@@ -21,9 +21,9 @@ Every release attaches platform tarballs to the
 tarball contains a single `falcon` executable.
 
 ```sh
-# Substitute the release version in both the tag and archive name, and your platform:
+# Substitute your platform:
 #   x86_64-linux | aarch64-linux | x86_64-darwin | aarch64-darwin
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.1/falcon-0.4.1-x86_64-linux.tar.gz \
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-x86_64-linux.tar.gz \
   | tar -xz
 sudo mv falcon /usr/local/bin/   # or anywhere on your PATH
 
@@ -34,10 +34,10 @@ Each release also publishes `SHA256SUMS` and a GitHub build provenance
 attestation for every tarball. To verify a download before extracting it:
 
 ```sh
-base=https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.1
-curl -fsSLO "$base/falcon-0.4.1-x86_64-linux.tar.gz" -O "$base/SHA256SUMS"
+base=https://github.com/JacobDevelops/dart_falcon/releases/latest/download
+curl -fsSLO "$base/falcon-x86_64-linux.tar.gz" -O "$base/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify falcon-0.4.1-x86_64-linux.tar.gz --repo JacobDevelops/dart_falcon
+gh attestation verify falcon-x86_64-linux.tar.gz --repo JacobDevelops/dart_falcon
 ```
 
 The mise GitHub backend runs these checks automatically.
@@ -64,7 +64,7 @@ Add the GitHub release backend to your project's `mise.toml`:
 
 ```toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.4.1", matching = "falcon-" }
+"github:JacobDevelops/dart_falcon" = { version = "0.4.2", matching = "falcon-" }
 ```
 
 Install the pinned release and run it:
@@ -113,9 +113,10 @@ capabilities = { workspace = { didChangeWatchedFiles = { dynamicRegistration = t
 1. A maintainer pushes a tag `vX.Y.Z`.
 2. CI (`.github/workflows/release.yml`) cross-builds all four platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
-3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz`, checksummed into
-   `SHA256SUMS`, given a build provenance attestation, and attached to a
-   GitHub Release.
+3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
+   versionless `falcon-<system>.tar.gz` copy for `releases/latest/download/`
+   links, checksummed into `SHA256SUMS`, given a build provenance attestation,
+   and attached to a GitHub Release.
 
 ## Next steps
 
