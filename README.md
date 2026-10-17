@@ -120,6 +120,7 @@ falcon speaks LSP (`falcon lsp`). First-party extensions live in
 
 - **VS Code**: `extensions/falcon-vscode`
 - **Zed**: `extensions/falcon-zed`
+- **Neovim**: no plugin needed, see the [setup snippet](./docs/installation.md#neovim)
 
 ## Roadmap
 

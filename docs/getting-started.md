@@ -114,8 +114,9 @@ First-party extensions launch that server for you. The VS Code extension also en
 
 - **VS Code**: `extensions/falcon-vscode`
 - **Zed**: `extensions/falcon-zed`
+- **Neovim**: a short `vim.lsp.config` snippet, no plugin needed
 
-Both launch the `falcon` binary from your `PATH`, so install falcon with any
+All of them launch the `falcon` binary from your `PATH`, so install falcon with any
 channel above first. See [installation.md](./installation.md#editor-extensions)
 for details.
 

@@ -87,6 +87,27 @@ falcon speaks LSP (`falcon lsp`); first-party extensions live in
 Both launch the `falcon` binary from your `PATH`, so install falcon with any
 channel above first.
 
+### Neovim
+
+Neovim 0.11+ needs no plugin. Add this to your config:
+
+```lua
+vim.lsp.config('falcon', {
+  cmd = { 'falcon', 'lsp' },
+  filetypes = { 'dart' },
+  root_markers = { 'falcon.json', 'pubspec.yaml', '.git' },
+})
+vim.lsp.enable('falcon')
+```
+
+On Linux and BSD, Neovim doesn't watch files by default, so `falcon.json` edits
+only apply after the server restarts. To reload them live, install
+`inotify-tools` and add this to the config above:
+
+```lua
+capabilities = { workspace = { didChangeWatchedFiles = { dynamicRegistration = true } } },
+```
+
 ## How releases work
 
 1. A maintainer pushes a tag `vX.Y.Z`.
