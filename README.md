@@ -3,6 +3,8 @@
 # falcon
 
 [![CI](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/JacobDevelops/dart_falcon)](https://github.com/JacobDevelops/dart_falcon/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 Docs and rule reference: [dart-falcon.jacobdevelops.com](https://dart-falcon.jacobdevelops.com)
 
