@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use falcon_rules::meta::{Domain, RULE_METADATA, RuleGroup, RuleMeta, RuleSource};
+use rayon::prelude::*;
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 use std::fs;
@@ -635,127 +636,26 @@ fn validate_rules(options: ValidateRules) {
         .collect();
     rule_dirs.sort();
 
+    // Each rule spawns one falcon process per fixture; rules are independent.
+    let outcomes: Vec<RuleOutcome> = rule_dirs
+        .par_iter()
+        .map(|rule_dir| validate_rule_dir(rule_dir, &workspace, &corpus_path, &falcon, threshold))
+        .collect();
+
     let mut total_files: usize = 0;
     let mut total_expected: usize = 0;
     let mut total_matched: usize = 0;
     let mut all_failures: Vec<String> = Vec::new();
-
-    for rule_dir in &rule_dirs {
-        let rule_name = rule_dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        let mut dart_files: Vec<PathBuf> = fs::read_dir(rule_dir)
-            .unwrap_or_else(|_| panic!("Cannot read {}", rule_dir.display()))
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
-            .collect();
-        dart_files.sort();
-
-        // Config-gated rules reuse their corpus config. Every other rule gets a
-        // generated config so validation also exercises non-recommended rules.
-        let rule_config_path = rule_dir.join("config.json");
-        let uses_generated_config = !rule_config_path.exists();
-        let generated_config_path = workspace.join(format!(
-            "target/validate-rules-{}-{rule_name}.json",
-            std::process::id()
-        ));
-        let rule_config = if uses_generated_config {
-            falcon_rules::meta::RULE_METADATA
-                .iter()
-                .find(|meta| meta.name == rule_name)
-                .and_then(|meta| docgen_config_for(&corpus_path, meta, &generated_config_path))
-        } else {
-            Some(rule_config_path)
-        };
-
-        for dart_file in &dart_files {
-            let source = match fs::read_to_string(dart_file) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("warning: cannot read {}: {}", dart_file.display(), e);
-                    continue;
-                }
-            };
-
-            total_files += 1;
-            let result = match validate_file(
-                dart_file,
-                &source,
-                &falcon,
-                threshold,
-                Some(&rule_name),
-                rule_config.as_deref(),
-            ) {
-                Ok(result) => result,
-                Err(error) => {
-                    let msg = format!(
-                        "ERROR {} — falcon invocation failed: {error}",
-                        dart_file.display()
-                    );
-                    if !json_output {
-                        eprintln!("{msg}");
-                    }
-                    all_failures.push(msg);
-                    continue;
-                }
-            };
-            total_expected += result.expected;
-            total_matched += result.matched;
-
-            for m in &result.missed {
-                let msg = format!(
-                    "MISS  {}:{} — rule `{}` expected but not emitted",
-                    dart_file.display(),
-                    m.line,
-                    m.rule
-                );
-                all_failures.push(msg.clone());
-                if !json_output {
-                    eprintln!("{msg}");
-                }
-            }
-            for fp in &result.false_positives {
-                let msg = format!(
-                    "EXTRA {}:{} — rule `{}` fired unexpectedly: {}",
-                    dart_file.display(),
-                    fp.line,
-                    fp.rule,
-                    fp.message
-                );
-                all_failures.push(msg.clone());
-                if !json_output {
-                    eprintln!("{msg}");
-                }
+    for outcome in outcomes {
+        total_files += outcome.files;
+        total_expected += outcome.expected;
+        total_matched += outcome.matched;
+        if !json_output {
+            for msg in &outcome.failures {
+                eprintln!("{msg}");
             }
         }
-
-        // Cross-file rules keep their fixtures in a `cross-file/` subdirectory,
-        // run as one invocation over the whole directory.
-        let cross_file_dir = rule_dir.join("cross-file");
-        if cross_file_dir.is_dir() {
-            let (expected, matched, failures) = validate_cross_file_dir(
-                &cross_file_dir,
-                &rule_name,
-                &falcon,
-                rule_config.as_deref(),
-            );
-            total_files += 1;
-            total_expected += expected;
-            total_matched += matched;
-            for msg in failures {
-                all_failures.push(msg.clone());
-                if !json_output {
-                    eprintln!("{msg}");
-                }
-            }
-        }
-        if uses_generated_config {
-            let _ = fs::remove_file(&generated_config_path);
-        }
+        all_failures.extend(outcome.failures);
     }
 
     if json_output {
@@ -787,6 +687,120 @@ fn validate_rules(options: ValidateRules) {
     if !all_failures.is_empty() {
         std::process::exit(1);
     }
+}
+
+#[derive(Default)]
+struct RuleOutcome {
+    files: usize,
+    expected: usize,
+    matched: usize,
+    failures: Vec<String>,
+}
+
+fn validate_rule_dir(
+    rule_dir: &Path,
+    workspace: &Path,
+    corpus_path: &Path,
+    falcon: &FalconRunner,
+    threshold: f64,
+) -> RuleOutcome {
+    let rule_name = rule_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let mut dart_files: Vec<PathBuf> = fs::read_dir(rule_dir)
+        .unwrap_or_else(|_| panic!("Cannot read {}", rule_dir.display()))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
+        .collect();
+    dart_files.sort();
+
+    // Config-gated rules reuse their corpus config. Every other rule gets a
+    // generated config so validation also exercises non-recommended rules.
+    let rule_config_path = rule_dir.join("config.json");
+    let uses_generated_config = !rule_config_path.exists();
+    let generated_config_path = workspace.join(format!(
+        "target/validate-rules-{}-{rule_name}.json",
+        std::process::id()
+    ));
+    let rule_config = if uses_generated_config {
+        falcon_rules::meta::RULE_METADATA
+            .iter()
+            .find(|meta| meta.name == rule_name)
+            .and_then(|meta| docgen_config_for(corpus_path, meta, &generated_config_path))
+    } else {
+        Some(rule_config_path)
+    };
+
+    let mut outcome = RuleOutcome::default();
+    for dart_file in &dart_files {
+        let source = match fs::read_to_string(dart_file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("warning: cannot read {}: {}", dart_file.display(), e);
+                continue;
+            }
+        };
+
+        outcome.files += 1;
+        let result = match validate_file(
+            dart_file,
+            &source,
+            falcon,
+            threshold,
+            Some(&rule_name),
+            rule_config.as_deref(),
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                outcome.failures.push(format!(
+                    "ERROR {} — falcon invocation failed: {error}",
+                    dart_file.display()
+                ));
+                continue;
+            }
+        };
+        outcome.expected += result.expected;
+        outcome.matched += result.matched;
+        outcome.failures.extend(result.missed.iter().map(|m| {
+            format!(
+                "MISS  {}:{} — rule `{}` expected but not emitted",
+                dart_file.display(),
+                m.line,
+                m.rule
+            )
+        }));
+        outcome
+            .failures
+            .extend(result.false_positives.iter().map(|fp| {
+                format!(
+                    "EXTRA {}:{} — rule `{}` fired unexpectedly: {}",
+                    dart_file.display(),
+                    fp.line,
+                    fp.rule,
+                    fp.message
+                )
+            }));
+    }
+
+    // Cross-file rules keep their fixtures in a `cross-file/` subdirectory,
+    // run as one invocation over the whole directory.
+    let cross_file_dir = rule_dir.join("cross-file");
+    if cross_file_dir.is_dir() {
+        let (expected, matched, failures) =
+            validate_cross_file_dir(&cross_file_dir, &rule_name, falcon, rule_config.as_deref());
+        outcome.files += 1;
+        outcome.expected += expected;
+        outcome.matched += matched;
+        outcome.failures.extend(failures);
+    }
+    if uses_generated_config {
+        let _ = fs::remove_file(&generated_config_path);
+    }
+    outcome
 }
 
 fn perf_corpus(corpus: Option<PathBuf>, root: Option<std::ffi::OsString>) -> Option<PathBuf> {
