@@ -109,7 +109,7 @@ fn a_and_b_index_unrequested_part_from_buffered_directives() {
 #[test]
 fn unopened_local_declarations_retain_deprecation_annotations() {
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+    let root = directory.path().canonicalize().unwrap();
     fs::create_dir_all(root.join(".dart_tool")).unwrap();
     fs::create_dir(root.join("lib")).unwrap();
     fs::write(
@@ -152,7 +152,7 @@ fn unopened_local_declarations_retain_deprecation_annotations() {
 #[test]
 fn part_only_indexes_uri_owner_siblings_and_imports() {
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+    let root = directory.path().canonicalize().unwrap();
     let owner = root.join("b.dart");
     let part = root.join("b_part.dart");
     let sibling = root.join("b_other.dart");
@@ -213,7 +213,7 @@ fn part_only_indexes_uri_owner_siblings_and_imports() {
 #[test]
 fn requested_parts_are_not_disk_companions_but_their_unopened_parts_are() {
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+    let root = directory.path().canonicalize().unwrap();
     let owner = root.join("owner.dart");
     let part = root.join("part.dart");
     let nested = root.join("nested.dart");
@@ -252,7 +252,7 @@ fn requested_parts_are_not_disk_companions_but_their_unopened_parts_are() {
 #[test]
 fn closing_an_unimported_root_removes_its_disk_companions() {
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+    let root = directory.path().canonicalize().unwrap();
     let owner = root.join("owner.dart");
     let part = root.join("part.dart");
     let remaining = root.join("remaining.dart");
@@ -291,7 +291,7 @@ fn closing_an_unimported_root_removes_its_disk_companions() {
 #[test]
 fn failed_local_import_targets_remain_available_for_file_watches() {
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+    let root = directory.path().canonicalize().unwrap();
     fs::create_dir(root.join("app")).unwrap();
     fs::create_dir(root.join("shared")).unwrap();
     let app = root.join("app/main.dart");
