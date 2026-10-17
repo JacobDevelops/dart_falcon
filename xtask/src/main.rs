@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use falcon_rules::meta::{Domain, RULE_METADATA, RuleGroup, RuleMeta, RuleSource};
 use rayon::prelude::*;
+use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 use std::fs;
@@ -36,6 +37,11 @@ enum Task {
     },
     /// Generate the documentation website's data.
     Docgen,
+    /// Set the workspace version and every pinned reference to it.
+    Version {
+        /// The new version, e.g. 0.4.2.
+        version: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -101,6 +107,7 @@ fn main() {
         Task::PerfLock(options) => perf_lock(options),
         Task::Schema { check } => schema(check),
         Task::Docgen => docgen(),
+        Task::Version { version } => set_version(&version),
     }
 }
 
@@ -129,6 +136,69 @@ fn schema(check: bool) {
     }
     fs::write(path, &generated).expect("write schema");
     println!("wrote {}", path.display());
+}
+
+/// Markdown docs plus the site's CLI data: every file that pins the falcon version.
+fn versioned_files(root: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = [root.to_path_buf(), root.join("docs")]
+        .iter()
+        .flat_map(|dir| fs::read_dir(dir).expect("read docs dir"))
+        .map(|entry| entry.expect("read docs entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    files.push(root.join("website/src/data/cli.json"));
+    files
+}
+
+/// `text` with every pinned falcon version (release tag, archive name, mise pin,
+/// cli.json `version`) replaced by `version`.
+fn with_version_references(text: &str, version: &str) -> String {
+    Regex::new(
+        r#"(releases/download/v|falcon-|dart_falcon" = \{ version = "|"version": ")\d+\.\d+\.\d+"#,
+    )
+    .unwrap()
+    .replace_all(text, format!("${{1}}{version}"))
+    .into_owned()
+}
+
+/// `cargo xtask version 0.4.2`: bump `[workspace.package]`, every pinned
+/// reference in `versioned_files`, and the workspace entries in Cargo.lock.
+fn set_version(version: &str) {
+    if !Regex::new(r"^\d+\.\d+\.\d+$").unwrap().is_match(version) {
+        eprintln!("error: expected a version like 0.4.2, got `{version}`");
+        std::process::exit(1);
+    }
+    let root = workspace_root();
+    let manifest_path = root.join("Cargo.toml");
+    let manifest = fs::read_to_string(&manifest_path).expect("read Cargo.toml");
+    let workspace_version =
+        Regex::new(r#"(\[workspace\.package\]\nversion\s*=\s*")[^"]+"#).unwrap();
+    if !workspace_version.is_match(&manifest) {
+        eprintln!("error: Cargo.toml has no `version` directly under [workspace.package]");
+        std::process::exit(1);
+    }
+    let manifest = workspace_version.replace(&manifest, format!("${{1}}{version}"));
+    fs::write(&manifest_path, manifest.as_ref()).expect("write Cargo.toml");
+    println!("updated {}", manifest_path.display());
+
+    for path in versioned_files(&root) {
+        let text = fs::read_to_string(&path).expect("read versioned file");
+        let updated = with_version_references(&text, version);
+        if updated != text {
+            fs::write(&path, updated).expect("write versioned file");
+            println!("updated {}", path.display());
+        }
+    }
+
+    let status = Command::new("cargo")
+        .args(["update", "--workspace", "--offline"])
+        .current_dir(&root)
+        .status()
+        .expect("failed to spawn cargo update");
+    if !status.success() {
+        eprintln!("error: cargo update --workspace failed");
+        std::process::exit(1);
+    }
 }
 
 /// Convert `snake_case` to `PascalCase` for the rule struct name.
@@ -1688,8 +1758,38 @@ fn docgen() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Task, strip_provenance};
+    use super::{Cli, Task, strip_provenance, versioned_files, with_version_references};
     use clap::Parser;
+    use std::path::Path;
+
+    #[test]
+    fn pinned_version_references_match_the_workspace_version() {
+        let version = env!("CARGO_PKG_VERSION");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        for path in versioned_files(root) {
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                text == with_version_references(&text, version),
+                "{} pins a version other than {version}; run `cargo xtask version {version}`",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn version_references_rewrite_pins_and_nothing_else() {
+        let text = r#"releases/download/v0.4.1/falcon-0.4.1-x86_64-linux.tar.gz
+"github:JacobDevelops/dart_falcon" = { version = "0.4.1", matching = "falcon-" }
+"version": "0.4.1"
+releases/latest/download/falcon-x86_64-linux.tar.gz regex 0.4.17"#;
+        assert_eq!(
+            with_version_references(text, "0.5.0"),
+            r#"releases/download/v0.5.0/falcon-0.5.0-x86_64-linux.tar.gz
+"github:JacobDevelops/dart_falcon" = { version = "0.5.0", matching = "falcon-" }
+"version": "0.5.0"
+releases/latest/download/falcon-x86_64-linux.tar.gz regex 0.4.17"#
+        );
+    }
 
     #[test]
     fn clean_fixture_does_not_hide_a_missing_binary() {

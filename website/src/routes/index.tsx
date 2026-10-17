@@ -10,7 +10,7 @@ export const Route = createFileRoute('/')({
 })
 
 const INSTALL_BINARY = `# download the prebuilt static binary (Linux x86_64)
-curl -fsSL ${REPO_URL}/releases/latest/download/falcon-${cli.version}-x86_64-linux.tar.gz | tar -xz
+curl -fsSL ${REPO_URL}/releases/latest/download/falcon-x86_64-linux.tar.gz | tar -xz
 sudo mv falcon /usr/local/bin/
 
 # lint your project — no Dart SDK required

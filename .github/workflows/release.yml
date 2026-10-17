@@ -46,6 +46,8 @@ jobs:
           mkdir -p stage dist
           install -m755 "target/${{ matrix.target }}/release/falcon" stage/falcon
           tar -C stage -czf "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" falcon
+          # Versionless copy so `releases/latest/download/falcon-<platform>.tar.gz` always resolves.
+          cp "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" "dist/falcon-${{ matrix.platform }}.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tarball-${{ matrix.platform }}
@@ -76,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
-          CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          CARGO_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
           if [ "$VERSION" != "$CARGO_VERSION" ]; then
             echo "tag v$VERSION does not match Cargo.toml version $CARGO_VERSION" >&2
             exit 1
@@ -90,6 +92,8 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           generate_release_notes: true
+          # Re-releasing an old tag must not steal `latest` from the newest release.
+          make_latest: legacy
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
