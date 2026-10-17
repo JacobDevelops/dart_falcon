@@ -1,6 +1,6 @@
 # Falcon 1.0 checklist
 
-Everything here must be resolved before falcon 1.0. A workflow item or rule row is deleted once it ships. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
+Workflow items and must-have rules must be resolved before falcon 1.0; nice-to-have rules are stretch goals and post-1.0 rules are out of scope (see [Priorities](#priorities)). A workflow item or rule row is deleted once it ships. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
 ## Workflow
 
@@ -37,8 +37,8 @@ style | suspicious`.
 |---|---:|---:|---:|---:|
 | DCM-inspired | 75 | 132 | 24 | 231 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 9 | 8 | 3 | 20 |
-| **Total** | **88** | **144** | **31** | **263** |
+| Additional rules | 8 | 7 | 3 | 18 |
+| **Total** | **87** | **143** | **31** | **261** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
@@ -229,7 +229,6 @@ not re-added.
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
 | `use-setstate-synchronously` | correctness | FT | paid | `setState` after await without mounted check. | must-have |
-| `setstate-lifecycle` | correctness | FT | n/a | Detect setState after an async gap without a fresh mounted guard, and calls in lifecycle methods where they do not belong. | must-have |
 | `require-super-dispose` | correctness | FT | n/a | Require super.dispose() in overrides; distinct from the shipped ordering check. | must-have |
 | `avoid-empty-setstate` | correctness | S | paid | `setState(() {})` with an empty body. | must-have |
 | `avoid-unnecessary-setstate` | correctness | FT | paid | setState in build/init where needless. | must-have |
@@ -371,9 +370,8 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 |---|---|---|---|---|---|
 | `list-all-equatable-fields` | correctness | FT | paid | Field missing from Equatable props. | must-have |
 | `add-equatable-props` | correctness | FT | paid | Equatable subclass missing a props override. | must-have |
-| `extend-equatable` | style | LT | paid | Value class should extend Equatable. | nice-to-have |
+| `extend-equatable` | style | LT | paid | Value class should extend Equatable; a library preference, not a correctness improvement. | nice-to-have |
 | `avoid-mutable-equatable-subclass-fields` | correctness | FT | n/a | Mutable fields on subclasses inheriting Equatable equality can invalidate equality/hash behavior. | must-have |
-| `prefer-equatable` | style | LT | n/a | Library preference to use Equatable for value classes, not a correctness improvement. | nice-to-have |
 | `prefer-equatable-mixin` | style | LT | paid | Use EquatableMixin where appropriate. | nice-to-have |
 
 ### Deduplication notes
@@ -396,11 +394,11 @@ checks (`use-setstate-synchronously`, `use-closest-build-context`) vs official
 `use_build_context_synchronously`; `avoid-duplicate-switch-case-conditions` vs
 falcon's shipped `no-duplicate-case-values`; `avoid-self-compare` vs falcon's
 shipped `no-self-comparisons`.
-Deduplicated or partially covered requirements: `avoid-bloc-public-methods` and `prefer-multi-bloc-provider` are existing rows; `prefer-ref-read-for-methods` is covered by neither existing provider nor riverpod rows and is listed separately. Image labels are covered by `avoid-missing-image-alt`; disposal work is limited to `super.dispose()`, FocusNode.dispose(), and Timer.cancel() coverage absent from existing disposal checks. The cascade-precedence, cognitive-complexity, widget-tree-depth, and filename-correspondence checks are distinct from shipped style or complexity checks; duplicate exports must account for combinators.
+Deduplicated or partially covered requirements: `avoid-bloc-public-methods` and `prefer-multi-bloc-provider` are existing rows; `prefer-ref-read-for-methods` is covered by neither existing provider nor riverpod rows and is listed separately. setState after an async gap is `use-setstate-synchronously` and setState in lifecycle methods is `avoid-unnecessary-setstate`, so neither gets its own row; the Equatable preference is `extend-equatable`. Image labels are covered by `avoid-missing-image-alt`; disposal work is limited to `super.dispose()`, FocusNode.dispose(), and Timer.cancel() coverage absent from existing disposal checks. The cascade-precedence, cognitive-complexity, widget-tree-depth, and filename-correspondence checks are distinct from shipped style or complexity checks; duplicate exports must account for combinators.
 
 The survey excludes rules already ported by falcon and niche-package rules for flame, patrol, mocktail, get_it, and fake_async.
 
-Additional planned rows cover uncovered lifecycle and disposal cases, accessibility labels and touch targets, provider cleanup, mutable Equatable subclasses, cognitive complexity, widget-tree depth, redundant exports, and optional conventions.
+Additional planned rows cover uncovered disposal cases, accessibility labels and touch targets, provider cleanup, mutable Equatable subclasses, cognitive complexity, widget-tree depth, redundant exports, and optional conventions.
 
 ---
 
