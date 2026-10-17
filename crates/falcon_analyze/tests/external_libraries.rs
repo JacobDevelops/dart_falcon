@@ -1713,11 +1713,13 @@ fn transitive_libraries_and_parts_reload_after_project_buffers_close_without_sdk
         "cache/dep/lib/leaf.dart",
         "library leaf; part 'leaf_part.dart'; class Leaf {}",
     );
+    let leaf = leaf.canonicalize().unwrap();
     let part = write(
         dir.path(),
         "cache/dep/lib/leaf_part.dart",
         "part of leaf; class LeafPart {}",
     );
+    let part = part.canonicalize().unwrap();
     let source = "import 'package:dep/bridge.dart';";
     let falcon_dart_parser::ParseResult {
         program, errors, ..

@@ -23,7 +23,7 @@ use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::{Program, TopLevelDecl};
 
 use super::{
-    build_reference_graph, canonical_or_lexical, detect_package, has_lib_component, is_under_lib,
+    build_reference_graph, canonical_package_path, detect_package, has_lib_component, is_under_lib,
 };
 
 #[derive(Default)]
@@ -41,7 +41,7 @@ impl CrossFileRule for UnusedFiles {
         let pkg = detect_package(files);
         let canons: Vec<PathBuf> = files
             .iter()
-            .map(|f| canonical_or_lexical(&f.path))
+            .map(|f| canonical_package_path(&f.path))
             .collect();
         let adj = build_reference_graph(files, &canons, pkg.as_ref());
 
@@ -306,6 +306,56 @@ mod tests {
         let out = flagged(&files);
         std::fs::remove_dir_all(&d).unwrap();
         assert_eq!(out, vec![dead.to_string_lossy().into_owned()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn virtual_files_in_symlinked_workspace_preserve_reachability() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(package.join("lib/src")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::os::unix::fs::symlink(&package, &workspace).unwrap();
+        let entry = workspace.join("lib/app.dart");
+        let live = workspace.join("lib/src/live.dart");
+        let dead = workspace.join("lib/src/dead.dart");
+        let files = vec![
+            pf(
+                entry.to_str().unwrap(),
+                "import 'package:app/src/live.dart';\nvoid main() {}\n",
+            ),
+            pf(live.to_str().unwrap(), "void live() {}\n"),
+            pf(dead.to_str().unwrap(), "void dead() {}\n"),
+        ];
+
+        assert!(files.iter().all(|file| !file.path.exists()));
+        assert_eq!(flagged(&files), vec![dead.to_string_lossy().into_owned()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_import_into_symlinked_lib_keeps_virtual_target_live() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let sources = root.path().join("sources");
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        std::fs::create_dir_all(sources.join("src")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::os::unix::fs::symlink(&sources, package.join("lib")).unwrap();
+        let entry = package.join("bin/main.dart");
+        let live = package.join("lib/src/live.dart");
+        let dead = package.join("lib/src/dead.dart");
+        let files = vec![
+            pf(
+                entry.to_str().unwrap(),
+                "import '../lib/src/live.dart';\nvoid main() {}\n",
+            ),
+            pf(live.to_str().unwrap(), "void live() {}\n"),
+            pf(dead.to_str().unwrap(), "void dead() {}\n"),
+        ];
+
+        assert_eq!(flagged(&files), vec![dead.to_string_lossy().into_owned()]);
     }
 
     // Two spellings of one real file (via a symlinked parent) share reachability:

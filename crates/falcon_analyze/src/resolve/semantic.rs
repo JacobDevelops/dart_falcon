@@ -16572,39 +16572,42 @@ final integer = integers.first;
     #[test]
     fn concrete_property_chain_readiness_reuses_receiver_results() {
         const DEPTH: usize = 40;
-        for chain in [".next".repeat(DEPTH), ".next.step()".repeat(DEPTH)] {
-            let source = format!(
-                "class Link {{ Link get next => throw 0; Link step() => throw 0; }} \
+        crate::with_rules_stack(|| {
+            for chain in [".next".repeat(DEPTH), ".next.step()".repeat(DEPTH)] {
+                let source = format!(
+                    "class Link {{ Link get next => throw 0; Link step() => throw 0; }} \
                  final value = root{chain};",
-            );
-            with_model(&source, |program, model| {
-                let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Variable(variable) = &program.declarations[1] else {
-                    panic!("expected variable");
-                };
-                let expression = variable.declarators[0].initializer.as_ref().unwrap();
-                let receiver = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: model.resolve_name("Link").unwrap(),
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
-                };
-                let lookups = std::cell::Cell::new(0);
-                assert!(signatures.declaration_dependencies_known_using_lookup(
-                    expression,
-                    model,
-                    None,
-                    &TypeEnvironment::new(),
-                    &TypeParameterScope::default(),
-                    &|name| {
-                        lookups.set(lookups.get() + 1);
-                        (name == "root").then(|| receiver.clone())
-                    },
-                ));
-                assert_eq!(lookups.get(), 1, "readiness re-inferred a receiver prefix");
-            });
-        }
+                );
+                with_model(&source, |program, model| {
+                    let signatures = SignatureIndex::from_program(program, model);
+                    let TopLevelDecl::Variable(variable) = &program.declarations[1] else {
+                        panic!("expected variable");
+                    };
+                    let expression = variable.declarators[0].initializer.as_ref().unwrap();
+                    let receiver = ResolvedType::Interface {
+                        occurrence: Default::default(),
+                        identity: model.resolve_name("Link").unwrap(),
+                        arguments: Vec::new().into(),
+                        nullable: false,
+                        extension_type: false,
+                    };
+                    let lookups = std::cell::Cell::new(0);
+                    assert!(signatures.declaration_dependencies_known_using_lookup(
+                        expression,
+                        model,
+                        None,
+                        &TypeEnvironment::new(),
+                        &TypeParameterScope::default(),
+                        &|name| {
+                            lookups.set(lookups.get() + 1);
+                            (name == "root").then(|| receiver.clone())
+                        },
+                    ));
+                    assert_eq!(lookups.get(), 1, "readiness re-inferred a receiver prefix");
+                });
+            }
+        })
+        .unwrap();
     }
 
     #[test]

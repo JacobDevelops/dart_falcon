@@ -3611,8 +3611,9 @@ mod tests {
     #[test]
     fn external_named_extension_identity_keeps_declaring_library() {
         let dir = tempfile::tempdir().unwrap();
-        let app = dir.path().join("app");
-        let dep = dir.path().join("dep");
+        let root = dir.path().canonicalize().unwrap();
+        let app = root.join("app");
+        let dep = root.join("dep");
         std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
         std::fs::create_dir_all(app.join("lib")).unwrap();
         std::fs::create_dir_all(dep.join("lib")).unwrap();
