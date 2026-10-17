@@ -4,12 +4,12 @@ falcon ships as a single binary. It doesn't run the Dart analyzer or analysis se
 
 ## Supported platforms
 
-| Platform         | Binary                       |
-| ---------------- | ---------------------------- |
-| Linux x86_64     | fully static (musl)          |
-| Linux aarch64    | fully static (musl)          |
-| macOS Intel      | native                       |
-| macOS Apple Silicon | native                    |
+| Platform            | Binary                        |
+| ------------------- | ----------------------------- |
+| Linux x86_64        | fully static (musl)           |
+| Linux aarch64       | fully static (musl)           |
+| macOS Intel         | native, macOS 11.7.1 or later |
+| macOS Apple Silicon | native, macOS 11.7.1 or later |
 
 Windows binaries are not published yet. Windows users can
 [build from source](#build-from-source) or use WSL.
@@ -78,8 +78,8 @@ channel above first.
 ## How releases work
 
 1. A maintainer pushes a tag `vX.Y.Z`.
-2. CI (`.github/workflows/release.yml`) builds all four platform binaries
-   (static musl for Linux via `cargo-zigbuild`, native builds for macOS).
+2. CI (`.github/workflows/release.yml`) cross-builds all four platform binaries
+   on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
 3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` and attached to a
    GitHub Release.
 

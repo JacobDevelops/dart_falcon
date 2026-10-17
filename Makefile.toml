@@ -4,25 +4,28 @@ skip_core_tasks      = true
 
 [env]
 ROOT = "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}"
+# Under cargo-make, mbx has already removed its cargo shim from PATH, so a bare
+# `cargo` would bypass the cache. Override with `CARGO_CMD=cargo makers ...`.
+CARGO_CMD = { value = "mbx", condition = { env_not_set = [ "CARGO_CMD" ] } }
 
 [tasks.build]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "build", "--locked", "--workspace", "${@}" ]
 
 [tasks.build_release]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "build", "--locked", "--workspace", "--release", "${@}" ]
 
 [tasks.check]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "check", "--locked", "--workspace", "--all-targets", "${@}" ]
 
 [tasks.format]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "fmt", "--all" ]
 
 [tasks.format_check]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "fmt", "--all", "--check" ]
 
 [tasks.toml_format]
@@ -34,7 +37,7 @@ command = "taplo"
 args    = [ "format", "--check" ]
 
 [tasks.clippy]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings" ]
 
 [tasks.lint]
@@ -45,50 +48,61 @@ run_task = { name = [ "test_targets", "test_doctests" ], parallel = false }
 
 [tasks.test_targets]
 private = true
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "nextest", "run", "--locked", "--workspace", "--all-targets", "${@}" ]
 
 [tasks.test_doctests]
 private = true
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "test", "--locked", "--workspace", "--doc" ]
 
 [tasks.test_no_capture]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "nextest", "run", "--locked", "--workspace", "--all-targets", "--no-capture", "${@}" ]
 
 [tasks.validate_rules]
 dependencies = [ "build" ]
-command      = "cargo"
-args         = [ "xtask", "validate-rules", "${@}" ]
+command      = "${CARGO_CMD}"
+args         = [ "xtask", "validate-rules", "--falcon-bin", "${ROOT}/target/debug/falcon", "${@}" ]
+
+# Single dev build with bench dev-deps unified; `build` then `bench_check` compiles every library twice.
+[tasks.ci_validate]
+script = '''
+set -eu
+target_dir="${CARGO_TARGET_DIR:-${ROOT}/target}"
+"${CARGO_CMD}" build --locked --workspace --bins --bench '*'
+"${target_dir}/debug/xtask" validate-rules --falcon-bin "${target_dir}/debug/falcon"
+'''
 
 [tasks.docgen]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "xtask", "docgen" ]
 
 [tasks.bench]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "bench", "--locked", "--workspace", "${@}" ]
 
 [tasks.bench_check]
-command = "cargo"
-args    = [ "bench", "--locked", "--workspace", "--no-run" ]
+command = "${CARGO_CMD}"
+args    = [ "build", "--locked", "--workspace", "--bench", "*" ]
 
 [tasks.run]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "run", "--locked", "-p", "dart_falcon", "--", "${@}" ]
 
 [tasks.run_release]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "run", "--locked", "--release", "-p", "dart_falcon", "--", "${@}" ]
 
 [tasks.watch]
-command = "cargo"
+command = "${CARGO_CMD}"
 args    = [ "watch", "-x", "check --workspace --all-targets" ]
 
+# `mbx clean` only removes mbx-managed targets, not an explicit CARGO_TARGET_DIR.
 [tasks.clean]
-command = "cargo"
-args    = [ "clean" ]
+script = '''
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then cargo clean; else "${CARGO_CMD}" clean; fi
+'''
 
 [tasks.web_install]
 cwd     = "website"

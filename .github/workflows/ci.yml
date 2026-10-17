@@ -6,41 +6,123 @@ on:
   pull_request:
     branches: [main]
 
+# Debuginfo is most of the codegen, link and cache size; panics still report file:line without it.
+env:
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
+# Each job restores the newest mbx compiler snapshot that main saved for it; only
+# main pushes write snapshots, so pull requests never seed what main restores.
+# MBX_GC_MAX_TOTAL_SIZE bounds each snapshot as main keeps adding to it.
 jobs:
   lint:
     name: Lint (fmt, taplo, clippy)
     runs-on: ubuntu-latest
+    env:
+      MBX_GC_MAX_TOTAL_SIZE: 2GiB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
         with:
-          install_args: cargo-make taplo
+          install_args: cargo-make taplo mr-boxington
           cache: true
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Restore main compiler snapshot
+        id: compiler-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mbx
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: mbx-v1-${{ github.job }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            mbx-v1-${{ github.job }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            mbx-v1-${{ github.job }}-${{ runner.arch }}-
       - run: makers ci_rustup_show
       - run: makers lint
+      # Automatic gc runs at most hourly, so enforce MBX_GC_MAX_TOTAL_SIZE before saving.
+      - name: Trim compiler snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiler-cache.outputs.cache-hit != 'true'
+        run: mbx gc
+      - name: Save main compiler snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mbx
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      MBX_GC_MAX_TOTAL_SIZE: 6GiB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
         with:
-          install_args: cargo-make cargo:cargo-nextest
+          install_args: cargo-make cargo-binstall cargo:cargo-nextest mr-boxington
           cache: true
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Restore main compiler snapshot
+        id: compiler-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mbx
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: mbx-v1-${{ github.job }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            mbx-v1-${{ github.job }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            mbx-v1-${{ github.job }}-${{ runner.arch }}-
       - run: makers test
+      - name: Trim compiler snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiler-cache.outputs.cache-hit != 'true'
+        run: mbx gc
+      - name: Save main compiler snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mbx
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
   validate:
     name: Validate rules, bench compile
     runs-on: ubuntu-latest
+    env:
+      MBX_GC_MAX_TOTAL_SIZE: 3GiB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
         with:
-          install_args: cargo-make
+          install_args: cargo-make mr-boxington
           cache: true
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: makers validate_rules
-      - run: makers bench_check
+      - name: Restore main compiler snapshot
+        id: compiler-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mbx
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: mbx-v1-${{ github.job }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            mbx-v1-${{ github.job }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            mbx-v1-${{ github.job }}-${{ runner.arch }}-
+      - run: makers ci_validate
+      - name: Trim compiler snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiler-cache.outputs.cache-hit != 'true'
+        run: mbx gc
+      - name: Save main compiler snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mbx
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
