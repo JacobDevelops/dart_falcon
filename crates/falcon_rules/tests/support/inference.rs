@@ -43,18 +43,18 @@ pub fn analyze(
     fs::create_dir_all(app.parent().unwrap()).unwrap();
     fs::write(&app, source).unwrap();
     let app = canonical_or_lexical(&app);
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;
         falcon_analyze::environment::DartSdk::load(&root.join("bin/cache/dart-sdk"))
     });
     let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
     assert_eq!(
@@ -70,7 +70,7 @@ pub fn analyze(
     }
     let sources = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: !errors.is_empty(),
     }];
     let identities = IdentityIndex::build(
@@ -86,7 +86,7 @@ pub fn analyze(
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: !errors.is_empty(),
                 has_unresolved_parts: false,
             },
@@ -95,17 +95,17 @@ pub fn analyze(
     );
     types.add_external(&externals, &identities);
     let signatures = SignatureIndex::build(
-        &[(app.clone(), &program)],
+        &[(app.clone(), parsed.clone())],
         Some(&externals),
         &identities,
         &types,
     );
-    let context = AnalyzeContext::new(&app, source, config, &syntax)
+    let context = AnalyzeContext::new(&app, config, &parsed)
         .with_types(&types)
         .with_identities(&identities)
         .with_signatures(&signatures)
         .with_environment(Some(&environment));
-    rule.analyze(&program, &context)
+    rule.analyze(program, &context)
 }
 
 // This support module is included by binaries that do not all use marker assertions.

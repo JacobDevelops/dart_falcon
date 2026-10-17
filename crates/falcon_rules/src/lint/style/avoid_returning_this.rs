@@ -25,7 +25,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidReturningThis;
@@ -33,7 +33,7 @@ pub struct AvoidReturningThis;
 impl Rule for AvoidReturningThis {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -41,9 +41,9 @@ impl Rule for AvoidReturningThis {
         };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
-            declarations: program.declarations.iter(),
+            declarations: program.declarations(),
             owner: None,
             returned: None,
             diags: Vec::new(),
@@ -60,7 +60,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    declarations: AstChildren<'a, TopLevelDecl<'a>>,
     owner: Option<(&'a str, DeclarationIdentity)>,
     returned: Option<Returned>,
     diags: Vec<Diagnostic>,
@@ -77,17 +77,17 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.owner = self.declarations.next()
-            .inspect(|declaration| debug_assert!(std::ptr::eq(*declaration, node)))
+            .inspect(|declaration| debug_assert_eq!(declaration.syntax().id(), node.syntax().id()))
             .and_then(|declaration| match declaration {
-                TopLevelDecl::Class(node) => Some(node.name.name.as_str()),
-                TopLevelDecl::MixinClass(node) => Some(node.name.name.as_str()),
-                TopLevelDecl::Enum(node) => Some(node.name.name.as_str()),
-                TopLevelDecl::Mixin(node) => Some(node.name.name.as_str()),
+                TopLevelDecl::Class(node) => Some(node.name().name()),
+                TopLevelDecl::MixinClass(node) => Some(node.name().name()),
+                TopLevelDecl::Enum(node) => Some(node.name().name()),
+                TopLevelDecl::Mixin(node) => Some(node.name().name()),
                 _ => None,
             })
             .and_then(|name| self.model.resolve_name(name).map(|owner| (name, owner)));
@@ -98,16 +98,16 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let Some((name, owner)) = &self.owner else {
             return StructuralTraversal::SkipChildren;
         };
         let (member_name, return_type, body, annotations, getter) = match member {
             ClassMember::Method(method) => (
-                &method.name, &method.return_type, &method.body, &method.annotations, false,
+                method.name(), method.return_type(), method.body(), method.annotations(), false,
             ),
             ClassMember::Getter(getter) => (
-                &getter.name, &getter.return_type, &getter.body, &getter.annotations, true,
+                getter.name(), getter.return_type(), getter.body(), getter.annotations(), true,
             ),
             _ => return StructuralTraversal::SkipChildren,
         };
@@ -118,7 +118,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             return StructuralTraversal::SkipChildren;
         }
         let overrides = self.signatures
-            .inherited_member_facts(owner, &member_name.name)
+            .inherited_member_facts(owner, member_name.name())
             .unwrap_or_default()
             .iter()
             .any(|fact| {
@@ -128,9 +128,9 @@ impl StructuralRuleVisitor for Collector<'_> {
             return StructuralTraversal::SkipChildren;
         }
         match body {
-            FunctionBody::Arrow(expr, _) => {
-                if matches!(expr.as_ref(), Expr::This { .. }) {
-                    self.report(member_name.span);
+            FunctionBody::Arrow(body) => {
+                if matches!(body.expr(), Expr::This(_)) {
+                    self.report(member_name.span());
                 }
                 StructuralTraversal::SkipChildren
             }
@@ -142,7 +142,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn exit_class_member(&mut self, _member: &ClassMember) {
+    fn exit_class_member(&mut self, _member: ClassMember<'a>) {
         if let Some(returned) = self.returned.take()
             && returned.all_this
             && let Some(span) = returned.first
@@ -151,11 +151,11 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, _node: Expr<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if matches!(node, Stmt::LocalFunc(_)) {
             StructuralTraversal::SkipChildren
         } else {
@@ -163,12 +163,12 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_return_stmt(&mut self, node: &ReturnStmt) -> StructuralTraversal {
+    fn visit_return_stmt(&mut self, node: ReturnStmt<'a>) -> StructuralTraversal {
         if let Some(returned) = &mut self.returned
-            && let Some(value) = &node.value
+            && let Some(value) = node.value()
         {
-            returned.first.get_or_insert(*value.span());
-            returned.all_this &= matches!(value, Expr::This { .. });
+            returned.first.get_or_insert(value.span());
+            returned.all_this &= matches!(value, Expr::This(_));
         }
         StructuralTraversal::SkipChildren
     }
@@ -177,13 +177,16 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 /// Whether `ty` names the enclosing declaration (type arguments and
 /// nullability do not change the referenced element).
-fn names_type(ty: &DartType, name: &str) -> bool {
-    matches!(ty, DartType::Named(named)
-        if matches!(named.segments.as_slice(), [segment] if segment.name == name))
+fn names_type(ty: DartType<'_>, name: &str) -> bool {
+    matches!(ty, DartType::Named(named) if {
+        let mut segments = named.segments();
+        segments.next().is_some_and(|segment| segment.name() == name) && segments.next().is_none()
+    })
 }
 
-fn has_override(annotations: &[Annotation]) -> bool {
-    annotations
-        .iter()
-        .any(|annotation| matches!(annotation.name.as_slice(), [name] if name.name == "override"))
+fn has_override<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
+    annotations.any(|annotation| {
+        let mut names = annotation.name();
+        names.next().is_some_and(|name| name.name() == "override") && names.next().is_none()
+    })
 }

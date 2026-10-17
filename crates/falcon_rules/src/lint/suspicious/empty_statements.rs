@@ -14,7 +14,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct EmptyStatements;
@@ -22,7 +22,7 @@ pub struct EmptyStatements;
 impl Rule for EmptyStatements {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -39,13 +39,13 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::Empty(span) = node {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
+        if let Stmt::Empty(empty) = node {
             self.diags.push(self.ctx.diagnostic(
                 "empty-statements",
                 "Unnecessary empty statement — remove the `;` or replace it with a block",
-                *span,
+                empty.span(),
             ));
         }
         StructuralTraversal::Continue

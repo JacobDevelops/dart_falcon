@@ -12,8 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -22,7 +21,7 @@ pub struct UnnecessaryGettersSetters;
 impl Rule for UnnecessaryGettersSetters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -38,8 +37,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let Some(members) = crate::lint::declarations::members_of(decl) {
             check_members(members, self.ctx, &mut self.diags);
         }
@@ -52,16 +51,20 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let mut getters: HashMap<&str, &GetterDecl> = HashMap::new();
-    let mut setters: HashMap<&str, &SetterDecl> = HashMap::new();
+fn check_members<'a>(
+    members: impl Iterator<Item = ClassMember<'a>>,
+    ctx: &AnalyzeContext,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut getters: HashMap<&str, GetterDecl<'a>> = HashMap::new();
+    let mut setters: HashMap<&str, SetterDecl<'a>> = HashMap::new();
     for member in members {
         match member {
             ClassMember::Getter(g) => {
-                getters.insert(g.name.name.as_str(), g);
+                getters.insert(g.name().name(), g);
             }
             ClassMember::Setter(s) => {
-                setters.insert(s.name.name.as_str(), s);
+                setters.insert(s.name().name(), s);
             }
             _ => {}
         }
@@ -71,10 +74,10 @@ fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<
         let Some(setter) = setters.get(name) else {
             continue;
         };
-        if !getter.annotations.is_empty() || !setter.annotations.is_empty() {
+        if !getter.annotations().is_empty() || !setter.annotations().is_empty() {
             continue;
         }
-        let (Some(gf), Some(sf)) = (getter_returns_field(getter), setter_assigns_field(setter))
+        let (Some(gf), Some(sf)) = (getter_returns_field(*getter), setter_assigns_field(*setter))
         else {
             continue;
         };
@@ -85,55 +88,63 @@ fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<
                     "unnecessary-getters-setters",
                     "Avoid wrapping a field in trivial getters and setters; use a public field."
                         .to_string(),
-                    getter.name.span,
+                    getter.name().span(),
                 ),
             );
         }
     }
 }
 
-fn field_name(expr: &Expr) -> Option<&str> {
+fn field_name(expr: Expr<'_>) -> Option<&str> {
     match expr.unparenthesized() {
-        Expr::Ident(id) => Some(id.name.as_str()),
-        Expr::Field { object, field, .. }
-            if matches!(object.unparenthesized(), Expr::This { .. }) =>
-        {
-            Some(field.name.as_str())
+        Expr::Ident(id) => Some(id.name()),
+        Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::This(_)) => {
+            Some(field.field().name())
         }
         _ => None,
     }
 }
 
-fn getter_returns_field(getter: &GetterDecl) -> Option<&str> {
-    match getter.body.as_ref()? {
-        FunctionBody::Arrow(expr, _) => field_name(expr),
-        FunctionBody::Block(block) if block.stmts.len() == 1 => match &block.stmts[0] {
-            Stmt::Return(ret) => field_name(ret.value.as_ref()?),
-            _ => None,
-        },
+fn getter_returns_field(getter: GetterDecl<'_>) -> Option<&str> {
+    match getter.body()? {
+        FunctionBody::Arrow(body) => field_name(body.expr()),
+        FunctionBody::Block(block) => {
+            let mut stmts = block.stmts();
+            let stmt = stmts.next()?;
+            if stmts.next().is_some() {
+                return None;
+            }
+            match stmt {
+                Stmt::Return(ret) => field_name(ret.value()?),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
 
-fn setter_assigns_field(setter: &SetterDecl) -> Option<&str> {
-    let assign = match setter.body.as_ref()? {
-        FunctionBody::Arrow(expr, _) => expr.as_ref(),
-        FunctionBody::Block(block) if block.stmts.len() == 1 => match &block.stmts[0] {
-            Stmt::Expr(e) => &e.expr,
-            _ => return None,
-        },
+fn setter_assigns_field(setter: SetterDecl<'_>) -> Option<&str> {
+    let assign = match setter.body()? {
+        FunctionBody::Arrow(body) => body.expr(),
+        FunctionBody::Block(block) => {
+            let mut stmts = block.stmts();
+            let stmt = stmts.next()?;
+            if stmts.next().is_some() {
+                return None;
+            }
+            match stmt {
+                Stmt::Expr(e) => e.expr(),
+                _ => return None,
+            }
+        }
         _ => return None,
     };
-    if let Expr::Assign {
-        target,
-        op: AssignOp::Eq,
-        value,
-        ..
-    } = assign.unparenthesized()
-        && let Expr::Ident(rhs) = value.unparenthesized()
-        && rhs.name == setter.param.name
+    if let Expr::Assign(assign) = assign.unparenthesized()
+        && assign.op() == AssignOp::Eq
+        && let Expr::Ident(rhs) = assign.value().unparenthesized()
+        && rhs.name() == setter.param().name()
     {
-        return field_name(target);
+        return field_name(assign.target());
     }
     None
 }

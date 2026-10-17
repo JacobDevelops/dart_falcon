@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoEmptyBlock;
@@ -19,7 +19,7 @@ pub struct NoEmptyBlock;
 impl Rule for NoEmptyBlock {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -36,7 +36,7 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    fn check_body(&mut self, body: Option<&FunctionBody>) {
+    fn check_body(&mut self, body: Option<FunctionBody<'_>>) {
         if let Some(FunctionBody::Block(block)) = body {
             flag_if_empty(block, &mut self.diags, self.ctx);
         }
@@ -44,84 +44,85 @@ impl Collector<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         self.check_body(node.body);
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            self.check_body(operator.body.as_ref());
+            self.check_body(operator.body());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         match node {
             Stmt::Block(block) => flag_if_empty(block, &mut self.diags, self.ctx),
             Stmt::TryCatch(try_catch) => {
-                flag_if_empty(&try_catch.body, &mut self.diags, self.ctx);
-                for catch in &try_catch.catches {
-                    flag_if_empty(&catch.body, &mut self.diags, self.ctx);
+                flag_if_empty(try_catch.body(), &mut self.diags, self.ctx);
+                for catch in try_catch.catches() {
+                    flag_if_empty(catch.body(), &mut self.diags, self.ctx);
                 }
-                if let Some(finally) = &try_catch.finally {
+                if let Some(finally) = try_catch.finally() {
                     flag_if_empty(finally, &mut self.diags, self.ctx);
                 }
             }
-            Stmt::LocalFunc(local) => self.check_body(Some(&local.body)),
+            Stmt::LocalFunc(local) => self.check_body(Some(local.body())),
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::FuncExpr { body, .. } = node {
-            self.check_body(Some(body));
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::FuncExpr(function) = node {
+            self.check_body(Some(function.body()));
         }
         StructuralTraversal::Continue
     }
 }
 }
 
-fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !block.stmts.is_empty() {
+fn flag_if_empty(block: Block<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    if !block.stmts().is_empty() {
         return;
     }
-    let syntax = ctx.syntax.syntax_for_span(block.span);
-    let open = syntax.token_range(block.span).start;
-    let Some(close_id) = syntax.closing_delimiter(open) else {
+    let mut tokens = block.syntax().tokens();
+    let Some(open) = tokens.next() else { return };
+    let Some(close) = tokens.next_back() else {
         return;
     };
-    let close = &syntax.tokens()[close_id.index()];
-    if syntax.tokens()[open.index() + 1..close_id.index()]
-        .iter()
-        .any(|token| token.kind.is_comment())
+    if open.kind() != falcon_syntax::TokenKind::LBrace
+        || close.kind() != falcon_syntax::TokenKind::RBrace
     {
+        return;
+    }
+    if tokens.any(|token| token.kind().is_comment()) {
         return;
     }
     diags.push(ctx.diagnostic(
@@ -141,21 +142,16 @@ mod tests {
     #[test]
     fn exact_block_end_excludes_following_comment_and_preserves_inner_comment() {
         let source = "void empty() {} /* trailing } */\nvoid intentional() { /* } */ }\n";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree, .. } =
+            falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(
-            Path::new("/project/lib/test.dart"),
-            source,
-            &config,
-            &syntax,
-        );
-        let diagnostics = NoEmptyBlock.analyze(&program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("/project/lib/test.dart"), &config, &parsed);
+        let diagnostics = NoEmptyBlock.analyze(parsed.program(), &ctx);
         let closing_brace = source.find("{}").unwrap() + 1;
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].span.start, closing_brace);

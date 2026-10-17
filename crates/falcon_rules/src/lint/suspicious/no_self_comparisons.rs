@@ -8,8 +8,8 @@
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -19,7 +19,7 @@ pub struct NoSelfComparisons;
 impl Rule for NoSelfComparisons {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -34,23 +34,18 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op,
-            left,
-            right,
-            span,
-            ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Binary(binary) = node else {
             return;
         };
-        if !is_comparison(op)
+        let left = binary.left();
+        let right = binary.right();
+        if !is_comparison(binary.op())
             || !proven_scalar_value(left, state)
             || !proven_scalar_value(right, state)
         {
@@ -62,12 +57,12 @@ impl SemanticRuleVisitor for Collector<'_> {
         self.diags.push(self.ctx.diagnostic(
             "no-self-comparisons",
             "Both operands of this comparison are identical.",
-            *span,
+            binary.span(),
         ));
     }
 }
 
-fn is_comparison(op: &BinaryOp) -> bool {
+fn is_comparison(op: BinaryOp) -> bool {
     matches!(
         op,
         BinaryOp::EqEq
@@ -79,7 +74,7 @@ fn is_comparison(op: &BinaryOp) -> bool {
     )
 }
 
-fn proven_scalar_value(expression: &Expr, state: &SemanticState<'_>) -> bool {
+fn proven_scalar_value<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> bool {
     let mut proof = ScalarValueProof {
         state,
         proven: false,
@@ -95,21 +90,18 @@ struct ScalarValueProof<'s, 'a> {
     proven: bool,
 }
 
-impl Visitor for ScalarValueProof<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> Visitor<'a> for ScalarValueProof<'_, 'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         let syntactically_stable = match node {
-            Expr::Ident(identifier) => self.state.is_variable_read(&identifier.name),
-            Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. } => true,
-            Expr::StringLit(string) => string.interpolations.is_empty(),
+            Expr::Ident(identifier) => self.state.is_variable_read(identifier.name()),
+            Expr::IntLit(_) | Expr::DoubleLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => true,
+            Expr::StringLit(string) => string.interpolations().next().is_none(),
             // `++x`/`--x` mutate, so the two sides are not the same value.
-            Expr::Unary { op, operand, .. }
-                if !matches!(op, UnaryOp::PlusPlus | UnaryOp::MinusMinus)
+            Expr::Unary(unary)
+                if !matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus)
                     && matches!(
-                        operand.unparenthesized(),
-                        Expr::Ident(_) | Expr::IntLit { .. } | Expr::DoubleLit { .. }
+                        unary.operand().unparenthesized(),
+                        Expr::Ident(_) | Expr::IntLit(_) | Expr::DoubleLit(_)
                     ) =>
             {
                 walk_expr(self, node);
@@ -163,18 +155,18 @@ class Child extends Values {
   bool inheritedFieldEqual() => value == value;
 }
 "#;
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let path = Path::new("self_comparisons.dart");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
@@ -183,21 +175,21 @@ class Child extends Values {
             [(
                 path,
                 falcon_analyze::LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
             )],
             &identities,
         );
-        let model = SemanticModel::new(path, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = NoSelfComparisons.analyze(&program, &ctx);
+        let diagnostics = NoSelfComparisons.analyze(program, &ctx);
         let lines: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| source[..diagnostic.span.start].matches('\n').count() + 1)

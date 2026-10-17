@@ -27,7 +27,7 @@ use falcon_analyze::{
     StructuralNode, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferConstructorsOverStaticMethods;
@@ -35,13 +35,13 @@ pub struct PreferConstructorsOverStaticMethods;
 impl Rule for PreferConstructorsOverStaticMethods {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -63,22 +63,21 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let (name, type_params, members, representation) = match decl {
-            TopLevelDecl::Class(node) => (&node.name, &node.type_params, &node.members, None),
+            TopLevelDecl::Class(node) => (node.name(), node.type_params(), node.members(), None),
             TopLevelDecl::MixinClass(node) => {
-                (&node.name, &node.type_params, &node.members, None)
+                (node.name(), node.type_params(), node.members(), None)
             }
             TopLevelDecl::ExtensionType(node) => (
-                &node.name,
-                &node.type_params,
-                &node.members,
+                node.name(),
+                node.type_params(),
+                node.members(),
                 Some(
-                    node.primary_constructor
-                        .constructor_name
-                        .as_ref()
-                        .map_or("new", |name| &self.ctx.source[name.span.start..name.span.end]),
+                    node.primary_constructor()
+                        .constructor_name()
+                        .map_or("new", |name| &self.ctx.source[name.span().start..name.span().end]),
                 ),
             ),
             _ => return StructuralTraversal::SkipChildren,
@@ -86,20 +85,18 @@ impl StructuralRuleVisitor for Collector<'_> {
         if !type_params.is_empty() {
             return StructuralTraversal::SkipChildren;
         }
-        let Some(owner) = self.model.resolve_name(name.name.as_str()) else {
+        let Some(owner) = self.model.resolve_name(name.name()) else {
             return StructuralTraversal::SkipChildren;
         };
         self.owner = Some(owner);
         self.constructors.clear();
         self.constructors.extend(
             members
-                .iter()
                 .filter_map(|member| match member {
                     ClassMember::Constructor(constructor) => Some(
                         constructor
-                            .constructor_name
-                            .as_ref()
-                            .map_or("new", |name| &self.ctx.source[name.span.start..name.span.end]),
+                            .constructor_name()
+                            .map_or("new", |name| &self.ctx.source[name.span().start..name.span().end]),
                     ),
                     _ => None,
                 })
@@ -111,20 +108,20 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let (name, return_type, body, is_static, generic) = match member {
             ClassMember::Method(method) => (
-                &method.name,
-                &method.return_type,
-                &method.body,
-                method.is_static,
-                !method.type_params.is_empty(),
+                method.name(),
+                method.return_type(),
+                method.body(),
+                method.is_static(),
+                !method.type_params().is_empty(),
             ),
             ClassMember::Getter(getter) => (
-                &getter.name,
-                &getter.return_type,
-                &getter.body,
-                getter.is_static,
+                getter.name(),
+                getter.return_type(),
+                getter.body(),
+                getter.is_static(),
                 false,
             ),
             _ => return StructuralTraversal::SkipChildren,
@@ -143,11 +140,11 @@ impl StructuralRuleVisitor for Collector<'_> {
         if !returns_owner {
             return StructuralTraversal::SkipChildren;
         }
-        self.active = Some((name.span, false));
+        self.active = Some((name.span(), false));
         StructuralTraversal::Continue
     }
 
-    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+    fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
         match parent {
             StructuralNode::MethodDecl(_) | StructuralNode::GetterDecl(_) => {
                 matches!(child, StructuralNode::FunctionBody(_))
@@ -156,7 +153,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn exit_class_member(&mut self, _member: &ClassMember) {
+    fn exit_class_member(&mut self, _member: ClassMember<'a>) {
         if let Some((span, found)) = self.active.take()
             && found
         {
@@ -168,14 +165,14 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         let Some((_, found)) = self.active.as_mut() else {
             return StructuralTraversal::SkipChildren;
         };
         let owner = self.owner.as_ref().expect("eligible enclosing declaration");
         if let Some((identity, constructor, _)) =
             crate::lint::flutter::constructor_invocation(node, &self.model)
-            && (matches!(node, Expr::New { .. })
+            && (matches!(node, Expr::New(_))
                 || identity != *owner
                 || self.constructors.contains(&constructor))
         {

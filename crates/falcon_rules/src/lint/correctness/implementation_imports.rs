@@ -9,7 +9,7 @@ use std::path::Path;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ImplementationImports;
@@ -17,17 +17,17 @@ pub struct ImplementationImports;
 impl Rule for ImplementationImports {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(own_package) = source_package(ctx.file_path) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let mut diags = Vec::new();
-        for import in &program.imports {
-            check_uri(&import.uri, &own_package, ctx, &mut diags);
-            for configurable in &import.configurable_uris {
-                check_uri(&configurable.uri, &own_package, ctx, &mut diags);
+        for import in program.imports() {
+            check_uri(import.uri(), &own_package, ctx, &mut diags);
+            for configurable in import.configurable_uris() {
+                check_uri(configurable.uri(), &own_package, ctx, &mut diags);
             }
         }
         RulePreparation::Diagnostics(diags)
@@ -50,8 +50,9 @@ fn source_package(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-fn check_uri(uri: &StringLitNode, own: &str, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let Some(package) = implementation_package(&uri.value) else {
+fn check_uri(uri: StringLitNode<'_>, own: &str, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
+    let value = uri.value();
+    let Some(package) = implementation_package(&value) else {
         return;
     };
     if package == own {
@@ -60,7 +61,7 @@ fn check_uri(uri: &StringLitNode, own: &str, ctx: &AnalyzeContext, diags: &mut V
     diags.push(ctx.diagnostic(
         "implementation-imports",
         format!("Don't import implementation files from another package ('{package}')."),
-        uri.span,
+        uri.span(),
     ));
 }
 

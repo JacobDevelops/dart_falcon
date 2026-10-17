@@ -28,7 +28,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
 
@@ -41,7 +41,7 @@ pub struct AvoidPositionalBooleanParameters;
 impl Rule for AvoidPositionalBooleanParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
@@ -50,8 +50,6 @@ impl Rule for AvoidPositionalBooleanParameters {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             state,
-            program,
-            next_declaration: 0,
             container: None,
             diags: Vec::new(),
         }))
@@ -64,16 +62,14 @@ struct Container<'p> {
     /// for extensions, which never override.
     identity: Option<DeclarationIdentity>,
     is_interface: bool,
-    members: &'p [ClassMember],
-    superclass: Option<&'p DartType>,
+    members: AstChildren<'p, ClassMember<'p>>,
+    superclass: Option<DartType<'p>>,
 }
 
-struct Collector<'a, 'ctx, 'p> {
-    ctx: &'a AnalyzeContext<'ctx>,
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     state: SemanticState<'a>,
-    program: &'p Program,
-    next_declaration: usize,
-    container: Option<Container<'p>>,
+    container: Option<Container<'a>>,
     diags: Vec<Diagnostic>,
 }
 
@@ -87,19 +83,19 @@ fn is_core_bool(ty: &ResolvedType) -> bool {
     )
 }
 
-fn has_override(annotations: &[Annotation]) -> bool {
-    annotations.iter().any(|annotation| {
+fn has_override<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
+    annotations.any(|annotation| {
         annotation
-            .name
-            .last()
-            .is_some_and(|name| name.name == "override")
+            .name()
+            .next_back()
+            .is_some_and(|name| name.name() == "override")
     })
 }
 
-impl<'p> Collector<'_, '_, 'p> {
+impl<'a> Collector<'a> {
     /// Whether a member named `name` has its signature fixed by an inherited
     /// member. Unresolvable hierarchies count as fixed so the rule stays quiet.
-    fn is_fixed(&self, name: &str, annotations: &[Annotation]) -> bool {
+    fn is_fixed(&self, name: &str, annotations: AstChildren<'a, Annotation<'a>>) -> bool {
         if has_override(annotations) {
             return true;
         }
@@ -120,19 +116,19 @@ impl<'p> Collector<'_, '_, 'p> {
 
     fn is_bool_param(
         &self,
-        param: &FormalParam,
-        params: &FormalParamList,
+        param: FormalParam<'a>,
+        params: FormalParamList<'a>,
         super_constructor: Option<&str>,
     ) -> bool {
-        if param.function_params.is_some() {
+        if param.function_params().is_some() {
             return false;
         }
-        if let Some(ty) = &param.param_type {
+        if let Some(ty) = param.param_type() {
             return is_core_bool(&self.state.model.resolve_type(ty));
         }
-        match param.initializing {
+        match param.initializing() {
             Some(InitializingFormal::This) => self
-                .field_type(&param.name.name)
+                .field_type(param.name().name())
                 .is_some_and(|ty| is_core_bool(&self.state.model.resolve_type(ty))),
             Some(InitializingFormal::Super) => {
                 let Some(container) = &self.container else {
@@ -159,52 +155,49 @@ impl<'p> Collector<'_, '_, 'p> {
     }
 
     /// The declared type of a field of the enclosing declaration.
-    fn field_type(&self, name: &str) -> Option<&'p DartType> {
+    fn field_type(&self, name: &str) -> Option<DartType<'a>> {
         let container = self.container.as_ref()?;
-        container.members.iter().find_map(|member| match member {
+        container.members.clone().find_map(|member| match member {
             ClassMember::Field(field)
                 if field
-                    .declarators
-                    .iter()
-                    .any(|declarator| declarator.name.name == name) =>
+                    .declarators()
+                    .any(|declarator| declarator.name().name() == name) =>
             {
-                field.field_type.as_ref()
+                field.field_type()
             }
             _ => None,
         })
     }
 
-    fn check_params(&mut self, params: &FormalParamList, super_constructor: Option<&str>) {
+    fn check_params(&mut self, params: FormalParamList<'a>, super_constructor: Option<&str>) {
         if let Some(first) = params
             .positional()
-            .find(|param| self.is_bool_param(param, params, super_constructor))
+            .find(|param| self.is_bool_param(*param, params, super_constructor))
         {
             self.diags
-                .push(self.ctx.diagnostic(RULE, MESSAGE, first.span));
+                .push(self.ctx.diagnostic(RULE, MESSAGE, first.span()));
         }
     }
 
-    fn enter(&self, declaration: &'p TopLevelDecl) -> Option<Container<'p>> {
-        let interface = |name: &Identifier, members, superclass| Container {
-            identity: self.state.model.resolve_name(name.name.as_str()),
+    fn enter(&self, declaration: TopLevelDecl<'a>) -> Option<Container<'a>> {
+        let interface = |name: Identifier<'a>, members, superclass| Container {
+            identity: self.state.model.resolve_name(name.name()),
             is_interface: true,
             members,
             superclass,
         };
         let container = match declaration {
-            TopLevelDecl::Class(node) => {
-                interface(&node.name, &node.members, node.extends.as_ref())
-            }
+            TopLevelDecl::Class(node) => interface(node.name(), node.members(), node.extends()),
             TopLevelDecl::MixinClass(node) => {
-                interface(&node.name, &node.members, node.extends.as_ref())
+                interface(node.name(), node.members(), node.extends())
             }
-            TopLevelDecl::Mixin(node) => interface(&node.name, &node.members, None),
-            TopLevelDecl::Enum(node) => interface(&node.name, &node.members, None),
-            TopLevelDecl::ExtensionType(node) => interface(&node.name, &node.members, None),
+            TopLevelDecl::Mixin(node) => interface(node.name(), node.members(), None),
+            TopLevelDecl::Enum(node) => interface(node.name(), node.members(), None),
+            TopLevelDecl::ExtensionType(node) => interface(node.name(), node.members(), None),
             TopLevelDecl::Extension(node) => Container {
                 identity: None,
                 is_interface: false,
-                members: &node.members,
+                members: node.members(),
                 superclass: None,
             },
             TopLevelDecl::ClassTypeAlias(_)
@@ -218,47 +211,45 @@ impl<'p> Collector<'_, '_, 'p> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_library_directive(&mut self, _: &LibraryDirective) -> StructuralTraversal {
+    fn visit_library_directive(&mut self, _: LibraryDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_part_of_directive(&mut self, _: &PartOfDirective) -> StructuralTraversal {
+    fn visit_part_of_directive(&mut self, _: PartOfDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_part_directive(&mut self, _: &PartDirective) -> StructuralTraversal {
+    fn visit_part_directive(&mut self, _: PartDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_import(&mut self, _: &ImportDirective) -> StructuralTraversal {
+    fn visit_import(&mut self, _: ImportDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_export(&mut self, _: &ExportDirective) -> StructuralTraversal {
+    fn visit_export(&mut self, _: ExportDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_top_level_decl(&mut self, _: &TopLevelDecl) -> StructuralTraversal {
-        self.container = self.enter(&self.program.declarations[self.next_declaration]);
-        self.next_declaration += 1;
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
+        self.container = self.enter(node);
         StructuralTraversal::Continue
     }
 
-    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) -> StructuralTraversal {
+    fn visit_primary_constructor(&mut self, node: PrimaryConstructor<'a>) -> StructuralTraversal {
         if !node
-            .constructor_name
-            .as_ref()
-            .is_some_and(|name| name.name.starts_with('_'))
+            .constructor_name()
+            .is_some_and(|name| name.name().starts_with('_'))
         {
             let target = self.container.as_ref().and_then(|container| {
-                container.members.iter().find_map(|member| match member {
+                container.members.clone().find_map(|member| match member {
                     ClassMember::PrimaryConstructorBody(body) => {
-                        body.initializers.iter().find_map(|init| match init {
-                            ConstructorInitializer::SuperCall { call_name, .. } => {
-                                Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                        body.initializers().find_map(|init| match init {
+                            ConstructorInitializer::SuperCall(call) => {
+                                Some(call.call_name().map_or("new", |name| name.name()))
                             }
                             _ => None,
                         })
@@ -266,13 +257,13 @@ impl StructuralRuleVisitor for Collector<'_, '_, '_> {
                     _ => None,
                 })
             });
-            self.check_params(&node.params, Some(target.unwrap_or("new")));
+            self.check_params(node.params(), Some(target.unwrap_or("new")));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        if !node.name.name.starts_with('_')
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        if !node.name().name().starts_with('_')
             && let Some(params) = node.params()
         {
             self.check_params(params, None);
@@ -280,32 +271,31 @@ impl StructuralRuleVisitor for Collector<'_, '_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         match node {
             ClassMember::Constructor(constructor) => {
                 let private = constructor
-                    .constructor_name
-                    .as_ref()
-                    .is_some_and(|name| name.name.starts_with('_'));
+                    .constructor_name()
+                    .is_some_and(|name| name.name().starts_with('_'));
                 if !private {
                     let super_constructor =
-                        constructor.initializers.iter().find_map(|init| match init {
-                            ConstructorInitializer::SuperCall { call_name, .. } => {
-                                Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                        constructor.initializers().find_map(|init| match init {
+                            ConstructorInitializer::SuperCall(call) => {
+                                Some(call.call_name().map_or("new", |name| name.name()))
                             }
                             _ => None,
                         });
                     self.check_params(
-                        &constructor.params,
+                        constructor.params(),
                         Some(super_constructor.unwrap_or("new")),
                     );
                 }
             }
             ClassMember::Method(method) => {
-                if !method.name.name.starts_with('_')
-                    && !self.is_fixed(&method.name.name, &method.annotations)
+                if !method.name().name().starts_with('_')
+                    && !self.is_fixed(method.name().name(), method.annotations())
                 {
-                    self.check_params(&method.params, None);
+                    self.check_params(method.params(), None);
                 }
             }
             ClassMember::Getter(_)
@@ -318,26 +308,25 @@ impl StructuralRuleVisitor for Collector<'_, '_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node
-            && !function.name.name.starts_with('_')
+            && !function.name().name().starts_with('_')
         {
-            self.check_params(&function.params, None);
+            self.check_params(function.params(), None);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node {
-            let first = function.params.iter().find(|param| {
-                !param.is_named && is_core_bool(&self.state.model.resolve_type(&param.param_type))
+            let first = function.params().find(|param| {
+                !param.is_named() && is_core_bool(&self.state.model.resolve_type(param.param_type()))
             });
             if let Some(first) = first {
-                let start = first.param_type.span().start;
+                let start = first.param_type().span().start;
                 let end = first
-                    .name
-                    .as_ref()
-                    .map_or(first.param_type.span().end, |name| name.span.end);
+                    .name()
+                    .map_or(first.param_type().span().end, |name| name.span().end);
                 self.diags
                     .push(self.ctx.diagnostic(RULE, MESSAGE, DiagSpan { start, end }));
             }

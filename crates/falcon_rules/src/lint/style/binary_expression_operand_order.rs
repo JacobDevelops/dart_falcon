@@ -14,7 +14,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct BinaryExpressionOperandOrder;
@@ -22,7 +22,7 @@ pub struct BinaryExpressionOperandOrder;
 impl Rule for BinaryExpressionOperandOrder {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -38,19 +38,16 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, expr: &Expr) -> StructuralTraversal {
-            if let Expr::Binary {
-                op,
-                left,
-                right,
-                span,
-                ..
-            } = expr
-            {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, expr: Expr<'a>) -> StructuralTraversal {
+            if let Expr::Binary(binary) = expr {
+                let op = binary.op();
+                let left = binary.left();
+                let right = binary.right();
+                let span = binary.span();
                 let left_is_literal = is_literal_or_const(left);
                 let right_is_literal = is_literal_or_const(right);
-                let left_is_null = matches!(left.unparenthesized(), Expr::NullLit { .. });
+                let left_is_null = matches!(left.unparenthesized(), Expr::NullLit(_));
 
                 if should_check_operator(op)
                     && left_is_literal
@@ -59,7 +56,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                     self.diags.push(self.ctx.diagnostic(
                 "binary-expression-operand-order",
                 "Avoid placing literal or constant operand on the left side of a binary expression",
-                *span,
+                span,
             ));
                 }
             }
@@ -72,18 +69,18 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn is_literal_or_const(expr: &Expr) -> bool {
+fn is_literal_or_const(expr: Expr<'_>) -> bool {
     matches!(
         expr.unparenthesized(),
-        Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
+        Expr::IntLit(_)
+            | Expr::DoubleLit(_)
             | Expr::StringLit(_)
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
     )
 }
 
-fn should_check_operator(op: &BinaryOp) -> bool {
+fn should_check_operator(op: BinaryOp) -> bool {
     matches!(
         op,
         BinaryOp::EqEq

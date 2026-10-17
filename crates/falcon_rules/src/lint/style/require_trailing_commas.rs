@@ -36,8 +36,8 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
-use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::cst::*;
+use falcon_syntax::token::TokenKind;
 
 use crate::lint::tokens::significant_tokens;
 
@@ -47,7 +47,7 @@ pub struct RequireTrailingCommas;
 impl Rule for RequireTrailingCommas {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if ctx.language_version().supports(Feature::TallStyle) {
@@ -64,7 +64,7 @@ impl Rule for RequireTrailingCommas {
 /// The last element of a checked list, as far as the exemptions care.
 enum Last<'a> {
     /// A positional expression: argument, collection element, assert operand.
-    Expr(&'a Expr),
+    Expr(Expr<'a>),
     /// A named argument, map entry, spread, or control-flow element.
     Other,
 }
@@ -72,7 +72,7 @@ enum Last<'a> {
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     /// Significant tokens in source order.
-    tokens: Vec<&'a Token>,
+    tokens: Vec<SyntaxToken<'ctx>>,
     diags: Vec<Diagnostic>,
 }
 
@@ -82,7 +82,7 @@ impl Collector<'_, '_> {
         let start = self.tokens.partition_point(|token| token.offset() < offset);
         self.tokens[start..]
             .iter()
-            .position(|token| token.kind == kind)
+            .position(|token| token.kind() == kind)
             .map(|index| start + index)
     }
 
@@ -96,18 +96,16 @@ impl Collector<'_, '_> {
 
     fn matching_delimiter(&self, index: usize, opening: bool) -> Option<usize> {
         let token = self.tokens[index];
-        let span = Span {
-            start: token.offset(),
-            end: self.end(index),
-        };
-        let syntax = self.ctx.syntax.syntax_for_span(span);
-        let id = syntax.token_range(span).start;
         let paired = if opening {
-            syntax.closing_delimiter(id)?
+            self.ctx
+                .tree()
+                .closing_delimiter(self.ctx.source, token.id())?
         } else {
-            syntax.opening_delimiter(id)?
+            self.ctx
+                .tree()
+                .opening_delimiter(self.ctx.source, token.id())?
         };
-        let offset = syntax.token(paired)?.offset();
+        let offset = paired.offset();
         self.tokens
             .binary_search_by_key(&offset, |token| token.offset())
             .ok()
@@ -145,7 +143,7 @@ impl Collector<'_, '_> {
             return;
         };
         let before_close = close - 1;
-        if before_close <= open || self.tokens[before_close].kind == TokenKind::Comma {
+        if before_close <= open || self.tokens[before_close].kind() == TokenKind::Comma {
             return;
         }
         if self.same_line(self.tokens[open].offset(), self.end(close)) {
@@ -172,7 +170,7 @@ impl Collector<'_, '_> {
         }
         let mut error = close;
         if matches!(
-            self.tokens[close - 1].kind,
+            self.tokens[close - 1].kind(),
             TokenKind::RBrace | TokenKind::RBracket
         ) {
             error = close - 1;
@@ -180,7 +178,7 @@ impl Collector<'_, '_> {
                 return;
             }
         }
-        if self.tokens[error - 1].kind == TokenKind::Comma {
+        if self.tokens[error - 1].kind() == TokenKind::Comma {
             return;
         }
         if self.same_line(self.tokens[open].offset(), self.end(close)) {
@@ -189,56 +187,59 @@ impl Collector<'_, '_> {
         self.report(error);
     }
 
-    fn check_param_list(&mut self, params: &FormalParamList) {
-        let open = self.find_from(params.span.start, TokenKind::LParen);
+    fn check_param_list(&mut self, params: FormalParamList<'_>) {
+        let open = self.find_from(params.span().start, TokenKind::LParen);
         self.check_params(open);
     }
 
-    fn check_args(&mut self, args: &ArgList) {
+    fn check_args(&mut self, args: ArgList<'_>) {
         let positional = args
-            .positional
-            .iter()
+            .positional()
             .map(|arg| (arg.span().start, Last::Expr(arg)));
-        let named = args.named.iter().map(|arg| (arg.span.start, Last::Other));
+        let named = args.named().map(|arg| (arg.span().start, Last::Other));
         let Some((_, last)) = positional.chain(named).max_by_key(|(start, _)| *start) else {
             return;
         };
-        let open = self.find_from(args.span.start, TokenKind::LParen);
+        let open = self.find_from(args.span().start, TokenKind::LParen);
         self.check_elements(open, last);
     }
 
-    fn check_assert(&mut self, span: &Span, condition: &Expr, message: Option<&Expr>) {
+    fn check_assert(&mut self, span: Span, condition: Expr<'_>, message: Option<Expr<'_>>) {
         let open = self.find_from(span.start, TokenKind::LParen);
         self.check_elements(open, Last::Expr(message.unwrap_or(condition)));
     }
 
-    fn check_collection(&mut self, span: &Span, kind: TokenKind, last: Option<&CollectionElement>) {
+    fn check_collection(
+        &mut self,
+        span: Span,
+        kind: TokenKind,
+        last: Option<CollectionElement<'_>>,
+    ) {
         let Some(last) = last else { return };
         let last = match last {
             CollectionElement::Expr(expr) => Last::Expr(expr),
-            CollectionElement::NullAware { .. }
-            | CollectionElement::Spread { .. }
-            | CollectionElement::If { .. }
-            | CollectionElement::For { .. } => Last::Other,
+            CollectionElement::NullAware(_)
+            | CollectionElement::Spread(_)
+            | CollectionElement::If(_)
+            | CollectionElement::For(_) => Last::Other,
         };
         let open = self.find_from(span.start, kind);
         self.check_elements(open, last);
     }
 
     /// The analyzer's exemptions for a multi-line positional last element.
-    fn is_exempt(&self, expr: &Expr) -> bool {
-        if self.on_one_line(*expr.span()) {
+    fn is_exempt(&self, expr: Expr<'_>) -> bool {
+        if self.on_one_line(expr.span()) {
             return false;
         }
         match expr.unparenthesized() {
-            Expr::FuncExpr { body, .. } => matches!(**body, FunctionBody::Block(_)),
-            Expr::StringLit(_) | Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. } => true,
-            Expr::Call {
-                callee, args, span, ..
-            } if matches!((**callee).unparenthesized(), Expr::FuncExpr { .. })
-                && callee.span().start == span.start =>
+            Expr::FuncExpr(function) => matches!(function.body(), FunctionBody::Block(_)),
+            Expr::StringLit(_) | Expr::List(_) | Expr::Set(_) | Expr::Map(_) => true,
+            Expr::Call(call)
+                if matches!(call.callee().unparenthesized(), Expr::FuncExpr(_))
+                    && call.callee().span().start == call.span().start =>
             {
-                self.on_one_line(args.span)
+                self.on_one_line(call.args().span())
             }
             _ => false,
         }
@@ -246,100 +247,100 @@ impl Collector<'_, '_> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::Call { args, .. } | Expr::New { args, .. } => self.check_args(args),
-            Expr::Cascade { sections, .. } => {
-                for op in sections.iter().flat_map(|section| &section.ops) {
-                    if let CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) = op {
-                        self.check_args(args);
+            Expr::Call(call) => self.check_args(call.args()),
+            Expr::New(new) => self.check_args(new.args()),
+            Expr::Cascade(cascade) => {
+                for op in cascade.sections().flat_map(|section| section.ops()) {
+                    match op {
+                        CascadeOp::Call(call) => self.check_args(call.args()),
+                        CascadeOp::Invoke(invoke) => self.check_args(invoke.args()),
+                        _ => {}
                     }
                 }
             }
-            Expr::List { elements, span, .. } => {
-                self.check_collection(span, TokenKind::LBracket, elements.last());
+            Expr::List(list) => {
+                self.check_collection(list.span(), TokenKind::LBracket, list.elements().next_back());
             }
-            Expr::Set { elements, span, .. } => {
-                self.check_collection(span, TokenKind::LBrace, elements.last());
+            Expr::Set(set) => {
+                self.check_collection(set.span(), TokenKind::LBrace, set.elements().next_back());
             }
-            Expr::Map { elements, span, .. } => {
-                if !elements.is_empty() {
-                    let open = self.find_from(span.start, TokenKind::LBrace);
+            Expr::Map(map) => {
+                if !map.elements().is_empty() {
+                    let open = self.find_from(map.span().start, TokenKind::LBrace);
                     self.check_elements(open, Last::Other);
                 }
             }
-            Expr::FuncExpr { params, .. } => self.check_param_list(params),
+            Expr::FuncExpr(function) => self.check_param_list(function.params()),
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) -> StructuralTraversal {
-        if let Some(args) = &node.args {
+    fn visit_annotation(&mut self, node: Annotation<'a>) -> StructuralTraversal {
+        if let Some(args) = node.args() {
             self.check_args(args);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         self.check_param_list(node.params);
         for initializer in node.initializers {
             match initializer {
-                ConstructorInitializer::SuperCall { args, .. }
-                | ConstructorInitializer::ThisCall { args, .. } => self.check_args(args),
-                ConstructorInitializer::Assert {
-                    condition,
-                    message,
-                    span,
-                } => self.check_assert(span, condition, message.as_ref()),
-                ConstructorInitializer::FieldInit { .. } => {}
+                ConstructorInitializer::SuperCall(call) => self.check_args(call.args()),
+                ConstructorInitializer::ThisCall(call) => self.check_args(call.args()),
+                ConstructorInitializer::Assert(assert) => {
+                    self.check_assert(assert.span(), assert.condition(), assert.message())
+                }
+                ConstructorInitializer::FieldInit(_) => {}
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
+    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) -> StructuralTraversal {
         for args in node
-            .variants
-            .iter()
-            .filter_map(|variant| variant.args.as_ref())
+            .variants()
+            .filter_map(|variant| variant.args())
         {
             self.check_args(args);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         match node {
             Stmt::Assert(stmt) => {
-                self.check_assert(&stmt.span, &stmt.condition, stmt.message.as_ref());
+                self.check_assert(stmt.span(), stmt.condition(), stmt.message());
             }
-            Stmt::LocalFunc(func) => self.check_param_list(&func.params),
+            Stmt::LocalFunc(func) => self.check_param_list(func.params()),
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         if let Some(params) = node.params() {
             self.check_param_list(params);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.check_param_list(&node.params);
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.check_param_list(node.params());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         match node {
-            ClassMember::Operator(operator) => self.check_param_list(&operator.params),
+            ClassMember::Operator(operator) => self.check_param_list(operator.params()),
             ClassMember::Setter(setter) => {
-                let open = self.find_from(setter.name.span.end, TokenKind::LParen);
+                let open = self.find_from(setter.name().span().end, TokenKind::LParen);
                 self.check_params(open);
             }
             _ => {}
@@ -347,36 +348,36 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
-        if let Some(params) = &node.function_params {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        if let Some(params) = node.function_params() {
             self.check_param_list(params);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node
-            && !function.params.is_empty()
+            && !function.params().is_empty()
         {
-            let span = function.span;
+            let span = function.span();
             let end = self
                 .tokens
                 .partition_point(|token| token.offset() < span.end);
             let mut close = end.checked_sub(1);
             // A legacy `typedef void F(...);` type span runs through its `;`.
             if let Some(index) = close
-                && self.tokens[index].kind == TokenKind::Semicolon
+                && self.tokens[index].kind() == TokenKind::Semicolon
             {
                 close = index.checked_sub(1);
             }
-            if function.is_nullable
+            if function.is_nullable()
                 && let Some(index) = close
-                && self.tokens[index].kind == TokenKind::Qmark
+                && self.tokens[index].kind() == TokenKind::Qmark
             {
                 close = index.checked_sub(1);
             }
             if let Some(close) = close
-                && self.tokens[close].kind == TokenKind::RParen
+                && self.tokens[close].kind() == TokenKind::RParen
                 && self.tokens[close].offset() >= span.start
             {
                 let open = self.matching_open(close);

@@ -21,7 +21,7 @@
 //! Adopted from the official `unawaited_futures` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 use crate::lint::correctness::discarded_futures::{UnusedFuturesRule, unused_futures};
 
@@ -31,7 +31,7 @@ pub struct UnawaitedFutures;
 impl Rule for UnawaitedFutures {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(unused_futures(

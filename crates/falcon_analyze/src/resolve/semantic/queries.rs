@@ -4,14 +4,14 @@ use super::*;
 
 /// A callable declaration and its receiver substitutions. Indexed signatures
 /// remain borrowed; only function-typed values need a synthesized signature.
-pub struct ResolvedInvocation<'a> {
-    pub signature: Cow<'a, ResolvedSignature>,
+pub struct ResolvedInvocation<'signature, 'tree> {
+    pub signature: Cow<'signature, ResolvedSignature>,
     pub owner: HashMap<TypeParameterId, ResolvedType>,
-    pub type_args: &'a [DartType],
+    pub type_args: AstChildren<'tree, DartType<'tree>>,
     pub constructor_result: Option<ResolvedType>,
 }
 
-impl ResolvedInvocation<'_> {
+impl ResolvedInvocation<'_, '_> {
     /// Constructors infer owner parameters against their instantiated result;
     /// other invocations infer the callable's own type parameters.
     pub fn inference_signature(
@@ -52,7 +52,7 @@ impl TypeEnvironment {
     /// null-shorted chain. Receiver lookup uses the reached branch internally.
     pub fn infer_invocation<F: Fn(&str) -> Option<ResolvedType>>(
         &self,
-        expression: &Expr,
+        expression: Expr<'_>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
@@ -64,7 +64,7 @@ impl TypeEnvironment {
     /// selects the correct superclass/mixin receiver for `super` dispatch.
     pub fn infer_access_receiver<F: Fn(&str) -> Option<ResolvedType>>(
         &self,
-        object: &Expr,
+        object: Expr<'_>,
         name: &str,
         is_null_safe: bool,
         context: &InferenceContext<'_, '_, '_, F>,
@@ -79,7 +79,7 @@ impl TypeEnvironment {
     }
     pub fn named_extension(
         &self,
-        expression: &Expr,
+        expression: Expr<'_>,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
     ) -> Option<DeclarationIdentity> {
         if !self.invocation_unshadowed(expression, context) {
@@ -94,7 +94,7 @@ impl TypeEnvironment {
 
     pub(super) fn invocation_unshadowed(
         &self,
-        expression: &Expr,
+        expression: Expr<'_>,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
     ) -> bool {
         expression_segments(expression, true).is_some_and(|segments| {
@@ -111,7 +111,7 @@ impl TypeEnvironment {
 
     pub(super) fn invocation_declaration<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
-        target: &Expr,
+        target: Expr<'_>,
         context: &InferenceContext<'a, '_, 'lookup, F>,
         reached_receiver: &mut Option<ResolvedType>,
         expected: Option<&ResolvedType>,
@@ -124,55 +124,48 @@ impl TypeEnvironment {
         let signatures = context.signatures;
         match target {
             Expr::Ident(identifier)
-                if !self.is_bound(&identifier.name)
-                    && (context.lookup)(&identifier.name).is_none() =>
+                if !self.is_bound(identifier.name())
+                    && (context.lookup)(identifier.name()).is_none() =>
             {
-                self.implicit_this_method(&identifier.name, model, signatures)
+                self.implicit_this_method(identifier.name(), model, signatures)
                     .or_else(|| {
                         model
-                            .resolve_value(identifier.name.as_str())
+                            .resolve_value(identifier.name())
                             .and_then(|identity| signatures.function(&identity))
                             .map(|signature| (signature, HashMap::new()))
                     })
             }
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } => {
+            Expr::Field(access) => {
+                let object = access.object();
+                let field = access.field();
+                let is_null_safe = access.is_null_safe();
                 let extension = if include_override
-                    && let Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } = object.unparenthesized()
-                    && args.named.is_empty()
-                    && let [receiver] = args.positional.as_slice()
+                    && let Expr::Call(call) = object.unparenthesized()
+                    && call.args().named().is_empty()
+                    && call.args().positional().len() == 1
                 {
-                    let (callee, type_args) = match callee.unparenthesized() {
-                        Expr::GenericInstantiation {
-                            target, type_args, ..
-                        } => (target.as_ref(), type_args.as_slice()),
-                        callee => (callee, type_args.as_slice()),
+                    let receiver = call.args().positional().next().unwrap();
+                    let (callee, type_args) = match call.callee().unparenthesized() {
+                        Expr::GenericInstantiation(instantiation) => {
+                            (instantiation.target(), instantiation.type_args())
+                        }
+                        callee => (callee, call.type_args()),
                     };
                     self.named_extension(callee, context).and_then(|identity| {
                         let receiver = self.infer_invocation(receiver, context, None);
-                        let receiver = if *is_null_safe {
+                        let receiver = if is_null_safe {
                             receiver.non_null()
                         } else {
                             receiver
                         };
                         let arguments: Vec<_> = type_args
-                            .iter()
                             .map(|ty| model.resolve_type_in(ty, context.type_parameters))
                             .collect();
                         signatures.resolved_extension_override_method(
                             &identity,
                             &receiver,
                             &arguments,
-                            &field.name,
+                            field.name(),
                             model,
                         )
                     })
@@ -187,7 +180,7 @@ impl TypeEnvironment {
                         && !self.is_bound(prefix)
                         && (context.lookup)(prefix).is_none()
                         && let Some(identity) =
-                            model.resolve_value(QualifiedName::prefixed(prefix, &field.name))
+                            model.resolve_value(QualifiedName::prefixed(prefix, field.name()))
                         && let Some(signature) = signatures.function(&identity)
                     {
                         return Some((signature, HashMap::new()));
@@ -195,23 +188,23 @@ impl TypeEnvironment {
                     let receiver = reached_receiver.get_or_insert_with(|| {
                         self.receiver_type(
                             object,
-                            &field.name,
+                            field.name(),
                             context,
                             expected.filter(|_| expression_has_dot_shorthand_base(object)),
                         )
                     });
                     let non_null;
-                    let receiver = if *is_null_safe && receiver.nullable() {
+                    let receiver = if is_null_safe && receiver.nullable() {
                         non_null = receiver.non_null();
                         &non_null
                     } else {
                         &*receiver
                     };
-                    if receiver.record_field(&field.name).is_some() {
+                    if receiver.record_field(field.name()).is_some() {
                         return None;
                     }
                     signatures
-                        .resolved_member(receiver, &field.name, model)
+                        .resolved_member(receiver, field.name(), model)
                         .or_else(|| {
                             if !self.invocation_unshadowed(object, context) {
                                 return None;
@@ -220,7 +213,7 @@ impl TypeEnvironment {
                             let identity = model.resolve_dotted(&segments).or_else(|| {
                                 model.resolve_extension(QualifiedName::from_segments(&segments)?)
                             })?;
-                            Some((signatures.member(&identity, &field.name)?, HashMap::new()))
+                            Some((signatures.member(&identity, field.name())?, HashMap::new()))
                         })
                 })
             }
@@ -231,42 +224,43 @@ impl TypeEnvironment {
     /// Resolves contextual parameter metadata without lifting the signature's
     /// return type for a null-shorted call. Locals shadow own members, which
     /// shadow library declarations, which shadow inherited members.
-    pub fn resolved_invocation<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+    pub fn resolved_invocation<'signature, 'tree, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
-        callee: &'a Expr,
-        type_args: &'a [DartType],
-        context: &InferenceContext<'a, '_, 'lookup, F>,
-    ) -> Option<ResolvedInvocation<'a>> {
+        callee: Expr<'tree>,
+        type_args: AstChildren<'tree, DartType<'tree>>,
+        context: &InferenceContext<'signature, '_, 'lookup, F>,
+    ) -> Option<ResolvedInvocation<'signature, 'tree>> {
         self.resolved_invocation_in(callee, type_args, context, None, &mut None, true)
             .ok()
     }
 
     // Err carries the final result when parameter inference is unnecessary.
-    pub(super) fn resolved_invocation_in<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+    pub(super) fn resolved_invocation_in<
+        'signature,
+        'tree,
+        'lookup,
+        F: Fn(&str) -> Option<ResolvedType>,
+    >(
         &self,
-        mut target: &'a Expr,
-        mut explicit: &'a [DartType],
-        context: &InferenceContext<'a, '_, 'lookup, F>,
+        mut target: Expr<'tree>,
+        mut explicit: AstChildren<'tree, DartType<'tree>>,
+        context: &InferenceContext<'signature, '_, 'lookup, F>,
         expected: Option<&ResolvedType>,
         reached_receiver: &mut Option<ResolvedType>,
         metadata: bool,
-    ) -> Result<ResolvedInvocation<'a>, ResolvedType> {
+    ) -> Result<ResolvedInvocation<'signature, 'tree>, ResolvedType> {
         let mut callee_type = None;
         let original_target = target;
         loop {
-            if let Expr::GenericInstantiation {
-                target: inner,
-                type_args,
-                ..
-            } = target
-            {
-                target = inner;
-                explicit = type_args;
+            if let Expr::GenericInstantiation(instantiation) = target {
+                target = instantiation.target();
+                explicit = instantiation.type_args();
             }
-            let Expr::Field { object, field, .. } = target else {
+            let Expr::Field(access) = target else {
                 break;
             };
-            if field.name != "call" {
+            let object = access.object();
+            if access.field().name() != "call" {
                 break;
             }
             let receiver = callee_type
@@ -280,16 +274,16 @@ impl TypeEnvironment {
             callee_type = Some(receiver);
             target = object;
         }
-        if let Expr::Field { object, .. } = target
-            && let Expr::GenericInstantiation { type_args, .. } = object.as_ref()
+        if let Expr::Field(access) = target
+            && let Expr::GenericInstantiation(instantiation) = access.object()
         {
-            explicit = type_args;
+            explicit = instantiation.type_args();
         }
         let model = context.model;
         let signatures = context.signatures;
         let resolved =
             self.invocation_declaration(target, context, reached_receiver, expected, true);
-        let constructor = ((metadata || !std::ptr::eq(target, original_target))
+        let constructor = ((metadata || target.syntax() != original_target.syntax())
             && resolved.is_none()
             && self.invocation_unshadowed(target, context))
         .then(|| resolve_call_constructor(target, model, true))
@@ -316,7 +310,7 @@ impl TypeEnvironment {
                 let return_type = receiver
                     .function_return_type()
                     .ok_or(ResolvedType::Unknown)?;
-                let local_generic = matches!(target, Expr::Ident(identifier) if self.is_local_function(&identifier.name));
+                let local_generic = matches!(target, Expr::Ident(identifier) if self.is_local_function(identifier.name()));
                 // Non-generic function values need no parameter metadata.
                 // Generic values still infer their binders from this call.
                 if !metadata
@@ -433,25 +427,31 @@ mod tests {
     use crate::resolve::IdentitySource;
     use falcon_dart_parser::parse;
 
-    fn with_model(source: &str, test: impl FnOnce(&Program, &SemanticModel<'_>, &SignatureIndex)) {
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+    fn with_model(
+        source: &str,
+        test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
+    ) {
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("/project/queries.dart");
         let identities = IdentityIndex::build(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
             &[],
             None,
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
-        test(&program, &model, &signatures);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
+        test(program, &model, &signatures);
     }
 
     #[test]
@@ -465,16 +465,17 @@ mod tests {
             ("f(a?.b)", false),
         ];
         for (expression, expected) in cases {
-            let falcon_dart_parser::ParseResult {
-                program, errors, ..
-            } = parse(&format!("dynamic probe(dynamic a) => {expression};"));
+            let source = format!("dynamic probe(dynamic a) => {expression};");
+            let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(&source);
+            let program = tree.program(&source);
             assert!(errors.is_empty(), "{expression}: {errors:?}");
-            let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
                 panic!()
             };
-            let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+            let Some(FunctionBody::Arrow(arrow)) = function.body() else {
                 panic!()
             };
+            let body = arrow.expr();
             assert_eq!(null_shorted(body), expected, "{expression}");
         }
     }
@@ -485,18 +486,17 @@ mod tests {
             "class Token {} class Box<T> { T apply(T value) => value; }
              dynamic probe(Box<Token>? box, Token value) => box?.apply(value);",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[2] else {
-                    panic!()
-                };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
-                    panic!()
-                };
-                let Expr::Call {
-                    callee, type_args, ..
-                } = body.as_ref()
+                let TopLevelDecl::Function(function) = program.declarations().nth(2).unwrap()
                 else {
                     panic!()
                 };
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
+                    panic!()
+                };
+                let body = arrow.expr();
+                let Expr::Call(call) = body else { panic!() };
+                let callee = call.callee();
+                let type_args = call.type_args();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -533,13 +533,14 @@ mod tests {
              dynamic grouped(Box? box) => (box?.present);",
             |program, model, signatures| {
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(arrow)) = function.body() else {
                         panic!()
                     };
+                    let body = arrow.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let context = InferenceContext {
@@ -551,7 +552,7 @@ mod tests {
                     };
                     let reached =
                         environment.infer_access_receiver(body, "member", false, &context, None);
-                    assert_eq!(reached.nullable(), function.name.name != "present");
+                    assert_eq!(reached.nullable(), function.name().name() != "present");
                     assert_eq!(
                         reached.non_null(),
                         ResolvedType::interface_identity(model.resolve_name("Leaf").unwrap())
@@ -574,7 +575,8 @@ mod tests {
              class Child<V> extends Middle<V> {}
              dynamic probe(Child<Token> child) => child;",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[4] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(4).unwrap()
+                else {
                     panic!()
                 };
                 let mut environment = TypeEnvironment::new();
@@ -616,7 +618,8 @@ mod tests {
             "class Token {}
              dynamic probe((Token, {Token value}) record) => record;",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
                 let mut environment = TypeEnvironment::new();
@@ -680,22 +683,20 @@ mod tests {
             |program, model, signatures| {
                 let scope = TypeParameterScope::default();
                 let token = ResolvedType::interface_identity(model.resolve_name("Token").unwrap());
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(arrow)) = function.body() else {
                         panic!()
                     };
-                    let Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } = body.as_ref()
-                    else {
+                    let body = arrow.expr();
+                    let Expr::Call(call) = body else {
                         panic!()
                     };
+                    let callee = call.callee();
+                    let type_args = call.type_args();
+                    let args = call.args();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let context = InferenceContext {
@@ -711,7 +712,7 @@ mod tests {
                     let substitutions = environment.infer_signature_substitutions_with_result(
                         invocation.inference_signature(),
                         args,
-                        invocation.type_args,
+                        invocation.type_args.clone(),
                         &context,
                         None,
                         None,
@@ -722,7 +723,7 @@ mod tests {
                     );
                     assert_eq!(
                         invocation.constructor_result.is_some(),
-                        matches!(function.name.name.as_str(), "unnamed" | "named")
+                        matches!(function.name().name(), "unnamed" | "named")
                     );
                     let result = if invocation.constructor_result.is_some() {
                         ResolvedType::Interface {
@@ -733,7 +734,7 @@ mod tests {
                             extension_type: false,
                         }
                     } else {
-                        token.with_nullable(function.name.name == "nullable")
+                        token.with_nullable(function.name().name() == "nullable")
                     };
                     assert_eq!(environment.infer_invocation(body, &context, None), result);
                 }
@@ -750,18 +751,17 @@ mod tests {
              class Box { Foo E(Foo value) => value; }
              dynamic probe(Foo value) => E(value).member();",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[4] else {
-                    panic!()
-                };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
-                    panic!()
-                };
-                let Expr::Call {
-                    callee, type_args, ..
-                } = body.as_ref()
+                let TopLevelDecl::Function(function) = program.declarations().nth(4).unwrap()
                 else {
                     panic!()
                 };
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
+                    panic!()
+                };
+                let body = arrow.expr();
+                let Expr::Call(call) = body else { panic!() };
+                let callee = call.callee();
+                let type_args = call.type_args();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -800,12 +800,14 @@ mod tests {
             "class Base { int action() => 0; } \
              dynamic probe<T extends Base>(T receiver) => action();",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
                     panic!()
                 };
+                let body = arrow.expr();
                 let signature = signatures
                     .function(&model.resolve_value("probe").unwrap())
                     .unwrap();
@@ -832,18 +834,17 @@ mod tests {
              class Box { void action(Token value) {} }
              dynamic probe(Token Function(Token) callback, Token value) => action(value);",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[2] else {
-                    panic!()
-                };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
-                    panic!()
-                };
-                let Expr::Call {
-                    callee, type_args, ..
-                } = body.as_ref()
+                let TopLevelDecl::Function(function) = program.declarations().nth(2).unwrap()
                 else {
                     panic!()
                 };
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
+                    panic!()
+                };
+                let body = arrow.expr();
+                let Expr::Call(call) = body else { panic!() };
+                let callee = call.callee();
+                let type_args = call.type_args();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -876,18 +877,17 @@ mod tests {
         with_model(
             "dynamic probe(Function callback) => callback();",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[0] else {
-                    panic!()
-                };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
-                    panic!()
-                };
-                let Expr::Call {
-                    callee, type_args, ..
-                } = body.as_ref()
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
                 else {
                     panic!()
                 };
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
+                    panic!()
+                };
+                let body = arrow.expr();
+                let Expr::Call(call) = body else { panic!() };
+                let callee = call.callee();
+                let type_args = call.type_args();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -925,18 +925,17 @@ mod tests {
              class Box { Add get add => Add(); }
              dynamic probe(Box? box, Token value) => box?.add(value);",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[3] else {
-                    panic!()
-                };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
-                    panic!()
-                };
-                let Expr::Call {
-                    callee, type_args, ..
-                } = body.as_ref()
+                let TopLevelDecl::Function(function) = program.declarations().nth(3).unwrap()
                 else {
                     panic!()
                 };
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
+                    panic!()
+                };
+                let body = arrow.expr();
+                let Expr::Call(call) = body else { panic!() };
+                let callee = call.callee();
+                let type_args = call.type_args();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -969,18 +968,17 @@ mod tests {
              class Bar<U> { U Foo(U value) => value; }
              dynamic probe(Bar<Token> owner, Token value) => Foo(value);",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[3] else {
-                    panic!()
-                };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
-                    panic!()
-                };
-                let Expr::Call {
-                    callee, type_args, ..
-                } = body.as_ref()
+                let TopLevelDecl::Function(function) = program.declarations().nth(3).unwrap()
                 else {
                     panic!()
                 };
+                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
+                    panic!()
+                };
+                let body = arrow.expr();
+                let Expr::Call(call) = body else { panic!() };
+                let callee = call.callee();
+                let type_args = call.type_args();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);

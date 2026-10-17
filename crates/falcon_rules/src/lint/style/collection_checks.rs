@@ -1,12 +1,12 @@
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 pub(super) fn lacks_collection_member(
     ctx: &AnalyzeContext<'_>,
-    receiver: &Expr,
+    receiver: Expr<'_>,
     state: &SemanticState<'_>,
     member: &str,
     targets: &[&'static str],
@@ -62,9 +62,9 @@ impl Emptiness {
     fn comparison_receiver<'a>(
         self,
         op: BinaryOp,
-        left: &'a Expr,
-        right: &'a Expr,
-    ) -> Option<&'a Expr> {
+        left: Expr<'a>,
+        right: Expr<'a>,
+    ) -> Option<Expr<'a>> {
         let forms = match self {
             Self::Empty => &[
                 (BinaryOp::EqEq, 0, false),
@@ -92,20 +92,15 @@ impl Emptiness {
             } else {
                 (left, right)
             };
-            let Expr::Field {
-                object,
-                field,
-                is_null_safe: false,
-                ..
-            } = length.unparenthesized()
-            else {
+            let Expr::Field(field) = length.unparenthesized() else {
                 return None;
             };
-            if field.name == "length"
-                && matches!(literal.unparenthesized(), Expr::IntLit { value: text, .. }
-                    if text.replace('_', "").parse::<i64>().ok() == Some(value))
+            if !field.is_null_safe()
+                && field.field().name() == "length"
+                && matches!(literal.unparenthesized(), Expr::IntLit(text)
+                    if text.value().replace('_', "").parse::<i64>().ok() == Some(value))
             {
-                Some(object.as_ref())
+                Some(field.object())
             } else {
                 None
             }
@@ -116,30 +111,25 @@ impl Emptiness {
 pub(super) fn analyze_emptiness<'a>(
     ctx: &'a AnalyzeContext<'a>,
     emptiness: Emptiness,
-) -> Box<dyn SemanticRuleVisitor + 'a> {
+) -> Box<dyn SemanticRuleVisitor<'a> + 'a> {
     struct Collector<'a> {
         ctx: &'a AnalyzeContext<'a>,
         emptiness: Emptiness,
         diags: Vec<Diagnostic>,
     }
-    impl SemanticRuleVisitor for Collector<'_> {
+    impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         fn finish(self: Box<Self>) -> Vec<Diagnostic> {
             self.diags
         }
 
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-            let Expr::Binary {
-                op,
-                left,
-                right,
-                span,
-                ..
-            } = node
-            else {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let Expr::Binary(binary) = node else {
                 return;
             };
             let (rule, member, message) = self.emptiness.details();
-            if let Some(receiver) = self.emptiness.comparison_receiver(*op, left, right)
+            if let Some(receiver) =
+                self.emptiness
+                    .comparison_receiver(binary.op(), binary.left(), binary.right())
                 && !lacks_collection_member(
                     self.ctx,
                     receiver,
@@ -148,7 +138,8 @@ pub(super) fn analyze_emptiness<'a>(
                     &["Iterable", "String", "Map"],
                 )
             {
-                self.diags.push(self.ctx.diagnostic(rule, message, *span));
+                self.diags
+                    .push(self.ctx.diagnostic(rule, message, binary.span()));
             }
         }
     }
@@ -177,17 +168,20 @@ mod tests {
             print(s.length == 0); print(s.length != 0);
             xs.where((e) => e is String);
         }";
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let parsed = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let program = parsed.tree.program(source);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         for rule in [
             &PreferIsEmpty as &dyn Rule,
             &PreferIsNotEmpty,
             &PreferIterableWhereType,
         ] {
-            assert!(rule.analyze(&program, &ctx).is_empty());
+            assert!(rule.analyze(program, &ctx).is_empty());
         }
     }
 }

@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryNullableReturnType;
@@ -19,7 +19,7 @@ pub struct UnnecessaryNullableReturnType;
 impl Rule for UnnecessaryNullableReturnType {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -45,57 +45,57 @@ struct ReturnState {
 }
 
 impl Collector<'_, '_> {
-    fn candidate(&mut self, return_type: Option<&DartType>, body: Option<&FunctionBody>) {
+    fn candidate(&mut self, return_type: Option<DartType<'_>>, body: Option<FunctionBody<'_>>) {
         if let Some(return_type) = return_type
             && return_type.is_nullable()
             && let Some(body) = body
         {
-            self.candidate = Some((*body.span(), *return_type.span()));
+            self.candidate = Some((body.span(), return_type.span()));
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.candidate(node.return_type.as_ref(), node.body.as_ref());
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.candidate(node.return_type(), node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.candidate(node.return_type.as_ref(), node.body.as_ref());
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.candidate(node.return_type(), node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.candidate(node.return_type.as_ref(), node.body.as_ref());
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        self.candidate(node.return_type(), node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_function_body(&mut self, body: &FunctionBody) -> StructuralTraversal {
-        let candidate = if self.candidate.is_some_and(|(span, _)| span == *body.span()) {
+    fn visit_function_body(&mut self, body: FunctionBody<'a>) -> StructuralTraversal {
+        let candidate = if self.candidate.is_some_and(|(span, _)| span == body.span()) {
             self.candidate.take().map(|(_, span)| span)
         } else {
             None
         };
         let (count, all_non_null) = match body {
-            FunctionBody::Arrow(expr, _) => (1, is_provably_non_null(expr)),
+            FunctionBody::Arrow(body) => (1, is_provably_non_null(body.expr())),
             FunctionBody::Block(_) => (0, true),
-            FunctionBody::Native(_, _) => (0, false),
+            FunctionBody::Native(_) => (0, false),
         };
         self.bodies.push(ReturnState { candidate, count, all_non_null });
         StructuralTraversal::Continue
     }
 
-    fn visit_return_stmt(&mut self, node: &ReturnStmt) -> StructuralTraversal {
+    fn visit_return_stmt(&mut self, node: ReturnStmt<'a>) -> StructuralTraversal {
         if let Some(state) = self.bodies.last_mut() {
             state.count += 1;
-            state.all_non_null &= node.value.as_ref().is_some_and(is_provably_non_null);
+            state.all_non_null &= node.value().is_some_and(is_provably_non_null);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_function_body(&mut self, _body: &FunctionBody) {
+    fn exit_function_body(&mut self, _body: FunctionBody<'a>) {
         let state = self.bodies.pop().unwrap();
         if state.count > 0 && state.all_non_null
             && let Some(span) = state.candidate

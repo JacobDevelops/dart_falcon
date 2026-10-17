@@ -15,7 +15,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseOnceConstructorsOnceProvider;
@@ -23,7 +23,7 @@ pub struct UseOnceConstructorsOnceProvider;
 impl Rule for UseOnceConstructorsOnceProvider {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -46,104 +46,104 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if !self.in_const
-            && let Expr::Call { callee, .. } = node
-            && let Expr::Ident(id) = callee.unparenthesized()
-            && ONCE_PROVIDERS.contains(&id.name.as_str())
+            && let Expr::Call(call) = node
+            && let Expr::Ident(id) = call.callee().unparenthesized()
+            && ONCE_PROVIDERS.contains(&id.name())
         {
             self.diags.push(self.ctx.diagnostic(
                 "use-once-constructors-once-provider",
                 "OnceProvider and similar Riverpod providers should use .once() factory method",
-                *node.span(),
+                node.span(),
             ));
         }
         self.const_stack.push(self.in_const);
-        self.in_const |= matches!(
-            node,
-            Expr::New { is_const: true, .. }
-                | Expr::List { is_const: true, .. }
-                | Expr::Set { is_const: true, .. }
-                | Expr::Map { is_const: true, .. }
-                | Expr::Record { is_const: true, .. }
-        );
+        self.in_const |= match node {
+            Expr::New(node) => node.is_const(),
+            Expr::List(node) => node.is_const(),
+            Expr::Set(node) => node.is_const(),
+            Expr::Map(node) => node.is_const(),
+            Expr::Record(node) => node.is_const(),
+            _ => false,
+        };
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
-        self.in_const |= node.keyword == VarKeyword::Const;
+        self.in_const |= node.keyword() == VarKeyword::Const;
         StructuralTraversal::Continue
     }
 
-    fn exit_local_var(&mut self, _node: &LocalVarDecl) {
+    fn exit_local_var(&mut self, _node: LocalVarDecl<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
-        self.in_const |= node.keyword == VarKeyword::Const;
+        self.in_const |= node.keyword() == VarKeyword::Const;
         StructuralTraversal::Continue
     }
 
-    fn exit_field_decl(&mut self, _node: &FieldDecl) {
+    fn exit_field_decl(&mut self, _node: FieldDecl<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
         if let TopLevelDecl::Variable(variable) = node {
-            self.in_const |= variable.keyword == VarKeyword::Const;
+            self.in_const |= variable.keyword() == VarKeyword::Const;
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+    fn exit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_annotation(&mut self, _node: &Annotation) -> StructuralTraversal {
+    fn visit_annotation(&mut self, _node: Annotation<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
         self.in_const = true;
         StructuralTraversal::Continue
     }
 
-    fn exit_annotation(&mut self, _node: &Annotation) {
+    fn exit_annotation(&mut self, _node: Annotation<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
         self.in_const |= matches!(node, Pattern::Const(_));
         StructuralTraversal::Continue
     }
 
-    fn exit_pattern(&mut self, _node: &Pattern) {
+    fn exit_pattern(&mut self, _node: Pattern<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_enum_decl(&mut self, _node: &EnumDecl) -> StructuralTraversal {
+    fn visit_enum_decl(&mut self, _node: EnumDecl<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
         self.in_const = true;
         StructuralTraversal::Continue
     }
 
-    fn exit_enum_decl(&mut self, _node: &EnumDecl) {
+    fn exit_enum_decl(&mut self, _node: EnumDecl<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 
-    fn visit_class_member(&mut self, _node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, _node: ClassMember<'a>) -> StructuralTraversal {
         self.const_stack.push(self.in_const);
         self.in_const = false;
         StructuralTraversal::Continue
     }
 
-    fn exit_class_member(&mut self, _node: &ClassMember) {
+    fn exit_class_member(&mut self, _node: ClassMember<'a>) {
         self.in_const = self.const_stack.pop().unwrap();
     }
 

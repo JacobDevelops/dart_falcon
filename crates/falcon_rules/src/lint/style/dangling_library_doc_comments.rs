@@ -4,7 +4,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::{Annotation, AstChildren, Program};
 
 #[derive(Default)]
 pub struct DanglingLibraryDocComments;
@@ -12,18 +12,12 @@ pub struct DanglingLibraryDocComments;
 impl Rule for DanglingLibraryDocComments {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let limit = first_directive(program, ctx)
             .map(|(offset, _)| offset)
-            .or_else(|| {
-                program
-                    .declarations
-                    .iter()
-                    .map(|decl| decl.span().start)
-                    .min()
-            })
+            .or_else(|| program.declarations().map(|decl| decl.span().start).min())
             .unwrap_or(ctx.source.len());
         let comments = documentation_blocks(ctx, limit);
         let starts = dangling_starts(program, ctx, &comments);
@@ -54,7 +48,11 @@ enum FirstDirective {
     Other,
 }
 
-fn dangling_starts(program: &Program, ctx: &AnalyzeContext, comments: &[DocBlock]) -> Vec<usize> {
+fn dangling_starts(
+    program: Program<'_>,
+    ctx: &AnalyzeContext,
+    comments: &[DocBlock],
+) -> Vec<usize> {
     if let Some((offset, kind)) = first_directive(program, ctx) {
         if matches!(kind, FirstDirective::Library | FirstDirective::PartOf) {
             return Vec::new();
@@ -64,16 +62,10 @@ fn dangling_starts(program: &Program, ctx: &AnalyzeContext, comments: &[DocBlock
             .unwrap_or_default();
     }
 
-    let Some(keyword) = program
-        .declarations
-        .iter()
-        .map(|decl| decl.span().start)
-        .min()
-    else {
+    let Some(keyword) = program.declarations().map(|decl| decl.span().start).min() else {
         return ctx
             .tokens()
-            .iter()
-            .filter(|token| token.kind == falcon_syntax::TokenKind::DocComment)
+            .filter(|token| token.kind() == falcon_syntax::TokenKind::DocComment)
             .map(|token| token.offset())
             .collect();
     };
@@ -85,11 +77,11 @@ fn dangling_starts(program: &Program, ctx: &AnalyzeContext, comments: &[DocBlock
     }
     let mut end_line = comment.end_line;
     let mut scanned = comment.end;
-    for token in ctx.tokens().iter().filter(|token| {
+    for token in ctx.tokens().filter(|token| {
         token.offset() >= comment.end
             && token.offset() < offset
             && matches!(
-                token.kind,
+                token.kind(),
                 falcon_syntax::TokenKind::LineComment | falcon_syntax::TokenKind::BlockComment
             )
     }) {
@@ -127,11 +119,7 @@ fn attached_comment<'a>(
 ) -> Option<(&'a DocBlock, usize)> {
     let mut comments = comments.iter().peekable();
     let mut candidate = None;
-    for token in ctx
-        .tokens()
-        .iter()
-        .take_while(|token| token.offset() < keyword)
-    {
+    for token in ctx.tokens().take_while(|token| token.offset() < keyword) {
         if token.is_trivia() {
             continue;
         }
@@ -142,7 +130,7 @@ fn attached_comment<'a>(
         {
             preceding = comments.next();
         }
-        if token.kind == falcon_syntax::TokenKind::At
+        if token.kind() == falcon_syntax::TokenKind::At
             && let Some(comment) = preceding
         {
             candidate = Some((comment, token.offset()));
@@ -154,38 +142,43 @@ fn attached_comment<'a>(
         .or(candidate)
 }
 
-fn first_directive(program: &Program, ctx: &AnalyzeContext) -> Option<(usize, FirstDirective)> {
-    let keyword = |annotations: &[Annotation], span| {
-        crate::lint::declarations::first_token_after_annotations(annotations, span, ctx.syntax)
+fn first_directive(program: Program<'_>, ctx: &AnalyzeContext) -> Option<(usize, FirstDirective)> {
+    let keyword = |annotations: AstChildren<'_, Annotation<'_>>, span| {
+        crate::lint::declarations::first_token_after_annotations(
+            annotations,
+            span,
+            ctx.tree(),
+            ctx.source,
+        )
     };
     let mut directives = Vec::new();
-    if let Some(directive) = &program.library_directive {
+    if let Some(directive) = program.library_directive() {
         directives.push((
-            keyword(&directive.annotations, directive.span),
+            keyword(directive.annotations(), directive.span()),
             FirstDirective::Library,
         ));
     }
-    if let Some(directive) = &program.part_of_directive {
+    if let Some(directive) = program.part_of_directive() {
         directives.push((
-            keyword(&directive.annotations, directive.span),
+            keyword(directive.annotations(), directive.span()),
             FirstDirective::PartOf,
         ));
     }
-    directives.extend(program.part_directives.iter().map(|directive| {
+    directives.extend(program.part_directives().map(|directive| {
         (
-            keyword(&directive.annotations, directive.span),
+            keyword(directive.annotations(), directive.span()),
             FirstDirective::Other,
         )
     }));
-    directives.extend(program.imports.iter().map(|directive| {
+    directives.extend(program.imports().map(|directive| {
         (
-            keyword(&directive.annotations, directive.span),
+            keyword(directive.annotations(), directive.span()),
             FirstDirective::Other,
         )
     }));
-    directives.extend(program.exports.iter().map(|directive| {
+    directives.extend(program.exports().map(|directive| {
         (
-            keyword(&directive.annotations, directive.span),
+            keyword(directive.annotations(), directive.span()),
             FirstDirective::Other,
         )
     }));
@@ -205,7 +198,7 @@ fn documentation_blocks(ctx: &AnalyzeContext, limit: usize) -> Vec<DocBlock> {
         if !token.is_trivia() {
             metadata_end = token.offset() + token.len();
         }
-        if token.kind != falcon_syntax::TokenKind::DocComment {
+        if token.kind() != falcon_syntax::TokenKind::DocComment {
             continue;
         }
         let end = token.offset() + token.len();
@@ -255,13 +248,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn diags(source: &str) -> Vec<Diagnostic> {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
-        DanglingLibraryDocComments.analyze(&program, &ctx)
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
+        DanglingLibraryDocComments.analyze(parsed.program(), &ctx)
     }
 
     #[test]
@@ -304,5 +299,13 @@ mod tests {
     #[test]
     fn ordinary_comments_inside_doc_group_are_not_following_comments() {
         assert!(diags("/// a\n/* x */ /// b\nclass C {}").is_empty());
+    }
+
+    #[test]
+    fn interpolation_documentation_is_not_library_documentation() {
+        let source = "@Anno('${/** internal */ 1}')\nclass C {}";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        assert!(diags(source).is_empty());
     }
 }

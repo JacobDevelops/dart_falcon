@@ -26,7 +26,7 @@
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{AnalyzeContext, PackageConfig, Rule, RulePreparation, percent_decode};
-use falcon_syntax::{Program, ast::StringLitNode};
+use falcon_syntax::cst::{Program, StringLitNode};
 
 use crate::lint::correctness::always_use_package_imports::uri_scheme;
 use crate::lint::string_lit::{decode_escapes, decoded_text, literal_parts};
@@ -39,18 +39,16 @@ const NAME: &str = "conditional-uri-does-not-exist";
 impl Rule for ConditionalUriDoesNotExist {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut configurations = program
-            .imports
-            .iter()
-            .flat_map(|import| &import.configurable_uris)
+            .imports()
+            .flat_map(|import| import.configurable_uris())
             .chain(
                 program
-                    .exports
-                    .iter()
-                    .flat_map(|export| &export.configurable_uris),
+                    .exports()
+                    .flat_map(|export| export.configurable_uris()),
             )
             .peekable();
         if configurations.peek().is_none() {
@@ -70,13 +68,13 @@ impl Rule for ConditionalUriDoesNotExist {
         RulePreparation::Diagnostics(
             configurations
                 .filter_map(|configuration| {
-                    let uri = &configuration.uri;
+                    let uri = configuration.uri();
                     let value = uri_value(uri);
                     (resolver.exists(&value) == Some(false)).then(|| {
                         ctx.diagnostic(
                             NAME,
                             format!("The target of the conditional URI '{value}' doesn't exist."),
-                            uri.span,
+                            uri.span(),
                         )
                     })
                 })
@@ -204,20 +202,24 @@ impl Resolver<'_> {
 
 /// Decode each adjacent literal independently: one raw segment does not make
 /// its non-raw neighbours raw.
-pub(super) fn uri_value(uri: &StringLitNode) -> String {
-    if !uri.is_adjacent {
+pub(super) fn uri_value(uri: StringLitNode<'_>) -> String {
+    if !uri.is_adjacent() {
         if let Some(literal) = uri.delimiter()
             && literal.triple
         {
             return decoded_text(&literal, &literal_parts(&literal));
         }
-        return if uri.has_raw_segment {
-            uri.value.clone()
+        return if uri.has_raw_segment() {
+            uri.value().into_owned()
         } else {
-            decode_escapes(&uri.value).into_owned()
+            decode_escapes(&uri.value()).into_owned()
         };
     }
-    let mut value = String::with_capacity(uri.value.len());
+    let mut value = String::with_capacity(
+        uri.segments()
+            .map(|(literal, _)| literal.content.len())
+            .sum(),
+    );
     for (literal, _) in uri.segments() {
         if literal.triple {
             value.push_str(&decoded_text(&literal, &literal_parts(&literal)));
@@ -340,19 +342,19 @@ mod tests {
             if (dart.library.io) 'package:configured_app/src/present.dart?query'\n\
             if (dart.library.html) '?query'\n\
             if (dart.library.js_interop) 'package:configured_app/src/present.dart#fragment';";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([file.as_path()], |_| None);
         let config = falcon_config::FalconConfig::default();
-        let context = AnalyzeContext::new(&file, source, &config, &syntax)
-            .with_environment(Some(&environment));
-        let diagnostics = ConditionalUriDoesNotExist.analyze(&program, &context);
+        let context =
+            AnalyzeContext::new(&file, &config, &parsed).with_environment(Some(&environment));
+        let diagnostics = ConditionalUriDoesNotExist.analyze(parsed.program(), &context);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
             &source[diagnostics[0].span.start..diagnostics[0].span.end],

@@ -11,7 +11,7 @@
 //! `always-use-package-imports`.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 use crate::lint::correctness::always_use_package_imports::uri_scheme;
 use crate::lint::string_lit::decode_escapes;
@@ -24,10 +24,10 @@ const NAME: &str = "prefer-relative-imports";
 impl Rule for PreferRelativeImports {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if program.imports.is_empty() {
+        if program.imports().is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let Some(package) = crate::cross_file::lib_dir_package(ctx.file_path) else {
@@ -38,14 +38,14 @@ impl Rule for PreferRelativeImports {
         }
         RulePreparation::Diagnostics(
             program
-                .imports
-                .iter()
+                .imports()
                 .filter(|import| {
-                    let uri = &import.uri;
-                    let value = if uri.has_raw_segment {
-                        uri.value.as_str().into()
+                    let uri = import.uri();
+                    let raw_value = uri.value();
+                    let value = if uri.has_raw_segment() {
+                        raw_value
                     } else {
-                        decode_escapes(&uri.value)
+                        decode_escapes(&raw_value)
                     };
                     is_self_package_uri(&value, &package.name)
                 })
@@ -53,7 +53,7 @@ impl Rule for PreferRelativeImports {
                     ctx.diagnostic(
                         NAME,
                         "Use relative imports for files in the 'lib' directory.",
-                        import.uri.span,
+                        import.uri().span(),
                     )
                 })
                 .collect(),

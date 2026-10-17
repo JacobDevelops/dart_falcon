@@ -19,8 +19,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::in_test_directory;
 
@@ -32,7 +31,7 @@ pub struct AlwaysDeclareReturnTypes;
 impl Rule for AlwaysDeclareReturnTypes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -51,14 +50,14 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    fn function(&mut self, name: &Identifier) {
+    fn function(&mut self, name: Identifier<'_>) {
         self.diags.push(self.ctx.diagnostic(
             RULE,
             format!(
                 "The function '{}' should have a return type but doesn't.",
-                name.name
+                name.name()
             ),
-            name.span,
+            name.span(),
         ));
     }
 
@@ -75,27 +74,27 @@ impl Collector<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         match node {
             TopLevelDecl::Function(function)
-                if function.return_type.is_none()
-                    && !matches!(function.kind, FunctionKind::Setter(_)) =>
+                if function.return_type().is_none()
+                    && !matches!(function.kind(), FunctionKind::Setter(_)) =>
             {
-                self.function(&function.name);
+                self.function(function.name());
             }
             // Only the legacy form `typedef F(int x);` has an omittable return
             // type; its synthesized function type starts at the alias name.
             TopLevelDecl::TypeAlias(alias) => {
-                if let DartType::Function(function) = &alias.aliased
-                    && function.return_type.is_none()
-                    && function.span.start == alias.name.span.start
+                if let DartType::Function(function) = alias.aliased()
+                    && function.return_type().is_none()
+                    && function.span().start == alias.name().span().start
                 {
-                    self.function(&alias.name);
+                    self.function(alias.name());
                 }
             }
             _ => {}
@@ -103,30 +102,30 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         match node {
-            ClassMember::Method(method) if method.return_type.is_none() => {
-                self.method(&method.name.name, method.name.span);
+            ClassMember::Method(method) if method.return_type().is_none() => {
+                self.method(method.name().name(), method.name().span());
             }
-            ClassMember::Getter(getter) if getter.return_type.is_none() => {
-                self.method(&getter.name.name, getter.name.span);
+            ClassMember::Getter(getter) if getter.return_type().is_none() => {
+                self.method(getter.name().name(), getter.name().span());
             }
             ClassMember::Operator(operator)
-                if operator.return_type.is_none() && operator.op != "[]=" =>
+                if operator.return_type().is_none() && operator.op() != "[]=" =>
             {
-                let span = operator_span(operator, self.ctx.syntax);
-                self.method(&operator.op, span);
+                let span = operator_span(operator, self.ctx.tree(), self.ctx.source);
+                self.method(operator.op(), span);
             }
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node
-            && function.return_type.is_none()
+            && function.return_type().is_none()
         {
-            self.function(&function.name);
+            self.function(function.name());
         }
         StructuralTraversal::Continue
     }
@@ -134,18 +133,21 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
 }
 
 /// The operator name alone, including both tokens of `[]`.
-pub(crate) fn operator_span(operator: &OperatorDecl, syntax: &falcon_syntax::SyntaxStore) -> Span {
+pub(crate) fn operator_span(operator: OperatorDecl<'_>, tree: &SyntaxTree, source: &str) -> Span {
     let header_start = operator
-        .annotations
+        .annotations()
         .last()
-        .map_or(operator.span.start, |annotation| annotation.span.end);
-    let mut tokens = syntax
-        .tokens_in(Span::new(header_start, operator.params.span.start))
+        .map_or(operator.span().start, |annotation| annotation.span().end);
+    let mut tokens = tree
+        .tokens_in(
+            source,
+            Span::new(header_start, operator.params().span().start),
+        )
         .filter(|token| !token.is_trivia())
-        .skip_while(|token| token.kind != falcon_syntax::TokenKind::Operator)
+        .skip_while(|token| token.kind() != falcon_syntax::TokenKind::Operator)
         .skip(1);
     let Some(first) = tokens.next() else {
-        return Span::new(header_start, operator.params.span.start);
+        return Span::new(header_start, operator.params().span().start);
     };
     let last = tokens.last().unwrap_or(first);
     Span::new(first.offset(), last.offset() + last.len())

@@ -106,7 +106,7 @@ pub fn run_cross_file(
             return true;
         };
         let suppression = suppressions.entry(path.as_ref()).or_insert_with(|| {
-            FileSuppressions::parse(&file.source, path, suppression_lookup, &file.syntax)
+            FileSuppressions::parse(file.source(), path, suppression_lookup, file.tree())
         });
         !suppression.is_suppressed(
             diagnostic.rule,

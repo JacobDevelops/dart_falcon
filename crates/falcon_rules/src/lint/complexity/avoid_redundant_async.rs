@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidRedundantAsync;
@@ -19,7 +19,7 @@ pub struct AvoidRedundantAsync;
 impl Rule for AvoidRedundantAsync {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(AsyncDeclarations {
@@ -35,16 +35,16 @@ struct AsyncDeclarations<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for AsyncDeclarations<'_, '_> {
+impl<'a, 'ctx> StructuralRuleVisitor<'ctx> for AsyncDeclarations<'a, 'ctx> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, _node: Expr<'ctx>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'ctx>) -> StructuralTraversal {
         if matches!(node, TopLevelDecl::Variable(_)) {
             StructuralTraversal::SkipChildren
         } else {
@@ -52,14 +52,14 @@ impl StructuralRuleVisitor for AsyncDeclarations<'_, '_> {
         }
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'ctx>) -> StructuralTraversal {
         if let Some(diag) = check_function_async(node, self.ctx) {
             self.diags.push(diag);
         }
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'ctx>) -> StructuralTraversal {
         if let ClassMember::Method(method) = node
             && let Some(diag) = check_method_async(method, self.ctx)
         {
@@ -70,41 +70,36 @@ impl StructuralRuleVisitor for AsyncDeclarations<'_, '_> {
 }
 }
 
-fn check_function_async(func_decl: &FunctionDecl, ctx: &AnalyzeContext) -> Option<Diagnostic> {
-    if !func_decl.async_marker.is_async() {
+fn check_function_async(func_decl: FunctionDecl<'_>, ctx: &AnalyzeContext) -> Option<Diagnostic> {
+    if !func_decl.async_marker().is_async() {
         return None;
     }
 
-    if is_redundant_async_body(&func_decl.body) {
-        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", func_decl.name.span));
+    if is_redundant_async_body(func_decl.body()) {
+        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", func_decl.name().span()));
     }
 
     None
 }
 
-fn check_method_async(method_decl: &MethodDecl, ctx: &AnalyzeContext) -> Option<Diagnostic> {
-    if !method_decl.async_marker.is_async() {
+fn check_method_async(method_decl: MethodDecl<'_>, ctx: &AnalyzeContext) -> Option<Diagnostic> {
+    if !method_decl.async_marker().is_async() {
         return None;
     }
 
-    if is_redundant_async_body(&method_decl.body) {
-        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", method_decl.name.span));
+    if is_redundant_async_body(method_decl.body()) {
+        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", method_decl.name().span()));
     }
 
     None
 }
 
-fn is_redundant_async_body(body: &Option<FunctionBody>) -> bool {
+fn is_redundant_async_body(body: Option<FunctionBody<'_>>) -> bool {
     match body {
         Some(FunctionBody::Block(block)) => {
-            block.stmts.len() == 1
-                && matches!(
-                    &block.stmts[0],
-                    Stmt::Return(ReturnStmt {
-                        value: Some(value),
-                        ..
-                    }) if matches!(value.unparenthesized(), Expr::Await { .. })
-                )
+            block.stmts().len() == 1
+                && matches!(block.stmts().next(), Some(Stmt::Return(returned))
+                    if returned.value().is_some_and(|value| matches!(value.unparenthesized(), Expr::Await(_))))
         }
         _ => false,
     }

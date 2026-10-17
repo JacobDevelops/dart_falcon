@@ -26,7 +26,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseToAndAsIfApplicable;
@@ -34,7 +34,7 @@ pub struct UseToAndAsIfApplicable;
 impl Rule for UseToAndAsIfApplicable {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -43,7 +43,7 @@ impl Rule for UseToAndAsIfApplicable {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             signatures,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             owner: None,
             diags: Vec::new(),
         }))
@@ -59,23 +59,23 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         self.owner = None;
             // Extensions have no supertypes to inherit from.
             let owner = match decl {
                 TopLevelDecl::Extension(_) => None,
-                TopLevelDecl::Class(node) => Some(&node.name.name),
-                TopLevelDecl::Mixin(node) => Some(&node.name.name),
-                TopLevelDecl::MixinClass(node) => Some(&node.name.name),
-                TopLevelDecl::Enum(node) => Some(&node.name.name),
-                TopLevelDecl::ExtensionType(node) => Some(&node.name.name),
+                TopLevelDecl::Class(node) => Some(node.name().name()),
+                TopLevelDecl::Mixin(node) => Some(node.name().name()),
+                TopLevelDecl::MixinClass(node) => Some(node.name().name()),
+                TopLevelDecl::Enum(node) => Some(node.name().name()),
+                TopLevelDecl::ExtensionType(node) => Some(node.name().name()),
                 _ => return StructuralTraversal::Continue,
             };
             let owner = match owner {
-                Some(name) => match self.model.resolve_name(name.as_str()) {
+                Some(name) => match self.model.resolve_name(name) {
                     Some(identity) => Some(identity),
                     None => return StructuralTraversal::Continue,
                 },
@@ -85,32 +85,32 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let Some(owner) = &self.owner else {
             return StructuralTraversal::Continue;
         };
                 let (name, params, return_type, body, span) = match member {
                     ClassMember::Method(method) => (
-                        method.name.name.as_str(),
-                        &method.params,
-                        &method.return_type,
-                        &method.body,
-                        method.name.span,
+                        method.name().name(),
+                        method.params(),
+                        method.return_type(),
+                        method.body(),
+                        method.name().span(),
                     ),
                     ClassMember::Operator(operator) => (
-                        operator.op.as_str(),
-                        &operator.params,
-                        &operator.return_type,
-                        &operator.body,
-                        crate::lint::declarations::operator_token_span(operator, self.ctx.syntax),
+                        operator.op(),
+                        operator.params(),
+                        operator.return_type(),
+                        operator.body(),
+                        crate::lint::declarations::operator_token_span(operator),
                     ),
                     _ => return StructuralTraversal::Continue,
                 };
                 let Some(body) = body else {
                     return StructuralTraversal::Continue;
                 };
-                if !params.params.is_empty()
-                    || matches!(return_type, Some(DartType::Void { .. }))
+                if !params.params().is_empty()
+                    || matches!(return_type, Some(DartType::Void(_)))
                     || begins_with_as_or_to(name)
                     || !wraps_this(body, &self.model, self.signatures)
                 {
@@ -143,41 +143,45 @@ fn begins_with_as_or_to(name: &str) -> bool {
 
 /// Whether the body is a single constructor call taking exactly `this`.
 fn wraps_this(
-    body: &FunctionBody,
+    body: FunctionBody<'_>,
     model: &SemanticModel<'_>,
     signatures: &falcon_analyze::SignatureIndex,
 ) -> bool {
     let expr = match body {
-        FunctionBody::Arrow(expr, _) => &**expr,
-        FunctionBody::Block(block) => match block.stmts.as_slice() {
-            [
-                Stmt::Return(ReturnStmt {
-                    value: Some(value), ..
-                }),
-            ] => value,
-            _ => return false,
-        },
-        FunctionBody::Native(..) => return false,
+        FunctionBody::Arrow(arrow) => arrow.expr(),
+        FunctionBody::Block(block) => {
+            let mut statements = block.stmts();
+            match (statements.next(), statements.next()) {
+                (Some(Stmt::Return(statement)), None) => match statement.value() {
+                    Some(value) => value,
+                    None => return false,
+                },
+                _ => return false,
+            }
+        }
+        FunctionBody::Native(_) => return false,
     };
     let (args, is_creation) = match expr.unparenthesized() {
-        Expr::New { args, .. } => (args, true),
-        Expr::Call { callee, args, .. } => (
-            args,
+        Expr::New(new) => (new.args(), true),
+        Expr::Call(call) => (
+            call.args(),
             // A bare type name can only be invoked as its unnamed
             // constructor; `Type.name` may be a static method, so it must
             // name a known constructor.
-            resolve_call_constructor(callee, model, false).is_some_and(
+            resolve_call_constructor(call.callee(), model, false).is_some_and(
                 |(identity, constructor)| {
-                    matches!(callee.unparenthesized(), Expr::Ident(_))
+                    matches!(call.callee().unparenthesized(), Expr::Ident(_))
                         || signatures.constructor(&identity, constructor).is_some()
                 },
             ),
         ),
         _ => return false,
     };
+    let mut positional = args.positional();
     is_creation
-        && args.named.is_empty()
-        && matches!(args.positional.as_slice(), [argument] if matches!(argument.unparenthesized(), Expr::This { .. }))
+        && args.named().is_empty()
+        && matches!(positional.next(), Some(argument) if matches!(argument.unparenthesized(), Expr::This(_)))
+        && positional.next().is_none()
 }
 
 #[cfg(test)]

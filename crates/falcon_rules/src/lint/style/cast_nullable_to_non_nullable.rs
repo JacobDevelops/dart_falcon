@@ -18,8 +18,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::semantic_type_operations::nullability;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -30,7 +29,7 @@ pub struct CastNullableToNonNullable;
 impl Rule for CastNullableToNonNullable {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -45,33 +44,28 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::As {
-            expr,
-            dart_type,
-            span,
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::As(cast) = node else {
             return;
         };
         let target = state
             .model
-            .resolve_type_in(dart_type, &state.type_parameters);
+            .resolve_type_in(cast.dart_type(), &state.type_parameters);
         if nullability(&target, &state.signatures, self.ctx.types) != Truth::No {
             return;
         }
-        if nullability(&state.infer(expr), &state.signatures, self.ctx.types) != Truth::Yes {
+        if nullability(&state.infer(cast.expr()), &state.signatures, self.ctx.types) != Truth::Yes {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(
             "cast-nullable-to-non-nullable",
             "Don't cast a nullable value to a non-nullable type.",
-            *span,
+            cast.span(),
         ));
     }
 }

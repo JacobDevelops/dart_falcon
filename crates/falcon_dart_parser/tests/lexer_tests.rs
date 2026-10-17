@@ -1,6 +1,6 @@
 use falcon_dart_parser::lexer::Lexer;
 use falcon_dart_parser::parser::parse;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::token::{Token, TokenKind};
 
 fn significant_tokens(tokens: Vec<Token>) -> Vec<Token> {
@@ -732,10 +732,9 @@ mod common_string;
 use common_string::string_lit;
 
 /// The source text under each interpolation's span.
-fn interp_texts(node: &StringLitNode, src: &str) -> Vec<String> {
-    node.interpolations
-        .iter()
-        .map(|i| src[i.span.start..i.span.end].to_string())
+fn interp_texts(node: StringLitNode<'_>, src: &str) -> Vec<String> {
+    node.interpolations()
+        .map(|i| src[i.span().start..i.span().end].to_string())
         .collect()
 }
 
@@ -768,11 +767,8 @@ fn shebang_without_trailing_newline_lexes_clean() {
 
 #[test]
 fn shebang_file_parses_with_zero_errors() {
-    let falcon_dart_parser::ParseResult {
-        program: _program,
-        errors,
-        ..
-    } = parse("#!/usr/bin/env dart\nvoid main() {}");
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse("#!/usr/bin/env dart\nvoid main() {}");
     assert!(
         errors.is_empty(),
         "shebang file should parse cleanly: {errors:?}"
@@ -810,25 +806,45 @@ fn adjacent_ident_then_braced_is_one_string_token() {
 
 #[test]
 fn adjacent_ident_then_braced_interpolations() {
-    let (node, src) = string_lit("'$a${ 'y' }'");
-    assert_eq!(interp_texts(&node, &src), vec!["a", " 'y' "]);
-    assert!(matches!(&node.interpolations[0].expr, Expr::Ident(id) if id.name == "a"));
-    assert!(matches!(&node.interpolations[1].expr, Expr::StringLit(_)));
+    let src = "void f() { var x = '$a${ 'y' }'; }";
+    let parsed = parse(src);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(interp_texts(node, src), vec!["a", " 'y' "]);
+    assert!(
+        matches!(node.interpolations().next().unwrap().expr(), Expr::Ident(id) if id.name() == "a")
+    );
+    assert!(matches!(
+        node.interpolations().nth(1).unwrap().expr(),
+        Expr::StringLit(_)
+    ));
 }
 
 #[test]
 fn adjacent_braced_then_braced_interpolations() {
-    let (node, src) = string_lit("'${a}${ 'y' }'");
-    assert_eq!(interp_texts(&node, &src), vec!["a", " 'y' "]);
+    let src = "void f() { var x = '${a}${ 'y' }'; }";
+    let parsed = parse(src);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(interp_texts(node, src), vec!["a", " 'y' "]);
 }
 
 #[test]
 fn several_simple_interpolations_stop_at_each_dollar() {
-    let (node, src) = string_lit("'$a$b${c}'");
-    assert_eq!(interp_texts(&node, &src), vec!["a", "b", "c"]);
-    assert!(matches!(&node.interpolations[0].expr, Expr::Ident(id) if id.name == "a"));
-    assert!(matches!(&node.interpolations[1].expr, Expr::Ident(id) if id.name == "b"));
-    assert!(matches!(&node.interpolations[2].expr, Expr::Ident(id) if id.name == "c"));
+    let src = "void f() { var x = '$a$b${c}'; }";
+    let parsed = parse(src);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(interp_texts(node, src), vec!["a", "b", "c"]);
+    assert!(
+        matches!(node.interpolations().next().unwrap().expr(), Expr::Ident(id) if id.name() == "a")
+    );
+    assert!(
+        matches!(node.interpolations().nth(1).unwrap().expr(), Expr::Ident(id) if id.name() == "b")
+    );
+    assert!(
+        matches!(node.interpolations().nth(2).unwrap().expr(), Expr::Ident(id) if id.name() == "c")
+    );
 }
 
 // ── (c) Nested triple-quoted string inside an interpolation ─────────────────
@@ -846,16 +862,28 @@ fn nested_triple_quote_in_interpolation_is_one_token() {
 
 #[test]
 fn nested_triple_quote_in_interpolation_interpolations() {
-    let (node, src) = string_lit("'''${wrap('''inner''')}'''");
-    assert_eq!(interp_texts(&node, &src), vec!["wrap('''inner''')"]);
-    assert!(matches!(node.interpolations[0].expr, Expr::Call { .. }));
+    let src = "void f() { var x = '''${wrap('''inner''')}'''; }";
+    let parsed = parse(src);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(interp_texts(node, src), vec!["wrap('''inner''')"]);
+    assert!(matches!(
+        node.interpolations().next().unwrap().expr(),
+        Expr::Call(_)
+    ));
 }
 
 #[test]
 fn nested_double_triple_quote_in_interpolation() {
-    let (node, src) = string_lit("\"\"\"${f(\"x\")}\"\"\"");
-    assert_eq!(interp_texts(&node, &src), vec!["f(\"x\")"]);
-    assert!(matches!(node.interpolations[0].expr, Expr::Call { .. }));
+    let src = "void f() { var x = \"\"\"${f(\"x\")}\"\"\"; }";
+    let parsed = parse(src);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(interp_texts(node, src), vec!["f(\"x\")"]);
+    assert!(matches!(
+        node.interpolations().next().unwrap().expr(),
+        Expr::Call(_)
+    ));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -878,11 +906,7 @@ fn leading_bom_is_stripped_no_error() {
 
 #[test]
 fn bom_file_parses_with_zero_errors() {
-    let falcon_dart_parser::ParseResult {
-        program: _program,
-        errors,
-        ..
-    } = parse("\u{FEFF}void main() {}");
+    let falcon_dart_parser::ParseResult { errors, .. } = parse("\u{FEFF}void main() {}");
     assert!(errors.is_empty(), "BOM file should parse clean: {errors:?}");
 }
 
@@ -942,19 +966,16 @@ fn test_raw_string_with_backslash_in_interpolation() {
     );
 
     // And it parses cleanly end-to-end, recording the interpolation.
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
+    let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let init = match &prog.declarations[0] {
-        TopLevelDecl::Variable(v) => v.declarators[0].initializer.as_ref().unwrap(),
+    let init = match prog.declarations().first().unwrap() {
+        TopLevelDecl::Variable(v) => v.declarators().first().unwrap().initializer().unwrap(),
         other => panic!("expected variable, got {other:?}"),
     };
     match init {
         Expr::StringLit(node) => assert_eq!(
-            node.interpolations.len(),
+            node.interpolations().count(),
             1,
             "expected one interpolation: {node:?}"
         ),
@@ -992,10 +1013,8 @@ fn line_comments_end_at_every_dart_line_ending() {
                 .count(),
             3
         );
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(&source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(program.declarations.len(), 2);
+        assert_eq!(tree.program(&source).declarations().len(), 2);
     }
 }

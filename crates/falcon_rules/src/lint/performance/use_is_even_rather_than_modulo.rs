@@ -12,7 +12,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, parse_int};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::ConstContexts;
 use crate::lint::const_eval::ConstructorConstContexts as ConstConstructorAsserts;
@@ -24,7 +24,7 @@ pub struct UseIsEvenRatherThanModulo;
 impl Rule for UseIsEvenRatherThanModulo {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -43,37 +43,35 @@ struct Collector<'a> {
     asserts: ConstConstructorAsserts,
 }
 
-fn int_literal(expr: &Expr) -> Option<i128> {
+fn int_literal(expr: Expr<'_>) -> Option<i128> {
     match expr {
-        Expr::IntLit { value, .. } => parse_int(value),
+        Expr::IntLit(literal) => parse_int(literal.value()),
         _ => None,
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op: BinaryOp::EqEq,
-            left,
-            right,
-            span,
-            ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Binary(binary) = node else {
             return;
         };
-        let Expr::Binary {
-            op: BinaryOp::Mod,
-            right: divisor,
-            ..
-        } = left.as_ref()
-        else {
+        if binary.op() != BinaryOp::EqEq {
+            return;
+        }
+        let left = binary.left();
+        let right = binary.right();
+        let span = binary.span();
+        let Expr::Binary(modulo) = left else {
             return;
         };
+        if modulo.op() != BinaryOp::Mod {
+            return;
+        }
+        let divisor = modulo.right();
         let getter = match int_literal(right) {
             Some(0) => "isEven",
             Some(_) => "isOdd",
@@ -81,15 +79,15 @@ impl SemanticRuleVisitor for Collector<'_> {
         };
         if int_literal(divisor) != Some(2)
             || !state.infer(left).interface("dart:core", "int")
-            || self.contexts.contains(span)
-            || self.asserts.in_const_constructor_assert(span)
+            || self.contexts.contains(&span)
+            || self.asserts.in_const_constructor_assert(&span)
         {
             return;
         }
         self.diags.push(self.ctx.diagnostic(
             "use-is-even-rather-than-modulo",
             format!("Use '{getter}' rather than '% 2'."),
-            *span,
+            span,
         ));
     }
 }

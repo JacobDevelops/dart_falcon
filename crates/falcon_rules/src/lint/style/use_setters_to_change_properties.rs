@@ -29,7 +29,7 @@ use falcon_analyze::{
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseSettersToChangeProperties;
@@ -37,18 +37,16 @@ pub struct UseSettersToChangeProperties;
 impl Rule for UseSettersToChangeProperties {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
-            program,
             ctx,
             signatures,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
-            next_decl: 0,
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             owner: None,
             diags: Vec::new(),
         }))
@@ -56,22 +54,18 @@ impl Rule for UseSettersToChangeProperties {
 }
 
 struct Collector<'a, 'ctx> {
-    program: &'a Program,
     ctx: &'a AnalyzeContext<'ctx>,
     signatures: &'a SignatureIndex,
     model: SemanticModel<'a>,
-    next_decl: usize,
-    owner: Option<(usize, ResolvedType, bool, bool)>,
+    owner: Option<(AstChildren<'a, ClassMember<'a>>, ResolvedType, bool, bool)>,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
-        let index = self.next_decl;
-        self.next_decl += 1;
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         self.owner = None;
         let model = &self.model;
             let (owner_type, unresolved_super, extension) = match decl {
@@ -79,27 +73,27 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
                     // Extension members resolve `this` against the `on` type
                     // and never override.
                     let mut parameters = TypeParameterScope::default();
-                    parameters.push(&node.type_params, model);
+                    parameters.push(node.type_params(), model);
                     (
-                        model.resolve_type_in(&node.on_type, &parameters),
+                        model.resolve_type_in(node.on_type(), &parameters),
                         false,
                         true,
                     )
                 }
                 _ => {
                     let name = match decl {
-                        TopLevelDecl::Class(node) => &node.name.name,
-                        TopLevelDecl::MixinClass(node) => &node.name.name,
-                        TopLevelDecl::Mixin(node) => &node.name.name,
-                        TopLevelDecl::Enum(node) => &node.name.name,
-                        TopLevelDecl::ExtensionType(node) => &node.name.name,
+                        TopLevelDecl::Class(node) => node.name().name(),
+                        TopLevelDecl::MixinClass(node) => node.name().name(),
+                        TopLevelDecl::Mixin(node) => node.name().name(),
+                        TopLevelDecl::Enum(node) => node.name().name(),
+                        TopLevelDecl::ExtensionType(node) => node.name().name(),
                         _ => return StructuralTraversal::Continue,
                     };
-                    let Some(owner) = model.resolve_name(name.as_str()) else {
+                    let Some(owner) = model.resolve_name(name) else {
                         return StructuralTraversal::Continue;
                     };
                     let unresolved_super = match decl {
-                        TopLevelDecl::Class(class) => class.extends.as_ref().is_some_and(|ty| {
+                        TopLevelDecl::Class(class) => class.extends().is_some_and(|ty| {
                             matches!(model.resolve_type(ty), ResolvedType::Unknown)
                         }),
                         _ => false,
@@ -111,22 +105,22 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
                     )
                 }
             };
-        self.owner = Some((index, owner_type, unresolved_super, extension));
+        self.owner = crate::lint::declarations::members_of(decl)
+            .map(|members| (members, owner_type, unresolved_super, extension));
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, method: &MethodDecl) -> StructuralTraversal {
-        if let Some((index, owner_type, unresolved_super, extension)) = &self.owner
-            && let Some(members) = crate::lint::declarations::members_of(&self.program.declarations[*index])
+    fn visit_method_decl(&mut self, method: MethodDecl<'a>) -> StructuralTraversal {
+        if let Some((members, owner_type, unresolved_super, extension)) = &self.owner
             && changes_property(
-                method, members, owner_type, self.signatures, &self.model,
+                method, members.clone(), owner_type, self.signatures, &self.model,
                 *unresolved_super, *extension,
             )
         {
                     self.diags.push(self.ctx.diagnostic(
                         "use-setters-to-change-properties",
                         "The method is used to change a property.",
-                        method.name.span,
+                        method.name().span(),
                     ));
                 }
         StructuralTraversal::Continue
@@ -134,19 +128,21 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
 }
 }
 
-fn changes_property(
-    method: &MethodDecl,
-    members: &[ClassMember],
+fn changes_property<'a>(
+    method: MethodDecl<'a>,
+    members: AstChildren<'a, ClassMember<'a>>,
     owner_type: &ResolvedType,
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
     unresolved_super: bool,
     extension: bool,
 ) -> bool {
-    let ([param], Some(DartType::Void { .. }), Some(body)) = (
-        method.params.params.as_slice(),
-        &method.return_type,
-        &method.body,
+    let mut params = method.params().params();
+    let (Some(param), None, Some(DartType::Void(_)), Some(body)) = (
+        params.next(),
+        params.next(),
+        method.return_type(),
+        method.body(),
     ) else {
         return false;
     };
@@ -163,30 +159,28 @@ fn changes_property(
         return false;
     };
     let expr = match body {
-        FunctionBody::Arrow(expr, _) => &**expr,
-        FunctionBody::Block(block) => match block.stmts.as_slice() {
-            [Stmt::Expr(statement)] => &statement.expr,
-            _ => return false,
-        },
-        FunctionBody::Native(..) => return false,
+        FunctionBody::Arrow(arrow) => arrow.expr(),
+        FunctionBody::Block(block) => {
+            let mut statements = block.stmts();
+            match (statements.next(), statements.next()) {
+                (Some(Stmt::Expr(statement)), None) => statement.expr(),
+                _ => return false,
+            }
+        }
+        FunctionBody::Native(_) => return false,
     };
-    let Expr::Assign {
-        target,
-        op: AssignOp::Eq,
-        value,
-        ..
-    } = expr.unparenthesized()
-    else {
+    let Expr::Assign(assignment) = expr.unparenthesized() else {
         return false;
     };
-    if !matches!(value.unparenthesized(), Expr::Ident(identifier) if identifier.name == param.name.name)
+    if assignment.op() != AssignOp::Eq
+        || !matches!(assignment.value().unparenthesized(), Expr::Ident(identifier) if identifier.name() == param.name().name())
     {
         return false;
     }
     // A property of the type itself: declared by it or, for an extension,
     // by the extension or its `on` type.
     let own_property = |name: &str, receiver: &ResolvedType| {
-        declares_property(members, name)
+        declares_property(members.clone(), name)
             || if extension {
                 signatures
                     .resolved_writable_field(receiver, name, model)
@@ -195,43 +189,36 @@ fn changes_property(
                 inherits_setter(owner, name, signatures)
             }
     };
-    let assigns_field = match target.unparenthesized() {
-        Expr::Field {
-            object,
-            field,
-            is_null_safe,
-            ..
-        } if !method.is_static
-            && (matches!((**object).unparenthesized(), Expr::This { .. })
-                || matches!(object.unparenthesized(), Expr::NullAssert { operand, .. }
-                    if matches!(operand.unparenthesized(), Expr::This { .. }))) =>
+    let assigns_field = match assignment.target().unparenthesized() {
+        Expr::Field(field)
+            if !method.is_static()
+                && (matches!(field.object().unparenthesized(), Expr::This(_))
+                    || matches!(field.object().unparenthesized(), Expr::NullAssert(assertion)
+                    if matches!(assertion.operand().unparenthesized(), Expr::This(_)))) =>
         {
-            if *is_null_safe || matches!(object.unparenthesized(), Expr::NullAssert { .. }) {
-                own_property(&field.name, &owner_type.non_null())
+            if field.is_null_safe()
+                || matches!(field.object().unparenthesized(), Expr::NullAssert(_))
+            {
+                own_property(field.field().name(), &owner_type.non_null())
             } else {
-                own_property(&field.name, owner_type)
+                own_property(field.field().name(), owner_type)
             }
         }
-        Expr::Field {
-            object,
-            field,
-            is_null_safe,
-            ..
-        } => {
-            let (object, asserted_non_null) = match object.unparenthesized() {
-                Expr::NullAssert { operand, .. } => (operand.unparenthesized(), true),
+        Expr::Field(field) => {
+            let (object, asserted_non_null) = match field.object().unparenthesized() {
+                Expr::NullAssert(assertion) => (assertion.operand().unparenthesized(), true),
                 object => (object, false),
             };
             let receiver = if let Expr::Ident(identifier) = object {
-                if identifier.name == param.name.name {
-                    param.param_type.as_ref().map(|ty| model.resolve_type(ty))
+                if identifier.name() == param.name().name() {
+                    param.param_type().map(|ty| model.resolve_type(ty))
                 } else {
                     signatures
-                        .resolved_field(owner_type, &identifier.name, model)
+                        .resolved_field(owner_type, identifier.name(), model)
                         .or_else(|| {
                             signatures.resolved_extension_getter(
                                 owner_type,
-                                &identifier.name,
+                                identifier.name(),
                                 model,
                             )
                         })
@@ -241,29 +228,29 @@ fn changes_property(
                 None
             };
             receiver.is_some_and(|receiver| {
-                let receiver = if *is_null_safe || asserted_non_null {
+                let receiver = if field.is_null_safe() || asserted_non_null {
                     receiver.non_null()
                 } else {
                     receiver
                 };
                 signatures
-                    .resolved_writable_field(&receiver, &field.name, model)
+                    .resolved_writable_field(&receiver, field.field().name(), model)
                     .is_some()
             })
         }
         // An unqualified name resolves lexically, so only the type's own
         // members are known to win over library-level declarations; inside
         // an extension the `on` type is only reached when nothing lexical is.
-        Expr::Ident(identifier) if identifier.name != param.name.name => {
-            declares_property(members, &identifier.name)
+        Expr::Ident(identifier) if identifier.name() != param.name().name() => {
+            declares_property(members.clone(), identifier.name())
                 || if extension {
-                    !method.is_static
-                        && model.resolve_value(identifier.name.as_str()).is_none()
+                    !method.is_static()
+                        && model.resolve_value(identifier.name()).is_none()
                         && signatures
-                            .resolved_writable_field(owner_type, &identifier.name, model)
+                            .resolved_writable_field(owner_type, identifier.name(), model)
                             .is_some()
                 } else {
-                    inherits_setter(owner, &identifier.name, signatures)
+                    inherits_setter(owner, identifier.name(), signatures)
                 }
         }
         _ => false,
@@ -272,13 +259,12 @@ fn changes_property(
 }
 
 /// A field or setter of this name declared by the type itself.
-fn declares_property(members: &[ClassMember], name: &str) -> bool {
-    members.iter().any(|member| match member {
+fn declares_property<'a>(mut members: AstChildren<'a, ClassMember<'a>>, name: &str) -> bool {
+    members.any(|member| match member {
         ClassMember::Field(field) => field
-            .declarators
-            .iter()
-            .any(|declarator| declarator.name.name == name),
-        ClassMember::Setter(setter) => setter.name.name == name,
+            .declarators()
+            .any(|declarator| declarator.name().name() == name),
+        ClassMember::Setter(setter) => setter.name().name() == name,
         _ => false,
     })
 }
@@ -291,7 +277,7 @@ fn inherits_setter(owner: &DeclarationIdentity, name: &str, signatures: &Signatu
 
 /// Whether the method overrides an inherited method.
 fn overrides_method(
-    method: &MethodDecl,
+    method: MethodDecl<'_>,
     owner: &DeclarationIdentity,
     signatures: &SignatureIndex,
     unresolved_super: bool,
@@ -300,16 +286,16 @@ fn overrides_method(
         return true;
     }
     signatures
-        .inherited_member_facts(owner, &method.name.name)
+        .inherited_member_facts(owner, method.name().name())
         .map_or(
-            !unresolved_super && !method.name.name.starts_with('_'),
+            !unresolved_super && !method.name().name().starts_with('_'),
             |facts| facts.iter().any(|fact| fact.kind == MemberKind::Method),
         )
 }
 
-fn has_override(method: &MethodDecl) -> bool {
-    method
-        .annotations
-        .iter()
-        .any(|annotation| matches!(annotation.name.as_slice(), [name] if name.name == "override"))
+fn has_override(method: MethodDecl<'_>) -> bool {
+    method.annotations().any(|annotation| {
+        let mut names = annotation.name();
+        matches!((names.next(), names.next()), (Some(name), None) if name.name() == "override")
+    })
 }

@@ -11,12 +11,12 @@ use std::ops::{Deref, DerefMut, Range};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use falcon_syntax::ast::{
-    BinaryOp, ClassMember, ClassRestriction, DartType, EffectiveMembers, Expr, FormalParam,
-    FormalParamList, FunctionBody, FunctionKind, InitializingFormal, ParamKind, Program, Span,
-    TopLevelDecl, TypeParam, UnaryOp, VarKeyword,
+use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
+use falcon_syntax::cst::{
+    AstChildren, BinaryOp, ClassMember, ClassRestriction, DartType, EffectiveMembers, Expr,
+    FormalParam, FormalParamList, FunctionBody, FunctionKind, InitializingFormal, NodeId,
+    ParamKind, Program, Span, TopLevelDecl, TypeParam, UnaryOp, VarKeyword,
 };
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 use super::identity::TypeAlias;
 use super::{
@@ -80,17 +80,17 @@ thread_local! {
 fn mark_alias_cycle() {
     ALIAS_CYCLE_GENERATION.with(|generation| generation.set(generation.get().wrapping_add(1)));
 }
-type IndexedProgram<'a> = (Option<FileId>, &'a Program, &'a [(usize, usize)]);
+type IndexedProgram<'a> = (Option<FileId>, &'a Arc<crate::ParsedFile>, bool);
 
 /// Whether a selector/call chain starts with an implicit dot-shorthand receiver.
 /// Argument expressions do not establish the receiver's inference context.
-pub fn expression_has_dot_shorthand_base(mut expression: &Expr) -> bool {
+pub fn expression_has_dot_shorthand_base(mut expression: Expr<'_>) -> bool {
     loop {
         expression = match expression.unparenthesized() {
-            Expr::DotShorthand { .. } => return true,
-            Expr::Field { object, .. } => object,
-            Expr::Call { callee, .. } => callee,
-            Expr::GenericInstantiation { target, .. } => target,
+            Expr::DotShorthand(_) => return true,
+            Expr::Field(node) => node.object(),
+            Expr::Call(node) => node.callee(),
+            Expr::GenericInstantiation(node) => node.target(),
             _ => return false,
         };
     }
@@ -99,34 +99,31 @@ pub fn expression_has_dot_shorthand_base(mut expression: &Expr) -> bool {
 /// Whether a null-aware selector (`?.`, `?[`) in `expression`'s own
 /// selector chain null-shorts it, which makes its static type nullable
 /// (`a?.b.c`, `a?.b!`, `a?[0].c()`). Explicit parentheses end a chain.
-pub fn null_shorted(expression: &Expr) -> bool {
+pub fn null_shorted(expression: Expr<'_>) -> bool {
     let mut current = expression;
     loop {
         current = match current {
-            Expr::Field {
-                object,
-                is_null_safe,
-                ..
-            }
-            | Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => {
-                if *is_null_safe {
+            Expr::Field(node) => {
+                if node.is_null_safe() {
                     return true;
                 }
-                object
+                node.object()
             }
-            Expr::NullAssert { operand, .. } => operand,
-            Expr::Call { callee, .. } => callee,
-            Expr::GenericInstantiation { target, .. } => target,
+            Expr::Index(node) => {
+                if node.is_null_safe() {
+                    return true;
+                }
+                node.object()
+            }
+            Expr::NullAssert(node) => node.operand(),
+            Expr::Call(node) => node.callee(),
+            Expr::GenericInstantiation(node) => node.target(),
             _ => return false,
         };
     }
 }
 
-type ArgumentTypeFallback<'a> = dyn Fn(&Expr) -> Option<ResolvedType> + 'a;
+type ArgumentTypeFallback<'a> = dyn Fn(Expr<'_>) -> Option<ResolvedType> + 'a;
 
 /// Shared immutable inputs for generic call inference.
 pub struct InferenceContext<'a, 'model, 'lookup, F: Fn(&str) -> Option<ResolvedType>> {
@@ -394,14 +391,13 @@ impl FunctionTypeShape {
         )
     }
 
-    fn from_scope(
+    fn from_scope<'tree>(
         required_named: Vec<String>,
-        parameters: &[TypeParam],
+        parameters: impl Iterator<Item = TypeParam<'tree>>,
         scope: &TypeParameterScope,
     ) -> Option<Arc<Self>> {
         let parameters = parameters
-            .iter()
-            .map(|parameter| scope.lookup(&parameter.name.name))
+            .map(|parameter| scope.lookup(parameter.name().name()))
             .collect::<Option<Vec<_>>>()?;
         Some(Self::new(required_named, parameters))
     }
@@ -974,6 +970,17 @@ impl Hash for ResolvedType {
 mod type_graph_tests {
     use super::*;
 
+    fn parsed() -> &'static Arc<crate::ParsedFile> {
+        static PARSED: std::sync::LazyLock<Arc<crate::ParsedFile>> =
+            std::sync::LazyLock::new(|| {
+                Arc::new(crate::ParsedFile {
+                    source: "".into(),
+                    tree: falcon_dart_parser::parse("").tree,
+                })
+            });
+        &PARSED
+    }
+
     fn fanout(depth: usize, leaf: ResolvedType) -> ResolvedType {
         let mut ty = leaf;
         for _ in 0..depth {
@@ -1050,7 +1057,7 @@ mod type_graph_tests {
     #[test]
     fn sdk_free_unrelatedness_preserves_deep_shared_types() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let signatures = SignatureIndex::default();
         for depth in [17, 80] {
             let left = fanout(depth, ResolvedType::Dynamic);
@@ -1116,7 +1123,7 @@ mod type_graph_tests {
     #[test]
     fn substitution_interns_independently_allocated_equal_siblings() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let id = TypeParameterId {
             owner: ParameterOwner::Sdk("structural-substitution"),
             ordinal: 0,
@@ -1155,7 +1162,7 @@ mod type_graph_tests {
     #[test]
     fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let id = TypeParameterId {
             owner: ParameterOwner::Sdk("substitution-source-memo"),
             ordinal: 0,
@@ -1201,7 +1208,7 @@ mod type_graph_tests {
     #[test]
     fn flat_irrelevant_substitution_roots_do_not_allocate_memos() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let substitutions = HashMap::from([(
             TypeParameterId {
                 owner: ParameterOwner::Sdk("irrelevant-root"),
@@ -1243,7 +1250,7 @@ mod type_graph_tests {
     #[test]
     fn substitution_memoizes_shared_irrelevant_children_after_relevant_siblings() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let id = TypeParameterId {
             owner: ParameterOwner::Sdk("mixed-substitution-fanout"),
             ordinal: 0,
@@ -1306,7 +1313,7 @@ mod type_graph_tests {
     #[test]
     fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let id = TypeParameterId {
             owner: ParameterOwner::Sdk("substitution-source-context"),
             ordinal: 0,
@@ -1489,7 +1496,7 @@ mod type_graph_tests {
     #[test]
     fn inference_join_memoizes_contextual_record_fanout() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let signatures = SignatureIndex::default();
         let provenance = |offset| {
             FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
@@ -1541,7 +1548,7 @@ mod type_graph_tests {
     #[test]
     fn inference_join_memoizes_interface_fanout() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let signatures = SignatureIndex::default();
         let fanout = |mut ty: ResolvedType| {
             for _ in 0..24 {
@@ -1612,7 +1619,7 @@ mod type_graph_tests {
     #[test]
     fn separate_member_substitution_joins_drop_function_alias_annotations() {
         let identities = IdentityIndex::default();
-        let model = SemanticModel::new(Path::new("graph.dart"), &identities, None);
+        let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
         let signatures = SignatureIndex::default();
         let id = TypeParameterId {
             owner: ParameterOwner::Sdk("member-substitution-join"),
@@ -2388,14 +2395,18 @@ pub struct TypeParameterScope {
 }
 
 impl TypeParameterScope {
-    pub fn push(&mut self, params: &[TypeParam], model: &SemanticModel<'_>) {
+    pub fn push<'tree>(
+        &mut self,
+        params: impl Iterator<Item = TypeParam<'tree>> + Clone,
+        model: &SemanticModel<'_>,
+    ) {
         let owner = ParameterOwner::Source {
             file: model.file,
-            offset: params.first().map_or(0, |param| param.span.start),
+            offset: params.clone().next().map_or(0, |param| param.span().start),
         };
         self.scopes.push(HashMap::new());
-        for (ordinal, param) in params.iter().enumerate() {
-            let name: Arc<str> = param.name.name.as_str().into();
+        for (ordinal, param) in params.clone().enumerate() {
+            let name: Arc<str> = param.name().name().into();
             self.scopes
                 .last_mut()
                 .expect("type-parameter scope")
@@ -2413,12 +2424,12 @@ impl TypeParameterScope {
                 );
         }
         for param in params {
-            let Some(ResolvedType::TypeParameter { id, .. }) = self.lookup(&param.name.name) else {
+            let Some(ResolvedType::TypeParameter { id, .. }) = self.lookup(param.name().name())
+            else {
                 unreachable!("registered type parameter");
             };
             let bound = param
-                .bound
-                .as_ref()
+                .bound()
                 .map(|bound| model.resolve_type_in(bound, self))
                 .unwrap_or_else(|| model.core_type("Object", true));
             self.scopes
@@ -2470,27 +2481,44 @@ impl TypeParameterScope {
 pub struct SemanticModel<'a> {
     file: Option<FileId>,
     library: Option<LibraryId>,
+    parsed: Option<&'a Arc<crate::ParsedFile>>,
     identities: &'a IdentityIndex,
     types: Option<&'a TypeIndex>,
 }
 
 impl<'a> SemanticModel<'a> {
-    pub fn new(file: &Path, identities: &'a IdentityIndex, types: Option<&'a TypeIndex>) -> Self {
-        Self::from_file(identities.file(file), identities, types)
+    pub fn new(
+        file: &Path,
+        parsed: &'a Arc<crate::ParsedFile>,
+        identities: &'a IdentityIndex,
+        types: Option<&'a TypeIndex>,
+    ) -> Self {
+        Self::from_file(identities.file(file), parsed, identities, types)
     }
 
     /// Resolve in an indexed file's instance rather than its primary path instance.
     pub(crate) fn from_file(
         file: Option<FileId>,
+        parsed: &'a Arc<crate::ParsedFile>,
         identities: &'a IdentityIndex,
         types: Option<&'a TypeIndex>,
     ) -> Self {
         Self {
             file,
             library: file.map(|file| identities.library(file)),
+            parsed: Some(parsed),
             identities,
             types,
         }
+    }
+
+    fn node_ref(&self, node: falcon_syntax::cst::SyntaxNode<'_>) -> crate::NodeRef {
+        let parsed = self
+            .parsed
+            .expect("syntax retention requires a source-backed model");
+        let retained = crate::NodeRef::new(Arc::clone(parsed), node.id());
+        debug_assert!(std::ptr::eq(node.tree(), &retained.file.tree));
+        retained
     }
 
     fn owns_declaration(&self, name: &str) -> bool {
@@ -2498,25 +2526,24 @@ impl<'a> SemanticModel<'a> {
             .is_none_or(|library| self.identities.is_authoritative_declaration(library, name))
     }
 
-    fn owns_top_level_declaration(&self, declaration: &TopLevelDecl) -> bool {
+    fn owns_top_level_declaration(&self, declaration: TopLevelDecl<'_>) -> bool {
         let name = match declaration {
-            TopLevelDecl::Class(node) => &node.name,
-            TopLevelDecl::ClassTypeAlias(node) => &node.name,
-            TopLevelDecl::Mixin(node) => &node.name,
-            TopLevelDecl::MixinClass(node) => &node.name,
-            TopLevelDecl::Enum(node) => &node.name,
+            TopLevelDecl::Class(node) => node.name(),
+            TopLevelDecl::ClassTypeAlias(node) => node.name(),
+            TopLevelDecl::Mixin(node) => node.name(),
+            TopLevelDecl::MixinClass(node) => node.name(),
+            TopLevelDecl::Enum(node) => node.name(),
             TopLevelDecl::Extension(node) => {
                 return node
-                    .name
-                    .as_ref()
-                    .is_none_or(|name| self.owns_declaration(&name.name));
+                    .name()
+                    .is_none_or(|name| self.owns_declaration(name.name()));
             }
-            TopLevelDecl::ExtensionType(node) => &node.name,
-            TopLevelDecl::Function(node) => &node.name,
-            TopLevelDecl::TypeAlias(node) => &node.name,
+            TopLevelDecl::ExtensionType(node) => node.name(),
+            TopLevelDecl::Function(node) => node.name(),
+            TopLevelDecl::TypeAlias(node) => node.name(),
             TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => return true,
         };
-        self.owns_declaration(&name.name)
+        self.owns_declaration(name.name())
     }
 
     /// The `package:` URI of the library declaring a project `identity`.
@@ -2532,9 +2559,13 @@ impl<'a> SemanticModel<'a> {
         identity: &DeclarationIdentity,
     ) -> Option<SemanticModel<'a>> {
         let library = self.identities.declaration_library(identity)?;
+        let file = self.identities.declaration_file(library, identity.name());
         Some(Self {
-            file: self.identities.declaration_file(library, identity.name()),
+            file,
             library: Some(library),
+            parsed: file
+                .map(|file| self.identities.parsed_file(file))
+                .or(self.parsed),
             identities: self.identities,
             types: self.types,
         })
@@ -2542,7 +2573,10 @@ impl<'a> SemanticModel<'a> {
 
     /// Views names from a declaring library without inventing a declaration.
     pub fn for_library(&self, library: LibraryId) -> Self {
-        Self::in_library(self.identities, self.types, Some(library))
+        Self {
+            parsed: self.parsed,
+            ..Self::in_library(self.identities, self.types, Some(library))
+        }
     }
 
     /// A model viewing members from `library`, for library-wide passes with
@@ -2555,42 +2589,42 @@ impl<'a> SemanticModel<'a> {
         Self {
             file: None,
             library,
+            parsed: None,
             identities,
             types,
         }
     }
 
-    pub fn resolve_type(&self, ty: &DartType) -> ResolvedType {
+    pub fn resolve_type(&self, ty: DartType<'_>) -> ResolvedType {
         self.resolve_type_in(ty, &TypeParameterScope::default())
     }
 
     /// Resolves ordinary and old-style function formals in their lexical scope.
     pub fn resolve_formal_parameter_in(
         &self,
-        param: &FormalParam,
+        param: FormalParam<'_>,
         parameters: &TypeParameterScope,
     ) -> ResolvedType {
         let mut local;
-        let parameters = if param.type_params.is_empty() {
+        let parameters = if param.type_params().is_empty() {
             parameters
         } else {
             local = parameters.clone();
-            local.push(&param.type_params, self);
+            local.push(param.type_params(), self);
             &local
         };
         let return_type = param
-            .param_type
-            .as_ref()
+            .param_type()
             .map(|ty| self.resolve_type_in(ty, parameters))
             .unwrap_or(ResolvedType::Dynamic);
-        let Some(function_params) = &param.function_params else {
+        let Some(function_params) = param.function_params() else {
             return return_type;
         };
         let mut named: Vec<_> = function_params
             .named()
             .map(|param| {
                 (
-                    param.name.name.clone(),
+                    param.name().name().to_owned(),
                     self.resolve_formal_parameter_in(param, parameters),
                 )
             })
@@ -2600,15 +2634,15 @@ impl<'a> SemanticModel<'a> {
             shape: FunctionTypeShape::from_scope(
                 function_params
                     .named()
-                    .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
-                    .map(|param| param.name.name.clone())
+                    .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
+                    .map(|param| param.name().name().to_owned())
                     .collect(),
-                &param.type_params,
+                param.type_params(),
                 parameters,
             ),
             optional_positional: function_params
                 .positional()
-                .filter(|param| param.kind == ParamKind::OptionalPositional)
+                .filter(|param| param.kind() == ParamKind::OptionalPositional)
                 .count(),
             alias: FunctionTypeAlias::default(),
             return_type: Arc::new(return_type),
@@ -2736,7 +2770,7 @@ impl<'a> SemanticModel<'a> {
     pub fn type_alias_parameter_count(&self, identity: &DeclarationIdentity) -> Option<usize> {
         self.identities
             .type_alias(identity)
-            .map(|alias| alias.type_params.len())
+            .map(|alias| alias.type_params().len())
     }
 
     /// The type the top-level type declaration `identity` denotes when
@@ -2757,17 +2791,23 @@ impl<'a> SemanticModel<'a> {
         }
     }
 
-    pub fn resolve_type_in(&self, ty: &DartType, parameters: &TypeParameterScope) -> ResolvedType {
+    pub fn resolve_type_in(
+        &self,
+        ty: DartType<'_>,
+        parameters: &TypeParameterScope,
+    ) -> ResolvedType {
         match ty {
-            DartType::Void { .. } => ResolvedType::Void,
-            DartType::Dynamic { .. } => ResolvedType::Dynamic,
+            DartType::Void(_) => ResolvedType::Void,
+            DartType::Dynamic(_) => ResolvedType::Dynamic,
             DartType::Named(named) => {
-                if let [segment] = named.segments.as_slice()
-                    && let Some(parameter) = parameters.lookup(&segment.name)
+                let mut segments = named.segments();
+                if let Some(segment) = segments.next()
+                    && segments.next().is_none()
+                    && let Some(parameter) = parameters.lookup(segment.name())
                 {
-                    return parameter.with_nullable(parameter.nullable() || named.is_nullable);
+                    return parameter.with_nullable(parameter.nullable() || named.is_nullable());
                 }
-                let Some(identity) = QualifiedName::from_identifiers(&named.segments)
+                let Some(identity) = QualifiedName::from_identifiers(named.segments())
                     .and_then(|name| self.resolve_name(name))
                 else {
                     return ResolvedType::Unknown;
@@ -2776,7 +2816,7 @@ impl<'a> SemanticModel<'a> {
                     return ResolvedType::Null;
                 }
                 if identity.is_sdk("dart:core", "Never") {
-                    return if named.is_nullable {
+                    return if named.is_nullable() {
                         ResolvedType::Null
                     } else {
                         ResolvedType::Never
@@ -2784,16 +2824,15 @@ impl<'a> SemanticModel<'a> {
                 }
                 if let Some(alias) = self.identities.type_alias(&identity) {
                     let arguments: Vec<_> = named
-                        .type_args
-                        .iter()
+                        .type_args()
                         .map(|argument| self.resolve_type_in(argument, parameters))
                         .collect();
                     return self.expand_alias(
                         &identity,
                         alias,
                         &arguments,
-                        named.is_nullable,
-                        Some((self.file, named.span.start)),
+                        named.is_nullable(),
+                        Some((self.file, named.span().start)),
                     );
                 }
                 let extension_type = self.types.is_some_and(|types| {
@@ -2802,31 +2841,29 @@ impl<'a> SemanticModel<'a> {
                 ResolvedType::Interface {
                     occurrence: Default::default(),
                     identity,
-                    arguments: if named.type_args.is_empty() {
+                    arguments: if named.type_args().is_empty() {
                         empty_type_arguments()
                     } else {
                         named
-                            .type_args
-                            .iter()
+                            .type_args()
                             .map(|argument| self.resolve_type_in(argument, parameters))
                             .collect()
                     },
-                    nullable: named.is_nullable,
+                    nullable: named.is_nullable(),
                     extension_type,
                 }
             }
             DartType::Function(function) => {
                 let mut function_parameters = parameters.clone();
-                function_parameters.push(&function.type_params, self);
+                function_parameters.push(function.type_params(), self);
                 let mut named: Vec<_> = function
-                    .params
-                    .iter()
-                    .filter(|param| param.is_named)
+                    .params()
+                    .filter(|param| param.is_named())
                     .filter_map(|param| {
-                        param.name.as_ref().map(|name| {
+                        param.name().map(|name| {
                             (
-                                name.name.clone(),
-                                self.resolve_type_in(&param.param_type, &function_parameters),
+                                name.name().to_owned(),
+                                self.resolve_type_in(param.param_type(), &function_parameters),
                             )
                         })
                     })
@@ -2835,36 +2872,32 @@ impl<'a> SemanticModel<'a> {
                 ResolvedType::Function {
                     shape: FunctionTypeShape::from_scope(
                         function
-                            .params
-                            .iter()
-                            .filter(|param| param.is_named && param.is_required)
-                            .filter_map(|param| param.name.as_ref().map(|name| name.name.clone()))
+                            .params()
+                            .filter(|param| param.is_named() && param.is_required())
+                            .filter_map(|param| param.name().map(|name| name.name().to_owned()))
                             .collect(),
-                        &function.type_params,
+                        function.type_params(),
                         &function_parameters,
                     ),
                     optional_positional: function
-                        .params
-                        .iter()
-                        .filter(|param| !param.is_named && !param.is_required)
+                        .params()
+                        .filter(|param| !param.is_named() && !param.is_required())
                         .count(),
                     alias: FunctionTypeAlias::default(),
                     return_type: Arc::new(
                         function
-                            .return_type
-                            .as_deref()
+                            .return_type()
                             .map(|ty| self.resolve_type_in(ty, &function_parameters))
                             .unwrap_or(ResolvedType::Dynamic),
                     ),
-                    positional: if function.params.iter().all(|param| param.is_named) {
+                    positional: if function.params().all(|param| param.is_named()) {
                         empty_type_arguments()
                     } else {
                         function
-                            .params
-                            .iter()
-                            .filter(|param| !param.is_named)
+                            .params()
+                            .filter(|param| !param.is_named())
                             .map(|param| {
-                                self.resolve_type_in(&param.param_type, &function_parameters)
+                                self.resolve_type_in(param.param_type(), &function_parameters)
                             })
                             .collect()
                     },
@@ -2873,29 +2906,27 @@ impl<'a> SemanticModel<'a> {
                     } else {
                         named.into()
                     },
-                    nullable: function.is_nullable,
+                    nullable: function.is_nullable(),
                 }
             }
             DartType::Record(record) => {
                 let mut named: Vec<_> = record
-                    .named
-                    .iter()
+                    .named()
                     .map(|field| {
                         (
-                            field.name.name.clone(),
-                            self.resolve_type_in(&field.field_type, parameters),
+                            field.name().name().to_owned(),
+                            self.resolve_type_in(field.field_type(), parameters),
                         )
                     })
                     .collect();
                 named.sort_by(|left, right| left.0.cmp(&right.0));
                 ResolvedType::Record {
                     occurrence: Default::default(),
-                    positional: if record.positional.is_empty() {
+                    positional: if record.positional().is_empty() {
                         empty_type_arguments()
                     } else {
                         record
-                            .positional
-                            .iter()
+                            .positional()
                             .map(|field| self.resolve_type_in(field, parameters))
                             .collect()
                     },
@@ -2904,7 +2935,7 @@ impl<'a> SemanticModel<'a> {
                     } else {
                         named.into()
                     },
-                    nullable: record.is_nullable,
+                    nullable: record.is_nullable(),
                 }
             }
         }
@@ -2990,23 +3021,23 @@ impl<'a> SemanticModel<'a> {
         let model = SemanticModel {
             file: Some(alias.file),
             library: Some(alias.library),
+            parsed: Some(self.identities.parsed_file(alias.file)),
             identities: self.identities,
             types: self.types,
         };
         let mut scope = TypeParameterScope::default();
-        scope.push(&alias.type_params, &model);
-        let aliased = model.resolve_type_in(&alias.aliased, &scope);
+        scope.push(alias.type_params(), &model);
+        let aliased = model.resolve_type_in(alias.aliased(), &scope);
         let mut parameters: Vec<_> = alias
-            .type_params
-            .iter()
+            .type_params()
             .enumerate()
             .filter_map(|(ordinal, parameter)| {
                 let ResolvedType::TypeParameter { id, bound, .. } =
-                    scope.lookup(&parameter.name.name)?
+                    scope.lookup(parameter.name().name())?
                 else {
                     return None;
                 };
-                let default = if parameter.bound.is_some() {
+                let default = if parameter.bound().is_some() {
                     bound.as_ref().clone()
                 } else {
                     ResolvedType::Dynamic
@@ -3496,20 +3527,18 @@ fn setter_parameter_contracts(name: &str, is_covariant: bool) -> Arc<[ParameterC
     }])
 }
 
-fn parameter_contracts(params: &FormalParamList) -> Arc<[ParameterContract]> {
-    if params.params.is_empty() {
+fn parameter_contracts(params: FormalParamList<'_>) -> Arc<[ParameterContract]> {
+    if params.params().is_empty() {
         return empty_parameter_contracts();
     }
     params
-        .params
-        .iter()
+        .params()
         .map(|param| ParameterContract {
-            name: param.name.name.clone(),
-            kind: param.kind,
-            is_covariant: param.is_covariant,
+            name: param.name().name().to_owned(),
+            kind: param.kind(),
+            is_covariant: param.is_covariant(),
             default_value_code: param
-                .default_value
-                .as_ref()
+                .default_value()
                 .map(default_syntax::default_syntax_key),
         })
         .collect()
@@ -3614,8 +3643,8 @@ impl ResolvedSignature {
     /// `type_params` and `params` in `scope` (which binds `type_params`).
     pub fn local_callable(
         scope: &TypeParameterScope,
-        type_params: &[TypeParam],
-        params: &FormalParamList,
+        type_params: AstChildren<'_, TypeParam<'_>>,
+        params: FormalParamList<'_>,
         model: &SemanticModel<'_>,
     ) -> Self {
         signature(scope, &[], type_params, Some(params), None, None, model)
@@ -3645,7 +3674,7 @@ impl ResolvedSignature {
 #[derive(Debug, Clone)]
 pub enum ParameterDefault {
     /// An explicit `= value`, evaluated in the declaring library.
-    Declared(Arc<Expr>),
+    Declared(crate::NodeRef),
     /// An optional parameter without a declared default defaults to `null`.
     Null,
     /// A super formal without a declared default takes the default of the
@@ -3691,7 +3720,7 @@ pub struct ParameterFacts {
 pub struct StaticConstFacts {
     pub name: String,
     pub ty: ResolvedType,
-    pub initializer: Expr,
+    pub initializer: crate::NodeRef,
     pub is_deprecated: bool,
 }
 
@@ -3783,9 +3812,10 @@ struct MemberEntry {
 #[derive(Debug, Clone)]
 pub struct ConstConstructorBody {
     pub is_primary: bool,
-    pub params: Vec<falcon_syntax::ast::FormalParam>,
-    pub initializers: Vec<falcon_syntax::ast::ConstructorInitializer>,
-    pub redirect: Option<falcon_syntax::ast::RedirectedConstructor>,
+    pub representation: bool,
+    pub params: Vec<crate::NodeRef>,
+    pub initializers: Vec<crate::NodeRef>,
+    pub redirect: Option<crate::NodeRef>,
 }
 
 type ExternalSignatureMap<K, V> = (
@@ -3926,14 +3956,14 @@ signature_index! {
         bound_declared: SignatureMap<TypeParameterId, bool>,
         member_supertypes: SignatureMap<DeclarationIdentity, Vec<ResolvedType>>,
         declarations: SignatureMap<DeclarationIdentity, DeclarationFacts>,
-        constants: SignatureMap<DeclarationIdentity, Expr>,
+        constants: SignatureMap<DeclarationIdentity, crate::NodeRef>,
         constant_types: SignatureMap<DeclarationIdentity, DeclarationIdentity>,
         enum_values: SignatureMap<DeclarationIdentity, Vec<String>>,
         /// Bodies of project `const` constructors, keyed by class and name.
         const_constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ConstConstructorBody>>,
         /// Instance field initializers of project classes with a `const`
         /// constructor, in declaration order.
-        const_field_initializers: SignatureMap<DeclarationIdentity, Vec<(String, Expr)>>,
+        const_field_initializers: SignatureMap<DeclarationIdentity, Vec<(String, crate::NodeRef)>>,
         /// Resolved external annotations of top-level functions that have any.
         function_annotations: SignatureMap<DeclarationIdentity, Vec<DeclarationIdentity>>,
         /// The declaration kind of every indexed class-like declaration.
@@ -3960,14 +3990,14 @@ signature_index! {
 
 /// A value declaration is either unqualified or import-prefixed. Longer
 /// instance chains are handled one receiver at a time, never rescanned.
-fn initializer_value_name(expression: &Expr) -> Option<QualifiedName<'_>> {
+fn initializer_value_name(expression: Expr<'_>) -> Option<QualifiedName<'_>> {
     match expression.unparenthesized() {
-        Expr::Ident(identifier) => Some(identifier.name.as_str().into()),
-        Expr::Field { object, field, .. } => {
-            let Expr::Ident(prefix) = object.as_ref() else {
+        Expr::Ident(identifier) => Some(identifier.name().into()),
+        Expr::Field(field) => {
+            let Expr::Ident(prefix) = field.object() else {
                 return None;
             };
-            Some(QualifiedName::prefixed(&prefix.name, &field.name))
+            Some(QualifiedName::prefixed(prefix.name(), field.field().name()))
         }
         _ => None,
     }
@@ -3981,45 +4011,45 @@ struct InitializerDependencies<F> {
     inspect: F,
 }
 
-impl<F: FnMut(&Expr, &TypeEnvironment)> InitializerDependencies<F> {
+impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
     fn bind(&mut self, name: &str) {
         self.environment.declare(name, ResolvedType::Unknown);
     }
 
-    fn bind_statements(&mut self, statements: &[falcon_syntax::ast::Stmt]) {
-        use falcon_syntax::ast::Stmt;
+    fn bind_statements(&mut self, statements: AstChildren<'a, falcon_syntax::cst::Stmt<'a>>) {
+        use falcon_syntax::cst::Stmt;
         for statement in statements {
             match statement {
                 Stmt::LocalVar(variable) => {
-                    for declarator in &variable.declarators {
-                        self.bind(&declarator.name.name);
+                    for declarator in variable.declarators() {
+                        self.bind(declarator.name().name());
                     }
                 }
-                Stmt::LocalFunc(function) => self.bind(&function.name.name),
-                Stmt::PatternDecl(declaration) => self.bind_pattern(&declaration.pattern),
+                Stmt::LocalFunc(function) => self.bind(function.name().name()),
+                Stmt::PatternDecl(declaration) => self.bind_pattern(declaration.pattern()),
                 _ => {}
             }
         }
     }
 
-    fn bind_pattern(&mut self, pattern: &falcon_syntax::ast::Pattern) {
+    fn bind_pattern(&mut self, pattern: falcon_syntax::cst::Pattern<'a>) {
         struct Bindings<'a>(&'a mut TypeEnvironment);
-        impl Visitor for Bindings<'_> {
-            fn visit_pattern(&mut self, pattern: &falcon_syntax::ast::Pattern) {
-                if let falcon_syntax::ast::Pattern::Variable { name, .. } = pattern {
-                    self.0.declare(name.name.clone(), ResolvedType::Unknown);
+        impl<'a> Visitor<'a> for Bindings<'_> {
+            fn visit_pattern(&mut self, pattern: falcon_syntax::cst::Pattern<'a>) {
+                if let falcon_syntax::cst::Pattern::Variable(variable) = pattern {
+                    self.0
+                        .declare(variable.name().name(), ResolvedType::Unknown);
                 }
-                if let falcon_syntax::ast::Pattern::Object(object) = pattern {
-                    for field in &object.fields {
-                        if field.pattern.is_none() {
-                            self.0
-                                .declare(field.name.name.clone(), ResolvedType::Unknown);
+                if let falcon_syntax::cst::Pattern::Object(object) = pattern {
+                    for field in object.fields() {
+                        if field.pattern().is_none() {
+                            self.0.declare(field.name().name(), ResolvedType::Unknown);
                         }
                     }
                 }
-                falcon_syntax::visitor::walk_pattern(self, pattern);
+                falcon_syntax::cst::visit::walk_pattern(self, pattern);
             }
-            fn visit_expr(&mut self, _: &Expr) {}
+            fn visit_expr(&mut self, _: Expr<'a>) {}
         }
         Bindings(&mut self.environment).visit_pattern(pattern);
     }
@@ -4032,21 +4062,21 @@ impl<F: FnMut(&Expr, &TypeEnvironment)> InitializerDependencies<F> {
 
     fn condition(
         &mut self,
-        condition: &falcon_syntax::ast::IfCondition,
+        condition: falcon_syntax::cst::IfCondition<'a>,
         then: impl FnOnce(&mut Self),
     ) {
-        use falcon_syntax::ast::IfCondition;
+        use falcon_syntax::cst::IfCondition;
         match condition {
             IfCondition::Expr(expression) => {
                 self.visit_expr(expression);
                 self.scoped(then);
             }
-            IfCondition::Case(expression, pattern, guard) => {
-                self.visit_expr(expression);
+            IfCondition::Case(condition) => {
+                self.visit_expr(condition.expr());
                 self.scoped(|visitor| {
-                    visitor.bind_pattern(pattern);
-                    visitor.visit_pattern(pattern);
-                    if let Some(guard) = guard {
+                    visitor.bind_pattern(condition.pattern());
+                    visitor.visit_pattern(condition.pattern());
+                    if let Some(guard) = condition.guard() {
                         visitor.visit_expr(guard);
                     }
                     then(visitor);
@@ -4056,12 +4086,12 @@ impl<F: FnMut(&Expr, &TypeEnvironment)> InitializerDependencies<F> {
     }
 }
 
-impl<F: FnMut(&Expr, &TypeEnvironment)> Visitor for InitializerDependencies<F> {
-    fn visit_expr(&mut self, expression: &Expr) {
-        if let Expr::FuncExpr { params, .. } = expression {
+impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDependencies<F> {
+    fn visit_expr(&mut self, expression: Expr<'a>) {
+        if let Expr::FuncExpr(function) = expression {
             self.scoped(|visitor| {
-                for parameter in &params.params {
-                    visitor.bind(&parameter.name.name);
+                for parameter in function.params().params() {
+                    visitor.bind(parameter.name().name());
                 }
                 walk_expr(visitor, expression);
                 (visitor.inspect)(expression, &visitor.environment);
@@ -4072,29 +4102,29 @@ impl<F: FnMut(&Expr, &TypeEnvironment)> Visitor for InitializerDependencies<F> {
         }
     }
 
-    fn visit_block(&mut self, block: &falcon_syntax::ast::Block) {
+    fn visit_block(&mut self, block: falcon_syntax::cst::Block<'a>) {
         self.scoped(|visitor| {
             // Local declarations shadow throughout their block.
-            visitor.bind_statements(&block.stmts);
-            falcon_syntax::visitor::walk_block(visitor, block);
+            visitor.bind_statements(block.stmts());
+            falcon_syntax::cst::visit::walk_block(visitor, block);
         });
     }
 
-    fn visit_stmt(&mut self, statement: &falcon_syntax::ast::Stmt) {
-        use falcon_syntax::ast::Stmt;
+    fn visit_stmt(&mut self, statement: falcon_syntax::cst::Stmt<'a>) {
+        use falcon_syntax::cst::Stmt;
         match statement {
             Stmt::LocalFunc(function) => self.scoped(|visitor| {
-                for parameter in &function.params.params {
-                    visitor.bind(&parameter.name.name);
+                for parameter in function.params().params() {
+                    visitor.bind(parameter.name().name());
                 }
                 walk_stmt(visitor, statement);
             }),
             Stmt::For(_) => self.scoped(|visitor| walk_stmt(visitor, statement)),
             Stmt::If(statement) => {
-                self.condition(&statement.condition, |visitor| {
-                    visitor.visit_stmt(&statement.then_branch)
+                self.condition(statement.condition(), |visitor| {
+                    visitor.visit_stmt(statement.then_branch())
                 });
-                if let Some(branch) = &statement.else_branch {
+                if let Some(branch) = statement.else_branch() {
                     self.visit_stmt(branch);
                 }
             }
@@ -4102,109 +4132,94 @@ impl<F: FnMut(&Expr, &TypeEnvironment)> Visitor for InitializerDependencies<F> {
         }
     }
 
-    fn visit_for_header(&mut self, header: &falcon_syntax::ast::ForHeader) {
-        use falcon_syntax::ast::ForInit;
-        match &header.init {
+    fn visit_for_header(&mut self, header: falcon_syntax::cst::ForHeader<'a>) {
+        use falcon_syntax::cst::ForInit;
+        match header.init() {
             Some(ForInit::VarDecl(declaration)) => {
-                for declarator in &declaration.declarators {
-                    self.bind(&declarator.name.name);
+                for declarator in declaration.declarators() {
+                    self.bind(declarator.name().name());
                 }
             }
-            Some(ForInit::ForIn {
-                name,
-                declares_variable: true,
-                iterable,
-                ..
-            }) => {
-                self.visit_expr(iterable);
-                self.bind(&name.name);
+            Some(ForInit::ForIn(initializer)) if initializer.declares_variable() => {
+                self.visit_expr(initializer.iterable());
+                self.bind(initializer.name().name());
                 return;
             }
-            Some(ForInit::PatternForIn {
-                pattern, iterable, ..
-            }) => {
-                self.visit_expr(iterable);
-                self.bind_pattern(pattern);
-                self.visit_pattern(pattern);
+            Some(ForInit::PatternForIn(initializer)) => {
+                self.visit_expr(initializer.iterable());
+                self.bind_pattern(initializer.pattern());
+                self.visit_pattern(initializer.pattern());
                 return;
             }
             _ => {}
         }
-        falcon_syntax::visitor::walk_for_header(self, header);
+        falcon_syntax::cst::visit::walk_for_header(self, header);
     }
 
-    fn visit_catch_clause(&mut self, catch: &falcon_syntax::ast::CatchClause) {
+    fn visit_catch_clause(&mut self, catch: falcon_syntax::cst::CatchClause<'a>) {
         self.scoped(|visitor| {
-            for name in [&catch.exception_var, &catch.stack_trace_var]
+            for name in [catch.exception_var(), catch.stack_trace_var()]
                 .into_iter()
                 .flatten()
             {
-                visitor.bind(&name.name);
+                visitor.bind(name.name());
             }
-            falcon_syntax::visitor::walk_catch_clause(visitor, catch);
+            falcon_syntax::cst::visit::walk_catch_clause(visitor, catch);
         });
     }
 
-    fn visit_switch_case(&mut self, case: &falcon_syntax::ast::SwitchCase) {
+    fn visit_switch_case(&mut self, case: falcon_syntax::cst::SwitchCase<'a>) {
         self.scoped(|visitor| {
-            for kind in &case.cases {
-                if let falcon_syntax::ast::SwitchCaseKind::Pattern(pattern, _) = kind {
-                    visitor.bind_pattern(pattern);
+            for kind in case.cases() {
+                if let falcon_syntax::cst::SwitchCaseKind::Pattern(label) = kind {
+                    visitor.bind_pattern(label.pattern());
                 }
             }
-            visitor.bind_statements(&case.body);
-            falcon_syntax::visitor::walk_switch_case(visitor, case);
+            visitor.bind_statements(case.body());
+            falcon_syntax::cst::visit::walk_switch_case(visitor, case);
         });
     }
 
-    fn visit_switch_expr_arm(&mut self, arm: &falcon_syntax::ast::SwitchExprArm) {
+    fn visit_switch_expr_arm(&mut self, arm: falcon_syntax::cst::SwitchExprArm<'a>) {
         self.scoped(|visitor| {
-            visitor.bind_pattern(&arm.pattern);
-            falcon_syntax::visitor::walk_switch_expr_arm(visitor, arm);
+            visitor.bind_pattern(arm.pattern());
+            falcon_syntax::cst::visit::walk_switch_expr_arm(visitor, arm);
         });
     }
 
-    fn visit_collection_element(&mut self, element: &falcon_syntax::ast::CollectionElement) {
-        use falcon_syntax::ast::CollectionElement;
+    fn visit_collection_element(&mut self, element: falcon_syntax::cst::CollectionElement<'a>) {
+        use falcon_syntax::cst::CollectionElement;
         match element {
-            CollectionElement::For { .. } => self.scoped(|visitor| {
-                falcon_syntax::visitor::walk_collection_element(visitor, element)
+            CollectionElement::For(_) => self.scoped(|visitor| {
+                falcon_syntax::cst::visit::walk_collection_element(visitor, element)
             }),
-            CollectionElement::If {
-                condition,
-                then_elem,
-                else_elem,
-                ..
-            } => {
-                self.condition(condition, |visitor| {
-                    visitor.visit_collection_element(then_elem)
+            CollectionElement::If(branch) => {
+                self.condition(branch.condition(), |visitor| {
+                    visitor.visit_collection_element(branch.then_elem())
                 });
-                if let Some(element) = else_elem {
+                if let Some(element) = branch.else_elem() {
                     self.visit_collection_element(element);
                 }
             }
-            _ => falcon_syntax::visitor::walk_collection_element(self, element),
+            _ => falcon_syntax::cst::visit::walk_collection_element(self, element),
         }
     }
 
-    fn visit_map_element(&mut self, element: &falcon_syntax::ast::MapElement) {
-        use falcon_syntax::ast::MapElement;
+    fn visit_map_element(&mut self, element: falcon_syntax::cst::MapElement<'a>) {
+        use falcon_syntax::cst::MapElement;
         match element {
-            MapElement::For { .. } => {
-                self.scoped(|visitor| falcon_syntax::visitor::walk_map_element(visitor, element))
+            MapElement::For(_) => {
+                self.scoped(|visitor| falcon_syntax::cst::visit::walk_map_element(visitor, element))
             }
-            MapElement::If {
-                condition,
-                then_entry,
-                else_entry,
-                ..
-            } => {
-                self.condition(condition, |visitor| visitor.visit_map_element(then_entry));
-                if let Some(element) = else_entry {
+            MapElement::If(branch) => {
+                self.condition(branch.condition(), |visitor| {
+                    visitor.visit_map_element(branch.then_entry())
+                });
+                if let Some(element) = branch.else_entry() {
                     self.visit_map_element(element);
                 }
             }
-            _ => falcon_syntax::visitor::walk_map_element(self, element),
+            _ => falcon_syntax::cst::visit::walk_map_element(self, element),
         }
     }
 }
@@ -4218,7 +4233,7 @@ impl SignatureIndex {
         self.member_entries.get(identity)?.get(name)
     }
 
-    pub fn from_program(program: &Program, model: &SemanticModel<'_>) -> Self {
+    pub fn from_program(program: Program<'_>, model: &SemanticModel<'_>) -> Self {
         let mut index = Self::default();
         index.add_sdk_signatures();
         index.add_program(program, model);
@@ -4298,7 +4313,7 @@ impl SignatureIndex {
     }
 
     pub fn from_project_files(
-        files: &[(PathBuf, &Program)],
+        files: &[(PathBuf, Arc<crate::ParsedFile>)],
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
@@ -4308,7 +4323,7 @@ impl SignatureIndex {
     /// Index only the current project, borrowing external signatures and facts.
     /// `external` must be an external-only, non-overlay snapshot.
     pub fn with_external(
-        files: &[(PathBuf, &Program)],
+        files: &[(PathBuf, Arc<crate::ParsedFile>)],
         identities: &IdentityIndex,
         types: &TypeIndex,
         external: Arc<SignatureIndex>,
@@ -4316,7 +4331,7 @@ impl SignatureIndex {
         let index = Self::borrowing_external(external);
         let all = files
             .iter()
-            .map(|(path, program)| (identities.file(path), *program, &[] as &[(usize, usize)]))
+            .map(|(path, parsed)| (identities.file(path), parsed, true))
             .collect();
         Self::build_programs(index, all, identities, types)
     }
@@ -4325,33 +4340,34 @@ impl SignatureIndex {
     /// (which must also be indexed by `identities`). The curated SDK/package
     /// tables only supply declarations whose sources are not loaded.
     pub fn build(
-        files: &[(PathBuf, &Program)],
+        files: &[(PathBuf, Arc<crate::ParsedFile>)],
         external: Option<&ExternalLibraries>,
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        let all: Vec<IndexedProgram<'_>> =
-            external
-                .into_iter()
-                .flat_map(ExternalLibraries::libraries)
-                .enumerate()
-                .flat_map(|(instance, library)| {
-                    library
-                        .files
-                        .iter()
-                        .enumerate()
-                        .map(move |(ordinal, file)| {
-                            (
-                                identities.external_file(instance, ordinal),
-                                &file.facts,
-                                file.concrete_operators.as_slice(),
-                            )
-                        })
-                })
-                .chain(files.iter().map(|(path, program)| {
-                    (identities.file(path), *program, &[] as &[(usize, usize)])
-                }))
-                .collect();
+        let all: Vec<IndexedProgram<'_>> = external
+            .into_iter()
+            .flat_map(ExternalLibraries::libraries)
+            .enumerate()
+            .flat_map(|(instance, library)| {
+                library
+                    .files
+                    .iter()
+                    .enumerate()
+                    .map(move |(ordinal, file)| {
+                        (
+                            identities.external_file(instance, ordinal),
+                            &file.parsed,
+                            false,
+                        )
+                    })
+            })
+            .chain(
+                files
+                    .iter()
+                    .map(|(path, parsed)| (identities.file(path), parsed, true)),
+            )
+            .collect();
         Self::build_programs(Self::default(), all, identities, types)
     }
 
@@ -4361,43 +4377,9 @@ impl SignatureIndex {
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        for (file, program, concrete_operators) in &all {
-            let model = SemanticModel::from_file(*file, identities, Some(types));
-            index.add_declarations(program, &model);
-            // Compact external facts have no bodies: operator abstractness
-            // therefore comes from their explicit retained presence metadata.
-            for &(declaration, member) in *concrete_operators {
-                let (owner, members) = match &program.declarations[declaration] {
-                    TopLevelDecl::Class(class) => (&class.name.name, &class.members),
-                    TopLevelDecl::MixinClass(class) => (&class.name.name, &class.members),
-                    TopLevelDecl::Mixin(mixin) => (&mixin.name.name, &mixin.members),
-                    TopLevelDecl::Enum(enumeration) => {
-                        (&enumeration.name.name, &enumeration.members)
-                    }
-                    TopLevelDecl::ExtensionType(extension) => {
-                        (&extension.name.name, &extension.members)
-                    }
-                    _ => continue,
-                };
-                if !model.owns_declaration(owner) {
-                    continue;
-                }
-                let ClassMember::Operator(operator) = &members[member] else {
-                    continue;
-                };
-                if let Some(identity) = model.resolve_name(owner.as_str())
-                    && let Some(entry) = index
-                        .member_entries
-                        .get_mut(&identity)
-                        .and_then(|members| members.get_mut(operator.lookup_name()))
-                {
-                    for facts in &mut entry.facts {
-                        if facts.kind == MemberKind::Operator {
-                            facts.is_abstract = false;
-                        }
-                    }
-                }
-            }
+        for (file, parsed, analyze_bodies) in &all {
+            let model = SemanticModel::from_file(*file, parsed, identities, Some(types));
+            index.add_declarations(parsed.program(), &model, *analyze_bodies);
         }
         if index.external.is_none() {
             index.add_fallback_signatures();
@@ -4405,10 +4387,10 @@ impl SignatureIndex {
         index.finish();
         let programs: Vec<_> = all
             .iter()
-            .map(|(file, program, _)| {
+            .map(|(file, parsed, _)| {
                 (
-                    *program,
-                    SemanticModel::from_file(*file, identities, Some(types)),
+                    parsed.program(),
+                    SemanticModel::from_file(*file, parsed, identities, Some(types)),
                 )
             })
             .collect();
@@ -4447,29 +4429,29 @@ impl SignatureIndex {
     /// Visit each initializer once, resolving import prefixes to declaration
     /// identities before finding cycles across all indexed libraries.
     fn collect_value_dependencies(
-        program: &Program,
+        program: Program<'_>,
         model: &SemanticModel<'_>,
         graph: &mut FxHashMap<DeclarationIdentity, Vec<DeclarationIdentity>>,
     ) {
         let mut edges = FxHashSet::default();
-        for declaration in &program.declarations {
+        for declaration in program.declarations() {
             let TopLevelDecl::Variable(variable) = declaration else {
                 continue;
             };
-            if variable.var_type.is_some() {
+            if variable.var_type().is_some() {
                 continue;
             }
-            for declarator in &variable.declarators {
-                if !model.owns_declaration(&declarator.name.name) {
+            for declarator in variable.declarators() {
+                if !model.owns_declaration(declarator.name().name()) {
                     continue;
                 }
-                if let Some(initializer) = &declarator.initializer
-                    && let Some(identity) = model.resolve_value(&declarator.name.name)
+                if let Some(initializer) = declarator.initializer()
+                    && let Some(identity) = model.resolve_value(declarator.name().name())
                 {
                     edges.clear();
                     InitializerDependencies {
                         environment: TypeEnvironment::new(),
-                        inspect: |expression: &Expr, environment: &TypeEnvironment| {
+                        inspect: |expression: Expr<'_>, environment: &TypeEnvironment| {
                             if let Some(name) = initializer_value_name(expression)
                                 && !environment.is_bound(name.prefix.unwrap_or(name.name))
                                 && let Some(identity) = model.resolve_value(name)
@@ -4544,24 +4526,24 @@ impl SignatureIndex {
 
     fn resolve_value_initializers(
         &mut self,
-        program: &Program,
+        program: Program<'_>,
         model: &SemanticModel<'_>,
         pending: &mut FxHashMap<DeclarationIdentity, ResolvedType>,
         retry_partial: bool,
     ) -> bool {
         let mut changed = false;
-        for declaration in &program.declarations {
+        for declaration in program.declarations() {
             let TopLevelDecl::Variable(variable) = declaration else {
                 continue;
             };
-            if variable.var_type.is_some() {
+            if variable.var_type().is_some() {
                 continue;
             }
-            for declarator in &variable.declarators {
-                if !model.owns_declaration(&declarator.name.name) {
+            for declarator in variable.declarators() {
+                if !model.owns_declaration(declarator.name().name()) {
                     continue;
                 }
-                let Some(identity) = model.resolve_value(&declarator.name.name) else {
+                let Some(identity) = model.resolve_value(declarator.name().name()) else {
                     continue;
                 };
                 if self.is_cyclic_value(&identity) {
@@ -4574,7 +4556,7 @@ impl SignatureIndex {
                 {
                     continue;
                 }
-                let Some(initializer) = &declarator.initializer else {
+                let Some(initializer) = declarator.initializer() else {
                     continue;
                 };
                 let ty = TypeEnvironment::new().infer_with_signatures(
@@ -4628,8 +4610,8 @@ impl SignatureIndex {
         changed
     }
 
-    fn add_program(&mut self, program: &Program, model: &SemanticModel<'_>) {
-        self.add_declarations(program, model);
+    fn add_program(&mut self, program: Program<'_>, model: &SemanticModel<'_>) {
+        self.add_declarations(program, model, true);
         self.finish();
         self.infer_programs(&[(program, *model)]);
         self.mark_field_forwarders(model.identities, model.types);
@@ -4637,13 +4619,13 @@ impl SignatureIndex {
 
     fn converge(
         &mut self,
-        programs: &[(&Program, SemanticModel<'_>)],
-        mut step: impl FnMut(&mut Self, &Program, &SemanticModel<'_>) -> bool,
+        programs: &[(Program<'_>, SemanticModel<'_>)],
+        mut step: impl FnMut(&mut Self, Program<'_>, &SemanticModel<'_>) -> bool,
     ) {
         loop {
             let mut changed = false;
             for (program, model) in programs {
-                changed |= step(self, program, model);
+                changed |= step(self, *program, model);
             }
             if !changed {
                 break;
@@ -4651,10 +4633,10 @@ impl SignatureIndex {
         }
     }
 
-    fn infer_programs(&mut self, programs: &[(&Program, SemanticModel<'_>)]) {
+    fn infer_programs(&mut self, programs: &[(Program<'_>, SemanticModel<'_>)]) {
         let mut dependencies = FxHashMap::default();
         for (program, model) in programs {
-            Self::collect_value_dependencies(program, model, &mut dependencies);
+            Self::collect_value_dependencies(*program, model, &mut dependencies);
         }
         self.cyclic_values = Self::cyclic_value_identities(&dependencies);
         // Settle forwarded and inherited headers before initializers can freeze implicit types.
@@ -4667,9 +4649,9 @@ impl SignatureIndex {
                 let mut declarations_changed = false;
                 let mut values_changed = false;
                 for (program, model) in programs {
-                    declarations_changed |= self.infer_declaration_types(program, model);
+                    declarations_changed |= self.infer_declaration_types(*program, model);
                     values_changed |= self.resolve_value_initializers(
-                        program,
+                        *program,
                         model,
                         &mut pending_values,
                         retry_partial,
@@ -4693,28 +4675,25 @@ impl SignatureIndex {
 
     /// Propagate callable headers before initializers and revisit dependencies
     /// whose inherited getter or field types were previously unresolved.
-    fn infer_override_types(&mut self, program: &Program, model: &SemanticModel<'_>) -> bool {
+    fn infer_override_types(&mut self, program: Program<'_>, model: &SemanticModel<'_>) -> bool {
         let mut changed = false;
         let mut lookup = inherited::OverrideInferenceLookup::default();
-        for declaration in &program.declarations {
+        for declaration in program.declarations() {
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
             let (name, members) = match declaration {
-                TopLevelDecl::Class(class) => (&class.name, &class.members),
-                TopLevelDecl::MixinClass(class) => (&class.name, &class.members),
-                TopLevelDecl::Mixin(mixin) => (&mixin.name, &mixin.members),
-                TopLevelDecl::Enum(enumeration) => (&enumeration.name, &enumeration.members),
+                TopLevelDecl::Class(class) => (class.name(), class.members()),
+                TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
+                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
+                TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
                 // Extension type members do not override implemented members.
                 _ => continue,
             };
-            let Some(identity) = model.resolve_name(&name.name) else {
+            let Some(identity) = model.resolve_name(name.name()) else {
                 continue;
             };
-            for member in members
-                .iter()
-                .filter(|member| inherits_method_types(member))
-            {
+            for member in members.filter(|member| inherits_method_types(*member)) {
                 changed |= self.inherit_method_types(&identity, member, model, &mut lookup);
             }
         }
@@ -4723,45 +4702,47 @@ impl SignatureIndex {
 
     /// Advance callable, field, and getter inference to a fixed point.
     /// Unresolved initializer dependencies remain holes for later passes.
-    fn infer_declaration_types(&mut self, program: &Program, model: &SemanticModel<'_>) -> bool {
+    fn infer_declaration_types(&mut self, program: Program<'_>, model: &SemanticModel<'_>) -> bool {
         let mut changed = self.infer_override_types(program, model);
-        for declaration in &program.declarations {
+        for declaration in program.declarations() {
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
             let (name, parameters, members) = match declaration {
-                TopLevelDecl::Class(class) => (&class.name, &class.type_params, &class.members),
+                TopLevelDecl::Class(class) => (class.name(), class.type_params(), class.members()),
                 TopLevelDecl::MixinClass(class) => {
-                    (&class.name, &class.type_params, &class.members)
+                    (class.name(), class.type_params(), class.members())
                 }
-                TopLevelDecl::Mixin(mixin) => (&mixin.name, &mixin.type_params, &mixin.members),
+                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.type_params(), mixin.members()),
                 TopLevelDecl::Enum(enumeration) => (
-                    &enumeration.name,
-                    &enumeration.type_params,
-                    &enumeration.members,
+                    enumeration.name(),
+                    enumeration.type_params(),
+                    enumeration.members(),
                 ),
-                TopLevelDecl::ExtensionType(extension) => {
-                    (&extension.name, &extension.type_params, &extension.members)
-                }
+                TopLevelDecl::ExtensionType(extension) => (
+                    extension.name(),
+                    extension.type_params(),
+                    extension.members(),
+                ),
                 _ => continue,
             };
-            let Some(identity) = model.resolve_name(&name.name) else {
+            let Some(identity) = model.resolve_name(name.name()) else {
                 continue;
             };
-            if !members.iter().any(|member| match member {
-                ClassMember::Field(field) if field.field_type.is_none() => {
-                    field.declarators.iter().any(|declarator| {
-                        self.member_entry(&identity, &declarator.name.name)
+            if !members.clone().any(|member| match member {
+                ClassMember::Field(field) if field.field_type().is_none() => {
+                    field.declarators().any(|declarator| {
+                        self.member_entry(&identity, declarator.name().name())
                             .and_then(|entry| entry.field.as_ref())
                             .is_some_and(|(_, ty)| {
                                 matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic)
                             })
                     })
                 }
-                ClassMember::Getter(getter) if getter.return_type.is_none() => self
+                ClassMember::Getter(getter) if getter.return_type().is_none() => self
                     .member_type_pending(
                         &identity,
-                        &getter.name.name,
+                        getter.name().name(),
                         model,
                         &mut FxHashSet::default(),
                     ),
@@ -4770,13 +4751,12 @@ impl SignatureIndex {
                 continue;
             }
             let mut scope = TypeParameterScope::default();
-            scope.push(parameters, model);
+            scope.push(parameters.clone(), model);
             let receiver = ResolvedType::Interface {
                 occurrence: Default::default(),
                 identity: identity.clone(),
                 arguments: parameters
-                    .iter()
-                    .filter_map(|parameter| scope.lookup(&parameter.name.name))
+                    .filter_map(|parameter| scope.lookup(parameter.name().name()))
                     .collect(),
                 nullable: false,
                 extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
@@ -4785,12 +4765,12 @@ impl SignatureIndex {
             environment.declare("this", receiver);
             for member in members {
                 match member {
-                    ClassMember::Field(field) if field.field_type.is_none() => {
-                        for declarator in &field.declarators {
+                    ClassMember::Field(field) if field.field_type().is_none() => {
+                        for declarator in field.declarators() {
                             changed |= self.infer_member_type(
                                 &identity,
-                                &declarator.name.name,
-                                declarator.initializer.as_ref(),
+                                declarator.name().name(),
+                                declarator.initializer(),
                                 model,
                                 &environment,
                                 &scope,
@@ -4798,17 +4778,17 @@ impl SignatureIndex {
                         }
                     }
                     ClassMember::Getter(getter)
-                        if getter.return_type.is_none()
+                        if getter.return_type().is_none()
                             && self.member_type_pending(
                                 &identity,
-                                &getter.name.name,
+                                getter.name().name(),
                                 model,
                                 &mut FxHashSet::default(),
                             ) =>
                     {
                         changed |= self.infer_member_type(
                             &identity,
-                            &getter.name.name,
+                            getter.name().name(),
                             None,
                             model,
                             &environment,
@@ -4827,24 +4807,24 @@ impl SignatureIndex {
     fn inherit_method_types(
         &mut self,
         identity: &DeclarationIdentity,
-        member: &ClassMember,
+        member: ClassMember<'_>,
         model: &SemanticModel<'_>,
         lookup: &mut inherited::OverrideInferenceLookup,
     ) -> bool {
         let (name, params, infer_return, setter) = match member {
             ClassMember::Method(method) => (
-                method.name.name.as_str(),
-                Some(&method.params),
-                method.return_type.is_none(),
+                method.name().name(),
+                Some(method.params()),
+                method.return_type().is_none(),
                 false,
             ),
             ClassMember::Operator(operator) => (
                 operator.lookup_name(),
-                Some(&operator.params),
-                operator.return_type.is_none(),
+                Some(operator.params()),
+                operator.return_type().is_none(),
                 false,
             ),
-            ClassMember::Setter(setter) => (setter.name.name.as_str(), None, false, true),
+            ClassMember::Setter(setter) => (setter.name().name(), None, false, true),
             _ => return false,
         };
         let unresolved = self.override_inference_unresolved(identity, name, setter, model, lookup);
@@ -4886,10 +4866,10 @@ impl SignatureIndex {
         let Some(signature) = entry.signature.as_mut() else {
             return false;
         };
-        let untyped = |param: &FormalParam| {
-            param.param_type.is_none()
-                && param.function_params.is_none()
-                && param.initializing.is_none()
+        let untyped = |param: FormalParam<'_>| {
+            param.param_type().is_none()
+                && param.function_params().is_none()
+                && param.initializing().is_none()
         };
         let params = params.expect("method or operator parameters");
         for (index, (param, slot)) in params
@@ -4906,11 +4886,11 @@ impl SignatureIndex {
                 update(slot, ty);
             }
         }
-        for param in params.named().filter(|param| untyped(param)) {
-            if let Some(slot) = signature.named.get_mut(&param.name.name) {
+        for param in params.named().filter(|param| untyped(*param)) {
+            if let Some(slot) = signature.named.get_mut(param.name().name()) {
                 let ty = inherited
                     .as_ref()
-                    .and_then(|(_, named, _)| named.get(&param.name.name))
+                    .and_then(|(_, named, _)| named.get(param.name().name()))
                     .unwrap_or(&fallback)
                     .clone();
                 update(slot, ty);
@@ -4929,7 +4909,7 @@ impl SignatureIndex {
         &mut self,
         identity: &DeclarationIdentity,
         name: &str,
-        expression: Option<&Expr>,
+        expression: Option<Expr<'_>>,
         model: &SemanticModel<'_>,
         environment: &TypeEnvironment,
         scope: &TypeParameterScope,
@@ -5065,7 +5045,7 @@ impl SignatureIndex {
 
     fn declaration_dependencies_known(
         &self,
-        expression: &Expr,
+        expression: Expr<'_>,
         model: &SemanticModel<'_>,
         owner: Option<&DeclarationIdentity>,
         environment: &TypeEnvironment,
@@ -5083,7 +5063,7 @@ impl SignatureIndex {
 
     fn declaration_dependencies_known_using_lookup(
         &self,
-        expression: &Expr,
+        expression: Expr<'_>,
         model: &SemanticModel<'_>,
         owner: Option<&DeclarationIdentity>,
         environment: &TypeEnvironment,
@@ -5091,14 +5071,13 @@ impl SignatureIndex {
         lookup: &impl Fn(&str) -> Option<ResolvedType>,
     ) -> bool {
         let mut unresolved = false;
-        // AST addresses are stable for this traversal only. Each field result
-        // is retained once, so a.b.c does not infer a.b again for c.
-        let mut receivers: FxHashMap<*const Expr, ResolvedType> = FxHashMap::default();
-        let mut member_receivers: FxHashMap<*const Expr, ResolvedType> = FxHashMap::default();
+        // Each field result is retained once, so a.b.c does not infer a.b again for c.
+        let mut receivers: FxHashMap<NodeId, ResolvedType> = FxHashMap::default();
+        let mut member_receivers: FxHashMap<NodeId, ResolvedType> = FxHashMap::default();
         let mut visited = FxHashSet::default();
         InitializerDependencies {
             environment: environment.clone(),
-            inspect: |expression: &Expr, environment: &TypeEnvironment| {
+            inspect: |expression: Expr<'_>, environment: &TypeEnvironment| {
                 if unresolved {
                     return;
                 }
@@ -5131,40 +5110,34 @@ impl SignatureIndex {
                             self.member_type_pending(&owner, name.name, model, &mut visited);
                     }
                 }
-                if let Expr::Field {
-                    object,
-                    field,
-                    is_null_safe,
-                    ..
-                } = expression
-                {
+                if let Expr::Field(access) = expression {
+                    let object = access.object();
+                    let field = access.field();
                     let static_owner = initializer_value_name(object)
                         .filter(|name| !environment.is_bound(name.prefix.unwrap_or(name.name)))
                         .and_then(|name| model.resolve_name(name));
                     if let Some(identity) = &static_owner {
                         visited.clear();
                         unresolved |=
-                            self.member_type_pending(identity, &field.name, model, &mut visited);
+                            self.member_type_pending(identity, field.name(), model, &mut visited);
                     }
-                    let receiver = receivers
-                        .remove(&(object.as_ref() as *const Expr))
-                        .unwrap_or_else(|| {
-                            environment.receiver_type(
-                                object,
-                                &field.name,
-                                &InferenceContext {
-                                    model,
-                                    signatures: self,
-                                    type_parameters: scope,
-                                    lookup,
-                                    argument_fallback: None,
-                                },
-                                None,
-                            )
-                        });
+                    let receiver = receivers.remove(&object.syntax().id()).unwrap_or_else(|| {
+                        environment.receiver_type(
+                            object,
+                            field.name(),
+                            &InferenceContext {
+                                model,
+                                signatures: self,
+                                type_parameters: scope,
+                                lookup,
+                                argument_fallback: None,
+                            },
+                            None,
+                        )
+                    });
                     // Cache reached-branch types separately from the null
                     // introduced by shorting, retaining declared nullability.
-                    let receiver = if *is_null_safe {
+                    let receiver = if access.is_null_safe() {
                         receiver.non_null()
                     } else {
                         receiver
@@ -5172,35 +5145,35 @@ impl SignatureIndex {
                     if let Some(ResolvedType::Interface { identity, .. }) = self
                         .resolved_instance_owner(
                             &receiver,
-                            &field.name,
+                            field.name(),
                             InstanceAccess::Read,
                             model,
                         )
                     {
                         visited.clear();
                         unresolved |=
-                            self.member_type_pending(&identity, &field.name, model, &mut visited);
+                            self.member_type_pending(&identity, field.name(), model, &mut visited);
                     }
                     let ty = static_owner
                         .as_ref()
-                        .and_then(|identity| self.field(identity, &field.name))
+                        .and_then(|identity| self.field(identity, field.name()))
                         .map(|(_, ty)| ty.clone())
                         .or_else(|| {
-                            self.resolved_field(&receiver, &field.name, model)
+                            self.resolved_field(&receiver, field.name(), model)
                                 .or_else(|| {
-                                    self.resolved_extension_getter(&receiver, &field.name, model)
+                                    self.resolved_extension_getter(&receiver, field.name(), model)
                                 })
                                 .map(|(ty, substitutions)| model.substitute(&ty, &substitutions))
                         })
                         .unwrap_or(ResolvedType::Unknown);
-                    receivers.insert(expression as *const Expr, ty);
-                    member_receivers.insert(expression as *const Expr, receiver);
-                } else if let Expr::Call { callee, .. } = expression {
-                    let target = match callee.as_ref() {
-                        Expr::GenericInstantiation { target, .. } => target.as_ref(),
+                    receivers.insert(expression.syntax().id(), ty);
+                    member_receivers.insert(expression.syntax().id(), receiver);
+                } else if let Expr::Call(call) = expression {
+                    let target = match call.callee() {
+                        Expr::GenericInstantiation(instantiation) => instantiation.target(),
                         target => target,
                     };
-                    if let Some(receiver) = member_receivers.remove(&(target as *const Expr)) {
+                    if let Some(receiver) = member_receivers.remove(&target.syntax().id()) {
                         let ty = environment.infer_unshorted(
                             expression,
                             InferenceContext {
@@ -5213,7 +5186,7 @@ impl SignatureIndex {
                             None,
                             Some(receiver),
                         );
-                        receivers.insert(expression as *const Expr, ty);
+                        receivers.insert(expression.syntax().id(), ty);
                     }
                 }
             },
@@ -5351,52 +5324,59 @@ impl SignatureIndex {
         }
     }
 
-    fn add_declarations(&mut self, program: &Program, model: &SemanticModel<'_>) {
-        self.flow_writes
-            .entry(model.file)
-            .or_insert_with(|| Arc::new(super::flow_writes::FlowWrites::program(program)));
-        for declaration in &program.declarations {
+    fn add_declarations(
+        &mut self,
+        program: Program<'_>,
+        model: &SemanticModel<'_>,
+        analyze_bodies: bool,
+    ) {
+        if analyze_bodies {
+            self.flow_writes
+                .entry(model.file)
+                .or_insert_with(|| Arc::new(super::flow_writes::FlowWrites::program(program)));
+        }
+        for declaration in program.declarations() {
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
             let kind = match declaration {
                 TopLevelDecl::Class(class) => Some((
-                    &class.name,
+                    class.name(),
                     TypeKind::Class,
-                    class.extends.is_none(),
-                    class.modifiers.restriction,
+                    class.extends().is_none(),
+                    class.modifiers().restriction,
                 )),
                 TopLevelDecl::ClassTypeAlias(alias) => Some((
-                    &alias.name,
+                    alias.name(),
                     TypeKind::Class,
                     false,
-                    alias.modifiers.restriction,
+                    alias.modifiers().restriction,
                 )),
                 TopLevelDecl::MixinClass(class) => Some((
-                    &class.name,
+                    class.name(),
                     TypeKind::MixinClass,
-                    class.extends.is_none(),
-                    class.is_base.then_some(ClassRestriction::Base),
+                    class.extends().is_none(),
+                    class.is_base().then_some(ClassRestriction::Base),
                 )),
                 TopLevelDecl::Mixin(mixin) => Some((
-                    &mixin.name,
+                    mixin.name(),
                     TypeKind::Mixin,
-                    mixin.on_clause.is_empty(),
-                    mixin.is_base.then_some(ClassRestriction::Base),
+                    mixin.on_clause().is_empty(),
+                    mixin.is_base().then_some(ClassRestriction::Base),
                 )),
                 TopLevelDecl::Enum(enumeration) => Some((
-                    &enumeration.name,
+                    enumeration.name(),
                     TypeKind::Enum,
                     !model.identities.has_sdk_sources(),
                     None,
                 )),
                 TopLevelDecl::ExtensionType(extension) => {
-                    Some((&extension.name, TypeKind::ExtensionType, false, None))
+                    Some((extension.name(), TypeKind::ExtensionType, false, None))
                 }
                 _ => None,
             };
             if let Some((name, kind, inherited_object, restriction)) = kind
-                && let Some(identity) = model.resolve_name(&name.name)
+                && let Some(identity) = model.resolve_name(name.name())
             {
                 self.inherited_object
                     .insert(identity.clone(), inherited_object);
@@ -5408,71 +5388,70 @@ impl SignatureIndex {
             match declaration {
                 TopLevelDecl::ClassTypeAlias(alias) => {
                     self.add_declaration_facts(
-                        &alias.name.name,
-                        &alias.annotations,
-                        &alias.type_params,
-                        &EffectiveMembers::declared(&[]),
-                        (None, alias.modifiers.is_abstract),
+                        alias.name().name(),
+                        alias.annotations(),
+                        alias.type_params(),
+                        EffectiveMembers::declared(AstChildren::empty()),
+                        (None, alias.modifiers().is_abstract),
                         model,
                     );
                     self.add_type(
-                        &alias.name.name,
-                        &alias.type_params,
-                        std::iter::once(&alias.superclass)
-                            .chain(&alias.with_clause)
-                            .chain(&alias.implements)
+                        alias.name().name(),
+                        alias.type_params(),
+                        std::iter::once(alias.superclass())
+                            .chain(alias.with_clause())
+                            .chain(alias.implements())
                             .collect(),
                         alias
-                            .with_clause
-                            .iter()
+                            .with_clause()
                             .rev()
-                            .chain(std::iter::once(&alias.superclass))
+                            .chain(std::iter::once(alias.superclass()))
                             .collect(),
-                        &EffectiveMembers::declared(&[]),
+                        EffectiveMembers::declared(AstChildren::empty()),
                         model,
                     );
-                    if let Some(identity) = model.resolve_name(&alias.name.name) {
+                    if let Some(identity) = model.resolve_name(alias.name().name()) {
                         let mut scope = TypeParameterScope::default();
-                        scope.push(&alias.type_params, model);
+                        scope.push(alias.type_params(), model);
                         self.superclasses.insert(
                             identity.clone(),
-                            model.resolve_type_in(&alias.superclass, &scope),
+                            model.resolve_type_in(alias.superclass(), &scope),
                         );
                         self.mixin_applications
-                            .insert(identity, 1..1 + alias.with_clause.len());
+                            .insert(identity, 1..1 + alias.with_clause().len());
                     }
                 }
                 // Alias parameters are the inference variables of alias
                 // constructor calls and tear-offs (`alias_template`).
                 TopLevelDecl::TypeAlias(alias) => {
                     let mut parameters = TypeParameterScope::default();
-                    parameters.push(&alias.type_params, model);
+                    parameters.push(alias.type_params(), model);
                     record_bound_declarations(
                         &mut self.bound_declared,
                         &parameters,
-                        &alias.type_params,
+                        alias.type_params(),
                     );
                     self.add_declaration_facts(
-                        &alias.name.name,
-                        &alias.annotations,
-                        &alias.type_params,
-                        &EffectiveMembers::declared(&[]),
+                        alias.name().name(),
+                        alias.annotations(),
+                        alias.type_params(),
+                        EffectiveMembers::declared(AstChildren::empty()),
                         (None, false),
                         model,
                     );
                 }
                 TopLevelDecl::Function(function)
-                    if matches!(function.kind, FunctionKind::Function(_)) =>
+                    if matches!(function.kind(), FunctionKind::Function(_)) =>
                 {
                     let mut parameters = TypeParameterScope::default();
-                    parameters.push(&function.type_params, model);
+                    parameters.push(function.type_params(), model);
                     record_bound_declarations(
                         &mut self.bound_declared,
                         &parameters,
-                        &function.type_params,
+                        function.type_params(),
                     );
-                    if let Some(identity) = model.resolve_value(&function.name.name) {
-                        let annotations = resolve_annotations(&function.annotations, model);
+                    if let Some(identity) = model.resolve_value(function.name().name()) {
+                        let annotations = resolve_annotations(function.annotations(), model);
                         if !annotations.is_empty() {
                             self.function_annotations
                                 .insert(identity.clone(), annotations);
@@ -5482,9 +5461,9 @@ impl SignatureIndex {
                             signature(
                                 &parameters,
                                 &[],
-                                &function.type_params,
+                                function.type_params(),
                                 function.params(),
-                                function.return_type.as_ref(),
+                                function.return_type(),
                                 None,
                                 model,
                             ),
@@ -5492,166 +5471,156 @@ impl SignatureIndex {
                     }
                 }
                 TopLevelDecl::Function(function)
-                    if matches!(function.kind, FunctionKind::Getter) =>
+                    if matches!(function.kind(), FunctionKind::Getter) =>
                 {
-                    if let Some(identity) = model.resolve_value(&function.name.name) {
+                    if let Some(identity) = model.resolve_value(function.name().name()) {
                         self.value_getters.insert(identity.clone());
                         self.value_types.insert(
                             identity,
                             function
-                                .return_type
-                                .as_ref()
+                                .return_type()
                                 .map(|ty| model.resolve_type(ty))
                                 .unwrap_or(ResolvedType::Dynamic),
                         );
                     }
                 }
                 TopLevelDecl::Variable(variable) => {
-                    for declarator in &variable.declarators {
-                        if !model.owns_declaration(&declarator.name.name) {
+                    for declarator in variable.declarators() {
+                        if !model.owns_declaration(declarator.name().name()) {
                             continue;
                         }
-                        let Some(identity) = model.resolve_value(&declarator.name.name) else {
+                        let Some(identity) = model.resolve_value(declarator.name().name()) else {
                             continue;
                         };
                         self.value_types.insert(
                             identity.clone(),
                             variable
-                                .var_type
-                                .as_ref()
+                                .var_type()
                                 .map(|ty| model.resolve_type(ty))
                                 .unwrap_or_else(|| {
-                                    if declarator.initializer.is_none() {
+                                    if declarator.initializer().is_none() {
                                         ResolvedType::Dynamic
                                     } else {
                                         ResolvedType::Unknown
                                     }
                                 }),
                         );
-                        if variable.keyword == VarKeyword::Const
-                            && let Some(initializer) = &declarator.initializer
+                        if variable.keyword() == VarKeyword::Const
+                            && let Some(initializer) = declarator.initializer()
                         {
                             if let Some(constant_type) = constructed_identity(initializer, model) {
                                 self.constant_types.insert(identity.clone(), constant_type);
                             }
-                            self.constants.insert(identity, initializer.clone());
+                            self.constants
+                                .insert(identity, model.node_ref(initializer.syntax()));
                         }
                     }
                 }
                 TopLevelDecl::Class(class) => {
                     let members = class.element_members();
                     let supertypes = class
-                        .extends
-                        .iter()
-                        .chain(&class.with_clause)
-                        .chain(&class.implements)
+                        .extends()
+                        .into_iter()
+                        .chain(class.with_clause())
+                        .chain(class.implements())
                         .collect();
-                    let member_supertypes = class
-                        .with_clause
-                        .iter()
-                        .rev()
-                        .chain(&class.extends)
-                        .collect();
+                    let member_supertypes =
+                        class.with_clause().rev().chain(class.extends()).collect();
                     self.add_type(
-                        &class.name.name,
-                        &class.type_params,
+                        class.name().name(),
+                        class.type_params(),
                         supertypes,
                         member_supertypes,
-                        &members,
+                        members.clone(),
                         model,
                     );
-                    if !class.with_clause.is_empty()
-                        && let Some(identity) = model.resolve_name(&class.name.name)
+                    if !class.with_clause().is_empty()
+                        && let Some(identity) = model.resolve_name(class.name().name())
                     {
-                        let start = usize::from(class.extends.is_some());
+                        let start = usize::from(class.extends().is_some());
                         self.mixin_applications
-                            .insert(identity, start..start + class.with_clause.len());
+                            .insert(identity, start..start + class.with_clause().len());
                     }
                     self.add_declaration_facts(
-                        &class.name.name,
-                        &class.annotations,
-                        &class.type_params,
-                        &members,
-                        (None, class.modifiers.is_abstract),
+                        class.name().name(),
+                        class.annotations(),
+                        class.type_params(),
+                        members.clone(),
+                        (None, class.modifiers().is_abstract),
                         model,
                     );
                 }
                 TopLevelDecl::MixinClass(class) => {
                     let members = class.element_members();
                     let supertypes = class
-                        .extends
-                        .iter()
-                        .chain(&class.with_clause)
-                        .chain(&class.implements)
+                        .extends()
+                        .into_iter()
+                        .chain(class.with_clause())
+                        .chain(class.implements())
                         .collect();
-                    let member_supertypes = class
-                        .with_clause
-                        .iter()
-                        .rev()
-                        .chain(&class.extends)
-                        .collect();
+                    let member_supertypes =
+                        class.with_clause().rev().chain(class.extends()).collect();
                     self.add_type(
-                        &class.name.name,
-                        &class.type_params,
+                        class.name().name(),
+                        class.type_params(),
                         supertypes,
                         member_supertypes,
-                        &members,
+                        members.clone(),
                         model,
                     );
                     self.add_declaration_facts(
-                        &class.name.name,
-                        &class.annotations,
-                        &class.type_params,
-                        &members,
-                        (None, class.is_abstract),
+                        class.name().name(),
+                        class.annotations(),
+                        class.type_params(),
+                        members.clone(),
+                        (None, class.is_abstract()),
                         model,
                     );
                 }
                 TopLevelDecl::Extension(extension) => {
-                    if let Some(name) = &extension.name {
+                    if let Some(name) = extension.name() {
                         self.add_type(
-                            &name.name,
-                            &extension.type_params,
+                            name.name(),
+                            extension.type_params(),
                             Vec::new(),
                             Vec::new(),
-                            &EffectiveMembers::declared(&extension.members),
+                            EffectiveMembers::declared(extension.members()),
                             model,
                         );
                     }
                     let mut parameters = TypeParameterScope::default();
-                    parameters.push(&extension.type_params, model);
-                    let owner_parameters = parameter_ids(&parameters, &extension.type_params);
+                    parameters.push(extension.type_params(), model);
+                    let owner_parameters = parameter_ids(&parameters, extension.type_params());
                     let methods = extension
-                        .members
-                        .iter()
+                        .members()
                         .filter_map(|member| match member {
-                            ClassMember::Method(method) if !method.is_static => {
-                                parameters.push(&method.type_params, model);
+                            ClassMember::Method(method) if !method.is_static() => {
+                                parameters.push(method.type_params(), model);
                                 record_bound_declarations(
                                     &mut self.bound_declared,
                                     &parameters,
-                                    &method.type_params,
+                                    method.type_params(),
                                 );
                                 let resolved = signature(
                                     &parameters,
                                     &owner_parameters,
-                                    &method.type_params,
-                                    Some(&method.params),
-                                    method.return_type.as_ref(),
+                                    method.type_params(),
+                                    Some(method.params()),
+                                    method.return_type(),
                                     None,
                                     model,
                                 );
                                 parameters.pop();
-                                Some((method.name.name.clone(), resolved))
+                                Some((method.name().name().to_owned(), resolved))
                             }
                             ClassMember::Operator(operator) => Some((
                                 operator.lookup_name().to_owned(),
                                 signature(
                                     &parameters,
                                     &owner_parameters,
-                                    &[],
-                                    Some(&operator.params),
-                                    operator.return_type.as_ref(),
+                                    AstChildren::<TypeParam<'_>>::empty(),
+                                    Some(operator.params()),
+                                    operator.return_type(),
                                     None,
                                     model,
                                 ),
@@ -5660,42 +5629,36 @@ impl SignatureIndex {
                         })
                         .collect();
                     let getters = extension
-                        .members
-                        .iter()
+                        .members()
                         .filter_map(|member| match member {
-                            ClassMember::Getter(getter) if !getter.is_static => Some((
-                                getter.name.name.clone(),
-                                getter
-                                    .return_type
-                                    .as_ref()
-                                    .map_or(ResolvedType::Dynamic, |ty| {
-                                        model.resolve_type_in(ty, &parameters)
-                                    }),
+                            ClassMember::Getter(getter) if !getter.is_static() => Some((
+                                getter.name().name().to_owned(),
+                                getter.return_type().map_or(ResolvedType::Dynamic, |ty| {
+                                    model.resolve_type_in(ty, &parameters)
+                                }),
                             )),
                             _ => None,
                         })
                         .collect();
                     self.extensions.push(ExtensionFacts {
                         declaring_library: model.library,
-                        name: extension.name.as_ref().map(|name| name.name.clone()),
+                        name: extension.name().map(|name| name.name().to_owned()),
                         identity: extension
-                            .name
-                            .as_ref()
-                            .and_then(|name| model.resolve_extension(&name.name)),
-                        on_type: model.resolve_type_in(&extension.on_type, &parameters),
+                            .name()
+                            .and_then(|name| model.resolve_extension(name.name())),
+                        on_type: model.resolve_type_in(extension.on_type(), &parameters),
                         parameters: owner_parameters,
                         parameter_bounds: extension
-                            .type_params
-                            .iter()
+                            .type_params()
                             .filter_map(|parameter| {
                                 let ResolvedType::TypeParameter { id, bound, .. } =
-                                    parameters.lookup(&parameter.name.name)?
+                                    parameters.lookup(parameter.name().name())?
                                 else {
                                     return None;
                                 };
                                 Some((
                                     id,
-                                    if parameter.bound.is_some() {
+                                    if parameter.bound().is_some() {
                                         bound.as_ref().clone()
                                     } else {
                                         ResolvedType::Dynamic
@@ -5705,18 +5668,17 @@ impl SignatureIndex {
                             .collect(),
                         methods,
                         annotations: extension
-                            .members
-                            .iter()
+                            .members()
                             .filter_map(|member| {
                                 let (name, annotations) = match member {
                                     ClassMember::Method(method) => {
-                                        (method.name.name.as_str(), &method.annotations)
+                                        (method.name().name(), method.annotations())
                                     }
                                     ClassMember::Getter(getter) => {
-                                        (getter.name.name.as_str(), &getter.annotations)
+                                        (getter.name().name(), getter.annotations())
                                     }
                                     ClassMember::Operator(operator) => {
-                                        (operator.lookup_name(), &operator.annotations)
+                                        (operator.lookup_name(), operator.annotations())
                                     }
                                     _ => return None,
                                 };
@@ -5726,25 +5688,25 @@ impl SignatureIndex {
                             .collect(),
                         getters,
                         members: extension
-                            .members
-                            .iter()
+                            .members()
                             .filter_map(|member| match member {
-                                ClassMember::Method(method) => Some(method.name.name.clone()),
+                                ClassMember::Method(method) => {
+                                    Some(method.name().name().to_owned())
+                                }
                                 _ => None,
                             })
                             .collect(),
                         instance_members: extension
-                            .members
-                            .iter()
+                            .members()
                             .filter_map(|member| match member {
-                                ClassMember::Method(method) if !method.is_static => {
-                                    Some(method.name.name.clone())
+                                ClassMember::Method(method) if !method.is_static() => {
+                                    Some(method.name().name().to_owned())
                                 }
-                                ClassMember::Getter(getter) if !getter.is_static => {
-                                    Some(getter.name.name.clone())
+                                ClassMember::Getter(getter) if !getter.is_static() => {
+                                    Some(getter.name().name().to_owned())
                                 }
-                                ClassMember::Setter(setter) if !setter.is_static => {
-                                    Some(format!("{}=", setter.name.name))
+                                ClassMember::Setter(setter) if !setter.is_static() => {
+                                    Some(format!("{}=", setter.name().name()))
                                 }
                                 ClassMember::Operator(operator) => {
                                     Some(operator.lookup_name().to_owned())
@@ -5757,47 +5719,47 @@ impl SignatureIndex {
                 TopLevelDecl::ExtensionType(extension) => {
                     let members = extension.element_members();
                     self.add_type(
-                        &extension.name.name,
-                        &extension.type_params,
-                        extension.implements.iter().collect(),
+                        extension.name().name(),
+                        extension.type_params(),
+                        extension.implements().collect(),
                         Vec::new(),
-                        &members,
+                        members.clone(),
                         model,
                     );
                     self.add_declaration_facts(
-                        &extension.name.name,
-                        &extension.annotations,
-                        &extension.type_params,
-                        &members,
+                        extension.name().name(),
+                        extension.annotations(),
+                        extension.type_params(),
+                        members.clone(),
                         (
                             extension
                                 .representation()
-                                .and_then(|param| param.param_type.as_ref()),
+                                .and_then(|param| param.param_type()),
                             false,
                         ),
                         model,
                     );
                 }
                 TopLevelDecl::Mixin(mixin) => {
-                    let supertypes = mixin.on_clause.iter().chain(&mixin.implements).collect();
+                    let supertypes = mixin.on_clause().chain(mixin.implements()).collect();
                     self.add_type(
-                        &mixin.name.name,
-                        &mixin.type_params,
+                        mixin.name().name(),
+                        mixin.type_params(),
                         supertypes,
                         Vec::new(),
-                        &EffectiveMembers::declared(&mixin.members),
+                        EffectiveMembers::declared(mixin.members()),
                         model,
                     );
-                    if let Some(identity) = model.resolve_name(&mixin.name.name) {
+                    if let Some(identity) = model.resolve_name(mixin.name().name()) {
                         self.mixin_constraint_counts
-                            .insert(identity, mixin.on_clause.len());
+                            .insert(identity, mixin.on_clause().len());
                     }
                     // Mixins are never instantiated: abstract for every consumer.
                     self.add_declaration_facts(
-                        &mixin.name.name,
-                        &mixin.annotations,
-                        &mixin.type_params,
-                        &EffectiveMembers::declared(&mixin.members),
+                        mixin.name().name(),
+                        mixin.annotations(),
+                        mixin.type_params(),
+                        EffectiveMembers::declared(mixin.members()),
                         (None, true),
                         model,
                     );
@@ -5805,29 +5767,28 @@ impl SignatureIndex {
                 TopLevelDecl::Enum(enumeration) => {
                     let members = enumeration.element_members();
                     self.add_type(
-                        &enumeration.name.name,
-                        &enumeration.type_params,
+                        enumeration.name().name(),
+                        enumeration.type_params(),
                         enumeration
-                            .with_clause
-                            .iter()
-                            .chain(&enumeration.implements)
+                            .with_clause()
+                            .chain(enumeration.implements())
                             .collect(),
-                        enumeration.with_clause.iter().rev().collect(),
-                        &members,
+                        enumeration.with_clause().rev().collect(),
+                        members.clone(),
                         model,
                     );
                     self.add_declaration_facts(
-                        &enumeration.name.name,
-                        &enumeration.annotations,
-                        &enumeration.type_params,
-                        &members,
+                        enumeration.name().name(),
+                        enumeration.annotations(),
+                        enumeration.type_params(),
+                        members.clone(),
                         (None, false),
                         model,
                     );
                     // Every enum implicitly extends `Enum`; only meaningful
                     // when `dart:core` sources describe it.
                     if model.identities.has_sdk_sources()
-                        && let Some(identity) = model.resolve_name(&enumeration.name.name)
+                        && let Some(identity) = model.resolve_name(enumeration.name().name())
                     {
                         let enum_type = model.core_type("Enum", false);
                         if let Some((_, supertypes)) = self.supertypes.get_mut(&identity) {
@@ -5842,12 +5803,12 @@ impl SignatureIndex {
                             supertypes.insert(object, enum_type);
                         }
                     }
-                    if let Some(identity) = model.resolve_name(&enumeration.name.name) {
-                        if !enumeration.with_clause.is_empty() {
+                    if let Some(identity) = model.resolve_name(enumeration.name().name()) {
+                        if !enumeration.with_clause().is_empty() {
                             let start = usize::from(model.identities.has_sdk_sources());
                             self.mixin_applications.insert(
                                 identity.clone(),
-                                start..start + enumeration.with_clause.len(),
+                                start..start + enumeration.with_clause().len(),
                             );
                         }
                         // The language synthesizes a static const list, including
@@ -5884,9 +5845,8 @@ impl SignatureIndex {
                         self.enum_values.insert(
                             identity,
                             enumeration
-                                .variants
-                                .iter()
-                                .map(|variant| variant.name.name.clone())
+                                .variants()
+                                .map(|variant| variant.name().name().to_owned())
                                 .collect(),
                         );
                     }
@@ -5897,31 +5857,29 @@ impl SignatureIndex {
         self.add_immutability(program, model);
     }
 
-    fn add_immutability(&mut self, program: &Program, model: &SemanticModel<'_>) {
-        for declaration in &program.declarations {
+    fn add_immutability(&mut self, program: Program<'_>, model: &SemanticModel<'_>) {
+        for declaration in program.declarations() {
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
             let (name, annotations, superclass) = match declaration {
-                TopLevelDecl::Class(node) => (&node.name, &node.annotations, node.extends.as_ref()),
-                TopLevelDecl::MixinClass(node) => {
-                    (&node.name, &node.annotations, node.extends.as_ref())
-                }
+                TopLevelDecl::Class(node) => (node.name(), node.annotations(), node.extends()),
+                TopLevelDecl::MixinClass(node) => (node.name(), node.annotations(), node.extends()),
                 TopLevelDecl::ClassTypeAlias(node) => {
                     // Its superclass was already resolved in the alias's
                     // generic scope while indexing the mixin application.
-                    (&node.name, &node.annotations, None)
+                    (node.name(), node.annotations(), None)
                 }
-                TopLevelDecl::Mixin(node) => (&node.name, &node.annotations, None),
-                TopLevelDecl::Enum(node) => (&node.name, &node.annotations, None),
-                TopLevelDecl::ExtensionType(node) => (&node.name, &node.annotations, None),
+                TopLevelDecl::Mixin(node) => (node.name(), node.annotations(), None),
+                TopLevelDecl::Enum(node) => (node.name(), node.annotations(), None),
+                TopLevelDecl::ExtensionType(node) => (node.name(), node.annotations(), None),
                 _ => continue,
             };
-            let Some(identity) = model.resolve_name(&*name.name) else {
+            let Some(identity) = model.resolve_name(name.name()) else {
                 continue;
             };
-            let immutable = if annotations.iter().any(|annotation| {
-                QualifiedName::from_identifiers(&annotation.name)
+            let immutable = if annotations.clone().any(|annotation| {
+                QualifiedName::from_identifiers(annotation.name())
                     .and_then(|name| {
                         model
                             .resolve_value(name)
@@ -5930,14 +5888,14 @@ impl SignatureIndex {
                     .is_some_and(|identity| identity.is_meta_immutable())
             }) {
                 Truth::Yes
-            } else if annotations.iter().any(|annotation| {
+            } else if annotations.clone().any(|annotation| {
                 // An `immutable` annotation that resolves to nothing may come
                 // through an export chain falcon does not follow.
                 annotation
-                    .name
+                    .name()
                     .last()
-                    .is_some_and(|last| matches!(&*last.name, "immutable" | "Immutable"))
-                    && QualifiedName::from_identifiers(&annotation.name)
+                    .is_some_and(|last| matches!(last.name(), "immutable" | "Immutable"))
+                    && QualifiedName::from_identifiers(annotation.name())
                         .and_then(|name| {
                             model
                                 .resolve_value(name)
@@ -5953,8 +5911,8 @@ impl SignatureIndex {
             if let Some(superclass) = superclass {
                 let mut scope = TypeParameterScope::default();
                 match declaration {
-                    TopLevelDecl::Class(node) => scope.push(&node.type_params, model),
-                    TopLevelDecl::MixinClass(node) => scope.push(&node.type_params, model),
+                    TopLevelDecl::Class(node) => scope.push(node.type_params(), model),
+                    TopLevelDecl::MixinClass(node) => scope.push(node.type_params(), model),
                     _ => {}
                 }
                 self.superclasses
@@ -5965,56 +5923,52 @@ impl SignatureIndex {
 
     fn resolve_constructor_formals(
         &mut self,
-        program: &Program,
+        program: Program<'_>,
         model: &SemanticModel<'_>,
     ) -> bool {
         let mut resolved = false;
-        for _ in 0..program.declarations.len() {
+        for _ in 0..program.declarations().len() {
             let mut changed = false;
-            for declaration in &program.declarations {
+            for declaration in program.declarations() {
                 if !model.owns_top_level_declaration(declaration) {
                     continue;
                 }
                 if let TopLevelDecl::ClassTypeAlias(alias) = declaration {
-                    changed |= self.forward_alias_constructors(&alias.name.name, model);
+                    changed |= self.forward_alias_constructors(alias.name().name(), model);
                     continue;
                 }
-                let (name, type_parameters, superclass, members) = match declaration {
-                    TopLevelDecl::Class(class) => (
-                        &class.name.name,
-                        &class.type_params,
-                        class.extends.as_ref(),
-                        class.element_members(),
-                    ),
-                    TopLevelDecl::MixinClass(class) => (
-                        &class.name.name,
-                        &class.type_params,
-                        class.extends.as_ref(),
-                        class.element_members(),
-                    ),
-                    TopLevelDecl::Enum(enumeration) => (
-                        &enumeration.name.name,
-                        &enumeration.type_params,
-                        None,
-                        EffectiveMembers::declared(&enumeration.members),
-                    ),
-                    TopLevelDecl::ExtensionType(extension) => (
-                        &extension.name.name,
-                        &extension.type_params,
-                        None,
-                        extension.element_members(),
-                    ),
+                let members = match declaration {
+                    TopLevelDecl::Class(class) => class.element_members(),
+                    TopLevelDecl::MixinClass(class) => class.element_members(),
+                    TopLevelDecl::Enum(enumeration) => {
+                        EffectiveMembers::declared(enumeration.members())
+                    }
+                    TopLevelDecl::ExtensionType(extension) => extension.element_members(),
                     _ => continue,
                 };
                 if !members.constructors().any(|constructor| {
                     constructor
                         .params
-                        .params
-                        .iter()
-                        .any(|parameter| parameter.initializing.is_some())
+                        .params()
+                        .any(|parameter| parameter.initializing().is_some())
                 }) {
                     continue;
                 }
+                let (name, type_parameters, superclass) = match declaration {
+                    TopLevelDecl::Class(class) => {
+                        (class.name().name(), class.type_params(), class.extends())
+                    }
+                    TopLevelDecl::MixinClass(class) => {
+                        (class.name().name(), class.type_params(), class.extends())
+                    }
+                    TopLevelDecl::Enum(enumeration) => {
+                        (enumeration.name().name(), enumeration.type_params(), None)
+                    }
+                    TopLevelDecl::ExtensionType(extension) => {
+                        (extension.name().name(), extension.type_params(), None)
+                    }
+                    _ => continue,
+                };
                 let Some(identity) = model.resolve_name(name) else {
                     continue;
                 };
@@ -6024,17 +5978,16 @@ impl SignatureIndex {
                 for constructor in members.constructors() {
                     let constructor_name = constructor
                         .constructor_name
-                        .as_ref()
-                        .map(|name| name.name.as_str())
+                        .map(|name| name.name())
                         .unwrap_or("new");
-                    for parameter in &constructor.params.params {
-                        if parameter.param_type.is_some()
-                            || parameter.initializing != Some(InitializingFormal::This)
+                    for parameter in constructor.params.params() {
+                        if parameter.initializing() != Some(InitializingFormal::This)
+                            || parameter.param_type().is_some()
                         {
                             continue;
                         }
                         let Some(ty) = self
-                            .member_entry(&identity, &parameter.name.name)
+                            .member_entry(&identity, parameter.name().name())
                             .filter(|entry| {
                                 entry.facts.iter().any(|fact| {
                                     matches!(fact.kind, MemberKind::Field { .. }) && !fact.is_static
@@ -6058,48 +6011,42 @@ impl SignatureIndex {
                     };
                     let super_constructor = constructor
                         .initializers
-                        .iter()
+                        .clone()
                         .find_map(|initializer| match initializer {
-                            falcon_syntax::ast::ConstructorInitializer::SuperCall {
-                                call_name,
-                                ..
-                            } => Some(
-                                call_name
-                                    .as_ref()
-                                    .map(|name| name.name.as_str())
-                                    .unwrap_or("new"),
-                            ),
+                            falcon_syntax::cst::ConstructorInitializer::SuperCall(call) => {
+                                Some(call.call_name().map_or("new", |name| name.name()))
+                            }
                             _ => None,
                         })
                         .unwrap_or("new");
                     let positional_super = constructor.params.positional().filter(|parameter| {
-                        parameter.initializing == Some(InitializingFormal::Super)
+                        parameter.initializing() == Some(InitializingFormal::Super)
                     });
                     let named_super = constructor.params.named().filter(|parameter| {
-                        parameter.initializing == Some(InitializingFormal::Super)
+                        parameter.initializing() == Some(InitializingFormal::Super)
                     });
                     let super_formals = positional_super
                         .enumerate()
                         .map(|(ordinal, parameter)| (SuperFormal::Positional(ordinal), parameter))
                         .chain(named_super.map(|parameter| {
-                            (SuperFormal::Named(&parameter.name.name), parameter)
+                            (SuperFormal::Named(parameter.name().name()), parameter)
                         }));
                     for (formal, parameter) in super_formals {
-                        if parameter.default_value.is_none()
+                        if parameter.default_value().is_none()
                             && matches!(
-                                parameter.kind,
+                                parameter.kind(),
                                 ParamKind::OptionalPositional
                                     | ParamKind::Named { required: false }
                             )
                         {
                             changed |= self.inherit_super_default(
                                 (&identity, constructor_name),
-                                &parameter.name.name,
+                                parameter.name().name(),
                                 (superclass, super_constructor),
                                 formal,
                             );
                         }
-                        if parameter.param_type.is_some() {
+                        if parameter.param_type().is_some() {
                             continue;
                         }
                         let Some(ty) = self.resolved_constructor_parameter_type(
@@ -6335,8 +6282,8 @@ impl SignatureIndex {
         &mut self,
         identity: &DeclarationIdentity,
         constructor_name: &str,
-        params: &FormalParamList,
-        parameter: &FormalParam,
+        params: FormalParamList<'_>,
+        parameter: FormalParam<'_>,
         ty: ResolvedType,
     ) -> bool {
         let mut changed = false;
@@ -6345,16 +6292,19 @@ impl SignatureIndex {
             .get_mut(identity)
             .and_then(|constructors| constructors.get_mut(constructor_name))
         {
-            if matches!(parameter.kind, falcon_syntax::ast::ParamKind::Named { .. }) {
-                if signature.named.get(&parameter.name.name) != Some(&ty) {
+            if matches!(
+                parameter.kind(),
+                falcon_syntax::cst::ParamKind::Named { .. }
+            ) {
+                if signature.named.get(parameter.name().name()) != Some(&ty) {
                     signature
                         .named
-                        .insert(parameter.name.name.clone(), ty.clone());
+                        .insert(parameter.name().name().to_owned(), ty.clone());
                     changed = true;
                 }
             } else if let Some(index) = params
                 .positional()
-                .position(|candidate| candidate.name.span == parameter.name.span)
+                .position(|candidate| candidate.name().span() == parameter.name().span())
                 && signature.positional.get(index) != Some(&ty)
             {
                 signature.positional[index] = ty.clone();
@@ -6369,7 +6319,7 @@ impl SignatureIndex {
             && let Some(parameter) = constructor
                 .parameters
                 .iter_mut()
-                .find(|candidate| candidate.name == parameter.name.name)
+                .find(|candidate| candidate.name == parameter.name().name())
             && parameter.ty != ty
         {
             parameter.ty = ty;
@@ -6381,30 +6331,32 @@ impl SignatureIndex {
     fn add_const_constructor_bodies(
         &mut self,
         identity: &DeclarationIdentity,
-        members: &EffectiveMembers<'_>,
+        members: EffectiveMembers<'_>,
+        model: &SemanticModel<'_>,
     ) {
         let bodies: FxHashMap<String, ConstConstructorBody> = members
             .constructors()
             .filter(|constructor| constructor.is_const && !constructor.is_external)
             .map(|constructor| {
-                let mut params = constructor.params.params.clone();
-                if constructor.is_primary {
-                    for parameter in &mut params {
-                        if members.representation || parameter.is_var || parameter.is_final {
-                            parameter.initializing = Some(InitializingFormal::This);
-                        }
-                    }
-                }
                 (
                     constructor
                         .constructor_name
-                        .as_ref()
-                        .map_or_else(|| "new".to_string(), |name| name.name.clone()),
+                        .map_or_else(|| "new".to_string(), |name| name.name().to_owned()),
                     ConstConstructorBody {
                         is_primary: constructor.is_primary,
-                        params,
-                        initializers: constructor.initializers.to_vec(),
-                        redirect: constructor.redirect.cloned(),
+                        representation: members.representation,
+                        params: constructor
+                            .params
+                            .params()
+                            .map(|parameter| model.node_ref(parameter.syntax()))
+                            .collect(),
+                        initializers: constructor
+                            .initializers
+                            .map(|initializer| model.node_ref(initializer.syntax()))
+                            .collect(),
+                        redirect: constructor
+                            .redirect
+                            .map(|redirect| model.node_ref(redirect.syntax())),
                     },
                 )
             })
@@ -6414,16 +6366,16 @@ impl SignatureIndex {
         }
         let fields = members
             .declared
-            .iter()
+            .clone()
             .filter_map(|member| match member {
-                ClassMember::Field(field) if !field.is_static => Some(field),
+                ClassMember::Field(field) if !field.is_static() => Some(field),
                 _ => None,
             })
             .flat_map(|field| {
-                field.declarators.iter().filter_map(|declarator| {
+                field.declarators().filter_map(|declarator| {
                     Some((
-                        declarator.name.name.clone(),
-                        declarator.initializer.clone()?,
+                        declarator.name().name().to_owned(),
+                        model.node_ref(declarator.initializer()?.syntax()),
                     ))
                 })
             })
@@ -6436,21 +6388,21 @@ impl SignatureIndex {
     fn add_declaration_facts(
         &mut self,
         name: &str,
-        annotations: &[falcon_syntax::ast::Annotation],
-        type_parameters: &[TypeParam],
-        members: &EffectiveMembers<'_>,
-        declaration_kind: (Option<&DartType>, bool),
+        annotations: AstChildren<'_, falcon_syntax::cst::Annotation<'_>>,
+        type_parameters: AstChildren<'_, TypeParam<'_>>,
+        members: EffectiveMembers<'_>,
+        declaration_kind: (Option<DartType<'_>>, bool),
         model: &SemanticModel<'_>,
     ) {
         let (extension_representation, is_abstract) = declaration_kind;
         let Some(identity) = model.resolve_name(name) else {
             return;
         };
-        self.add_const_constructor_bodies(&identity, members);
+        self.add_const_constructor_bodies(&identity, members.clone(), model);
         let mut scope = TypeParameterScope::default();
         scope.push(type_parameters, model);
         let library_target = annotations
-            .iter()
+            .clone()
             .any(|annotation| annotation_targets_library(annotation, model));
         let annotations = resolve_annotations(annotations, model);
         let constructors = members
@@ -6458,39 +6410,34 @@ impl SignatureIndex {
             .map(|constructor| ConstructorFacts {
                 name: constructor
                     .constructor_name
-                    .as_ref()
-                    .map(|name| name.name.clone())
+                    .map(|name| name.name().to_owned())
                     .unwrap_or_else(|| "new".to_string()),
                 annotations: resolve_annotations(constructor.annotations, model),
                 is_const: constructor.is_const,
                 is_factory: constructor.is_factory,
                 is_private: constructor
                     .constructor_name
-                    .as_ref()
-                    .is_some_and(|name| name.name.starts_with('_')),
-                redirect_target: constructor.redirect.as_ref().map(|redirect| {
+                    .is_some_and(|name| name.name().starts_with('_')),
+                redirect_target: constructor.redirect.map(|redirect| {
                     (
-                        model.resolve_type(&redirect.type_),
+                        model.resolve_type(redirect.type_()),
                         redirect
-                            .constructor_name
-                            .as_ref()
-                            .map_or_else(|| "new".to_string(), |name| name.name.clone()),
+                            .constructor_name()
+                            .map_or_else(|| "new".to_string(), |name| name.name().to_owned()),
                     )
                 }),
                 parameters: constructor
                     .params
-                    .params
-                    .iter()
+                    .params()
                     .map(|parameter| ParameterFacts {
-                        name: parameter.name.name.clone(),
+                        name: parameter.name().name().to_owned(),
                         ty: parameter
-                            .param_type
-                            .as_ref()
+                            .param_type()
                             .map(|ty| model.resolve_type_in(ty, &scope))
                             .or_else(|| {
-                                (parameter.initializing == Some(InitializingFormal::This)).then(
+                                (parameter.initializing() == Some(InitializingFormal::This)).then(
                                     || {
-                                        self.member_entry(&identity, &parameter.name.name)
+                                        self.member_entry(&identity, parameter.name().name())
                                             .filter(|entry| {
                                                 entry.facts.iter().any(|fact| {
                                                     matches!(fact.kind, MemberKind::Field { .. })
@@ -6505,20 +6452,20 @@ impl SignatureIndex {
                             })
                             .unwrap_or(ResolvedType::Unknown),
                         is_named: matches!(
-                            parameter.kind,
-                            falcon_syntax::ast::ParamKind::Named { .. }
+                            parameter.kind(),
+                            falcon_syntax::cst::ParamKind::Named { .. }
                         ),
-                        is_super: parameter.initializing == Some(InitializingFormal::Super),
+                        is_super: parameter.initializing() == Some(InitializingFormal::Super),
                     })
                     .collect(),
             })
             .collect();
         let static_consts = members
             .declared
-            .iter()
+            .clone()
             .filter_map(|member| match member {
                 ClassMember::Field(field)
-                    if field.is_static && field.keyword == VarKeyword::Const =>
+                    if field.is_static() && field.keyword() == VarKeyword::Const =>
                 {
                     Some(field)
                 }
@@ -6527,24 +6474,23 @@ impl SignatureIndex {
             .flat_map(|field| {
                 let field_scope = scope.clone();
                 let declared_ty = field
-                    .field_type
-                    .as_ref()
+                    .field_type()
                     .map(|ty| model.resolve_type_in(ty, &scope));
-                let is_deprecated = field.annotations.iter().any(|annotation| {
-                    annotation.name.last().is_some_and(|name| {
-                        matches!(name.name.as_str(), "deprecated" | "Deprecated")
-                    })
+                let is_deprecated = field.annotations().any(|annotation| {
+                    annotation
+                        .name()
+                        .last()
+                        .is_some_and(|name| matches!(name.name(), "deprecated" | "Deprecated"))
                 });
-                field.declarators.iter().filter_map(move |declarator| {
+                field.declarators().filter_map(move |declarator| {
                     declarator
-                        .initializer
-                        .as_ref()
+                        .initializer()
                         .map(|initializer| StaticConstFacts {
-                            name: declarator.name.name.clone(),
+                            name: declarator.name().name().to_owned(),
                             ty: declared_ty.clone().unwrap_or_else(|| {
                                 infer_const_initializer_type(initializer, model, &field_scope)
                             }),
-                            initializer: initializer.clone(),
+                            initializer: model.node_ref(initializer.syntax()),
                             is_deprecated,
                         })
                 })
@@ -6934,10 +6880,10 @@ impl SignatureIndex {
     fn add_type(
         &mut self,
         name: &str,
-        type_parameters: &[TypeParam],
-        supertypes: Vec<&DartType>,
-        member_supertypes: Vec<&DartType>,
-        members: &EffectiveMembers<'_>,
+        type_parameters: AstChildren<'_, TypeParam<'_>>,
+        supertypes: Vec<DartType<'_>>,
+        member_supertypes: Vec<DartType<'_>>,
+        members: EffectiveMembers<'_>,
         model: &SemanticModel<'_>,
     ) {
         let type_identity = model.resolve_name(name);
@@ -6946,9 +6892,9 @@ impl SignatureIndex {
             return;
         };
         let mut scope = TypeParameterScope::default();
-        scope.push(type_parameters, model);
-        let owner_parameters = parameter_ids(&scope, type_parameters);
-        record_bound_declarations(&mut self.bound_declared, &scope, type_parameters);
+        scope.push(type_parameters.clone(), model);
+        let owner_parameters = parameter_ids(&scope, type_parameters.clone());
+        record_bound_declarations(&mut self.bound_declared, &scope, type_parameters.clone());
         let bounds: HashMap<_, _> = owner_parameters
             .iter()
             .zip(type_parameters)
@@ -6956,8 +6902,7 @@ impl SignatureIndex {
                 (
                     id.clone(),
                     parameter
-                        .bound
-                        .as_ref()
+                        .bound()
                         .map(|bound| model.resolve_type_in(bound, &scope))
                         .unwrap_or(ResolvedType::Dynamic),
                 )
@@ -6971,29 +6916,26 @@ impl SignatureIndex {
         }
         let mut field_types = members
             .declared
-            .iter()
+            .clone()
             .filter_map(|member| match member {
-                ClassMember::Field(field) if !field.is_static => Some(field),
+                ClassMember::Field(field) if !field.is_static() => Some(field),
                 _ => None,
             })
             .flat_map(|field| {
                 let field_type = field
-                    .field_type
-                    .as_ref()
+                    .field_type()
                     .map(|ty| model.resolve_type_in(ty, &scope))
                     .unwrap_or(ResolvedType::Unknown);
-                field
-                    .declarators
-                    .iter()
-                    .map(move |declarator| (declarator.name.name.clone(), field_type.clone()))
+                field.declarators().map(move |declarator| {
+                    (declarator.name().name().to_string(), field_type.clone())
+                })
             })
             .collect::<HashMap<_, _>>();
         for parameter in members.declaring_params() {
             field_types.insert(
-                parameter.name.name.clone(),
+                parameter.name().name().to_string(),
                 parameter
-                    .param_type
-                    .as_ref()
+                    .param_type()
                     .map(|ty| model.resolve_type_in(ty, &scope))
                     .unwrap_or(ResolvedType::Unknown),
             );
@@ -7024,40 +6966,40 @@ impl SignatureIndex {
         self.member_supertypes
             .insert(identity.clone(), resolved_member_supertypes);
         let entries = self.member_entries.entry(identity.clone()).or_default();
-        for member in members.declared {
+        for member in members.declared.clone() {
             match member {
                 ClassMember::Method(method) => {
-                    let entry = entries.entry(method.name.name.clone()).or_default();
-                    scope.push(&method.type_params, model);
+                    let entry = entries.entry(method.name().name().to_string()).or_default();
+                    scope.push(method.type_params(), model);
                     record_bound_declarations(
                         &mut self.bound_declared,
                         &scope,
-                        &method.type_params,
+                        method.type_params(),
                     );
                     entry.override_shape = Some(inherited::OverrideShape::new(
-                        &method.params,
-                        &method.type_params,
+                        method.params(),
+                        method.type_params(),
                         &scope,
                     ));
-                    entry.is_instance_method |= !method.is_static;
+                    entry.is_instance_method |= !method.is_static();
                     entry.signature = Some(signature(
                         &scope,
                         &owner_parameters,
-                        &method.type_params,
-                        Some(&method.params),
-                        method.return_type.as_ref(),
+                        method.type_params(),
+                        Some(method.params()),
+                        method.return_type(),
                         None,
                         model,
                     ));
                     entry.facts.push(MemberFacts {
                         declaring_type: identity.clone(),
                         kind: MemberKind::Method,
-                        is_static: method.is_static,
+                        is_static: method.is_static(),
                         // An `external` method has no body but is concrete.
-                        is_abstract: method.is_abstract && !method.is_external,
-                        positional_parameter_names: positional_parameter_names(&method.params),
-                        annotations: resolve_annotations(&method.annotations, model),
-                        parameter_contracts: Some(parameter_contracts(&method.params)),
+                        is_abstract: method.is_abstract() && !method.is_external(),
+                        positional_parameter_names: positional_parameter_names(method.params()),
+                        annotations: resolve_annotations(method.annotations(), model),
+                        parameter_contracts: Some(parameter_contracts(method.params())),
                     });
                     scope.pop();
                 }
@@ -7067,15 +7009,14 @@ impl SignatureIndex {
                         .or_default()
                         .insert(
                             constructor
-                                .constructor_name
-                                .as_ref()
-                                .map(|name| name.name.clone())
+                                .constructor_name()
+                                .map(|name| name.name().to_string())
                                 .unwrap_or_else(|| "new".to_string()),
                             signature(
                                 &scope,
                                 &owner_parameters,
-                                &[],
-                                Some(&constructor.params),
+                                AstChildren::empty(),
+                                Some(constructor.params()),
                                 None,
                                 Some(&field_types),
                                 model,
@@ -7084,23 +7025,24 @@ impl SignatureIndex {
                 }
                 ClassMember::Field(field) => {
                     let field_type = field
-                        .field_type
-                        .as_ref()
+                        .field_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Unknown);
-                    for declarator in &field.declarators {
+                    for declarator in field.declarators() {
                         let kind = MemberKind::field(field, declarator);
-                        let entry = entries.entry(declarator.name.name.clone()).or_default();
-                        entry.promotable_field = declarator.name.name.starts_with('_')
-                            && !field.is_static
-                            && !field.is_abstract
-                            && !field.is_external
-                            && matches!(field.keyword, VarKeyword::Final | VarKeyword::Const);
+                        let entry = entries
+                            .entry(declarator.name().name().to_string())
+                            .or_default();
+                        entry.promotable_field = declarator.name().name().starts_with('_')
+                            && !field.is_static()
+                            && !field.is_abstract()
+                            && !field.is_external()
+                            && matches!(field.keyword(), VarKeyword::Final | VarKeyword::Const);
                         entry.facts.push(MemberFacts {
                             declaring_type: identity.clone(),
                             kind,
-                            is_static: field.is_static,
-                            is_abstract: field.is_abstract,
+                            is_static: field.is_static(),
+                            is_abstract: field.is_abstract(),
                             positional_parameter_names: Vec::new(),
                             parameter_contracts: Some(if kind.has_setter() {
                                 setter_parameter_contracts(
@@ -7116,10 +7058,10 @@ impl SignatureIndex {
                             } else {
                                 empty_parameter_contracts()
                             }),
-                            annotations: resolve_annotations(&field.annotations, model),
+                            annotations: resolve_annotations(field.annotations(), model),
                         });
                         entry.field = Some((owner_parameters.clone(), field_type.clone()));
-                        if !field.is_static {
+                        if !field.is_static() {
                             entry.read = Some(field_type.clone());
                             if kind.has_setter() {
                                 entry.write = Some(field_type.clone());
@@ -7128,50 +7070,48 @@ impl SignatureIndex {
                     }
                 }
                 ClassMember::Getter(getter) => {
-                    let entry = entries.entry(getter.name.name.clone()).or_default();
+                    let entry = entries.entry(getter.name().name().to_string()).or_default();
                     entry.facts.push(MemberFacts {
                         declaring_type: identity.clone(),
                         kind: MemberKind::Getter,
-                        is_static: getter.is_static,
-                        is_abstract: getter.is_abstract,
+                        is_static: getter.is_static(),
+                        is_abstract: getter.is_abstract(),
                         positional_parameter_names: Vec::new(),
                         parameter_contracts: Some(empty_parameter_contracts()),
-                        annotations: resolve_annotations(&getter.annotations, model),
+                        annotations: resolve_annotations(getter.annotations(), model),
                     });
                     let return_type = getter
-                        .return_type
-                        .as_ref()
+                        .return_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Dynamic);
                     entry.field = Some((owner_parameters.clone(), return_type.clone()));
-                    entry.implicit_getter = getter.return_type.is_none();
-                    if !getter.is_static {
+                    entry.implicit_getter = getter.return_type().is_none();
+                    if !getter.is_static() {
                         entry.read = Some(return_type);
                     }
                 }
                 ClassMember::Setter(setter) => {
-                    let entry = entries.entry(setter.name.name.clone()).or_default();
+                    let entry = entries.entry(setter.name().name().to_string()).or_default();
                     entry.facts.push(MemberFacts {
                         declaring_type: identity.clone(),
                         kind: MemberKind::Setter,
-                        is_static: setter.is_static,
-                        is_abstract: setter.is_abstract,
-                        positional_parameter_names: vec![setter.param.name.clone()],
+                        is_static: setter.is_static(),
+                        is_abstract: setter.is_abstract(),
+                        positional_parameter_names: vec![setter.param().name().to_string()],
                         parameter_contracts: Some(setter_parameter_contracts(
-                            &setter.param.name,
-                            setter.is_covariant,
+                            setter.param().name(),
+                            setter.is_covariant(),
                         )),
-                        annotations: resolve_annotations(&setter.annotations, model),
+                        annotations: resolve_annotations(setter.annotations(), model),
                     });
                     let parameter_type = setter
-                        .param_type
-                        .as_ref()
+                        .param_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Dynamic);
                     entry
                         .field
                         .get_or_insert_with(|| (owner_parameters.clone(), parameter_type.clone()));
-                    if !setter.is_static {
+                    if !setter.is_static() {
                         entry.write = Some(parameter_type);
                     }
                 }
@@ -7180,14 +7120,17 @@ impl SignatureIndex {
                         .entry(operator.lookup_name().to_owned())
                         .or_default();
                     entry.is_instance_method = true;
-                    entry.override_shape =
-                        Some(inherited::OverrideShape::new(&operator.params, &[], &scope));
+                    entry.override_shape = Some(inherited::OverrideShape::new(
+                        operator.params(),
+                        AstChildren::empty(),
+                        &scope,
+                    ));
                     entry.signature = Some(signature(
                         &scope,
                         &owner_parameters,
-                        &[],
-                        Some(&operator.params),
-                        operator.return_type.as_ref(),
+                        AstChildren::empty(),
+                        Some(operator.params()),
+                        operator.return_type(),
                         None,
                         model,
                     ));
@@ -7195,10 +7138,10 @@ impl SignatureIndex {
                         declaring_type: identity.clone(),
                         kind: MemberKind::Operator,
                         is_static: false,
-                        is_abstract: operator.body.is_none() && !operator.is_external,
-                        positional_parameter_names: positional_parameter_names(&operator.params),
-                        annotations: resolve_annotations(&operator.annotations, model),
-                        parameter_contracts: Some(parameter_contracts(&operator.params)),
+                        is_abstract: operator.body().is_none() && !operator.is_external(),
+                        positional_parameter_names: positional_parameter_names(operator.params()),
+                        annotations: resolve_annotations(operator.annotations(), model),
+                        parameter_contracts: Some(parameter_contracts(operator.params())),
                     });
                 }
                 // Indexed through the constructor it completes (`element_members`).
@@ -7206,15 +7149,17 @@ impl SignatureIndex {
             }
         }
         for parameter in members.declaring_params() {
-            let is_final = members.representation || parameter.is_final;
-            let field_type = field_types[&parameter.name.name].clone();
-            let entry = entries.entry(parameter.name.name.clone()).or_default();
-            entry.promotable_field = parameter.name.name.starts_with('_') && is_final;
+            let is_final = members.representation || parameter.is_final();
+            let field_type = field_types[parameter.name().name()].clone();
+            let entry = entries
+                .entry(parameter.name().name().to_string())
+                .or_default();
+            entry.promotable_field = parameter.name().name().starts_with('_') && is_final;
             entry.facts.push(MemberFacts {
                 declaring_type: identity.clone(),
                 kind: MemberKind::Field {
                     writable: !is_final,
-                    covariant: parameter.is_covariant,
+                    covariant: parameter.is_covariant(),
                 },
                 is_static: false,
                 is_abstract: false,
@@ -7222,9 +7167,9 @@ impl SignatureIndex {
                 parameter_contracts: Some(if is_final {
                     empty_parameter_contracts()
                 } else {
-                    setter_parameter_contracts("value", parameter.is_covariant)
+                    setter_parameter_contracts("value", parameter.is_covariant())
                 }),
-                annotations: resolve_annotations(&parameter.annotations, model),
+                annotations: resolve_annotations(parameter.annotations(), model),
             });
             entry.field = Some((owner_parameters.clone(), field_type.clone()));
             entry.read = Some(field_type.clone());
@@ -7236,17 +7181,17 @@ impl SignatureIndex {
             let mut primary_signature = signature(
                 &scope,
                 &owner_parameters,
-                &[],
-                Some(&primary.params),
+                AstChildren::empty(),
+                Some(primary.params()),
                 None,
                 Some(&field_types),
                 model,
             );
-            for parameter in primary.params.named().filter(|parameter| {
-                (parameter.is_final || parameter.is_var || members.representation)
-                    && parameter.name.name.starts_with('_')
+            for parameter in primary.params().named().filter(|parameter| {
+                (parameter.is_final() || parameter.is_var() || members.representation)
+                    && parameter.name().name().starts_with('_')
             }) {
-                let name = &parameter.name.name;
+                let name = parameter.name().name();
                 let label = name.trim_start_matches('_');
                 if let Some(ty) = primary_signature.named.remove(name) {
                     primary_signature.named.insert(label.to_string(), ty);
@@ -7268,10 +7213,10 @@ impl SignatureIndex {
                         .required_named
                         .iter()
                         .map(|name| {
-                            if primary.params.named().any(|parameter| {
-                                parameter.name.name == *name
-                                    && (parameter.is_final
-                                        || parameter.is_var
+                            if primary.params().named().any(|parameter| {
+                                parameter.name().name() == *name
+                                    && (parameter.is_final()
+                                        || parameter.is_var()
                                         || members.representation)
                             }) {
                                 name.trim_start_matches('_').to_string()
@@ -7288,9 +7233,8 @@ impl SignatureIndex {
                 .or_default()
                 .insert(
                     primary
-                        .constructor_name
-                        .as_ref()
-                        .map_or_else(|| "new".to_string(), |name| name.name.clone()),
+                        .constructor_name()
+                        .map_or_else(|| "new".to_string(), |name| name.name().to_string()),
                     primary_signature,
                 );
         }
@@ -7355,8 +7299,8 @@ impl SignatureIndex {
         self.kinds.get(identity).copied()
     }
 
-    pub fn constant_initializer(&self, identity: &DeclarationIdentity) -> Option<&Expr> {
-        self.constants.get(identity)
+    pub fn constant_initializer(&self, identity: &DeclarationIdentity) -> Option<Expr<'_>> {
+        self.constants.get(identity).map(crate::NodeRef::expr)
     }
 
     pub fn constant_type(&self, identity: &DeclarationIdentity) -> Option<&DeclarationIdentity> {
@@ -7391,10 +7335,15 @@ impl SignatureIndex {
 
     /// Instance field initializers of a project class with a `const`
     /// constructor.
-    pub fn const_field_initializers(&self, identity: &DeclarationIdentity) -> &[(String, Expr)] {
+    pub fn const_field_initializers(
+        &self,
+        identity: &DeclarationIdentity,
+    ) -> impl Iterator<Item = (&str, Expr<'_>)> {
         self.const_field_initializers
             .get(identity)
-            .map_or(&[], Vec::as_slice)
+            .into_iter()
+            .flatten()
+            .map(|(name, initializer)| (name.as_str(), initializer.expr()))
     }
 
     /// `ty` viewed as an instance of `target` (the analyzer's `asInstanceOf`):
@@ -7512,7 +7461,7 @@ impl SignatureIndex {
         TypeEnvironment::default().constructor_tearoff(
             identity.clone(),
             name,
-            &[],
+            AstChildren::empty(),
             &InferenceContext {
                 model,
                 signatures: self,
@@ -9793,42 +9742,38 @@ impl SignatureIndex {
 }
 
 fn constructed_identity(
-    expression: &Expr,
+    expression: Expr<'_>,
     model: &SemanticModel<'_>,
 ) -> Option<DeclarationIdentity> {
     match expression.unparenthesized() {
-        Expr::New {
-            dart_type,
-            constructor_name,
-            ..
-        } => resolve_new_constructor(dart_type, constructor_name.as_ref(), model)
+        Expr::New(new) => resolve_new_constructor(new.dart_type(), new.constructor_name(), model)
             .map(|(identity, _)| identity),
-        Expr::Call { callee, .. } => {
-            resolve_call_constructor(callee, model, false).map(|(identity, _)| identity)
+        Expr::Call(call) => {
+            resolve_call_constructor(call.callee(), model, false).map(|(identity, _)| identity)
         }
         _ => None,
     }
 }
 
-pub fn expression_segments(
-    expression: &Expr,
+pub fn expression_segments<'a>(
+    expression: Expr<'a>,
     allow_generic_instantiation: bool,
-) -> Option<Vec<&str>> {
+) -> Option<Vec<&'a str>> {
     let mut current = expression;
     let mut segments = Vec::new();
     loop {
         match current.unparenthesized() {
             Expr::Ident(identifier) => {
-                segments.push(identifier.name.as_str());
+                segments.push(identifier.name());
                 segments.reverse();
                 return Some(segments);
             }
-            Expr::Field { object, field, .. } => {
-                segments.push(field.name.as_str());
-                current = object;
+            Expr::Field(field) => {
+                segments.push(field.field().name());
+                current = field.object();
             }
-            Expr::GenericInstantiation { target, .. } if allow_generic_instantiation => {
-                current = target;
+            Expr::GenericInstantiation(instantiation) if allow_generic_instantiation => {
+                current = instantiation.target();
             }
             _ => return None,
         }
@@ -9840,7 +9785,7 @@ pub fn expression_segments(
 /// Constant evaluation permits generic-instantiation wrappers; lexical lint
 /// policies can keep rejecting those wrappers by passing `false`.
 pub fn resolve_call_constructor<'a>(
-    callee: &'a Expr,
+    callee: Expr<'a>,
     model: &SemanticModel<'_>,
     allow_generic_instantiation: bool,
 ) -> Option<(DeclarationIdentity, &'a str)> {
@@ -9855,54 +9800,51 @@ pub fn resolve_call_constructor<'a>(
 /// Resolve an explicit `new`/`const` constructor without assuming a dotted
 /// type name denotes an import prefix rather than a named constructor.
 pub fn resolve_new_constructor<'a>(
-    dart_type: &'a DartType,
-    constructor_name: Option<&'a falcon_syntax::ast::Identifier>,
+    dart_type: DartType<'a>,
+    constructor_name: Option<falcon_syntax::cst::Identifier<'a>>,
     model: &SemanticModel<'_>,
 ) -> Option<(DeclarationIdentity, &'a str)> {
     let DartType::Named(named) = dart_type else {
         return None;
     };
     if let Some(identity) =
-        QualifiedName::from_identifiers(&named.segments).and_then(|name| model.resolve_name(name))
+        QualifiedName::from_identifiers(named.segments()).and_then(|name| model.resolve_name(name))
     {
-        return Some((
-            identity,
-            constructor_name.map_or("new", |name| name.name.as_str()),
-        ));
+        return Some((identity, constructor_name.map_or("new", |name| name.name())));
     }
     if constructor_name.is_some() {
         return None;
     }
-    let (constructor, qualifier) = named.segments.split_last()?;
+    let mut qualifier = named.segments();
+    let constructor = qualifier.next_back()?;
     Some((
         QualifiedName::from_identifiers(qualifier).and_then(|name| model.resolve_name(name))?,
-        constructor.name.as_str(),
+        constructor.name(),
     ))
 }
 
 fn annotation_targets_library(
-    annotation: &falcon_syntax::ast::Annotation,
+    annotation: falcon_syntax::cst::Annotation<'_>,
     model: &SemanticModel<'_>,
 ) -> bool {
     if !matches!(
-        QualifiedName::from_identifiers(&annotation.name).and_then(|name| model.resolve_imported_member(name)),
+        QualifiedName::from_identifiers(annotation.name()).and_then(|name| model.resolve_imported_member(name)),
         Some(identity) if identity.is_package("meta", "Target")
     ) {
         return false;
     }
-    let Some(args) = &annotation.args else {
+    let Some(args) = annotation.args() else {
         return false;
     };
-    args.positional
-        .iter()
-        .chain(args.named.iter().map(|argument| &argument.value))
+    args.positional()
+        .chain(args.named().map(|argument| argument.value()))
         .any(|expression| target_kind_library(expression, model))
 }
 
-fn target_kind_library(expression: &Expr, model: &SemanticModel<'_>) -> bool {
+fn target_kind_library(expression: Expr<'_>, model: &SemanticModel<'_>) -> bool {
     match expression.unparenthesized() {
-        Expr::Field { object, field, .. } if field.name == "library" => {
-            let Some(segments) = expression_segments(object, false) else {
+        Expr::Field(field) if field.field().name() == "library" => {
+            let Some(segments) = expression_segments(field.object(), false) else {
                 return false;
             };
             matches!(
@@ -9910,52 +9852,52 @@ fn target_kind_library(expression: &Expr, model: &SemanticModel<'_>) -> bool {
                 Some(identity) if identity.is_package("meta", "TargetKind")
             )
         }
-        Expr::List { elements, .. } | Expr::Set { elements, .. } => {
-            elements.iter().any(|element| {
-                matches!(element, falcon_syntax::ast::CollectionElement::Expr(expression)
+        Expr::List(list) => list.elements().any(|element| {
+            matches!(element, falcon_syntax::cst::CollectionElement::Expr(expression)
                 if target_kind_library(expression, model))
-            })
-        }
+        }),
+        Expr::Set(set) => set.elements().any(|element| {
+            matches!(element, falcon_syntax::cst::CollectionElement::Expr(expression)
+                if target_kind_library(expression, model))
+        }),
         _ => false,
     }
 }
 
 fn infer_const_initializer_type(
-    initializer: &Expr,
+    initializer: Expr<'_>,
     model: &SemanticModel<'_>,
     scope: &TypeParameterScope,
 ) -> ResolvedType {
     match initializer {
-        Expr::New { dart_type, .. } => model.resolve_type_in(dart_type, scope).with_nullable(false),
-        Expr::Call { callee, .. } => resolve_call_constructor(callee, model, false)
+        Expr::New(new) => model
+            .resolve_type_in(new.dart_type(), scope)
+            .with_nullable(false),
+        Expr::Call(call) => resolve_call_constructor(call.callee(), model, false)
             .map_or(ResolvedType::Unknown, |(identity, _)| {
                 ResolvedType::interface_identity(identity)
             }),
-        Expr::Conditional {
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            let left = infer_const_initializer_type(then_expr, model, scope);
-            let right = infer_const_initializer_type(else_expr, model, scope);
+        Expr::Conditional(conditional) => {
+            let left = infer_const_initializer_type(conditional.then_expr(), model, scope);
+            let right = infer_const_initializer_type(conditional.else_expr(), model, scope);
             if left == right {
                 left
             } else {
                 ResolvedType::Unknown
             }
         }
-        Expr::IntLit { .. } => model.core_type("int", false),
-        Expr::DoubleLit { .. } => model.core_type("double", false),
+        Expr::IntLit(_) => model.core_type("int", false),
+        Expr::DoubleLit(_) => model.core_type("double", false),
         Expr::StringLit(_) => model.core_type("String", false),
-        Expr::BoolLit { .. } => model.core_type("bool", false),
+        Expr::BoolLit(_) => model.core_type("bool", false),
         _ => ResolvedType::Unknown,
     }
 }
 
-fn positional_parameter_names(params: &FormalParamList) -> Vec<String> {
+fn positional_parameter_names(params: FormalParamList<'_>) -> Vec<String> {
     params
         .positional()
-        .map(|parameter| parameter.name.name.clone())
+        .map(|parameter| parameter.name().name().to_string())
         .collect()
 }
 
@@ -9990,128 +9932,107 @@ fn same_library(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool
 }
 
 /// Whether an instance callable omits a type supplied by override inference.
-fn inherits_method_types(member: &ClassMember) -> bool {
+fn inherits_method_types(member: ClassMember<'_>) -> bool {
     let (params, infer_return) = match member {
-        ClassMember::Method(method) if !method.is_static => {
-            (&method.params, method.return_type.is_none())
+        ClassMember::Method(method) if !method.is_static() => {
+            (method.params(), method.return_type().is_none())
         }
-        ClassMember::Operator(operator) => (&operator.params, operator.return_type.is_none()),
-        ClassMember::Setter(setter) => return !setter.is_static && setter.param_type.is_none(),
+        ClassMember::Operator(operator) => (operator.params(), operator.return_type().is_none()),
+        ClassMember::Setter(setter) => return !setter.is_static() && setter.param_type().is_none(),
         _ => return false,
     };
     infer_return
-        || params.params.iter().any(|param| {
-            param.param_type.is_none()
-                && param.function_params.is_none()
-                && param.initializing.is_none()
+        || params.params().any(|param| {
+            param.param_type().is_none()
+                && param.function_params().is_none()
+                && param.initializing().is_none()
         })
 }
 
-fn signature(
+fn signature<'a>(
     scope: &TypeParameterScope,
     owner_parameters: &[TypeParameterId],
-    call_parameters: &[TypeParam],
-    params: Option<&FormalParamList>,
-    return_type: Option<&DartType>,
+    call_parameters: impl Iterator<Item = TypeParam<'a>> + Clone,
+    params: Option<FormalParamList<'_>>,
+    return_type: Option<DartType<'_>>,
     field_types: Option<&HashMap<String, ResolvedType>>,
     model: &SemanticModel<'_>,
 ) -> ResolvedSignature {
-    let parameter_type = |param: &FormalParam| {
-        if param.param_type.is_some() || param.function_params.is_some() {
+    let parameter_type = |param: FormalParam<'_>, initializing, name: &str| {
+        if param.param_type().is_some() || param.function_params().is_some() {
             model.resolve_formal_parameter_in(param, scope)
-        } else if param.initializing == Some(InitializingFormal::This) {
+        } else if initializing == Some(InitializingFormal::This) {
             field_types
-                .and_then(|fields| fields.get(&param.name.name))
+                .and_then(|fields| fields.get(name))
                 .cloned()
                 .unwrap_or(ResolvedType::Unknown)
-        } else if param.initializing == Some(InitializingFormal::Super) {
+        } else if initializing == Some(InitializingFormal::Super) {
             ResolvedType::Unknown
         } else {
             ResolvedType::Dynamic
         }
     };
-    let optional = |param: &FormalParam| {
-        matches!(
-            param.kind,
+    let mut result = ResolvedSignature::returning(ResolvedType::Dynamic);
+    result.owner_parameters = owner_parameters.to_vec();
+    result.call_parameters = parameter_ids(scope, call_parameters.clone());
+    let mut required_named = Vec::new();
+    for param in params.into_iter().flat_map(|params| params.params()) {
+        let name = param.name().name();
+        let kind = param.kind();
+        let initializing = param.initializing();
+        let default_value = param.default_value();
+        let optional = matches!(
+            kind,
             ParamKind::OptionalPositional | ParamKind::Named { required: false }
-        )
-    };
-    // Super formals without a declared default inherit theirs once the super
-    // constructor resolves (`resolve_constructor_formals`).
-    let default = |param: &FormalParam| match &param.default_value {
-        Some(value) => Some(ParameterDefault::Declared(Arc::new(value.clone()))),
-        None if optional(param) && param.initializing != Some(InitializingFormal::Super) => {
-            Some(ParameterDefault::Null)
+        );
+        let has_default = default_value.is_some() || optional;
+        let ty = parameter_type(param, initializing, name);
+        if let ParamKind::Named { required } = kind {
+            if required {
+                required_named.push(name.to_string());
+            }
+            result.named.insert(name.to_string(), ty);
+        } else {
+            result.optional_positional += usize::from(kind == ParamKind::OptionalPositional);
+            result.positional.push(ty);
+            if has_default {
+                result
+                    .positional_parameter_names
+                    .resize_with(result.positional.len() - 1, String::new);
+                result.positional_parameter_names.push(name.to_string());
+            } else if !result.positional_parameter_names.is_empty() {
+                result.positional_parameter_names.push(String::new());
+            }
         }
-        None => None,
-    };
-    let has_default = |param: &FormalParam| param.default_value.is_some() || optional(param);
-    ResolvedSignature {
-        optional_positional: params
-            .into_iter()
-            .flat_map(|params| params.positional())
-            .filter(|param| param.kind == ParamKind::OptionalPositional)
-            .count(),
-        owner_parameters: owner_parameters.to_vec(),
-        call_parameters: parameter_ids(scope, call_parameters),
-        shape: FunctionTypeShape::from_scope(
-            params
-                .into_iter()
-                .flat_map(|params| params.named())
-                .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
-                .map(|param| param.name.name.clone())
-                .collect(),
-            call_parameters,
-            scope,
-        ),
-        positional_parameter_names: params
-            .filter(|params| params.positional().any(has_default))
-            .map_or_else(Vec::new, |params| {
-                params
-                    .positional()
-                    .map(|param| {
-                        if has_default(param) {
-                            param.name.name.clone()
-                        } else {
-                            String::new()
-                        }
-                    })
-                    .collect()
-            }),
-        non_optional_defaults: params
-            .into_iter()
-            .flat_map(|params| &params.params)
-            .filter(|param| {
-                has_default(param)
-                    && (!optional(param)
-                        || param.annotations.iter().any(|annotation| {
-                            annotation
-                                .name
-                                .last()
-                                .is_some_and(|name| name.name == "required")
-                        }))
-            })
-            .map(|param| param.name.name.clone())
-            .collect(),
-        positional: params
-            .into_iter()
-            .flat_map(|params| params.positional())
-            .map(&parameter_type)
-            .collect(),
-        named: params
-            .into_iter()
-            .flat_map(|params| params.named())
-            .map(|param| (param.name.name.clone(), parameter_type(param)))
-            .collect(),
-        defaults: params
-            .into_iter()
-            .flat_map(|params| &params.params)
-            .filter_map(|param| Some((param.name.name.clone(), default(param)?)))
-            .collect(),
-        return_type: return_type
-            .map(|ty| model.resolve_type_in(ty, scope))
-            .unwrap_or(ResolvedType::Dynamic),
+        if has_default
+            && (!optional
+                || param.annotations().any(|annotation| {
+                    annotation
+                        .name()
+                        .last()
+                        .is_some_and(|name| name.name() == "required")
+                }))
+        {
+            result.non_optional_defaults.insert(name.to_string());
+        }
+        // Super formals without a declared default inherit theirs once the super
+        // constructor resolves (`resolve_constructor_formals`).
+        let default = match default_value {
+            Some(value) => Some(ParameterDefault::Declared(model.node_ref(value.syntax()))),
+            None if optional && initializing != Some(InitializingFormal::Super) => {
+                Some(ParameterDefault::Null)
+            }
+            None => None,
+        };
+        if let Some(default) = default {
+            result.defaults.insert(name.to_string(), default);
+        }
     }
+    result.shape = FunctionTypeShape::from_scope(required_named, call_parameters, scope);
+    result.return_type = return_type
+        .map(|ty| model.resolve_type_in(ty, scope))
+        .unwrap_or(ResolvedType::Dynamic);
+    result
 }
 
 /// Whether `ty` mentions any of `parameters`.
@@ -10134,10 +10055,12 @@ fn mentions_any(ty: &ResolvedType, parameters: &[TypeParameterId]) -> bool {
     .is_some()
 }
 
-fn parameter_ids(scope: &TypeParameterScope, parameters: &[TypeParam]) -> Vec<TypeParameterId> {
+fn parameter_ids<'a>(
+    scope: &TypeParameterScope,
+    parameters: impl Iterator<Item = TypeParam<'a>>,
+) -> Vec<TypeParameterId> {
     parameters
-        .iter()
-        .filter_map(|parameter| match scope.lookup(&parameter.name.name) {
+        .filter_map(|parameter| match scope.lookup(parameter.name().name()) {
             Some(ResolvedType::TypeParameter { id, .. }) => Some(id),
             _ => None,
         })
@@ -10145,14 +10068,15 @@ fn parameter_ids(scope: &TypeParameterScope, parameters: &[TypeParam]) -> Vec<Ty
 }
 
 /// Records whether the declaration of each of `parameters` states a bound.
-fn record_bound_declarations(
+fn record_bound_declarations<'a>(
     declared: &mut FxHashMap<TypeParameterId, bool>,
     scope: &TypeParameterScope,
-    parameters: &[TypeParam],
+    parameters: impl Iterator<Item = TypeParam<'a>>,
 ) {
     for parameter in parameters {
-        if let Some(ResolvedType::TypeParameter { id, .. }) = scope.lookup(&parameter.name.name) {
-            declared.insert(id, parameter.bound.is_some());
+        if let Some(ResolvedType::TypeParameter { id, .. }) = scope.lookup(parameter.name().name())
+        {
+            declared.insert(id, parameter.bound().is_some());
         }
     }
 }
@@ -10532,16 +10456,16 @@ impl TypeEnvironment {
         }
     }
 
-    fn receiver_name(object: &Expr) -> Option<&str> {
+    fn receiver_name<'syntax>(object: Expr<'syntax>) -> Option<&'syntax str> {
         match object {
-            Expr::Ident(identifier) => Some(&identifier.name),
-            Expr::This { .. } => Some("this"),
+            Expr::Ident(identifier) => Some(identifier.name()),
+            Expr::This(_) => Some("this"),
             _ => None,
         }
     }
 
-    pub fn promoted_field(&self, object: &Expr, field: &str) -> Option<ResolvedType> {
-        if matches!(object, Expr::This { .. }) {
+    pub fn promoted_field(&self, object: Expr<'_>, field: &str) -> Option<ResolvedType> {
+        if matches!(object, Expr::This(_)) {
             return self.promoted_this_field(field);
         }
         self.binding(Self::receiver_name(object)?)?
@@ -10550,8 +10474,8 @@ impl TypeEnvironment {
             .cloned()
     }
 
-    pub fn promote_field(&mut self, object: &Expr, field: &str, ty: ResolvedType) {
-        if matches!(object, Expr::This { .. }) {
+    pub fn promote_field(&mut self, object: Expr<'_>, field: &str, ty: ResolvedType) {
+        if matches!(object, Expr::This(_)) {
             self.promote_this_field(field, ty);
             return;
         }
@@ -10608,13 +10532,13 @@ impl TypeEnvironment {
 
     pub fn bind_params(
         &mut self,
-        params: &FormalParamList,
+        params: FormalParamList<'_>,
         model: &SemanticModel<'_>,
         type_params: &TypeParameterScope,
     ) {
-        for param in params.params.iter() {
+        for param in params.params() {
             let ty = model.resolve_formal_parameter_in(param, type_params);
-            self.declare_at(param.name.name.clone(), ty, param.name.span);
+            self.declare_at(param.name().name().to_owned(), ty, param.name().span());
         }
     }
 
@@ -10647,11 +10571,11 @@ impl TypeEnvironment {
     }
 
     /// Solves generic call parameters; owner and explicit substitutions are fixed.
-    pub fn infer_signature_substitutions<F: Fn(&str) -> Option<ResolvedType>>(
+    pub fn infer_signature_substitutions<'syntax, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         signature: &ResolvedSignature,
-        args: &falcon_syntax::ast::ArgList,
-        type_args: &[DartType],
+        args: impl Into<Option<falcon_syntax::cst::ArgList<'syntax>>>,
+        type_args: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         owner: &HashMap<TypeParameterId, ResolvedType>,
@@ -10675,7 +10599,10 @@ impl TypeEnvironment {
     /// borrowing the declared parameter types and default-value metadata.
     /// When requested, records generic closures' downward function contexts by
     /// expression offset, before upward inference narrows the call's type arguments.
-    pub fn infer_signature_substitutions_with_result<F: Fn(&str) -> Option<ResolvedType>>(
+    pub fn infer_signature_substitutions_with_result<
+        'syntax,
+        F: Fn(&str) -> Option<ResolvedType>,
+    >(
         &self,
         signature: (
             &ResolvedSignature,
@@ -10683,12 +10610,13 @@ impl TypeEnvironment {
             &ResolvedType,
             &HashMap<TypeParameterId, ResolvedType>,
         ),
-        args: &falcon_syntax::ast::ArgList,
-        type_args: &[DartType],
+        args: impl Into<Option<falcon_syntax::cst::ArgList<'syntax>>>,
+        type_args: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         mut argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
     ) -> HashMap<TypeParameterId, ResolvedType> {
+        let args = args.into();
         let (signature, call_parameters, return_type, owner) = signature;
         let mut substitutions = owner.clone();
         if call_parameters.is_empty() {
@@ -10698,9 +10626,12 @@ impl TypeEnvironment {
             substitutions.extend(call_parameters.iter().enumerate().map(|(index, id)| {
                 (
                     id.clone(),
-                    type_args.get(index).map_or(ResolvedType::Unknown, |ty| {
-                        context.model.resolve_type_in(ty, context.type_parameters)
-                    }),
+                    type_args
+                        .clone()
+                        .nth(index)
+                        .map_or(ResolvedType::Unknown, |ty| {
+                            context.model.resolve_type_in(ty, context.type_parameters)
+                        }),
                 )
             }));
             return substitutions;
@@ -10837,7 +10768,7 @@ impl TypeEnvironment {
             };
         let infer_argument =
             |parameter: &ResolvedType,
-             argument: &Expr,
+             argument: Expr<'_>,
              expected_argument: &ResolvedType,
              inferred: &mut HashMap<TypeParameterId, ResolvedType>,
              upper: &mut HashMap<TypeParameterId, ResolvedType>| {
@@ -10873,7 +10804,7 @@ impl TypeEnvironment {
             };
         let has_unresolved_inputs =
             |parameter: &ResolvedType,
-             argument: &Expr,
+             argument: Expr<'_>,
              substitutions: &HashMap<TypeParameterId, ResolvedType>| {
                 if !call_parameters
                     .iter()
@@ -10881,7 +10812,7 @@ impl TypeEnvironment {
                 {
                     return false;
                 }
-                let Expr::FuncExpr { params, .. } = argument else {
+                let Expr::FuncExpr(function) = argument else {
                     return false;
                 };
                 let ResolvedType::Function {
@@ -10901,20 +10832,21 @@ impl TypeEnvironment {
                             && mentions_any(&ty, std::slice::from_ref(id))
                     })
                 };
+                let params = function.params();
                 params
                     .positional()
                     .zip(positional.iter())
                     .any(|(param, ty)| {
-                        param.param_type.is_none()
-                            && param.function_params.is_none()
+                        param.param_type().is_none()
+                            && param.function_params().is_none()
                             && depends_on_call(ty)
                     })
                     || params.named().any(|param| {
-                        param.param_type.is_none()
-                            && param.function_params.is_none()
+                        param.param_type().is_none()
+                            && param.function_params().is_none()
                             && named
                                 .iter()
-                                .find(|(name, _)| name == &param.name.name)
+                                .find(|(name, _)| name == param.name().name())
                                 .is_some_and(|(_, ty)| depends_on_call(ty))
                     })
             };
@@ -10928,21 +10860,30 @@ impl TypeEnvironment {
         // Each stage uses a frozen context. Independent closure results must
         // join before they contextualize closures that consume those results.
         for closures in [false, true] {
-            for (parameter, argument) in signature.positional.iter().zip(&args.positional).chain(
-                args.named.iter().filter_map(|argument| {
-                    signature
-                        .named
-                        .get(&argument.name.name)
-                        .map(|parameter| (parameter, &argument.value))
-                }),
-            ) {
-                if matches!(argument, Expr::FuncExpr { .. }) != closures {
+            for (parameter, argument) in signature
+                .positional
+                .iter()
+                .zip(args.into_iter().flat_map(|args| args.positional()))
+                .chain(
+                    args.into_iter()
+                        .flat_map(|args| args.named())
+                        .filter_map(|argument| {
+                            signature
+                                .named
+                                .get(argument.name().name())
+                                .map(|parameter| (parameter, argument.value()))
+                        }),
+                )
+            {
+                if matches!(argument, Expr::FuncExpr(_)) != closures {
                     continue;
                 }
                 let expected_argument = context.model.substitute(parameter, &argument_context);
                 if closures && has_unresolved_inputs(parameter, argument, &substitutions) {
                     if deferred.capacity() == 0 {
-                        deferred.reserve(args.positional.len() + args.named.len());
+                        deferred.reserve(
+                            args.map_or(0, |args| args.positional().len() + args.named().len()),
+                        );
                     }
                     deferred.push((parameter, argument));
                     continue;
@@ -11067,15 +11008,15 @@ impl TypeEnvironment {
         &self,
         identity: DeclarationIdentity,
         name: &str,
-        type_args: &[DartType],
-        args: &falcon_syntax::ast::ArgList,
+        type_args: AstChildren<'_, DartType<'_>>,
+        args: falcon_syntax::cst::ArgList<'_>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
         if let Some(alias) = context.model.identities.type_alias(&identity) {
             if !type_args.is_empty() {
                 let arguments: Vec<_> = type_args
-                    .iter()
+                    .clone()
                     .map(|ty| context.model.resolve_type_in(ty, context.type_parameters))
                     .collect();
                 return context
@@ -11136,7 +11077,7 @@ impl TypeEnvironment {
             let substitutions = self.infer_signature_substitutions(
                 &signature,
                 args,
-                &[],
+                AstChildren::empty(),
                 context,
                 expected,
                 &HashMap::new(),
@@ -11152,7 +11093,7 @@ impl TypeEnvironment {
                 occurrence: Default::default(),
                 identity,
                 arguments: type_args
-                    .iter()
+                    .clone()
                     .map(|ty| context.model.resolve_type_in(ty, context.type_parameters))
                     .collect(),
                 nullable: false,
@@ -11181,7 +11122,7 @@ impl TypeEnvironment {
 
     pub fn infer_with_signatures(
         &self,
-        expr: &Expr,
+        expr: Expr<'_>,
         model: &SemanticModel<'_>,
         signatures: &SignatureIndex,
         type_parameters: &TypeParameterScope,
@@ -11192,7 +11133,7 @@ impl TypeEnvironment {
     /// [`Self::infer_with_signatures`], using `lookup` for names without a local binding.
     pub fn infer_with_signatures_using_lookup(
         &self,
-        expr: &Expr,
+        expr: Expr<'_>,
         model: &SemanticModel<'_>,
         signatures: &SignatureIndex,
         type_parameters: &TypeParameterScope,
@@ -11206,12 +11147,12 @@ impl TypeEnvironment {
     /// Shorting does not erase nullability declared by a preceding member.
     fn receiver_type(
         &self,
-        object: &Expr,
+        object: Expr<'_>,
         name: &str,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
-        if matches!(object, Expr::Super { .. }) {
+        if matches!(object, Expr::Super(_)) {
             context
                 .signatures
                 .super_receiver(&self.lookup("this"), name, context.model)
@@ -11267,25 +11208,36 @@ impl TypeEnvironment {
     /// enum value, or a static field or getter.
     fn static_access_type(
         &self,
-        object: &Expr,
+        object: Expr<'_>,
         name: &str,
         model: &SemanticModel<'_>,
         signatures: &SignatureIndex,
         lookup: &impl Fn(&str) -> Option<ResolvedType>,
     ) -> Option<ResolvedType> {
         let segments = expression_segments(object, false)?;
+        self.static_access_segments(&segments, name, model, signatures, lookup)
+    }
+
+    fn static_access_segments(
+        &self,
+        segments: &[&str],
+        name: &str,
+        model: &SemanticModel<'_>,
+        signatures: &SignatureIndex,
+        lookup: &impl Fn(&str) -> Option<ResolvedType>,
+    ) -> Option<ResolvedType> {
         let head = segments.first()?;
         if self.is_bound(head) || lookup(head).is_some() {
             return None;
         }
-        if let [prefix] = segments.as_slice()
+        if let [prefix] = segments
             && let Some(identity) = model.resolve_value(QualifiedName::prefixed(prefix, name))
         {
             return signatures.value_type(&identity).cloned();
         }
         let identity = model
-            .resolve_dotted(&segments)
-            .or_else(|| model.resolve_extension(QualifiedName::from_segments(&segments)?))?;
+            .resolve_dotted(segments)
+            .or_else(|| model.resolve_extension(QualifiedName::from_segments(segments)?))?;
         if signatures.is_enum_value(&identity, name) {
             return Some(ResolvedType::interface_identity(identity));
         }
@@ -11306,7 +11258,7 @@ impl TypeEnvironment {
         &self,
         signature: &ResolvedSignature,
         owner: &HashMap<TypeParameterId, ResolvedType>,
-        explicit: &[DartType],
+        explicit: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
@@ -11391,7 +11343,7 @@ impl TypeEnvironment {
         &self,
         identity: DeclarationIdentity,
         name: &str,
-        explicit: &[DartType],
+        explicit: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> Option<ResolvedType> {
@@ -11462,18 +11414,19 @@ impl TypeEnvironment {
 
     fn callable_tearoff<F: Fn(&str) -> Option<ResolvedType>>(
         &self,
-        target: &Expr,
-        explicit: &[DartType],
+        target: Expr<'_>,
+        explicit: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         cached_receiver: &mut Option<ResolvedType>,
     ) -> Option<ResolvedType> {
         if self.invocation_unshadowed(target, context)
-            && matches!(target, Expr::Field { .. })
+            && matches!(target, Expr::Field(_))
             && expression_segments(target, true)
                 .is_some_and(|segments| context.model.resolve_dotted(&segments).is_none())
             && let Some((identity, name)) = resolve_call_constructor(target, context.model, true)
-            && let Some(ty) = self.constructor_tearoff(identity, name, explicit, context, expected)
+            && let Some(ty) =
+                self.constructor_tearoff(identity, name, explicit.clone(), context, expected)
         {
             return Some(ty);
         }
@@ -11485,7 +11438,7 @@ impl TypeEnvironment {
     /// Infers an expression with a downward result context and lexical lookup.
     pub fn infer_with_context(
         &self,
-        expr: &Expr,
+        expr: Expr<'_>,
         model: &SemanticModel<'_>,
         signatures: &SignatureIndex,
         type_parameters: &TypeParameterScope,
@@ -11502,11 +11455,121 @@ impl TypeEnvironment {
         self.infer_in_context(expr, context, expected, None)
     }
 
+    pub fn infer_constant_name(
+        &self,
+        mut names: falcon_syntax::cst::PatternNames<'_>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+    ) -> ResolvedType {
+        let Some(first) = names.next() else {
+            return ResolvedType::Unknown;
+        };
+        let model = context.model;
+        let signatures = context.signatures;
+        let unshadowed = self.invocation_unshadowed(Expr::Ident(first), context);
+        let mut ty = self.infer_in_context(
+            Expr::Ident(first),
+            queries::context_copy(context),
+            None,
+            None,
+        );
+        if names.is_empty() {
+            return ty;
+        }
+        let mut segments = Vec::with_capacity(names.len() + 1);
+        segments.push(first.name());
+        for name in names {
+            let field = name.name();
+            segments.push(field);
+            let owner = &segments[..segments.len() - 1];
+            let promoted = (owner.len() == 1)
+                .then(|| self.promoted_field(Expr::Ident(first), field))
+                .flatten();
+            let static_type =
+                || self.static_access_segments(owner, field, model, signatures, context.lookup);
+            ty = if let Some(promoted) = promoted {
+                promoted
+            } else if let Some(static_type) = static_type() {
+                static_type
+            } else if let Some(data) = signatures.instantiated_data_read(&ty, field, model) {
+                data
+            } else if matches!(ty, ResolvedType::Dynamic) {
+                ResolvedType::Dynamic
+            } else if field == "call" && matches!(ty, ResolvedType::Function { .. }) {
+                ty.with_nullable(false)
+            } else {
+                let constructor = if unshadowed && model.resolve_dotted(&segments).is_none() {
+                    model.resolve_dotted(owner).and_then(|identity| {
+                        self.constructor_tearoff(
+                            identity,
+                            field,
+                            AstChildren::empty(),
+                            context,
+                            None,
+                        )
+                    })
+                } else {
+                    None
+                };
+                let prefixed = || {
+                    if matches!(ty, ResolvedType::Unknown) || ty.interface("dart:core", "Type") {
+                        let [prefix] = owner else {
+                            return None;
+                        };
+                        if !self.is_bound(prefix) && (context.lookup)(prefix).is_none() {
+                            return model
+                                .resolve_value(QualifiedName::prefixed(prefix, field))
+                                .and_then(|identity| signatures.function(&identity))
+                                .map(|signature| (signature, HashMap::new()));
+                        }
+                    }
+                    None
+                };
+                let method = || {
+                    if ty.record_field(field).is_some() {
+                        return None;
+                    }
+                    signatures.resolved_member(&ty, field, model).or_else(|| {
+                        if !unshadowed {
+                            return None;
+                        }
+                        let identity = model.resolve_dotted(owner).or_else(|| {
+                            model.resolve_extension(QualifiedName::from_segments(owner)?)
+                        })?;
+                        Some((signatures.member(&identity, field)?, HashMap::new()))
+                    })
+                };
+                constructor
+                    .or_else(|| {
+                        let (signature, owner) = prefixed().or_else(method)?;
+                        Some(self.tearoff_type(
+                            signature,
+                            &owner,
+                            AstChildren::empty(),
+                            context,
+                            None,
+                        ))
+                    })
+                    .unwrap_or_else(|| {
+                        if ty == ResolvedType::Unknown
+                            && !self.is_bound(first.name())
+                            && (context.lookup)(first.name()).is_none()
+                            && model.resolve_dotted(&segments).is_some()
+                        {
+                            model.core_type("Type", false)
+                        } else {
+                            ResolvedType::Unknown
+                        }
+                    })
+            };
+        }
+        ty
+    }
+
     /// Reuses an immediate receiver already inferred by a shared AST visitor.
     /// A null-shorted selector chain makes the result nullable.
     fn infer_in_context(
         &self,
-        expr: &Expr,
+        expr: Expr<'_>,
         context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
         receiver: Option<ResolvedType>,
@@ -11536,7 +11599,7 @@ impl TypeEnvironment {
                     .signatures
                     .resolved_member(&ty, "call", context.model)
         {
-            self.tearoff_type(signature, &owner, &[], context, expected)
+            self.tearoff_type(signature, &owner, AstChildren::empty(), context, expected)
         } else {
             ty
         }
@@ -11546,19 +11609,19 @@ impl TypeEnvironment {
     /// Nullability declared by a member remains part of that branch's type.
     fn infer_unshorted(
         &self,
-        expr: &Expr,
+        expr: Expr<'_>,
         context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
         mut receiver: Option<ResolvedType>,
     ) -> ResolvedType {
-        if let Expr::Paren { expr, .. } = expr {
-            return self.infer_in_context(expr, context, expected, receiver);
+        if let Expr::Paren(paren) = expr {
+            return self.infer_in_context(paren.expr(), context, expected, receiver);
         }
         let model = context.model;
         let signatures = context.signatures;
         let type_parameters = context.type_parameters;
         let lookup = context.lookup;
-        let infer = |expr: &Expr| {
+        let infer = |expr: Expr<'_>| {
             self.infer_with_signatures_using_lookup(
                 expr,
                 model,
@@ -11567,46 +11630,43 @@ impl TypeEnvironment {
                 lookup,
             )
         };
-        if let Expr::Field {
-            object,
-            field,
-            is_null_safe,
-            ..
-        } = expr
-        {
-            if let Some(ty) = self.promoted_field(object, &field.name) {
+        if let Expr::Field(access) = expr {
+            let object = access.object();
+            let field = access.field();
+            let is_null_safe = access.is_null_safe();
+            if let Some(ty) = self.promoted_field(object, field.name()) {
                 return ty;
             }
             if let Some(ty) =
-                self.static_access_type(object, &field.name, model, signatures, lookup)
+                self.static_access_type(object, field.name(), model, signatures, lookup)
             {
                 return ty;
             }
             let receiver = receiver.take().unwrap_or_else(|| {
                 self.receiver_type(
                     object,
-                    &field.name,
+                    field.name(),
                     &context,
                     expected.filter(|_| expression_has_dot_shorthand_base(object)),
                 )
             });
-            let receiver = if *is_null_safe {
+            let receiver = if is_null_safe {
                 receiver.non_null()
             } else {
                 receiver
             };
-            if let Some(ty) = signatures.instantiated_data_read(&receiver, &field.name, model) {
+            if let Some(ty) = signatures.instantiated_data_read(&receiver, field.name(), model) {
                 return ty;
             }
             if matches!(receiver, ResolvedType::Dynamic) {
                 return ResolvedType::Dynamic;
             }
-            if field.name == "call" && matches!(receiver, ResolvedType::Function { .. }) {
+            if field.name() == "call" && matches!(receiver, ResolvedType::Function { .. }) {
                 return receiver.with_nullable(false);
             }
-            let explicit = match object.as_ref() {
-                Expr::GenericInstantiation { type_args, .. } => type_args.as_slice(),
-                _ => &[],
+            let explicit = match object {
+                Expr::GenericInstantiation(generic) => generic.type_args(),
+                _ => AstChildren::empty(),
             };
             let unknown_receiver = receiver == ResolvedType::Unknown;
             if let Some(ty) =
@@ -11624,32 +11684,26 @@ impl TypeEnvironment {
                 return model.core_type("Type", false);
             }
         }
-        if let Expr::Call {
-            callee,
-            type_args,
-            args,
-            ..
-        } = expr
-        {
+        if let Expr::Call(call) = expr {
+            let callee = call.callee();
+            let type_args = call.type_args();
+            let args = call.args();
             let (target, explicit) = match callee.unparenthesized() {
-                Expr::GenericInstantiation {
-                    target, type_args, ..
-                } => (target.as_ref(), type_args.as_slice()),
-                Expr::Field { object, .. } => match object.as_ref() {
-                    Expr::GenericInstantiation { type_args, .. } => {
-                        (callee.as_ref(), type_args.as_slice())
-                    }
-                    _ => (callee.as_ref(), type_args.as_slice()),
+                Expr::GenericInstantiation(generic) => (generic.target(), generic.type_args()),
+                Expr::Field(field) => match field.object() {
+                    Expr::GenericInstantiation(generic) => (callee, generic.type_args()),
+                    _ => (callee, type_args),
                 },
-                target => (target, type_args.as_slice()),
+                target => (target, type_args),
             };
-            if let Expr::DotShorthand { name, .. } = target
+            if let Expr::DotShorthand(shorthand) = target
                 && let Some(ResolvedType::Interface { identity, .. }) = expected
             {
-                if signatures.constructor(identity, &name.name).is_some() || name.name == "new" {
+                let name = shorthand.name();
+                if signatures.constructor(identity, name.name()).is_some() || name.name() == "new" {
                     return self.infer_constructor(
                         identity.clone(),
-                        &name.name,
+                        name.name(),
                         explicit,
                         args,
                         &context,
@@ -11657,10 +11711,10 @@ impl TypeEnvironment {
                     );
                 }
                 if signatures
-                    .declared_member_facts(identity, &name.name)
+                    .declared_member_facts(identity, name.name())
                     .iter()
                     .any(|facts| facts.is_static)
-                    && let Some(signature) = signatures.member(identity, &name.name)
+                    && let Some(signature) = signatures.member(identity, name.name())
                 {
                     let substitutions = self.infer_signature_substitutions(
                         signature,
@@ -11696,28 +11750,30 @@ impl TypeEnvironment {
                 }
             }
             // `num.clamp` alone has argument-dependent return typing.
-            if let Expr::Field {
-                object,
-                field,
-                is_null_safe: false,
-                ..
-            } = target
-                && field.name == "clamp"
+            if let Expr::Field(access) = target
+                && !access.is_null_safe()
+                && access.field().name() == "clamp"
             {
+                let object = access.object();
+                let field = access.field();
                 let reached = receiver.get_or_insert_with(|| {
                     self.receiver_type(
                         object,
-                        &field.name,
+                        field.name(),
                         &context,
                         expected.filter(|_| expression_has_dot_shorthand_base(object)),
                     )
                 });
                 if numeric(reached)
                     && !reached.nullable()
-                    && let [lower, upper] = args.positional.as_slice()
-                    && args.named.is_empty()
+                    && args.positional().len() == 2
+                    && args.named().is_empty()
                 {
-                    let operands = [reached.clone(), infer(lower), infer(upper)];
+                    let operands = [
+                        reached.clone(),
+                        infer(args.positional().next().expect("two clamp arguments")),
+                        infer(args.positional().nth(1).expect("two clamp arguments")),
+                    ];
                     let all = |name| {
                         operands
                             .iter()
@@ -11745,7 +11801,7 @@ impl TypeEnvironment {
                     let substitutions = self.infer_signature_substitutions_with_result(
                         invocation.inference_signature(),
                         args,
-                        invocation.type_args,
+                        invocation.type_args.clone(),
                         &context,
                         expected,
                         None,
@@ -11755,19 +11811,36 @@ impl TypeEnvironment {
                 Err(return_type) => return_type,
             };
         }
+        self.infer_non_call(expr, context, expected)
+    }
+
+    // Keep collection and closure temporaries off recursive invocation frames.
+    fn infer_non_call(
+        &self,
+        expr: Expr<'_>,
+        context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        expected: Option<&ResolvedType>,
+    ) -> ResolvedType {
+        let model = context.model;
+        let signatures = context.signatures;
+        let type_parameters = context.type_parameters;
+        let lookup = context.lookup;
+        let infer = |expr: Expr<'_>| {
+            self.infer_with_signatures_using_lookup(
+                expr,
+                model,
+                signatures,
+                type_parameters,
+                lookup,
+            )
+        };
         match expr {
-            Expr::FuncExpr {
-                type_params,
-                params,
-                body,
-                async_marker,
-                ..
-            } => self.infer_function(
+            Expr::FuncExpr(function) => self.infer_function(
                 FunctionSyntax {
-                    type_params,
-                    params,
-                    body,
-                    async_marker: *async_marker,
+                    type_params: function.type_params(),
+                    params: function.params(),
+                    body: function.body(),
+                    async_marker: function.async_marker(),
                     return_type: None,
                 },
                 model,
@@ -11776,77 +11849,75 @@ impl TypeEnvironment {
                 expected,
                 lookup,
             ),
-            Expr::Is { .. }
-            | Expr::Unary {
-                op: falcon_syntax::ast::UnaryOp::Bang,
-                ..
-            } => model.core_type("bool", false),
-            Expr::Unary {
-                op: falcon_syntax::ast::UnaryOp::Minus,
-                operand,
-                ..
-            } if matches!(operand.as_ref(), Expr::IntLit { .. })
-                && expected.is_some_and(|context| context.interface("dart:core", "double")) =>
+            Expr::Is(_) => model.core_type("bool", false),
+            Expr::Unary(unary) if unary.op() == UnaryOp::Bang => model.core_type("bool", false),
+            Expr::Unary(unary)
+                if unary.op() == UnaryOp::Minus
+                    && matches!(unary.operand(), Expr::IntLit(_))
+                    && expected.is_some_and(|context| context.interface("dart:core", "double")) =>
             {
                 model.core_type("double", false)
             }
-            Expr::Unary { op, operand, .. } => {
-                let ty = infer(operand);
+            Expr::Unary(unary) => {
+                let op = unary.op();
+                let ty = infer(unary.operand());
                 if numeric(&ty) {
                     ty.with_nullable(false)
                 } else {
                     let name = match op {
-                        falcon_syntax::ast::UnaryOp::Minus => "unary-",
-                        falcon_syntax::ast::UnaryOp::Tilde => "~",
-                        falcon_syntax::ast::UnaryOp::PlusPlus => "+",
-                        falcon_syntax::ast::UnaryOp::MinusMinus => "-",
-                        falcon_syntax::ast::UnaryOp::Bang => unreachable!(),
+                        falcon_syntax::cst::UnaryOp::Minus => "unary-",
+                        falcon_syntax::cst::UnaryOp::Tilde => "~",
+                        falcon_syntax::cst::UnaryOp::PlusPlus => "+",
+                        falcon_syntax::cst::UnaryOp::MinusMinus => "-",
+                        falcon_syntax::cst::UnaryOp::Bang => unreachable!(),
                     };
                     operator_return_type(&ty, name, signatures, model)
                 }
             }
-            Expr::PostfixIncDec { operand, .. } => {
-                let ty = infer(operand);
+            Expr::PostfixIncDec(postfix) => {
+                let ty = infer(postfix.operand());
                 if numeric(&ty) {
                     ty.with_nullable(false)
                 } else {
                     ty
                 }
             }
-            Expr::IntLit { .. }
+            Expr::IntLit(_)
                 if expected.is_some_and(|context| context.interface("dart:core", "double")) =>
             {
                 model.core_type("double", false)
             }
-            Expr::IntLit { .. } => model.core_type("int", false),
-            Expr::DoubleLit { .. } => model.core_type("double", false),
+            Expr::IntLit(_) => model.core_type("int", false),
+            Expr::DoubleLit(_) => model.core_type("double", false),
             Expr::StringLit(_) => model.core_type("String", false),
-            Expr::BoolLit { .. } => model.core_type("bool", false),
-            Expr::NullLit { .. } => ResolvedType::Null,
-            Expr::SymbolLit { .. } => model.core_type("Symbol", false),
-            Expr::GenericInstantiation {
-                target, type_args, ..
-            } => self
-                .callable_tearoff(target, type_args, &context, expected, &mut None)
-                .or_else(|| {
-                    let receiver = infer(target);
-                    if receiver.nullable() {
-                        return None;
-                    }
-                    let (signature, owner) =
-                        signatures.resolved_member(&receiver, "call", model)?;
-                    Some(self.tearoff_type(signature, &owner, type_args, &context, expected))
-                })
-                .unwrap_or_else(|| {
-                    if expression_segments(target, true)
-                        .is_some_and(|segments| model.resolve_dotted(&segments).is_some())
-                    {
-                        model.core_type("Type", false)
-                    } else {
-                        ResolvedType::Unknown
-                    }
-                }),
-            Expr::DotShorthand { name, .. } => {
+            Expr::BoolLit(_) => model.core_type("bool", false),
+            Expr::NullLit(_) => ResolvedType::Null,
+            Expr::SymbolLit(_) => model.core_type("Symbol", false),
+            Expr::GenericInstantiation(generic) => {
+                let target = generic.target();
+                let type_args = generic.type_args();
+                self.callable_tearoff(target, type_args.clone(), &context, expected, &mut None)
+                    .or_else(|| {
+                        let receiver = infer(target);
+                        if receiver.nullable() {
+                            return None;
+                        }
+                        let (signature, owner) =
+                            signatures.resolved_member(&receiver, "call", model)?;
+                        Some(self.tearoff_type(signature, &owner, type_args, &context, expected))
+                    })
+                    .unwrap_or_else(|| {
+                        if expression_segments(target, true)
+                            .is_some_and(|segments| model.resolve_dotted(&segments).is_some())
+                        {
+                            model.core_type("Type", false)
+                        } else {
+                            ResolvedType::Unknown
+                        }
+                    })
+            }
+            Expr::DotShorthand(shorthand) => {
+                let name = shorthand.name();
                 let receiver = match expected {
                     Some(ResolvedType::Function {
                         return_type, alias, ..
@@ -11863,7 +11934,7 @@ impl TypeEnvironment {
                 else {
                     return ResolvedType::Unknown;
                 };
-                if signatures.is_enum_value(identity, &name.name) {
+                if signatures.is_enum_value(identity, name.name()) {
                     return receiver.with_nullable(false);
                 }
                 let owner = signatures.owner_substitutions(
@@ -11871,54 +11942,67 @@ impl TypeEnvironment {
                     arguments,
                     Some(occurrence),
                 );
-                if let Some((_, ty)) = signatures.field(identity, &name.name)
+                if let Some((_, ty)) = signatures.field(identity, name.name())
                     && signatures
-                        .declared_member_facts(identity, &name.name)
+                        .declared_member_facts(identity, name.name())
                         .iter()
                         .any(|facts| facts.is_static)
                 {
                     return model.substitute(ty, &owner);
                 }
-                self.constructor_tearoff(identity.clone(), &name.name, &[], &context, expected)
-                    .or_else(|| {
-                        signatures.member(identity, &name.name).map(|signature| {
-                            self.tearoff_type(signature, &owner, &[], &context, expected)
-                        })
+                self.constructor_tearoff(
+                    identity.clone(),
+                    name.name(),
+                    AstChildren::empty(),
+                    &context,
+                    expected,
+                )
+                .or_else(|| {
+                    signatures.member(identity, name.name()).map(|signature| {
+                        self.tearoff_type(
+                            signature,
+                            &owner,
+                            AstChildren::empty(),
+                            &context,
+                            expected,
+                        )
                     })
-                    .unwrap_or(ResolvedType::Unknown)
+                })
+                .unwrap_or(ResolvedType::Unknown)
             }
-            Expr::This { .. } => self.lookup("this"),
+            Expr::This(_) => self.lookup("this"),
             Expr::Ident(identifier) => {
                 // Bindings this environment adds (pattern variables of an
                 // inferred switch arm) shadow the lexical lookup.
-                if self.is_local_function(&identifier.name) {
-                    self.callable_tearoff(expr, &[], &context, expected, &mut None)
-                        .unwrap_or_else(|| self.lookup(&identifier.name))
-                } else if self.is_bound(&identifier.name) {
-                    self.lookup(&identifier.name)
-                } else if let Some(ty) = self.promoted_this_field(&identifier.name) {
+                if self.is_local_function(identifier.name()) {
+                    self.callable_tearoff(expr, AstChildren::empty(), &context, expected, &mut None)
+                        .unwrap_or_else(|| self.lookup(identifier.name()))
+                } else if self.is_bound(identifier.name()) {
+                    self.lookup(identifier.name())
+                } else if let Some(ty) = self.promoted_this_field(identifier.name()) {
                     ty
-                } else if let Some(ty) = lookup(&identifier.name) {
+                } else if let Some(ty) = lookup(identifier.name()) {
                     ty
                 } else if let Some(ty) =
-                    self.callable_tearoff(expr, &[], &context, expected, &mut None)
+                    self.callable_tearoff(expr, AstChildren::empty(), &context, expected, &mut None)
                 {
                     ty
-                } else if let Some(identity) = model.resolve_value(identifier.name.as_str())
+                } else if let Some(identity) = model.resolve_value(identifier.name())
                     && let Some(ty) = signatures.value_type(&identity)
                 {
                     ty.clone()
-                } else if identifier.name == "Never"
-                    || model.resolve_name(identifier.name.as_str()).is_some()
-                    || type_parameters.lookup(&identifier.name).is_some()
+                } else if identifier.name() == "Never"
+                    || model.resolve_name(identifier.name()).is_some()
+                    || type_parameters.lookup(identifier.name()).is_some()
                 {
                     model.core_type("Type", false)
                 } else {
-                    self.lookup(&identifier.name)
+                    self.lookup(identifier.name())
                 }
             }
-            Expr::As { dart_type, .. } => model.resolve_type_in(dart_type, type_parameters),
-            Expr::NullAssert { operand, .. } => {
+            Expr::As(cast) => model.resolve_type_in(cast.dart_type(), type_parameters),
+            Expr::NullAssert(assertion) => {
+                let operand = assertion.operand();
                 let operand_context = expected.map(|ty| ty.with_nullable(true));
                 self.infer_with_context(
                     operand,
@@ -11930,20 +12014,18 @@ impl TypeEnvironment {
                 )
                 .non_null()
             }
-            Expr::New {
-                dart_type,
-                constructor_name,
-                args,
-                ..
-            } => {
+            Expr::New(creation) => {
+                let dart_type = creation.dart_type();
+                let constructor_name = creation.constructor_name();
+                let args = creation.args();
                 if let DartType::Named(named) = dart_type
                     && let Some((identity, name)) =
-                        resolve_new_constructor(dart_type, constructor_name.as_ref(), model)
+                        resolve_new_constructor(dart_type, constructor_name, model)
                 {
                     self.infer_constructor(
                         identity,
                         name,
-                        &named.type_args,
+                        named.type_args(),
                         args,
                         &context,
                         expected,
@@ -11954,15 +12036,16 @@ impl TypeEnvironment {
                         .with_nullable(false)
                 }
             }
-            Expr::Cascade { object, .. } => self.infer_with_context(
-                object,
+            Expr::Cascade(cascade) => self.infer_with_context(
+                cascade.object(),
                 model,
                 signatures,
                 type_parameters,
                 expected,
                 lookup,
             ),
-            Expr::Await { expr: operand, .. } => {
+            Expr::Await(awaited) => {
+                let operand = awaited.expr();
                 // `await e` gives `e` the context `FutureOr<K>`.
                 let operand_context = expected
                     .filter(|context| !has_inference_holes(context))
@@ -12000,21 +12083,25 @@ impl TypeEnvironment {
                     None => ty,
                 }
             }
-            Expr::Record { fields, .. } => {
+            Expr::Record(record) => {
+                let fields = record.fields();
                 let expected = expected.filter(|ty| matches!(ty, ResolvedType::Record { positional, named, .. }
-                    if positional.len() == fields.iter().filter(|field| field.name.is_none()).count()
-                        && named.len() == fields.iter().filter(|field| field.name.is_some()).count()
-                        && fields.iter().filter_map(|field| field.name.as_ref()).all(|field| named.iter().any(|(name, _)| name == &field.name))));
-                let positional_count = fields.iter().filter(|field| field.name.is_none()).count();
+                    if positional.len() == fields.clone().filter(|field| field.name().is_none()).count()
+                        && named.len() == fields.clone().filter(|field| field.name().is_some()).count()
+                        && fields.clone().filter_map(|field| field.name()).all(|field| named.iter().any(|(name, _)| name == field.name()))));
+                let positional_count = fields
+                    .clone()
+                    .filter(|field| field.name().is_none())
+                    .count();
                 let mut positional = Vec::with_capacity(positional_count);
                 let mut named = Vec::with_capacity(fields.len() - positional_count);
                 for field in fields {
-                    let context = expected.and_then(|ty| match &field.name {
-                        Some(name) => ty.record_field(&name.name),
+                    let context = expected.and_then(|ty| match field.name() {
+                        Some(name) => ty.record_field(name.name()),
                         None => ty.record_positional(positional.len()),
                     });
                     let ty = self.infer_with_context(
-                        &field.value,
+                        field.value(),
                         model,
                         signatures,
                         type_parameters,
@@ -12032,8 +12119,8 @@ impl TypeEnvironment {
                     } else {
                         ty
                     };
-                    match &field.name {
-                        Some(name) => named.push((name.name.clone(), ty)),
+                    match field.name() {
+                        Some(name) => named.push((name.name().to_owned(), ty)),
                         None => positional.push(ty),
                     }
                 }
@@ -12045,15 +12132,15 @@ impl TypeEnvironment {
                     nullable: false,
                 }
             }
-            Expr::List {
-                type_arg, elements, ..
-            }
-            | Expr::Set {
-                type_arg, elements, ..
-            } => {
+            Expr::List(_) | Expr::Set(_) => {
+                let (type_arg, elements) = match expr {
+                    Expr::List(list) => (list.type_arg(), list.elements()),
+                    Expr::Set(set) => (set.type_arg(), set.elements()),
+                    _ => unreachable!(),
+                };
                 // Spread-only brace literals are parsed as sets until their
                 // downward context or spread operands establish a map shape.
-                let map_context = if matches!(expr, Expr::Set { .. }) && type_arg.is_none() {
+                let map_context = if matches!(expr, Expr::Set(_)) && type_arg.is_none() {
                     expected.and_then(|ty| {
                         signatures.instantiated_supertype(ty, "dart:core", "Map", model)
                     })
@@ -12061,7 +12148,6 @@ impl TypeEnvironment {
                     None
                 };
                 let context = type_arg
-                    .as_ref()
                     .map(|ty| model.resolve_type_in(ty, type_parameters))
                     .or_else(|| map_context.as_ref().and_then(|ty| ty.type_argument(0)))
                     .or_else(|| {
@@ -12097,7 +12183,7 @@ impl TypeEnvironment {
                     },
                     contexts: [context.as_ref(), map_value_context.as_ref()],
                     components: [Vec::new(), Vec::new()],
-                    infer_map_spreads: matches!(expr, Expr::Set { .. })
+                    infer_map_spreads: matches!(expr, Expr::Set(_))
                         && type_arg.is_none()
                         && context.is_none(),
                 };
@@ -12137,7 +12223,7 @@ impl TypeEnvironment {
                     occurrence: Default::default(),
                     identity: DeclarationIdentity::sdk(
                         "dart:core",
-                        if matches!(expr, Expr::List { .. }) {
+                        if matches!(expr, Expr::List(_)) {
                             "List"
                         } else {
                             "Set"
@@ -12148,11 +12234,9 @@ impl TypeEnvironment {
                     extension_type: false,
                 }
             }
-            Expr::Map {
-                type_args,
-                elements,
-                ..
-            } => {
+            Expr::Map(map) => {
+                let type_args = map.type_args();
+                let elements = map.elements();
                 // `{}` is a set literal when its context is an iterable type.
                 if type_args.is_empty()
                     && elements.is_empty()
@@ -12178,7 +12262,8 @@ impl TypeEnvironment {
                 }
                 let contexts = [0, 1].map(|ordinal| {
                     type_args
-                        .get(ordinal)
+                        .clone()
+                        .nth(ordinal)
                         .map(|ty| model.resolve_type_in(ty, type_parameters))
                         .or_else(|| {
                             expected
@@ -12234,66 +12319,67 @@ impl TypeEnvironment {
                     extension_type: false,
                 }
             }
-            Expr::Binary {
-                op, left, right, ..
-            } => match op {
-                BinaryOp::EqEq
-                | BinaryOp::NotEq
-                | BinaryOp::Lt
-                | BinaryOp::Gt
-                | BinaryOp::LtEq
-                | BinaryOp::GtEq
-                | BinaryOp::And
-                | BinaryOp::Or => model.core_type("bool", false),
-                // `NonNull(T1) ⊔ T2`: `e1` takes the context `K?`, `e2` the
-                // context `K`, or `NonNull(T1)` without one.
-                BinaryOp::NullCoalesce => {
-                    let left_context = expected.map(|context| context.with_nullable(true));
-                    let left = self
-                        .infer_with_context(
-                            left,
+            Expr::Binary(binary) => {
+                let op = binary.op();
+                let left = binary.left();
+                let right = binary.right();
+                match op {
+                    BinaryOp::EqEq
+                    | BinaryOp::NotEq
+                    | BinaryOp::Lt
+                    | BinaryOp::Gt
+                    | BinaryOp::LtEq
+                    | BinaryOp::GtEq
+                    | BinaryOp::And
+                    | BinaryOp::Or => model.core_type("bool", false),
+                    // `NonNull(T1) ⊔ T2`: `e1` takes the context `K?`, `e2` the
+                    // context `K`, or `NonNull(T1)` without one.
+                    BinaryOp::NullCoalesce => {
+                        let left_context = expected.map(|context| context.with_nullable(true));
+                        let left = self
+                            .infer_with_context(
+                                left,
+                                model,
+                                signatures,
+                                type_parameters,
+                                left_context.as_ref(),
+                                lookup,
+                            )
+                            .non_null();
+                        let left = self.contextual_callable_type(left, &context, expected);
+                        let right = self.infer_with_context(
+                            right,
                             model,
                             signatures,
                             type_parameters,
-                            left_context.as_ref(),
+                            expected
+                                .filter(|ty| !has_inference_holes(ty))
+                                .or(Some(&left).filter(|ty| **ty != ResolvedType::Unknown)),
                             lookup,
-                        )
-                        .non_null();
-                    let left = self.contextual_callable_type(left, &context, expected);
-                    let right = self.infer_with_context(
-                        right,
-                        model,
-                        signatures,
-                        type_parameters,
-                        expected
-                            .filter(|ty| !has_inference_holes(ty))
-                            .or(Some(&left).filter(|ty| **ty != ResolvedType::Unknown)),
-                        lookup,
-                    );
-                    contextual_join(&[left, right], expected, signatures, model)
+                        );
+                        contextual_join(&[left, right], expected, signatures, model)
+                    }
+                    _ => {
+                        let left = infer(left);
+                        let right_context = operator_parameter_type(&left, op, signatures, model);
+                        let right = self.infer_with_context(
+                            right,
+                            model,
+                            signatures,
+                            type_parameters,
+                            right_context.as_ref(),
+                            lookup,
+                        );
+                        binary_result(op, &left, &right, signatures, model)
+                    }
                 }
-                _ => {
-                    let left = infer(left);
-                    let right_context = operator_parameter_type(&left, *op, signatures, model);
-                    let right = self.infer_with_context(
-                        right,
-                        model,
-                        signatures,
-                        type_parameters,
-                        right_context.as_ref(),
-                        lookup,
-                    );
-                    binary_result(*op, &left, &right, signatures, model)
-                }
-            },
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
+            }
+            Expr::Conditional(conditional) => {
+                let condition = conditional.condition();
+                let then_expr = conditional.then_expr();
+                let else_expr = conditional.else_expr();
                 let flow = self.flow(model, signatures, type_parameters);
-                let branch = |truth: bool, branch: &Expr| {
+                let branch = |truth: bool, branch: Expr<'_>| {
                     let mut environment = self.clone();
                     flow.assume_condition(&mut environment, condition, truth);
                     environment.infer_with_context(
@@ -12308,21 +12394,22 @@ impl TypeEnvironment {
                 let types = [branch(true, then_expr), branch(false, else_expr)];
                 contextual_join(&types, expected, signatures, model)
             }
-            Expr::Switch { subject, arms, .. } => {
+            Expr::Switch(switch) => {
+                let subject = switch.subject();
+                let arms = switch.arms();
                 let flow = self.flow(model, signatures, type_parameters);
                 let matched = infer(subject);
                 let arm_types: Vec<_> = arms
-                    .iter()
                     .map(|arm| {
                         let mut environment = self.clone();
                         environment.push_scope();
-                        flow.assume_pattern(&mut environment, subject, &arm.pattern, true);
-                        flow.declare_pattern(&mut environment, &arm.pattern, matched.clone());
-                        if let Some(guard) = &arm.guard {
+                        flow.assume_pattern(&mut environment, subject, arm.pattern(), true);
+                        flow.declare_pattern(&mut environment, arm.pattern(), matched.clone());
+                        if let Some(guard) = arm.guard() {
                             flow.assume_condition(&mut environment, guard, true);
                         }
                         environment.infer_with_context(
-                            &arm.body,
+                            arm.body(),
                             model,
                             signatures,
                             type_parameters,
@@ -12333,22 +12420,21 @@ impl TypeEnvironment {
                     .collect();
                 contextual_join(&arm_types, expected, signatures, model)
             }
-            Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => {
+            Expr::Index(index) => {
+                let object = index.object();
+                let is_null_safe = index.is_null_safe();
                 let receiver = self.receiver_type(object, "[]", &context, None);
-                let receiver = if *is_null_safe {
+                let receiver = if is_null_safe {
                     receiver.non_null()
                 } else {
                     receiver
                 };
                 operator_return_type(&receiver, "[]", signatures, model)
             }
-            Expr::Assign {
-                target, op, value, ..
-            } => {
+            Expr::Assign(assignment) => {
+                let target = assignment.target();
+                let op = assignment.op();
+                let value = assignment.value();
                 let target_type = infer(target);
                 match op.binary() {
                     None => self.infer_with_context(
@@ -12374,7 +12460,7 @@ impl TypeEnvironment {
                     Some(op) => binary_result(op, &target_type, &infer(value), signatures, model),
                 }
             }
-            Expr::Throw { .. } => ResolvedType::Never,
+            Expr::Throw(_) => ResolvedType::Never,
             _ => ResolvedType::Unknown,
         }
     }
@@ -12390,7 +12476,7 @@ impl TypeEnvironment {
         expected: Option<&ResolvedType>,
         lookup: &impl Fn(&str) -> Option<ResolvedType>,
     ) -> ResolvedType {
-        use falcon_syntax::ast::AsyncMarker;
+        use falcon_syntax::cst::AsyncMarker;
         if function.return_type.is_none()
             && matches!(
                 function.async_marker,
@@ -12400,7 +12486,7 @@ impl TypeEnvironment {
             return ResolvedType::Unknown;
         }
         let mut function_parameters = type_parameters.clone();
-        function_parameters.push(function.type_params, model);
+        function_parameters.push(function.type_params.clone(), model);
         let contextual = match expected {
             Some(ResolvedType::Function {
                 alias,
@@ -12419,7 +12505,7 @@ impl TypeEnvironment {
             .positional()
             .enumerate()
             .map(|(index, param)| {
-                let ty = if param.param_type.is_some() || param.function_params.is_some() {
+                let ty = if param.param_type().is_some() || param.function_params().is_some() {
                     model.resolve_formal_parameter_in(param, &function_parameters)
                 } else {
                     contextual
@@ -12430,7 +12516,7 @@ impl TypeEnvironment {
                         })
                         .unwrap_or_else(|| signatures.uncontextual_closure_type(expected))
                 };
-                environment.declare(param.name.name.clone(), ty.clone());
+                environment.declare(param.name().name().to_owned(), ty.clone());
                 ty
             })
             .collect();
@@ -12438,20 +12524,20 @@ impl TypeEnvironment {
             .params
             .named()
             .map(|param| {
-                let ty = if param.param_type.is_some() || param.function_params.is_some() {
+                let ty = if param.param_type().is_some() || param.function_params().is_some() {
                     model.resolve_formal_parameter_in(param, &function_parameters)
                 } else {
                     contextual
                         .and_then(|(alias, _, _, named)| {
                             named
                                 .iter()
-                                .find(|(name, _)| name == &param.name.name)
+                                .find(|(name, _)| name == param.name().name())
                                 .map(|(_, ty)| ty.clone().projected_from(alias))
                         })
                         .unwrap_or_else(|| signatures.uncontextual_closure_type(expected))
                 };
-                environment.declare(param.name.name.clone(), ty.clone());
-                (param.name.name.clone(), ty)
+                environment.declare(param.name().name().to_owned(), ty.clone());
+                (param.name().name().to_owned(), ty)
             })
             .collect();
         let return_type = match function.return_type {
@@ -12474,8 +12560,8 @@ impl TypeEnvironment {
                     }
                 });
                 let return_type = match function.body {
-                    FunctionBody::Arrow(expression, _) => environment.infer_with_context(
-                        expression,
+                    FunctionBody::Arrow(arrow) => environment.infer_with_context(
+                        arrow.expr(),
                         model,
                         signatures,
                         &function_parameters,
@@ -12497,14 +12583,14 @@ impl TypeEnvironment {
                             types: Vec::new(),
                             exhaustive_switches: Vec::new(),
                         };
-                        for statement in &block.stmts {
+                        for statement in block.stmts() {
                             returns.visit_stmt(statement);
                         }
                         // A reachable end returns `null` implicitly.
                         if super::flow::completes_normally(
-                            &block.stmts,
+                            block.stmts(),
                             &|expression| returns.infer(expression, None) == ResolvedType::Never,
-                            &|statement| returns.exhaustive_switches.contains(&statement.span),
+                            &|statement| returns.exhaustive_switches.contains(&statement.span()),
                         ) {
                             returns.types.push(ResolvedType::Null);
                         }
@@ -12537,7 +12623,7 @@ impl TypeEnvironment {
                             inferred
                         }
                     }
-                    FunctionBody::Native(_, _) => ResolvedType::Unknown,
+                    FunctionBody::Native(_) => ResolvedType::Unknown,
                 };
                 if function.async_marker == AsyncMarker::Async {
                     let argument = flatten_async_return(return_type, signatures, model);
@@ -12558,8 +12644,8 @@ impl TypeEnvironment {
                 function
                     .params
                     .named()
-                    .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
-                    .map(|param| param.name.name.clone())
+                    .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
+                    .map(|param| param.name().name().to_owned())
                     .collect(),
                 function.type_params,
                 &function_parameters,
@@ -12567,7 +12653,7 @@ impl TypeEnvironment {
             optional_positional: function
                 .params
                 .positional()
-                .filter(|param| param.kind == ParamKind::OptionalPositional)
+                .filter(|param| param.kind() == ParamKind::OptionalPositional)
                 .count(),
             alias: FunctionTypeAlias::default(),
             return_type: Arc::new(return_type),
@@ -12580,11 +12666,11 @@ impl TypeEnvironment {
 
 /// The syntax function literals and local function declarations share.
 struct FunctionSyntax<'f> {
-    type_params: &'f [TypeParam],
-    params: &'f FormalParamList,
-    body: &'f FunctionBody,
-    async_marker: falcon_syntax::ast::AsyncMarker,
-    return_type: Option<&'f DartType>,
+    type_params: AstChildren<'f, TypeParam<'f>>,
+    params: FormalParamList<'f>,
+    body: FunctionBody<'f>,
+    async_marker: falcon_syntax::cst::AsyncMarker,
+    return_type: Option<DartType<'f>>,
 }
 
 /// `(library, name, members)`; each member is `(name, kind, positional
@@ -12798,13 +12884,12 @@ fn sdk_parameter(owner: &'static str, ordinal: usize) -> TypeParameterId {
 
 /// The external (SDK or package) identities of `annotations`.
 fn resolve_annotations(
-    annotations: &[falcon_syntax::ast::Annotation],
+    annotations: AstChildren<'_, falcon_syntax::cst::Annotation<'_>>,
     model: &SemanticModel<'_>,
 ) -> Vec<DeclarationIdentity> {
     annotations
-        .iter()
         .filter_map(|annotation| {
-            model.resolve_imported_member(QualifiedName::from_identifiers(&annotation.name)?)
+            model.resolve_imported_member(QualifiedName::from_identifiers(annotation.name())?)
         })
         .collect()
 }
@@ -12839,11 +12924,11 @@ struct ClosureReturns<'a, 'model, L> {
     context: Option<&'a ResolvedType>,
     lookup: &'a L,
     types: Vec<ResolvedType>,
-    exhaustive_switches: Vec<falcon_syntax::ast::Span>,
+    exhaustive_switches: Vec<Span>,
 }
 
 impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
-    fn infer(&self, expression: &Expr, expected: Option<&ResolvedType>) -> ResolvedType {
+    fn infer(&self, expression: Expr<'_>, expected: Option<&ResolvedType>) -> ResolvedType {
         self.environment.infer_with_context(
             expression,
             self.flow.model,
@@ -12860,11 +12945,10 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
         self.environment.pop_scope();
     }
 
-    fn declare_local(&mut self, declaration: &falcon_syntax::ast::LocalVarDecl) {
-        for declarator in &declaration.declarators {
+    fn declare_local(&mut self, declaration: falcon_syntax::cst::LocalVarDecl<'_>) {
+        for declarator in declaration.declarators() {
             let ty = declaration
-                .var_type
-                .as_ref()
+                .var_type()
                 .map(|ty| {
                     self.flow
                         .model
@@ -12872,19 +12956,19 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
                 })
                 .or_else(|| {
                     declarator
-                        .initializer
-                        .as_ref()
+                        .initializer()
                         .map(|expression| self.infer(expression, None))
                 })
                 .unwrap_or(ResolvedType::Dynamic);
-            if let Some(initializer) = &declarator.initializer {
+            if let Some(initializer) = declarator.initializer() {
                 self.visit_expr(initializer);
             }
-            self.environment.declare(declarator.name.name.clone(), ty);
+            self.environment
+                .declare(declarator.name().name().to_owned(), ty);
         }
     }
 
-    fn declare_pattern(&mut self, pattern: &falcon_syntax::ast::Pattern, matched: ResolvedType) {
+    fn declare_pattern(&mut self, pattern: falcon_syntax::cst::Pattern<'_>, matched: ResolvedType) {
         self.flow
             .declare_pattern(&mut self.environment, pattern, matched);
     }
@@ -12895,35 +12979,38 @@ impl super::flow::FlowContext<'_, '_> {
     /// closed subtype set. Guards cannot contribute unconditional coverage.
     pub fn switch_is_exhaustive(
         &self,
-        statement: &falcon_syntax::ast::SwitchStmt,
+        statement: falcon_syntax::cst::SwitchStmt<'_>,
         matched: &ResolvedType,
     ) -> bool {
-        use falcon_syntax::ast::{ConstPatternValue, LiteralPatternValue, Pattern, SwitchCaseKind};
+        use falcon_syntax::cst::{ConstPatternValue, LiteralPatternValue, Pattern, SwitchCaseKind};
         let patterns = || {
             statement
-                .cases
-                .iter()
-                .flat_map(|case| &case.cases)
+                .cases()
+                .flat_map(|case| case.cases())
                 .filter_map(|case| match case {
-                    SwitchCaseKind::Pattern(pattern, None) => Some(pattern.as_ref()),
+                    SwitchCaseKind::Pattern(label) if label.guard().is_none() => {
+                        Some(label.pattern())
+                    }
                     _ => None,
                 })
         };
         let covers_type = |matched: &ResolvedType| {
             patterns().any(|pattern| {
                 let target = match pattern {
-                    Pattern::Wildcard { type_: None, .. }
-                    | Pattern::Variable { type_: None, .. } => {
-                        return true;
+                    Pattern::Wildcard(wildcard) => {
+                        let Some(type_) = wildcard.type_() else {
+                            return true;
+                        };
+                        self.model.resolve_type_in(type_, self.type_parameters)
                     }
-                    Pattern::Wildcard {
-                        type_: Some(type_), ..
+                    Pattern::Variable(variable) => {
+                        let Some(type_) = variable.type_() else {
+                            return true;
+                        };
+                        self.model.resolve_type_in(type_, self.type_parameters)
                     }
-                    | Pattern::Variable {
-                        type_: Some(type_), ..
-                    } => self.model.resolve_type_in(type_, self.type_parameters),
-                    Pattern::Object(object) if object.fields.is_empty() => {
-                        self.object_pattern_type(&object.type_, matched)
+                    Pattern::Object(object) if object.fields().is_empty() => {
+                        self.object_pattern_type(object.type_(), matched)
                     }
                     _ => return false,
                 };
@@ -12938,7 +13025,7 @@ impl super::flow::FlowContext<'_, '_> {
             return true;
         }
         let covers_null = patterns().any(|pattern| {
-            matches!(pattern, Pattern::Literal(literal) if matches!(literal.value, LiteralPatternValue::Null))
+            matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Null))
         });
         if *matched == ResolvedType::Null {
             return covers_null;
@@ -12955,7 +13042,7 @@ impl super::flow::FlowContext<'_, '_> {
         if identity.is_sdk("dart:core", "bool") {
             return [false, true].into_iter().all(|value| {
                 patterns().any(|pattern| {
-                    matches!(pattern, Pattern::Literal(literal) if matches!(literal.value, LiteralPatternValue::Bool(actual) if actual == value))
+                    matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Bool(actual) if actual == value))
                 })
             });
         }
@@ -12968,13 +13055,14 @@ impl super::flow::FlowContext<'_, '_> {
                     let Pattern::Const(constant) = pattern else {
                         return false;
                     };
-                    let ConstPatternValue::Name(names) = &constant.value else {
+                    let ConstPatternValue::Name(names) = constant.value() else {
                         return false;
                     };
-                    let Some((name, owner)) = names.split_last() else {
+                    let Some(name) = names.clone().last() else {
                         return false;
                     };
-                    name.name == *value
+                    let owner = names.clone().take(names.len() - 1);
+                    name.name() == *value
                         && QualifiedName::from_identifiers(owner)
                             .and_then(|owner| self.model.resolve_name(owner))
                             .as_ref()
@@ -12984,13 +13072,13 @@ impl super::flow::FlowContext<'_, '_> {
     }
 }
 
-impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> {
-    fn visit_stmt(&mut self, statement: &falcon_syntax::ast::Stmt) {
-        use falcon_syntax::ast::{ForInit, IfCondition, Stmt, SwitchCaseKind};
+impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureReturns<'_, '_, L> {
+    fn visit_stmt(&mut self, statement: falcon_syntax::cst::Stmt<'tree>) {
+        use falcon_syntax::cst::{ForInit, IfCondition, Stmt, SwitchCaseKind};
         let loop_start = match statement {
-            Stmt::For(statement) => Some(statement.span.start),
-            Stmt::While(statement) => Some(statement.span.start),
-            Stmt::DoWhile(statement) => Some(statement.span.start),
+            Stmt::For(statement) => Some(statement.span().start),
+            Stmt::While(statement) => Some(statement.span().start),
+            Stmt::DoWhile(statement) => Some(statement.span().start),
             _ => None,
         };
         if let Some(start) = loop_start
@@ -13009,17 +13097,16 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
         self.conservative_writes |= matches!(
             statement,
             Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::TryCatch(_) | Stmt::Switch(_)
-        ) || matches!(statement, Stmt::If(statement) if matches!(statement.condition, IfCondition::Case(..)));
+        ) || matches!(statement, Stmt::If(statement) if matches!(statement.condition(), IfCondition::Case(..)));
         let optional_entry =
             (self.conservative_writes && !conservative_before).then(|| self.environment.clone());
         match statement {
             Stmt::Return(statement) => {
-                if let Some(value) = &statement.value {
+                if let Some(value) = statement.value() {
                     self.visit_expr(value);
                 }
                 let ty = statement
-                    .value
-                    .as_ref()
+                    .value()
                     .map_or(ResolvedType::Void, |value| self.infer(value, self.context));
                 self.types.push(ty);
             }
@@ -13027,11 +13114,11 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
             Stmt::LocalFunc(function) => {
                 let ty = self.environment.infer_function(
                     FunctionSyntax {
-                        type_params: &function.type_params,
-                        params: &function.params,
-                        body: &function.body,
-                        async_marker: function.async_marker,
-                        return_type: function.return_type.as_ref(),
+                        type_params: function.type_params(),
+                        params: function.params(),
+                        body: function.body(),
+                        async_marker: function.async_marker(),
+                        return_type: function.return_type(),
                     },
                     self.flow.model,
                     self.flow.signatures,
@@ -13040,28 +13127,28 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
                     self.lookup,
                 );
                 self.environment
-                    .declare_local_function(function.name.name.clone(), ty);
+                    .declare_local_function(function.name().name().to_owned(), ty);
             }
             Stmt::PatternDecl(declaration) => {
-                let matched = self.infer(&declaration.init, None);
-                self.declare_pattern(&declaration.pattern, matched);
+                let matched = self.infer(declaration.init(), None);
+                self.declare_pattern(declaration.pattern(), matched);
             }
             Stmt::Block(_) => self.scoped(|returns| walk_stmt(returns, statement)),
-            Stmt::If(statement) => match &statement.condition {
+            Stmt::If(statement) => match statement.condition() {
                 IfCondition::Expr(condition) => {
                     self.visit_expr(condition);
                     let before = self.environment.clone();
                     self.flow
                         .assume_condition(&mut self.environment, condition, true);
-                    self.scoped(|returns| returns.visit_stmt(&statement.then_branch));
+                    self.scoped(|returns| returns.visit_stmt(statement.then_branch()));
                     let then_exits = self
                         .flow
-                        .statement_exits(&self.environment, &statement.then_branch);
+                        .statement_exits(&self.environment, statement.then_branch());
                     let then_environment = self.environment.clone();
                     self.environment = before;
                     self.flow
                         .assume_condition(&mut self.environment, condition, false);
-                    let else_exits = if let Some(branch) = &statement.else_branch {
+                    let else_exits = if let Some(branch) = statement.else_branch() {
                         self.scoped(|returns| returns.visit_stmt(branch));
                         self.flow.statement_exits(&self.environment, branch)
                     } else {
@@ -13080,32 +13167,31 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
                     self.conservative_writes = conservative_before;
                     return;
                 }
-                IfCondition::Case(value, pattern, _) => {
+                IfCondition::Case(case) => {
+                    let value = case.expr();
+                    let pattern = case.pattern();
                     self.visit_expr(value);
                     let matched = self.infer(value, None);
                     let before = self.environment.clone();
                     self.scoped(|returns| {
                         returns.declare_pattern(pattern, matched);
-                        returns.visit_stmt(&statement.then_branch);
+                        returns.visit_stmt(statement.then_branch());
                     });
                     let then_environment = self.environment.clone();
                     self.environment = before.join(&then_environment);
-                    if let Some(branch) = &statement.else_branch {
+                    if let Some(branch) = statement.else_branch() {
                         self.visit_stmt(branch);
                     }
                     self.environment = then_environment.join(&self.environment);
                 }
             },
             Stmt::For(statement) => self.scoped(|returns| {
-                match &statement.header.init {
+                match statement.header().init() {
                     Some(ForInit::VarDecl(declaration)) => returns.declare_local(declaration),
-                    Some(ForInit::ForIn {
-                        var_type,
-                        name,
-                        iterable,
-                        declares_variable: true,
-                        ..
-                    }) => {
+                    Some(ForInit::ForIn(binding)) if binding.declares_variable() => {
+                        let var_type = binding.var_type();
+                        let name = binding.name();
+                        let iterable = binding.iterable();
                         let ty = match var_type {
                             Some(ty) => returns
                                 .flow
@@ -13113,80 +13199,80 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
                                 .resolve_type_in(ty, returns.flow.type_parameters),
                             None => returns.flow.iterable_element(
                                 &returns.infer(iterable, None),
-                                statement.is_await,
+                                statement.is_await(),
                             ),
                         };
-                        returns.environment.declare(name.name.clone(), ty);
+                        returns.environment.declare(name.name().to_owned(), ty);
                     }
-                    Some(ForInit::PatternForIn {
-                        pattern, iterable, ..
-                    }) => {
+                    Some(ForInit::PatternForIn(binding)) => {
+                        let pattern = binding.pattern();
+                        let iterable = binding.iterable();
                         let matched = returns
                             .flow
-                            .iterable_element(&returns.infer(iterable, None), statement.is_await);
+                            .iterable_element(&returns.infer(iterable, None), statement.is_await());
                         returns.declare_pattern(pattern, matched);
                     }
                     // A bare `for (x in xs)` writes the enclosing `x`.
-                    Some(ForInit::Exprs(_) | ForInit::ForIn { .. }) | None => {}
+                    Some(ForInit::Exprs(_) | ForInit::ForIn(_)) | None => {}
                 }
-                returns.visit_stmt(&statement.body);
+                returns.visit_stmt(statement.body());
             }),
             Stmt::TryCatch(statement) => {
                 let before = self.environment.clone();
                 self.scoped(|returns| {
-                    for statement in &statement.body.stmts {
+                    for statement in statement.body().stmts() {
                         returns.visit_stmt(statement);
                     }
                 });
                 let mut exits = self.environment.clone();
-                for catch in &statement.catches {
+                for catch in statement.catches() {
                     self.environment = before.join(&exits);
                     self.scoped(|returns| {
                         // Untyped `catch (e, s)` binds `Object` and `StackTrace`.
-                        if let Some(name) = &catch.exception_var {
+                        if let Some(name) = catch.exception_var() {
                             let model = returns.flow.model;
-                            let ty = catch.exception_type.as_ref().map_or_else(
+                            let ty = catch.exception_type().map_or_else(
                                 || model.core_type("Object", false),
                                 |ty| model.resolve_type_in(ty, returns.flow.type_parameters),
                             );
-                            returns.environment.declare(name.name.clone(), ty);
+                            returns.environment.declare(name.name().to_owned(), ty);
                         }
-                        if let Some(name) = &catch.stack_trace_var {
+                        if let Some(name) = catch.stack_trace_var() {
                             let ty = returns.flow.model.core_type("StackTrace", false);
-                            returns.environment.declare(name.name.clone(), ty);
+                            returns.environment.declare(name.name().to_owned(), ty);
                         }
-                        for statement in &catch.body.stmts {
+                        for statement in catch.body().stmts() {
                             returns.visit_stmt(statement);
                         }
                     });
                     exits = exits.join(&self.environment);
                 }
                 self.environment = before.join(&exits);
-                if let Some(finally) = &statement.finally {
+                if let Some(finally) = statement.finally() {
                     self.scoped(|returns| {
-                        for statement in &finally.stmts {
+                        for statement in finally.stmts() {
                             returns.visit_stmt(statement);
                         }
                     });
                 }
             }
             Stmt::Switch(statement) => {
-                self.visit_expr(&statement.subject);
-                let matched = self.infer(&statement.subject, None);
+                self.visit_expr(statement.subject());
+                let matched = self.infer(statement.subject(), None);
                 if self.flow.switch_is_exhaustive(statement, &matched) {
-                    self.exhaustive_switches.push(statement.span);
+                    self.exhaustive_switches.push(statement.span());
                 }
                 let before = self.environment.clone();
                 let mut exits = before.clone();
-                for case in &statement.cases {
+                for case in statement.cases() {
                     self.environment = before.join(&exits);
                     self.scoped(|returns| {
-                        for kind in &case.cases {
-                            if let SwitchCaseKind::Pattern(pattern, _) = kind {
-                                returns.declare_pattern(pattern, matched.clone());
+                        for kind in case.cases() {
+                            if let SwitchCaseKind::Pattern(label) = kind {
+                                returns.declare_pattern(label.pattern(), matched.clone());
                             }
                         }
-                        for statement in &case.body {
+                        for statement in case.body() {
                             returns.visit_stmt(statement);
                         }
                     });
@@ -13202,24 +13288,22 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
         self.conservative_writes = conservative_before;
     }
 
-    fn visit_expr(&mut self, expression: &Expr) {
+    fn visit_expr(&mut self, expression: Expr<'tree>) {
         let conservative_before = self.conservative_writes;
         self.conservative_writes |= matches!(
             expression,
-            Expr::Switch { .. } | Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. }
+            Expr::Switch(_) | Expr::List(_) | Expr::Set(_) | Expr::Map(_)
         );
         match expression {
             // A nested callable is inferred separately and does not execute here.
-            Expr::FuncExpr { .. } => {
+            Expr::FuncExpr(_) => {
                 self.conservative_writes = conservative_before;
                 return;
             }
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
+            Expr::Conditional(conditional) => {
+                let condition = conditional.condition();
+                let then_expr = conditional.then_expr();
+                let else_expr = conditional.else_expr();
                 self.visit_expr(condition);
                 let before = self.environment.clone();
                 self.flow
@@ -13232,12 +13316,14 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
                 self.visit_expr(else_expr);
                 self.environment = then_environment.join(&self.environment);
             }
-            Expr::Binary {
-                op: BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce,
-                left,
-                right,
-                ..
-            } => {
+            Expr::Binary(binary)
+                if matches!(
+                    binary.op(),
+                    BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
+                ) =>
+            {
+                let left = binary.left();
+                let right = binary.right();
                 self.visit_expr(left);
                 let before = self.environment.clone();
                 self.visit_expr(right);
@@ -13247,29 +13333,30 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
         }
         if self.conservative_writes {
             let target = match expression {
-                Expr::Assign { target, .. } => Some(target.as_ref()),
-                Expr::Unary {
-                    op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
-                    operand,
-                    ..
+                Expr::Assign(assignment) => Some(assignment.target()),
+                Expr::Unary(unary)
+                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+                {
+                    Some(unary.operand())
                 }
-                | Expr::PostfixIncDec { operand, .. } => Some(operand.as_ref()),
+                Expr::PostfixIncDec(postfix) => Some(postfix.operand()),
                 _ => None,
             };
             if let Some(Expr::Ident(name)) = target {
-                self.environment.demote(&name.name);
+                self.environment.demote(name.name());
             }
         } else {
             let assigned = match expression {
-                Expr::Assign {
-                    target, op, value, ..
-                } => {
-                    let expected = match target.as_ref() {
+                Expr::Assign(assignment) => {
+                    let target = assignment.target();
+                    let op = assignment.op();
+                    let value = assignment.value();
+                    let expected = match target {
                         Expr::Ident(name)
-                            if self.environment.is_bound(&name.name)
+                            if self.environment.is_bound(name.name())
                                 && matches!(op.binary(), None | Some(BinaryOp::NullCoalesce)) =>
                         {
-                            Some(self.environment.declared_type(&name.name))
+                            Some(self.environment.declared_type(name.name()))
                         }
                         _ => None,
                     };
@@ -13296,11 +13383,11 @@ struct CollectionTypes<'a, 'model, L> {
 impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
     fn branch(
         &mut self,
-        condition: &falcon_syntax::ast::IfCondition,
+        condition: falcon_syntax::cst::IfCondition<'_>,
         truth: bool,
         visit: impl FnOnce(&mut Self),
     ) {
-        use falcon_syntax::ast::IfCondition;
+        use falcon_syntax::cst::IfCondition;
         let saved = self.lexical.environment.clone();
         self.lexical.environment.push_scope();
         match condition {
@@ -13309,7 +13396,10 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
                     .flow
                     .assume_condition(&mut self.lexical.environment, expression, truth)
             }
-            IfCondition::Case(expression, pattern, guard) if truth => {
+            IfCondition::Case(case) if truth => {
+                let expression = case.expr();
+                let pattern = case.pattern();
+                let guard = case.guard();
                 let matched = self.lexical.infer(expression, None);
                 self.lexical.declare_pattern(pattern, matched);
                 self.lexical.flow.assume_pattern(
@@ -13324,10 +13414,10 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
                         .assume_condition(&mut self.lexical.environment, guard, true);
                 }
             }
-            IfCondition::Case(expression, pattern, None) => self.lexical.flow.assume_pattern(
+            IfCondition::Case(case) if case.guard().is_none() => self.lexical.flow.assume_pattern(
                 &mut self.lexical.environment,
-                expression,
-                pattern,
+                case.expr(),
+                case.pattern(),
                 false,
             ),
             _ => {}
@@ -13338,27 +13428,20 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
 
     fn loop_body(
         &mut self,
-        header: &falcon_syntax::ast::ForHeader,
+        header: falcon_syntax::cst::ForHeader<'_>,
         is_await: bool,
         visit: impl FnOnce(&mut Self),
     ) {
-        use falcon_syntax::ast::ForInit;
-        let saved = header
-            .condition
-            .as_ref()
-            .map(|_| self.lexical.environment.clone());
+        use falcon_syntax::cst::ForInit;
+        let saved = header.condition().map(|_| self.lexical.environment.clone());
         self.lexical.environment.push_scope();
-        match &header.init {
+        match header.init() {
             Some(ForInit::VarDecl(declaration)) => self.lexical.declare_local(declaration),
-            Some(ForInit::ForIn {
-                var_type,
-                name,
-                iterable,
-                declares_variable: true,
-                ..
-            }) => {
+            Some(ForInit::ForIn(binding)) if binding.declares_variable() => {
+                let var_type = binding.var_type();
+                let name = binding.name();
+                let iterable = binding.iterable();
                 let ty = var_type
-                    .as_ref()
                     .map(|ty| {
                         self.lexical
                             .flow
@@ -13370,11 +13453,11 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
                             .flow
                             .iterable_element(&self.lexical.infer(iterable, None), is_await)
                     });
-                self.lexical.environment.declare(name.name.clone(), ty);
+                self.lexical.environment.declare(name.name().to_owned(), ty);
             }
-            Some(ForInit::PatternForIn {
-                pattern, iterable, ..
-            }) => {
+            Some(ForInit::PatternForIn(binding)) => {
+                let pattern = binding.pattern();
+                let iterable = binding.iterable();
                 let matched = self
                     .lexical
                     .flow
@@ -13383,7 +13466,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
             }
             _ => {}
         }
-        if let Some(condition) = &header.condition {
+        if let Some(condition) = header.condition() {
             self.lexical
                 .flow
                 .assume_condition(&mut self.lexical.environment, condition, true);
@@ -13395,7 +13478,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
         }
     }
 
-    fn spread(&mut self, expression: &Expr, map: bool, null_aware: bool) {
+    fn spread(&mut self, expression: Expr<'_>, map: bool, null_aware: bool) {
         let context = self.contexts[0].map(|first| ResolvedType::Interface {
             occurrence: Default::default(),
             identity: DeclarationIdentity::sdk("dart:core", if map { "Map" } else { "Iterable" }),
@@ -13448,27 +13531,27 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
     }
 }
 
-impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for CollectionTypes<'_, '_, L> {
-    fn visit_collection_element(&mut self, element: &falcon_syntax::ast::CollectionElement) {
-        use falcon_syntax::ast::CollectionElement;
+impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for CollectionTypes<'_, '_, L> {
+    fn visit_collection_element(&mut self, element: falcon_syntax::cst::CollectionElement<'tree>) {
+        use falcon_syntax::cst::CollectionElement;
         match element {
             CollectionElement::Expr(expression) => {
                 self.components[0].push(self.lexical.infer(expression, self.contexts[0]))
             }
-            CollectionElement::NullAware { expr, .. } => {
-                self.components[0].push(self.lexical.infer(expr, self.contexts[0]).non_null())
-            }
-            CollectionElement::Spread {
-                expr,
-                is_null_aware,
-                ..
-            } => self.spread(expr, self.contexts[1].is_some(), *is_null_aware),
-            CollectionElement::If {
-                condition,
-                then_elem,
-                else_elem,
-                ..
-            } => {
+            CollectionElement::NullAware(element) => self.components[0].push(
+                self.lexical
+                    .infer(element.expr(), self.contexts[0])
+                    .non_null(),
+            ),
+            CollectionElement::Spread(element) => self.spread(
+                element.expr(),
+                self.contexts[1].is_some(),
+                element.is_null_aware(),
+            ),
+            CollectionElement::If(element) => {
+                let condition = element.condition();
+                let then_elem = element.then_elem();
+                let else_elem = element.else_elem();
                 self.branch(condition, true, |visitor| {
                     visitor.visit_collection_element(then_elem)
                 });
@@ -13478,45 +13561,38 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for CollectionTypes<'_, '_, L>
                     });
                 }
             }
-            CollectionElement::For {
-                header,
-                is_await,
-                element,
-                ..
-            } => self.loop_body(header, *is_await, |visitor| {
-                visitor.visit_collection_element(element)
-            }),
+            CollectionElement::For(element) => {
+                self.loop_body(element.header(), element.is_await(), |visitor| {
+                    visitor.visit_collection_element(element.element())
+                })
+            }
         }
     }
 
-    fn visit_map_element(&mut self, element: &falcon_syntax::ast::MapElement) {
-        use falcon_syntax::ast::MapElement;
+    fn visit_map_element(&mut self, element: falcon_syntax::cst::MapElement<'tree>) {
+        use falcon_syntax::cst::MapElement;
         match element {
             MapElement::Entry(entry) => {
-                let key = self.lexical.infer(&entry.key, self.contexts[0]);
-                let value = self.lexical.infer(&entry.value, self.contexts[1]);
-                self.components[0].push(if entry.key_null_aware {
+                let key = self.lexical.infer(entry.key(), self.contexts[0]);
+                let value = self.lexical.infer(entry.value(), self.contexts[1]);
+                self.components[0].push(if entry.key_null_aware() {
                     key.non_null()
                 } else {
                     key
                 });
-                self.components[1].push(if entry.value_null_aware {
+                self.components[1].push(if entry.value_null_aware() {
                     value.non_null()
                 } else {
                     value
                 });
             }
-            MapElement::Spread {
-                expr,
-                is_null_aware,
-                ..
-            } => self.spread(expr, true, *is_null_aware),
-            MapElement::If {
-                condition,
-                then_entry,
-                else_entry,
-                ..
-            } => {
+            MapElement::Spread(element) => {
+                self.spread(element.expr(), true, element.is_null_aware())
+            }
+            MapElement::If(element) => {
+                let condition = element.condition();
+                let then_entry = element.then_entry();
+                let else_entry = element.else_entry();
                 self.branch(condition, true, |visitor| {
                     visitor.visit_map_element(then_entry)
                 });
@@ -13524,18 +13600,15 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for CollectionTypes<'_, '_, L>
                     self.branch(condition, false, |visitor| visitor.visit_map_element(entry));
                 }
             }
-            MapElement::For {
-                header,
-                is_await,
-                entry,
-                ..
-            } => self.loop_body(header, *is_await, |visitor| {
-                visitor.visit_map_element(entry)
-            }),
+            MapElement::For(element) => {
+                self.loop_body(element.header(), element.is_await(), |visitor| {
+                    visitor.visit_map_element(element.entry())
+                })
+            }
         }
     }
 
-    fn visit_expr(&mut self, _expression: &Expr) {}
+    fn visit_expr(&mut self, _expression: Expr<'tree>) {}
 }
 
 struct TypeConstraintContext<'a, 'model> {
@@ -14536,9 +14609,12 @@ mod tests {
             .unwrap();
             std::fs::write(path, source).unwrap();
         }
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let environment = crate::AnalysisEnvironment::discover_with_sdk_locator(
             paths.iter().map(PathBuf::as_path),
@@ -14550,7 +14626,7 @@ mod tests {
         );
         let project: Vec<_> = paths
             .iter()
-            .map(|path| (path.as_path(), &program, source))
+            .map(|path| (path.as_path(), program, source))
             .collect();
         let external = ExternalLibraries::load(&environment, &project, |path| {
             paths.iter().any(|project| project == path)
@@ -14561,12 +14637,15 @@ mod tests {
             }).count(),
             2,
         );
-        let files: Vec<_> = paths.iter().map(|path| (path.clone(), &program)).collect();
+        let files: Vec<_> = paths
+            .iter()
+            .map(|path| (path.clone(), parsed.clone()))
+            .collect();
         let sources: Vec<_> = paths
             .iter()
             .map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             })
             .collect();
@@ -14592,7 +14671,7 @@ mod tests {
                     (
                         path.as_path(),
                         LibrarySource {
-                            program: &program,
+                            program,
                             has_parse_errors: false,
                             has_unresolved_parts: false,
                         },
@@ -14613,7 +14692,7 @@ mod tests {
                 SignatureIndex::build(&files, Some(&external), identities, &types)
             };
             for path in &paths {
-                let model = SemanticModel::new(path, identities, Some(&types));
+                let model = SemanticModel::new(path, &parsed, identities, Some(&types));
                 for name in ["Canonical", "PackageCanonical"] {
                     let identity = model.resolve_name(name).unwrap();
                     let library = identities.declaration_library(&identity).unwrap();
@@ -14721,7 +14800,10 @@ final partial = [first, unresolved];
             |program, model| {
                 let single = SignatureIndex::from_program(program, model);
                 let project = SignatureIndex::from_project_files(
-                    &[(PathBuf::from("/project/lib/main.dart"), program)],
+                    &[(
+                        PathBuf::from("/project/lib/main.dart"),
+                        model.node_ref(program.syntax()).file,
+                    )],
                     model.identities,
                     model.types.unwrap(),
                 );
@@ -14857,23 +14939,32 @@ final partial = [first, unresolved];
             final viaNonNull = GenericTools(Base<int>(1))?.chosen(); \
             final viaInferredMethod = GenericTools(Base<int>(1)).choose('value');";
         let falcon_dart_parser::ParseResult {
-            program: old_program,
+            tree: old_program_tree,
             errors,
             ..
         } = parse(old_source);
+        let old_program_parsed = Arc::new(crate::ParsedFile {
+            source: old_source.into(),
+            tree: old_program_tree,
+        });
+        let old_program = old_program_parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let falcon_dart_parser::ParseResult {
-            program: new_program,
+            tree: new_program_tree,
             errors,
             ..
         } = parse(new_source);
+        let new_program_parsed = Arc::new(crate::ParsedFile {
+            source: new_source.into(),
+            tree: new_program_tree,
+        });
         assert!(errors.is_empty(), "{errors:?}");
         std::fs::write(&path, old_source).unwrap();
         let environment =
             crate::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
         let external = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &old_program, old_source)],
+            &[(path.as_path(), old_program, old_source)],
             // Only this package file belongs to the fixture's external graph.
             |candidate| candidate != external_path,
         );
@@ -14893,14 +14984,15 @@ final partial = [first, unresolved];
             &base_types,
         ));
         let mut old_identity = None;
-        for (source, program, expected) in [
-            (old_source, &old_program, "int"),
-            (new_source, &new_program, "String"),
+        for (source, parsed, expected) in [
+            (old_source, &old_program_parsed, "int"),
+            (new_source, &new_program_parsed, "String"),
         ] {
+            let program = parsed.program();
             let identities = IdentityIndex::with_external(
                 &[IdentitySource {
                     path: &path,
-                    program,
+                    parsed,
                     has_parse_errors: false,
                 }],
                 &[source],
@@ -14921,12 +15013,12 @@ final partial = [first, unresolved];
                 Arc::clone(&base_types),
             );
             let signatures = SignatureIndex::with_external(
-                &[(path.clone(), program)],
+                &[(path.clone(), parsed.clone())],
                 &identities,
                 &types,
                 Arc::clone(&base_signatures),
             );
-            let model = SemanticModel::new(&path, &identities, Some(&types));
+            let model = SemanticModel::new(&path, parsed, &identities, Some(&types));
             let base = model.resolve_name("Base").unwrap();
             let child = model.resolve_name("Child").unwrap();
             assert_eq!(types.type_kind_identity(&base), Some(TypeKind::Class));
@@ -15192,20 +15284,21 @@ final partial = [first, unresolved];
              dynamic contraLast(void Function(dynamic) missing) => consume(integer, missing);",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
                     if !matches!(
-                        function.name.name.as_str(),
+                        function.name().name(),
                         "first" | "last" | "inside" | "contraFirst" | "contraLast"
                     ) {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    let hole = if function.name.name == "inside" {
+                    let expression = expression.expr();
+                    let hole = if function.name().name() == "inside" {
                         ResolvedType::Interface {
                             occurrence: Default::default(),
                             identity: DeclarationIdentity::sdk("dart:core", "List"),
@@ -15213,7 +15306,7 @@ final partial = [first, unresolved];
                             nullable: false,
                             extension_type: false,
                         }
-                    } else if function.name.name.starts_with("contra") {
+                    } else if function.name().name().starts_with("contra") {
                         ResolvedType::Function {
                             shape: None,
                             alias: FunctionTypeAlias::default(),
@@ -15237,7 +15330,7 @@ final partial = [first, unresolved];
                         ),
                         ResolvedType::Unknown,
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
                 assert_eq!(
@@ -15268,12 +15361,14 @@ final partial = [first, unresolved];
             "T pick<T>(T a, T b) => a; int use() => pick(1, 2);",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!()
                 };
+                let expression = expression.expr();
                 assert_eq!(
                     TypeEnvironment::new().infer_with_context(
                         expression,
@@ -15323,18 +15418,19 @@ final partial = [first, unresolved];
                     nullable: false,
                     extension_type: false,
                 };
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    if !function.type_params.is_empty() {
+                    if !function.type_params().is_empty() {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
-                    let context = match function.name.name.as_str() {
+                    let expression = expression.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
+                    let context = match function.name().name() {
                         "partial" | "bounded" => Some(&partial),
                         "complete" => Some(&expected),
                         "nested" => Some(&partial_pair),
@@ -15354,7 +15450,7 @@ final partial = [first, unresolved];
                         ),
                         expected,
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -15378,14 +15474,15 @@ final partial = [first, unresolved];
                 let mut signature = ResolvedSignature::returning(partial.clone());
                 signature.positional.push(partial.clone());
                 let function_context = signature.function_type();
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
-                    let is_call = function.name.name == "call";
+                    let expression = expression.expr();
+                    let is_call = function.name().name() == "call";
                     let inferred = TypeEnvironment::new().infer_with_context(
                         expression,
                         model,
@@ -15420,14 +15517,15 @@ final partial = [first, unresolved];
              Future<Sequence<num>> Function() closure() => () async => create(1);",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations[4..] {
+                for declaration in program.declarations().skip(4) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expression = expression.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let inferred = TypeEnvironment::new().infer_with_context(
                         expression,
                         model,
@@ -15448,7 +15546,7 @@ final partial = [first, unresolved];
                     assert!(
                         value.arguments()[0].interface("dart:core", "num"),
                         "{}: {inferred:?}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -15463,13 +15561,15 @@ final partial = [first, unresolved];
              Sequence<num> probe() => create(1);",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = program.declarations.last().unwrap() else {
+                let TopLevelDecl::Function(function) = program.declarations().last().unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!()
                 };
-                let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                let expression = expression.expr();
+                let expected = model.resolve_type(function.return_type().unwrap());
                 let inferred = TypeEnvironment::new().infer_with_context(
                     expression,
                     model,
@@ -15493,13 +15593,14 @@ final partial = [first, unresolved];
              dynamic arrow(Pending future) => () async => future;",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     let scope = TypeParameterScope::default();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
@@ -15529,19 +15630,22 @@ final partial = [first, unresolved];
         let parsed = sources.map(|source| {
             let parsed = parse(source);
             assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-            parsed
+            Arc::new(crate::ParsedFile {
+                source: source.into(),
+                tree: parsed.tree,
+            })
         });
-        let programs = parsed.each_ref().map(|parsed| &parsed.program);
+        let programs = parsed.each_ref().map(|parsed| parsed.program());
         let identities = IdentityIndex::from_project_files(
             &[
                 IdentitySource {
                     path: &paths[0],
-                    program: programs[0],
+                    parsed: &parsed[0],
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: &paths[1],
-                    program: programs[1],
+                    parsed: &parsed[1],
                     has_parse_errors: false,
                 },
             ],
@@ -15549,24 +15653,20 @@ final partial = [first, unresolved];
         );
         let types = TypeIndex::from_program(programs[0]);
         let files = vec![
-            (paths[0].clone(), programs[0]),
-            (paths[1].clone(), programs[1]),
+            (paths[0].clone(), parsed[0].clone()),
+            (paths[1].clone(), parsed[1].clone()),
         ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let config = falcon_config::FalconConfig::default();
         for (index, name) in ["x", "y"].into_iter().enumerate() {
-            let model = SemanticModel::new(&paths[index], &identities, Some(&types));
+            let model =
+                SemanticModel::new(&paths[index], &parsed[index], &identities, Some(&types));
             let start = sources[index].find("while").unwrap();
             assert_eq!(
                 signatures.flow_writes[&model.file].region_writes[&start],
                 HashSet::from([name.to_owned()]),
             );
-            let mut context = crate::AnalyzeContext::new(
-                &paths[index],
-                sources[index],
-                &config,
-                &parsed[index].syntax,
-            );
+            let mut context = crate::AnalyzeContext::new(&paths[index], &config, &parsed[index]);
             context.identities = Some(&identities);
             context.signatures = Some(&signatures);
             assert!(std::ptr::eq(
@@ -15770,10 +15870,15 @@ final nullableIndex = holder?.items[0].size;
     fn unresolved_property_chains_infer_in_linear_work() {
         let source = format!("final value = unknown{};", ".x".repeat(40));
         with_model(&source, |program, model| {
-            let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+            let TopLevelDecl::Variable(variable) = program.declarations().next().unwrap() else {
                 panic!("expected variable");
             };
-            let expression = variable.declarators[0].initializer.as_ref().unwrap();
+            let expression = variable
+                .declarators()
+                .next()
+                .unwrap()
+                .initializer()
+                .unwrap();
             let signatures = SignatureIndex::from_program(program, model);
             let lookups = std::cell::Cell::new(0);
             let lookup = |_: &str| {
@@ -16169,21 +16274,24 @@ class SetterChild extends SetterApplication {
         );
     }
 
-    fn with_model(source: &str, test: impl FnOnce(&Program, &SemanticModel<'_>)) {
+    fn with_model(source: &str, test: impl FnOnce(Program<'_>, &SemanticModel<'_>)) {
         let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let sources = [IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }];
         let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let types = TypeIndex::from_program(&program);
-        let model = SemanticModel::new(&path, &identities, Some(&types));
-        test(&program, &model);
+        let types = TypeIndex::from_program(program);
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
+        test(program, &model);
     }
 
     #[test]
@@ -16191,19 +16299,20 @@ class SetterChild extends SetterApplication {
         with_model(
             "T f<T, U extends T>(T input, {required int value}) => throw 0;",
             |program, model| {
-                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
+                else {
                     panic!("expected function")
                 };
                 let mut scope = TypeParameterScope::default();
-                scope.push(&function.type_params[..1], model);
+                scope.push(function.type_params().take(1), model);
                 assert!(
-                    FunctionTypeShape::from_scope(Vec::new(), &function.type_params, &scope,)
+                    FunctionTypeShape::from_scope(Vec::new(), function.type_params(), &scope,)
                         .is_none()
                 );
-                scope.push(&function.type_params, model);
+                scope.push(function.type_params(), model);
                 let shape = FunctionTypeShape::from_scope(
                     vec!["value".to_owned()],
-                    &function.type_params,
+                    function.type_params(),
                     &scope,
                 )
                 .unwrap();
@@ -16259,13 +16368,13 @@ class SetterChild extends SetterApplication {
              Cycle<int> cyclic() => throw 0;",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!("expected function")
                     };
-                    let ty = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let ty = model.resolve_type(function.return_type().unwrap());
                     let erased = signatures.extension_type_erasure(&ty, model);
-                    if function.name.name == "nested" {
+                    if function.name().name() == "nested" {
                         assert_eq!(erased, Some(model.core_type("int", false)));
                     } else {
                         assert_eq!(erased, None);
@@ -16515,7 +16624,7 @@ final integer = integers.first;
     fn with_parsed_core(
         source: &str,
         core: &str,
-        test: impl FnOnce(&Program, &SemanticModel<'_>, &SignatureIndex),
+        test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
     ) {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
@@ -16542,9 +16651,12 @@ final integer = integers.first;
         let path = root.join("app/lib/main.dart");
         std::fs::write(&path, source).unwrap();
         let path = crate::canonical_or_lexical(&path);
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let environment =
             crate::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
@@ -16553,14 +16665,14 @@ final integer = integers.first;
             });
         let external = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &program, source)],
+            &[(path.as_path(), program, source)],
             |candidate| candidate == path.as_path(),
         );
         assert!(!external.is_empty(), "parsed core fixture was not loaded");
         let identities = IdentityIndex::build(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
@@ -16574,7 +16686,7 @@ final integer = integers.first;
             [(
                 path.as_path(),
                 LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -16583,14 +16695,14 @@ final integer = integers.first;
         );
         types.add_external(&external, &identities);
         let signatures = SignatureIndex::build(
-            &[(path.clone(), &program)],
+            &[(path.clone(), parsed.clone())],
             Some(&external),
             &identities,
             &types,
         );
         test(
-            &program,
-            &SemanticModel::new(&path, &identities, Some(&types)),
+            program,
+            &SemanticModel::new(&path, &parsed, &identities, Some(&types)),
             &signatures,
         );
     }
@@ -16606,10 +16718,16 @@ final integer = integers.first;
                 );
                 with_model(&source, |program, model| {
                     let signatures = SignatureIndex::from_program(program, model);
-                    let TopLevelDecl::Variable(variable) = &program.declarations[1] else {
+                    let TopLevelDecl::Variable(variable) = program.declarations().nth(1).unwrap()
+                    else {
                         panic!("expected variable");
                     };
-                    let expression = variable.declarators[0].initializer.as_ref().unwrap();
+                    let expression = variable
+                        .declarators()
+                        .next()
+                        .unwrap()
+                        .initializer()
+                        .unwrap();
                     let receiver = ResolvedType::Interface {
                         occurrence: Default::default(),
                         identity: model.resolve_name("Link").unwrap(),
@@ -17012,7 +17130,10 @@ final integer = integers.first;
                 "class Partial<T> {{ Partial(T value); int get length => 0; }} {declarations}"
             );
             with_model(&source, |program, model| {
-                let files = [(PathBuf::from("/project/lib/main.dart"), program)];
+                let files = [(
+                    PathBuf::from("/project/lib/main.dart"),
+                    model.node_ref(program.syntax()).file,
+                )];
                 for signatures in [
                     SignatureIndex::from_program(program, model),
                     SignatureIndex::from_project_files(
@@ -17060,34 +17181,41 @@ final integer = integers.first;
     fn imported_partial_global_inference_is_independent_of_file_order() {
         let main_path = PathBuf::from("/project/lib/main.dart");
         let origin_path = PathBuf::from("/project/lib/origin.dart");
-        let falcon_dart_parser::ParseResult {
-            program: main,
-            errors,
-            ..
-        } = parse(
-            "import 'origin.dart' as origin; final items = [origin.later]; \
+        let main_source = "import 'origin.dart' as origin; final items = [origin.later]; \
              dynamic readItems() => items; dynamic readNull() => origin.empty; \
-             final cycle = [origin.other];",
-        );
-        assert!(errors.is_empty(), "{errors:?}");
+             final cycle = [origin.other];";
         let falcon_dart_parser::ParseResult {
-            program: origin,
+            tree: main_tree,
             errors,
             ..
-        } = parse(
-            "import 'main.dart' as root; final later = 1; var empty = null; \
-             final other = [root.cycle];",
-        );
+        } = parse(main_source);
+        let main_parsed = Arc::new(crate::ParsedFile {
+            source: main_source.into(),
+            tree: main_tree,
+        });
+        let main = main_parsed.program();
+        assert!(errors.is_empty(), "{errors:?}");
+        let origin_source = "import 'main.dart' as root; final later = 1; var empty = null; \
+             final other = [root.cycle];";
+        let falcon_dart_parser::ParseResult {
+            tree: origin_tree,
+            errors,
+            ..
+        } = parse(origin_source);
+        let origin_parsed = Arc::new(crate::ParsedFile {
+            source: origin_source.into(),
+            tree: origin_tree,
+        });
         assert!(errors.is_empty(), "{errors:?}");
         let sources = [
             IdentitySource {
                 path: &main_path,
-                program: &main,
+                parsed: &main_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &origin_path,
-                program: &origin,
+                parsed: &origin_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -17097,7 +17225,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -17106,16 +17234,23 @@ final integer = integers.first;
             &identities,
         );
         for files in [
-            [(main_path.clone(), &main), (origin_path.clone(), &origin)],
-            [(origin_path.clone(), &origin), (main_path.clone(), &main)],
+            [
+                (main_path.clone(), main_parsed.clone()),
+                (origin_path.clone(), origin_parsed.clone()),
+            ],
+            [
+                (origin_path.clone(), origin_parsed.clone()),
+                (main_path.clone(), main_parsed.clone()),
+            ],
         ] {
             let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-            let model = SemanticModel::new(&main_path, &identities, Some(&types));
+            let model = SemanticModel::new(&main_path, &main_parsed, &identities, Some(&types));
             let items = signatures
                 .value_type(&model.resolve_value("items").unwrap())
                 .unwrap();
             assert!(items.arguments()[0].interface("dart:core", "int"));
-            let origin_model = SemanticModel::new(&origin_path, &identities, Some(&types));
+            let origin_model =
+                SemanticModel::new(&origin_path, &origin_parsed, &identities, Some(&types));
             for identity in [
                 model.resolve_value("cycle").unwrap(),
                 origin_model.resolve_value("other").unwrap(),
@@ -17125,16 +17260,18 @@ final integer = integers.first;
                     Some(&ResolvedType::Unknown)
                 );
             }
-            for (declaration, expected) in main.declarations[1..]
-                .iter()
+            for (declaration, expected) in main
+                .declarations()
+                .skip(1)
                 .zip([items.clone(), ResolvedType::Dynamic])
             {
                 let TopLevelDecl::Function(function) = declaration else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
                     panic!()
                 };
+                let body = body.expr();
                 assert_eq!(
                     TypeEnvironment::new().infer_with_signatures(
                         body,
@@ -17159,13 +17296,14 @@ final integer = integers.first;
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
                 let other = ResolvedType::interface_identity(model.resolve_name("Other").unwrap());
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(body)) = function.body() else {
                         panic!()
                     };
+                    let body = body.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     assert!(
@@ -17288,19 +17426,17 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(body)) = function.body() else {
                         panic!()
                     };
+                    let body = body.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
-                    let expected = function
-                        .return_type
-                        .as_ref()
-                        .map(|ty| model.resolve_type(ty));
+                    let expected = function.return_type().map(|ty| model.resolve_type(ty));
                     let actual = environment.infer_with_context(
                         body,
                         model,
@@ -17311,7 +17447,7 @@ final integer = integers.first;
                     );
                     let int = model.core_type("int", false);
                     let string = model.core_type("String", false);
-                    match function.name.name.as_str() {
+                    match function.name().name() {
                         "list" | "counted" | "promoted" => assert_eq!(actual.arguments(), &[int]),
                         "map" => assert_eq!(actual.arguments(), &[int.clone(), int]),
                         "positional" => assert_eq!(actual, int),
@@ -17346,14 +17482,15 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(body)) = function.body() else {
                         panic!()
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let body = body.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let actual = environment.infer_with_context(
@@ -17364,7 +17501,7 @@ final integer = integers.first;
                         Some(&expected),
                         &|_| None,
                     );
-                    assert_eq!(actual, expected, "{}", function.name.name);
+                    assert_eq!(actual, expected, "{}", function.name().name());
                 }
             },
         );
@@ -17388,21 +17525,22 @@ final integer = integers.first;
              abstract class Set<E> implements Iterable<E> {} \
              abstract class List<E> implements Iterable<E> {}",
             |program, model, signatures| {
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let scope = TypeParameterScope::default();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     assert_eq!(
                         environment.infer_with_signatures(expression, model, signatures, &scope),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -17484,14 +17622,15 @@ final integer = integers.first;
             let signatures = SignatureIndex::from_program(program, model);
             let scope = TypeParameterScope::default();
             for ((expression, name, arguments), declaration) in
-                cases.iter().zip(&program.declarations[2..])
+                cases.iter().zip(program.declarations().skip(2))
             {
                 let TopLevelDecl::Function(function) = declaration else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
                     panic!()
                 };
+                let body = body.expr();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
                 let actual = environment.infer_with_signatures(body, model, &signatures, &scope);
@@ -17502,14 +17641,21 @@ final integer = integers.first;
                 assert_eq!(actual.arguments().len(), arguments.len(), "{expression}");
                 for (actual, expected) in actual.arguments().iter().zip(*arguments) {
                     let expected = expected.map_or(ResolvedType::Unknown, |ty| {
-                        let falcon_dart_parser::ParseResult {
-                            program, errors, ..
-                        } = parse(&format!("{ty} expected;"));
+                        let program_source = format!("{ty} expected;");
+                        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                            parse(&program_source);
+                        let parsed = Arc::new(crate::ParsedFile {
+                            source: program_source.into(),
+                            tree,
+                        });
+                        let program = parsed.program();
                         assert!(errors.is_empty(), "{errors:?}");
-                        let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+                        let TopLevelDecl::Variable(variable) =
+                            program.declarations().next().unwrap()
+                        else {
                             panic!()
                         };
-                        model.resolve_type(variable.var_type.as_ref().unwrap())
+                        model.resolve_type(variable.var_type().unwrap())
                     });
                     assert_eq!(*actual, expected, "{expression}");
                 }
@@ -17524,18 +17670,19 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     assert_eq!(
                         environment.infer_with_signatures(expression, model, &signatures, &scope),
-                        model.resolve_type(function.return_type.as_ref().unwrap())
+                        model.resolve_type(function.return_type().unwrap())
                     );
                 }
             },
@@ -17558,22 +17705,20 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations[4..] {
+                for declaration in program.declarations().skip(4) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
-                    let Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } = expression.as_ref()
-                    else {
+                    let expression = expression.expr();
+                    let Expr::Call(call) = expression else {
                         panic!()
                     };
+                    let callee = call.callee();
+                    let type_args = call.type_args();
+                    let args = call.args();
                     let environment = TypeEnvironment::new();
                     let context = InferenceContext {
                         model,
@@ -17583,7 +17728,7 @@ final integer = integers.first;
                         argument_fallback: None,
                     };
                     let invocation = environment
-                        .resolved_invocation(callee, type_args, &context)
+                        .resolved_invocation(callee, type_args.clone(), &context)
                         .unwrap();
                     let mut argument_contexts = HashMap::new();
                     let substitutions = environment.infer_signature_substitutions_with_result(
@@ -17596,7 +17741,7 @@ final integer = integers.first;
                     );
                     assert_eq!(
                         model.substitute(&invocation.signature.return_type, &substitutions),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                     );
                     assert_eq!(argument_contexts.len(), 1);
                     let ResolvedType::Function { positional, .. } =
@@ -17629,22 +17774,20 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations[6..] {
+                for declaration in program.declarations().skip(6) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
-                    let Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } = expression.as_ref()
-                    else {
+                    let expression = expression.expr();
+                    let Expr::Call(call) = expression else {
                         panic!()
                     };
+                    let callee = call.callee();
+                    let type_args = call.type_args();
+                    let args = call.args();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let context = InferenceContext {
@@ -17655,7 +17798,7 @@ final integer = integers.first;
                         argument_fallback: None,
                     };
                     let invocation = environment
-                        .resolved_invocation(callee, type_args, &context)
+                        .resolved_invocation(callee, type_args.clone(), &context)
                         .unwrap();
                     let mut argument_contexts = HashMap::new();
                     let substitutions = environment.infer_signature_substitutions_with_result(
@@ -17668,9 +17811,9 @@ final integer = integers.first;
                     );
                     assert_eq!(
                         model.substitute(&invocation.signature.return_type, &substitutions),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                     );
-                    assert!(argument_contexts.is_empty(), "{}", function.name.name);
+                    assert!(argument_contexts.is_empty(), "{}", function.name().name());
                 }
             },
         );
@@ -17686,17 +17829,18 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    if function.name.name == "encode" {
+                    if function.name().name() == "encode" {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expression = expression.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     assert_eq!(
@@ -17710,7 +17854,7 @@ final integer = integers.first;
                         ),
                         expected,
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -17725,12 +17869,14 @@ final integer = integers.first;
              int joined(bool flag) => (flag ? first : second)(1);",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = &program.declarations[2] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(2).unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!()
                 };
+                let expression = expression.expr();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -17785,12 +17931,14 @@ final integer = integers.first;
              double probe(MockRandom random) => when(random.nextDouble).thenReturn(1.0);",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = &program.declarations[5] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(5).unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!()
                 };
+                let expression = expression.expr();
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
@@ -17820,17 +17968,18 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    if !function.type_params.is_empty() {
+                    if !function.type_params().is_empty() {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expression = expression.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     assert_eq!(
@@ -17844,9 +17993,9 @@ final integer = integers.first;
                         ),
                         expected,
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
-                    if !function.name.name.starts_with("context") {
+                    if !function.name().name().starts_with("context") {
                         assert_eq!(
                             environment.infer_with_signatures(
                                 expression,
@@ -17856,8 +18005,8 @@ final integer = integers.first;
                             ),
                             expected
                         );
-                    } else if function.name.name == "contextNumber"
-                        || function.name.name == "contextDouble"
+                    } else if function.name().name() == "contextNumber"
+                        || function.name().name() == "contextDouble"
                     {
                         assert_eq!(
                             environment.infer_with_signatures(
@@ -17868,7 +18017,7 @@ final integer = integers.first;
                             ),
                             model.core_type("double", false)
                         );
-                    } else if function.name.name == "contextBoxNumber" {
+                    } else if function.name().name() == "contextBoxNumber" {
                         let ResolvedType::Interface { arguments, .. } = environment
                             .infer_with_signatures(expression, model, &signatures, &scope)
                         else {
@@ -17896,27 +18045,28 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let actual = TypeEnvironment::new().infer_with_signatures(
                         expression,
                         model,
                         &signatures,
                         &scope,
                     );
-                    if function.name.name == "unresolved" {
+                    if function.name().name() == "unresolved" {
                         assert_eq!(actual.arguments(), &[ResolvedType::Unknown]);
                     } else {
                         assert_eq!(
                             actual,
-                            model.resolve_type(function.return_type.as_ref().unwrap()),
+                            model.resolve_type(function.return_type().unwrap()),
                             "{}",
-                            function.name.name,
+                            function.name().name(),
                         );
                     }
                 }
@@ -17934,16 +18084,17 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let actual = environment.infer_with_context(
                         expression,
                         model,
@@ -17952,22 +18103,24 @@ final integer = integers.first;
                         Some(&expected),
                         &|_| None,
                     );
-                    let parameter = model
-                        .resolve_formal_parameter_in(&function.params().unwrap().params[0], &scope);
+                    let parameter = model.resolve_formal_parameter_in(
+                        function.params().unwrap().params().next().unwrap(),
+                        &scope,
+                    );
                     assert_eq!(
                         actual,
-                        if function.name.name == "unrelated" {
+                        if function.name().name() == "unrelated" {
                             parameter
                         } else {
                             expected
                         },
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                     assert_eq!(
                         environment.infer_with_signatures(expression, model, &signatures, &scope),
                         model.resolve_formal_parameter_in(
-                            &function.params().unwrap().params[0],
+                            function.params().unwrap().params().next().unwrap(),
                             &scope
                         ),
                     );
@@ -17985,16 +18138,17 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let actual = environment.infer_with_context(
                         expression,
                         model,
@@ -18003,7 +18157,7 @@ final integer = integers.first;
                         Some(&expected),
                         &|_| None,
                     );
-                    match function.name.name.as_str() {
+                    match function.name().name() {
                         "dynamicField" => assert_eq!(actual, expected),
                         "objectField" => {
                             let ResolvedType::Record { positional, .. } = actual else {
@@ -18140,30 +18294,40 @@ final integer = integers.first;
     fn mixin_application_private_constructors_are_library_scoped() {
         let base_path = PathBuf::from("/project/lib/base.dart");
         let alias_path = PathBuf::from("/project/lib/alias.dart");
-        let falcon_dart_parser::ParseResult {
-            program: base,
-            errors: base_errors,
-            ..
-        } = parse(concat!(
+        let base_source = concat!(
             "class Base { Base(); Base._private(); } mixin Extra {} ",
             "class LocalAlias = Base with Extra;",
-        ));
+        );
         let falcon_dart_parser::ParseResult {
-            program: alias,
+            tree: base_tree,
+            errors: base_errors,
+            ..
+        } = parse(base_source);
+        let base_parsed = Arc::new(crate::ParsedFile {
+            source: base_source.into(),
+            tree: base_tree,
+        });
+        let alias_source = "import 'base.dart'; class ImportedAlias = Base with Extra;";
+        let falcon_dart_parser::ParseResult {
+            tree: alias_tree,
             errors: alias_errors,
             ..
-        } = parse("import 'base.dart'; class ImportedAlias = Base with Extra;");
+        } = parse(alias_source);
+        let alias_parsed = Arc::new(crate::ParsedFile {
+            source: alias_source.into(),
+            tree: alias_tree,
+        });
         assert!(base_errors.is_empty());
         assert!(alias_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &alias_path,
-                program: &alias,
+                parsed: &alias_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &base_path,
-                program: &base,
+                parsed: &base_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -18173,7 +18337,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -18181,13 +18345,16 @@ final integer = integers.first;
             }),
             &identities,
         );
-        let files = [(alias_path.clone(), &alias), (base_path.clone(), &base)];
+        let files = [
+            (alias_path.clone(), alias_parsed.clone()),
+            (base_path.clone(), base_parsed.clone()),
+        ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        for (path, name, private_visible) in [
-            (&base_path, "LocalAlias", true),
-            (&alias_path, "ImportedAlias", false),
+        for (path, parsed, name, private_visible) in [
+            (&base_path, &base_parsed, "LocalAlias", true),
+            (&alias_path, &alias_parsed, "ImportedAlias", false),
         ] {
-            let model = SemanticModel::new(path, &identities, Some(&types));
+            let model = SemanticModel::new(path, parsed, &identities, Some(&types));
             let owner = model.resolve_name(name).unwrap();
             assert!(signatures.constructor(&owner, "new").is_some());
             assert_eq!(
@@ -18240,14 +18407,15 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expression = expression.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18257,7 +18425,7 @@ final integer = integers.first;
                         ),
                         expected,
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18276,20 +18444,21 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
                     if !matches!(
-                        function.name.name.as_str(),
+                        function.name().name(),
                         "bounded" | "rawContext" | "rawInheritedContext"
                     ) {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expression = expression.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let inferred = environment.infer_with_context(
@@ -18300,7 +18469,7 @@ final integer = integers.first;
                         Some(&expected),
                         &|_| None,
                     );
-                    if function.name.name == "bounded" {
+                    if function.name().name() == "bounded" {
                         assert_eq!(inferred, expected.non_null());
                     } else {
                         assert!(inferred.arguments()[0].interface("dart:core", "Object"));
@@ -18335,17 +18504,18 @@ final integer = integers.first;
                 let dynamic = ResolvedType::Dynamic;
                 let object = model.core_type("Object", true);
                 let num = model.core_type("num", false);
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    if !function.type_params.is_empty() {
+                    let expression = expression.expr();
+                    if !function.type_params().is_empty() {
                         continue;
                     }
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let inferred = environment.infer_with_context(
@@ -18360,7 +18530,7 @@ final integer = integers.first;
                         ResolvedType::Function { return_type, .. } => return_type.as_ref(),
                         other => other,
                     };
-                    let argument = match function.name.name.as_str() {
+                    let argument = match function.name().name() {
                         "omittedBound" | "rawTearoff" | "aliasTearoff" | "aliasConstructor" => {
                             &dynamic
                         }
@@ -18371,7 +18541,7 @@ final integer = integers.first;
                         instance.arguments(),
                         std::slice::from_ref(argument),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18389,23 +18559,24 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    if !function.type_params.is_empty() {
+                    if !function.type_params().is_empty() {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     assert_eq!(
                         environment.infer_with_signatures(expression, model, &signatures, &scope),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18428,14 +18599,15 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
-                    if function.name.name == "nextDouble" {
+                    let expression = expression.expr();
+                    if function.name().name() == "nextDouble" {
                         continue;
                     }
                     let Some(params) = function.params() else {
@@ -18445,9 +18617,9 @@ final integer = integers.first;
                     environment.bind_params(params, model, &scope);
                     assert_eq!(
                         environment.infer_with_signatures(expression, model, &signatures, &scope),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18474,16 +18646,17 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    if !function.type_params.is_empty() {
+                    if !function.type_params().is_empty() {
                         continue;
                     }
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18491,9 +18664,9 @@ final integer = integers.first;
                             &signatures,
                             &scope,
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18512,13 +18685,14 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18526,9 +18700,9 @@ final integer = integers.first;
                             &signatures,
                             &scope,
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
                 for name in ["Box", "Middle", "Leaf"] {
@@ -18552,20 +18726,20 @@ final integer = integers.first;
              int Function() closure() => () { if (_x != null) return _x; return 0; }; }",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Class(class) = &program.declarations[0] else {
+                let TopLevelDecl::Class(class) = program.declarations().next().unwrap() else {
                     panic!("expected class");
                 };
                 let method = class
-                    .members
-                    .iter()
+                    .members()
                     .find_map(|member| match member {
                         ClassMember::Method(method) => Some(method),
                         _ => None,
                     })
                     .unwrap();
-                let Some(FunctionBody::Arrow(expression, _)) = &method.body else {
+                let Some(FunctionBody::Arrow(expression)) = method.body() else {
                     panic!("expected arrow body");
                 };
+                let expression = expression.expr();
                 let receiver = ResolvedType::Interface {
                     occurrence: Default::default(),
                     identity: model.resolve_name("Promoted").unwrap(),
@@ -18588,7 +18762,7 @@ final integer = integers.first;
                         &TypeParameterScope::default(),
                         &lookup,
                     ),
-                    model.resolve_type(method.return_type.as_ref().unwrap()),
+                    model.resolve_type(method.return_type().unwrap()),
                 );
             },
         );
@@ -18604,13 +18778,14 @@ final integer = integers.first;
              flag ? (value = b) : 0; return value; };",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18618,9 +18793,9 @@ final integer = integers.first;
                             &signatures,
                             &TypeParameterScope::default(),
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18636,12 +18811,14 @@ final integer = integers.first;
             "class Object {} class num extends Object {} class int extends num {} \
              class List<E> { E get first => throw 0; E get last => throw 0; }",
             |program, model, signatures| {
-                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
+                else {
                     panic!("expected function");
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!("expected arrow body");
                 };
+                let expression = expression.expr();
                 assert_eq!(
                     TypeEnvironment::new().infer_with_signatures(
                         expression,
@@ -18649,7 +18826,7 @@ final integer = integers.first;
                         signatures,
                         &TypeParameterScope::default(),
                     ),
-                    model.resolve_type(function.return_type.as_ref().unwrap()),
+                    model.resolve_type(function.return_type().unwrap()),
                 );
             },
         );
@@ -18664,13 +18841,14 @@ final integer = integers.first;
              int? value; [if (condition) value = 1]; return value; };",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18678,9 +18856,9 @@ final integer = integers.first;
                             &signatures,
                             &TypeParameterScope::default(),
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18696,13 +18874,14 @@ final integer = integers.first;
              (switch (key) { 0 => value = 1, _ => 0 }); return value; };",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18710,9 +18889,9 @@ final integer = integers.first;
                             &signatures,
                             &TypeParameterScope::default(),
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18726,12 +18905,14 @@ final integer = integers.first;
              try { value = parse(); } catch (_) {} return value; }; int parse() => 1;",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
+                else {
                     panic!("expected function");
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!("expected arrow body");
                 };
+                let expression = expression.expr();
                 assert_eq!(
                     TypeEnvironment::new().infer_with_signatures(
                         expression,
@@ -18739,7 +18920,7 @@ final integer = integers.first;
                         &signatures,
                         &TypeParameterScope::default(),
                     ),
-                    model.resolve_type(function.return_type.as_ref().unwrap()),
+                    model.resolve_type(function.return_type().unwrap()),
                 );
             },
         );
@@ -18758,13 +18939,14 @@ final integer = integers.first;
             "class Object {} class num extends Object {} class int extends num {} \
              class Iterable<E> {} class List<E> extends Iterable<E> {}",
             |program, model, signatures| {
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18772,9 +18954,9 @@ final integer = integers.first;
                             signatures,
                             &TypeParameterScope::default(),
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18800,13 +18982,14 @@ final integer = integers.first;
              int? maybe() => null; void invoke() {}",
             "class Object {} class num extends Object {} class int extends num {}",
             |program, model, signatures| {
-                for declaration in program.declarations.iter().take(4) {
+                for declaration in program.declarations().take(4) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!("expected function");
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!("expected arrow body");
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18814,9 +18997,9 @@ final integer = integers.first;
                             signatures,
                             &TypeParameterScope::default(),
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18836,16 +19019,17 @@ final integer = integers.first;
         with_model(&source, |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let scope = TypeParameterScope::default();
-            for declaration in &program.declarations {
+            for declaration in program.declarations() {
                 let TopLevelDecl::Function(function) = declaration else {
                     continue;
                 };
-                if !function.type_params.is_empty() {
+                if !function.type_params().is_empty() {
                     continue;
                 }
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     continue;
                 };
+                let expression = expression.expr();
                 assert_eq!(
                     TypeEnvironment::new().infer_with_signatures(
                         expression,
@@ -18853,9 +19037,9 @@ final integer = integers.first;
                         &signatures,
                         &scope
                     ),
-                    model.resolve_type(function.return_type.as_ref().unwrap()),
+                    model.resolve_type(function.return_type().unwrap()),
                     "{}",
-                    function.name.name,
+                    function.name().name(),
                 );
             }
         });
@@ -18878,13 +19062,14 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18892,9 +19077,9 @@ final integer = integers.first;
                             &signatures,
                             &scope
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18930,13 +19115,14 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18944,9 +19130,9 @@ final integer = integers.first;
                             &signatures,
                             &scope,
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -18978,13 +19164,14 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         continue;
                     };
+                    let expression = expression.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             expression,
@@ -18992,9 +19179,9 @@ final integer = integers.first;
                             &signatures,
                             &scope,
                         ),
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
             },
@@ -19063,18 +19250,19 @@ final integer = integers.first;
             let signatures = SignatureIndex::from_program(program, model);
             let scope = TypeParameterScope::default();
             for ((expression, expected), declaration) in
-                cases.iter().zip(&program.declarations[1..])
+                cases.iter().zip(program.declarations().skip(1))
             {
                 let TopLevelDecl::Function(function) = declaration else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
                     panic!()
                 };
+                let body = body.expr();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
                 let expected = expected.map_or(ResolvedType::Unknown, |_| {
-                    model.resolve_type(function.return_type.as_ref().unwrap())
+                    model.resolve_type(function.return_type().unwrap())
                 });
                 assert_eq!(
                     environment.infer_with_signatures(body, model, &signatures, &scope),
@@ -19098,13 +19286,14 @@ final integer = integers.first;
                     assert!(facts[0].is_static);
                     assert_eq!(facts[0].declaring_type, owner);
                 }
-                for declaration in &program.declarations[1..] {
+                for declaration in program.declarations().skip(1) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(body)) = function.body() else {
                         panic!()
                     };
+                    let body = body.expr();
                     assert_eq!(
                         TypeEnvironment::new().infer_with_signatures(
                             body,
@@ -19125,12 +19314,14 @@ final integer = integers.first;
             "Never stop() => throw 0; void use() => stop();",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!()
                 };
+                let expression = expression.expr();
                 let actual = TypeEnvironment::new().infer_with_signatures(
                     expression,
                     model,
@@ -19168,14 +19359,15 @@ final integer = integers.first;
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations[3..] {
+                for declaration in program.declarations().skip(3) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(body)) = function.body() else {
                         panic!()
                     };
-                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let body = body.expr();
+                    let expected = model.resolve_type(function.return_type().unwrap());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let inferred = environment.infer_with_context(
@@ -19197,11 +19389,11 @@ final integer = integers.first;
         with_model(
             "Never stop() => throw 0; Never? nullable() => null;",
             |program, model| {
-                for (index, declaration) in program.declarations.iter().enumerate() {
+                for (index, declaration) in program.declarations().enumerate() {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let ty = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let ty = model.resolve_type(function.return_type().unwrap());
                     assert_eq!(
                         ty,
                         if index == 0 {
@@ -19220,11 +19412,12 @@ final integer = integers.first;
         with_model(
             "class Never {} Never value() => Never();",
             |program, model| {
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
                 assert!(matches!(
-                    model.resolve_type(function.return_type.as_ref().unwrap()),
+                    model.resolve_type(function.return_type().unwrap()),
                     ResolvedType::Interface {
                         identity: DeclarationIdentity::Project { .. },
                         ..
@@ -19241,20 +19434,21 @@ final integer = integers.first;
             |program, model| {
                 let owner = model.resolve_value("f").unwrap();
                 let declaration_model = model.for_declaration(&owner).unwrap();
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
                 assert!(matches!(
-                    declaration_model.resolve_type(function.return_type.as_ref().unwrap()),
+                    declaration_model.resolve_type(function.return_type().unwrap()),
                     ResolvedType::Interface {
                         extension_type: true,
                         ..
                     }
                 ));
                 let mut original = TypeParameterScope::default();
-                original.push(&function.type_params, model);
+                original.push(function.type_params(), model);
                 let mut declaration = TypeParameterScope::default();
-                declaration.push(&function.type_params, &declaration_model);
+                declaration.push(function.type_params(), &declaration_model);
                 assert_eq!(original.lookup("T"), declaration.lookup("T"));
             },
         );
@@ -19272,39 +19466,42 @@ final integer = integers.first;
                 "void remote<T>() {}",
             ),
         ];
-        let programs: Vec<_> = inputs
+        let parsed: Vec<_> = inputs
             .iter()
             .map(|(_, source)| {
-                let falcon_dart_parser::ParseResult {
-                    program, errors, ..
-                } = parse(source);
+                let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+                let parsed = Arc::new(crate::ParsedFile {
+                    source: (*source).into(),
+                    tree,
+                });
                 assert!(errors.is_empty(), "{errors:?}");
-                program
+                parsed
             })
             .collect();
         let sources: Vec<_> = inputs
             .iter()
-            .zip(&programs)
-            .map(|((path, _), program)| IdentitySource {
+            .zip(&parsed)
+            .map(|((path, _), parsed)| IdentitySource {
                 path,
-                program,
+                parsed,
                 has_parse_errors: false,
             })
             .collect();
         let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let caller = SemanticModel::new(&inputs[0].0, &identities, None);
-        let origin = SemanticModel::new(&inputs[1].0, &identities, None);
+        let caller = SemanticModel::new(&inputs[0].0, &parsed[0], &identities, None);
+        let origin = SemanticModel::new(&inputs[1].0, &parsed[1], &identities, None);
         let owner = caller.resolve_value("remote").unwrap();
         let imported = caller.for_declaration(&owner).unwrap();
-        let TopLevelDecl::Function(function) = &programs[1].declarations[0] else {
+        let TopLevelDecl::Function(function) = parsed[1].program().declarations().next().unwrap()
+        else {
             panic!()
         };
         let mut direct_scope = TypeParameterScope::default();
-        direct_scope.push(&function.type_params, &origin);
+        direct_scope.push(function.type_params(), &origin);
         let mut imported_scope = TypeParameterScope::default();
-        imported_scope.push(&function.type_params, &imported);
+        imported_scope.push(function.type_params(), &imported);
         let mut caller_scope = TypeParameterScope::default();
-        caller_scope.push(&function.type_params, &caller);
+        caller_scope.push(function.type_params(), &caller);
         assert_eq!(direct_scope.lookup("T"), imported_scope.lookup("T"));
         assert_ne!(caller_scope.lookup("T"), imported_scope.lookup("T"));
     }
@@ -19314,13 +19511,18 @@ final integer = integers.first;
         with_model(
             "import 'dart:async'; class Box<T> {} void f(Box<String?> box, Future<void> future) {}",
             |program, model| {
-                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap()
+                else {
                     panic!()
                 };
                 let box_type = model.resolve_type(
-                    function.params().unwrap().params[0]
-                        .param_type
-                        .as_ref()
+                    function
+                        .params()
+                        .unwrap()
+                        .params()
+                        .next()
+                        .unwrap()
+                        .param_type()
                         .unwrap(),
                 );
                 let ResolvedType::Interface {
@@ -19337,9 +19539,13 @@ final integer = integers.first;
                 assert!(arguments[0].nullable());
 
                 let future = model.resolve_type(
-                    function.params().unwrap().params[1]
-                        .param_type
-                        .as_ref()
+                    function
+                        .params()
+                        .unwrap()
+                        .params()
+                        .nth(1)
+                        .unwrap()
+                        .param_type()
                         .unwrap(),
                 );
                 assert!(model.void_context(&future));
@@ -19352,15 +19558,15 @@ final integer = integers.first;
         with_model(
             "void f(int i, double d, String s, dynamic x) {}",
             |program, model| {
-                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
+                else {
                     panic!()
                 };
                 let types: Vec<_> = function
                     .params()
                     .unwrap()
-                    .params
-                    .iter()
-                    .map(|param| model.resolve_type(param.param_type.as_ref().unwrap()))
+                    .params()
+                    .map(|param| model.resolve_type(param.param_type().unwrap()))
                     .collect();
                 assert_eq!(model.unrelated(&types[0], &types[1]), Truth::No);
                 assert_eq!(model.unrelated(&types[0], &types[2]), Truth::Yes);
@@ -19438,6 +19644,76 @@ final integer = integers.first;
     }
 
     #[test]
+    fn super_formal_declared_defaults_override_inherited_defaults() {
+        with_model(
+            concat!(
+                "class Base { Base([int count = 7]); } ",
+                "class Inherited extends Base { Inherited([super.count]); } ",
+                "class Overridden extends Base { Overridden([super.count = 9]); }",
+            ),
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let base = model.resolve_name("Base").unwrap();
+                let inherited = signatures
+                    .constructor(&model.resolve_name("Inherited").unwrap(), "new")
+                    .unwrap();
+                let ParameterDefault::Inherited { owner, default } = &inherited.defaults["count"]
+                else {
+                    panic!()
+                };
+                assert_eq!(*owner, base);
+                let ParameterDefault::Declared(inherited_default) = default.as_ref() else {
+                    panic!()
+                };
+                let TopLevelDecl::Class(base_class) = program.declarations().next().unwrap() else {
+                    panic!()
+                };
+                let ClassMember::Constructor(base_constructor) =
+                    base_class.members().next().unwrap()
+                else {
+                    panic!()
+                };
+                let expected_base = base_constructor
+                    .params()
+                    .params()
+                    .next()
+                    .unwrap()
+                    .default_value()
+                    .unwrap();
+                assert_eq!(inherited_default.id, expected_base.syntax().id());
+                assert!(Arc::ptr_eq(
+                    &inherited_default.file,
+                    &model.node_ref(expected_base.syntax()).file,
+                ));
+                let overridden = signatures
+                    .constructor(&model.resolve_name("Overridden").unwrap(), "new")
+                    .unwrap();
+                let ParameterDefault::Declared(default) = &overridden.defaults["count"] else {
+                    panic!()
+                };
+                let TopLevelDecl::Class(class) = program.declarations().last().unwrap() else {
+                    panic!()
+                };
+                let ClassMember::Constructor(constructor) = class.members().next().unwrap() else {
+                    panic!()
+                };
+                let expected = constructor
+                    .params()
+                    .params()
+                    .next()
+                    .unwrap()
+                    .default_value()
+                    .unwrap();
+                assert_eq!(default.id, expected.syntax().id());
+                assert!(Arc::ptr_eq(
+                    &default.file,
+                    &model.node_ref(expected.syntax()).file,
+                ));
+            },
+        );
+    }
+
+    #[test]
     fn declaration_contracts_preserve_names_kinds_defaults_and_optional_arity() {
         with_model(
             "class A { void m(covariant int first, [int second]) {} \
@@ -19489,6 +19765,80 @@ final integer = integers.first;
                 let contract = &setter.parameter_contracts.as_ref().unwrap()[0];
                 assert_eq!(contract.name, "incoming");
                 assert!(contract.is_covariant);
+            },
+        );
+    }
+
+    #[test]
+    fn signature_collection_preserves_default_slots_and_required_annotations() {
+        with_model(
+            "class A { void m(int first, [int second = 1, int third]) {} \
+             void n({required int named, required int explicit = 4, \
+             @required int legacy = 2, int optional}) {} \
+             void p(int first, int second) {} \
+             void r(int leading, int defaulted = 3, int trailing) {} }",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let identity = model.resolve_name("A").unwrap();
+                let positional = signatures.member(&identity, "m").unwrap();
+                assert_eq!(
+                    positional.positional_parameter_names,
+                    ["", "second", "third"]
+                );
+                assert_eq!(positional.optional_positional, 2);
+                assert_eq!(positional.positional.len(), 3);
+                assert!(!positional.defaults.contains_key("first"));
+                assert!(matches!(
+                    positional.defaults.get("second"),
+                    Some(ParameterDefault::Declared(_))
+                ));
+                assert!(matches!(
+                    positional.defaults.get("third"),
+                    Some(ParameterDefault::Null)
+                ));
+                assert!(positional.non_optional_defaults.is_empty());
+                let named = signatures.member(&identity, "n").unwrap();
+                assert!(named.positional_parameter_names.is_empty());
+                assert!(named.positional.is_empty());
+                assert_eq!(named.named.len(), 4);
+                assert!(!named.defaults.contains_key("named"));
+                assert!(matches!(
+                    named.defaults.get("explicit"),
+                    Some(ParameterDefault::Declared(_))
+                ));
+                assert!(matches!(
+                    named.defaults.get("legacy"),
+                    Some(ParameterDefault::Declared(_))
+                ));
+                assert!(matches!(
+                    named.defaults.get("optional"),
+                    Some(ParameterDefault::Null)
+                ));
+                assert_eq!(
+                    named.non_optional_defaults,
+                    HashSet::from(["explicit".to_string(), "legacy".to_string()])
+                );
+                let plain = signatures.member(&identity, "p").unwrap();
+                assert_eq!(plain.positional.len(), 2);
+                assert!(plain.positional_parameter_names.is_empty());
+                let required_positional = signatures.member(&identity, "r").unwrap();
+                assert_eq!(
+                    required_positional.positional_parameter_names,
+                    ["", "defaulted", ""]
+                );
+                assert_eq!(required_positional.optional_positional, 0);
+                assert_eq!(required_positional.positional.len(), 3);
+                assert!(matches!(
+                    required_positional.defaults.get("defaulted"),
+                    Some(ParameterDefault::Declared(_))
+                ));
+                assert!(!required_positional.defaults.contains_key("leading"));
+                assert!(!required_positional.defaults.contains_key("trailing"));
+                assert_eq!(
+                    required_positional.non_optional_defaults,
+                    HashSet::from(["defaulted".to_string()])
+                );
+                assert!(plain.defaults.is_empty());
             },
         );
     }
@@ -19555,22 +19905,23 @@ final integer = integers.first;
              abstract class List<E> { E operator [](int index); int indexOf(E value); }",
             |program, model, signatures| {
                 let scope = TypeParameterScope::default();
-                for declaration in &program.declarations {
+                for declaration in program.declarations() {
                     let TopLevelDecl::Function(function) = declaration else {
                         continue;
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let inferred =
                         environment.infer_with_signatures(expression, model, signatures, &scope);
                     assert_eq!(
                         inferred,
-                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        model.resolve_type(function.return_type().unwrap()),
                         "{}",
-                        function.name.name,
+                        function.name().name(),
                     );
                 }
                 let identity = model.resolve_name("Choice").unwrap();
@@ -19605,13 +19956,14 @@ final integer = integers.first;
                 let environment = TypeEnvironment::new();
                 let expected = model.core_type("String", false);
                 let lookup = |name: &str| (name == "value").then(|| expected.clone());
-                for (index, declaration) in program.declarations.iter().enumerate() {
+                for (index, declaration) in program.declarations().enumerate() {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = function.body.as_ref() else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let inferred = environment.infer_with_signatures_using_lookup(
                         expression,
                         model,
@@ -19663,17 +20015,17 @@ final integer = integers.first;
             "int? nullable(Object? value) => value as int?; int nonNullable(Object value) => value as int; T? generic<T>(Object? value) => value as T?;",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for (index, declaration) in program.declarations.iter().enumerate() {
+                for (index, declaration) in program.declarations().enumerate() {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = function.body.as_ref() else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let mut scope = TypeParameterScope::default();
-                    scope.push(&function.type_params, model);
-                    let expected =
-                        model.resolve_type_in(function.return_type.as_ref().unwrap(), &scope);
+                    scope.push(function.type_params(), model);
+                    let expected = model.resolve_type_in(function.return_type().unwrap(), &scope);
                     let environment = TypeEnvironment::new();
                     assert_eq!(
                         environment.infer_with_signatures_using_lookup(
@@ -19704,19 +20056,23 @@ final integer = integers.first;
             "class Base { int value() => 0; } class Child extends Base {} int inherited(Child child) => child.value(); class GenericBase<T> { T value() => throw UnimplementedError(); } class GenericChild extends GenericBase<int> {} int generic(GenericChild child) => child.value();",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in [&program.declarations[2], &program.declarations[5]] {
+                for declaration in [
+                    program.declarations().nth(2).unwrap(),
+                    program.declarations().nth(5).unwrap(),
+                ] {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = function.body.as_ref() else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let type_parameters = TypeParameterScope::default();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &type_parameters);
 
                     let inferred = environment.infer_with_signatures(
-                        expression.as_ref(),
+                        expression,
                         model,
                         &signatures,
                         &type_parameters,
@@ -20290,6 +20646,112 @@ final integer = integers.first;
     }
 
     #[test]
+    fn signature_index_retains_caller_arenas_independently_of_identity_sources() {
+        let source = "void local({int count = 7}) {} const value = 9;";
+        let parse_file = || {
+            let result = parse(source);
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+            Arc::new(crate::ParsedFile {
+                source: source.into(),
+                tree: result.tree,
+            })
+        };
+        let caller = parse_file();
+        let indexed = parse_file();
+        let path = PathBuf::from("/project/lib/main.dart");
+        let sources = [IdentitySource {
+            path: &path,
+            parsed: &indexed,
+            has_parse_errors: false,
+        }];
+        let types = TypeIndex::from_program(caller.program());
+        let files = [(path.clone(), caller.clone())];
+        let empty = IdentityIndex::from_project_files(&[], &[]);
+        let empty_signatures = SignatureIndex::build(&files, None, &empty, &types);
+        assert!(empty_signatures.functions.is_empty());
+        assert!(empty_signatures.constants.is_empty());
+
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let signatures = SignatureIndex::build(&files, None, &identities, &types);
+        let model = SemanticModel::new(&path, &caller, &identities, Some(&types));
+        let signature = signatures
+            .functions
+            .get(&model.resolve_value("local").unwrap())
+            .unwrap();
+        let ParameterDefault::Declared(default) = &signature.defaults["count"] else {
+            panic!()
+        };
+        let constant = signatures
+            .constants
+            .get(&model.resolve_value("value").unwrap())
+            .unwrap();
+        let mut declarations = caller.program().declarations();
+        let TopLevelDecl::Function(function) = declarations.next().unwrap() else {
+            panic!()
+        };
+        let TopLevelDecl::Variable(variable) = declarations.next().unwrap() else {
+            panic!()
+        };
+        let expected_default = function
+            .params()
+            .unwrap()
+            .params()
+            .next()
+            .unwrap()
+            .default_value()
+            .unwrap();
+        let expected_constant = variable
+            .declarators()
+            .next()
+            .unwrap()
+            .initializer()
+            .unwrap();
+        for (retained, expected) in [(default, expected_default), (constant, expected_constant)] {
+            assert!(Arc::ptr_eq(&retained.file, &caller));
+            assert!(!Arc::ptr_eq(&retained.file, &indexed));
+            assert_eq!(retained.id, expected.syntax().id());
+            assert_eq!(retained.expr().syntax().id(), expected.syntax().id());
+        }
+    }
+
+    #[test]
+    fn local_callable_retains_defaults_without_a_file_identity() {
+        let source = "void local({int count = 7}) {}";
+        let parsed_result = parse(source);
+        assert!(
+            parsed_result.errors.is_empty(),
+            "{:?}",
+            parsed_result.errors
+        );
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree: parsed_result.tree,
+        });
+        let identities = IdentityIndex::from_project_files(&[], &[]);
+        let path = PathBuf::from("/project/lib/main.dart");
+        let model = SemanticModel::new(&path, &parsed, &identities, None);
+        assert!(model.file.is_none());
+        let TopLevelDecl::Function(function) = parsed.program().declarations().next().unwrap()
+        else {
+            panic!()
+        };
+        let params = function.params().unwrap();
+        let expected = params.params().next().unwrap().default_value().unwrap();
+        let signature = ResolvedSignature::local_callable(
+            &TypeParameterScope::default(),
+            function.type_params(),
+            params,
+            &model,
+        );
+        let ParameterDefault::Declared(default) = &signature.defaults["count"] else {
+            panic!()
+        };
+        assert!(Arc::ptr_eq(&default.file, &parsed));
+        assert_eq!(default.id, expected.syntax().id());
+        assert_eq!(default.expr().syntax().id(), expected.syntax().id());
+    }
+
+    #[test]
     fn resolved_calls_borrow_signatures_and_share_default_expressions() {
         with_model(
             "class Value { Value({int n = 1}); void method({int n = 1}) {} } \
@@ -20317,7 +20779,8 @@ final integer = integers.first;
                 let ParameterDefault::Declared(copy) = &cloned.defaults["n"] else {
                     panic!()
                 };
-                assert!(Arc::ptr_eq(default, copy));
+                assert!(Arc::ptr_eq(&default.file, &copy.file));
+                assert_eq!(default.id, copy.id);
                 let receiver =
                     ResolvedType::interface_identity(model.resolve_name("Receiver").unwrap());
                 let (resolved, _) = signatures
@@ -20456,15 +20919,15 @@ final integer = integers.first;
             ),
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = program.declarations.last().unwrap() else {
+                let TopLevelDecl::Function(function) = program.declarations().last().unwrap()
+                else {
                     panic!()
                 };
                 let receivers: Vec<_> = function
                     .params()
                     .unwrap()
-                    .params
-                    .iter()
-                    .map(|parameter| model.resolve_type(parameter.param_type.as_ref().unwrap()))
+                    .params()
+                    .map(|parameter| model.resolve_type(parameter.param_type().unwrap()))
                     .collect();
                 for (index, member, owner) in [
                     (0, "raw", "RawList"),
@@ -20504,13 +20967,18 @@ final integer = integers.first;
             "class SourceFuture<T> {} extension Completion<T> on SourceFuture<T> { void get completed {} } void uses(SourceFuture<void> future) {}",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let TopLevelDecl::Function(function) = program.declarations.last().unwrap() else {
+                let TopLevelDecl::Function(function) = program.declarations().last().unwrap()
+                else {
                     panic!()
                 };
                 let receiver = model.resolve_type(
-                    function.params().unwrap().params[0]
-                        .param_type
-                        .as_ref()
+                    function
+                        .params()
+                        .unwrap()
+                        .params()
+                        .next()
+                        .unwrap()
+                        .param_type()
                         .unwrap(),
                 );
                 assert!(signatures.has_possible_extension_getter(&receiver, "completed", model));
@@ -20826,13 +21294,17 @@ final integer = integers.first;
     fn sdk_set_add_returns_bool() {
         with_model("void f(Set<int> values) {}", |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
                 panic!()
             };
             let receiver = model.resolve_type(
-                function.params().unwrap().params[0]
-                    .param_type
-                    .as_ref()
+                function
+                    .params()
+                    .unwrap()
+                    .params()
+                    .next()
+                    .unwrap()
+                    .param_type()
                     .unwrap(),
             );
             let (signature, _) = signatures.resolved_member(&receiver, "add", model).unwrap();
@@ -20861,12 +21333,14 @@ final integer = integers.first;
                     }
                 );
 
-                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
+                else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(expression, _)) = function.body.as_ref() else {
+                let Some(FunctionBody::Arrow(expression)) = function.body() else {
                     panic!()
                 };
+                let expression = expression.expr();
                 let type_parameters = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &type_parameters);
@@ -20894,29 +21368,38 @@ final integer = integers.first;
     fn private_inherited_members_are_visible_from_same_library_parts() {
         let root_path = PathBuf::from("/project/lib/root.dart");
         let part_path = PathBuf::from("/project/lib/part.dart");
+        let root_source =
+            "library shared; part 'part.dart'; class Base { int _method() => 0; int _field = 0; }";
         let falcon_dart_parser::ParseResult {
-            program: root,
+            tree: root_tree,
             errors: root_errors,
             ..
-        } = parse(
-            "library shared; part 'part.dart'; class Base { int _method() => 0; int _field = 0; }",
-        );
+        } = parse(root_source);
+        let root_parsed = Arc::new(crate::ParsedFile {
+            source: root_source.into(),
+            tree: root_tree,
+        });
+        let part_source = "part of shared; class Child extends Base {}";
         let falcon_dart_parser::ParseResult {
-            program: part,
+            tree: part_tree,
             errors: part_errors,
             ..
-        } = parse("part of shared; class Child extends Base {}");
+        } = parse(part_source);
+        let part_parsed = Arc::new(crate::ParsedFile {
+            source: part_source.into(),
+            tree: part_tree,
+        });
         assert!(root_errors.is_empty());
         assert!(part_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &root_path,
-                program: &root,
+                parsed: &root_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &part_path,
-                program: &part,
+                parsed: &part_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -20926,7 +21409,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: source.has_parse_errors,
                         has_unresolved_parts: false,
                     },
@@ -20934,9 +21417,12 @@ final integer = integers.first;
             }),
             &identities,
         );
-        let files = [(root_path, &root), (part_path.clone(), &part)];
+        let files = [
+            (root_path, root_parsed.clone()),
+            (part_path.clone(), part_parsed.clone()),
+        ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        let model = SemanticModel::new(&part_path, &identities, Some(&types));
+        let model = SemanticModel::new(&part_path, &part_parsed, &identities, Some(&types));
         let child = ResolvedType::Interface {
             occurrence: Default::default(),
             identity: model.resolve_name("Child").unwrap(),
@@ -20966,27 +21452,37 @@ final integer = integers.first;
     fn private_inherited_members_are_hidden_across_libraries() {
         let base_path = PathBuf::from("/project/lib/base.dart");
         let child_path = PathBuf::from("/project/lib/child.dart");
+        let base_source = "class Base { int _method() => 0; int _field = 0; }";
         let falcon_dart_parser::ParseResult {
-            program: base,
+            tree: base_tree,
             errors: base_errors,
             ..
-        } = parse("class Base { int _method() => 0; int _field = 0; }");
+        } = parse(base_source);
+        let base_parsed = Arc::new(crate::ParsedFile {
+            source: base_source.into(),
+            tree: base_tree,
+        });
+        let child_program_source = "import 'base.dart'; class Child extends Base {}";
         let falcon_dart_parser::ParseResult {
-            program: child_program,
+            tree: child_program_tree,
             errors: child_errors,
             ..
-        } = parse("import 'base.dart'; class Child extends Base {}");
+        } = parse(child_program_source);
+        let child_program_parsed = Arc::new(crate::ParsedFile {
+            source: child_program_source.into(),
+            tree: child_program_tree,
+        });
         assert!(base_errors.is_empty());
         assert!(child_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &base_path,
-                program: &base,
+                parsed: &base_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &child_path,
-                program: &child_program,
+                parsed: &child_program_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -20996,7 +21492,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: source.has_parse_errors,
                         has_unresolved_parts: false,
                     },
@@ -21004,9 +21500,17 @@ final integer = integers.first;
             }),
             &identities,
         );
-        let files = [(base_path, &base), (child_path.clone(), &child_program)];
+        let files = [
+            (base_path, base_parsed.clone()),
+            (child_path.clone(), child_program_parsed.clone()),
+        ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        let model = SemanticModel::new(&child_path, &identities, Some(&types));
+        let model = SemanticModel::new(
+            &child_path,
+            &child_program_parsed,
+            &identities,
+            Some(&types),
+        );
         let child = ResolvedType::Interface {
             occurrence: Default::default(),
             identity: model.resolve_name("Child").unwrap(),
@@ -21036,31 +21540,38 @@ final integer = integers.first;
     fn private_inherited_lookup_skips_invisible_override() {
         let base_path = PathBuf::from("/project/lib/a.dart");
         let middle_path = PathBuf::from("/project/lib/b.dart");
+        let base_source = "import 'b.dart'; class Base { int _method() => 0; int _field = 0; } class Child extends Middle {}";
         let falcon_dart_parser::ParseResult {
-            program: base,
+            tree: base_tree,
             errors: base_errors,
             ..
-        } = parse(
-            "import 'b.dart'; class Base { int _method() => 0; int _field = 0; } class Child extends Middle {}",
-        );
+        } = parse(base_source);
+        let base_parsed = Arc::new(crate::ParsedFile {
+            source: base_source.into(),
+            tree: base_tree,
+        });
+        let middle_source =
+            "import 'a.dart'; class Middle extends Base { int _method() => 1; int _field = 1; }";
         let falcon_dart_parser::ParseResult {
-            program: middle,
+            tree: middle_tree,
             errors: middle_errors,
             ..
-        } = parse(
-            "import 'a.dart'; class Middle extends Base { int _method() => 1; int _field = 1; }",
-        );
+        } = parse(middle_source);
+        let middle_parsed = Arc::new(crate::ParsedFile {
+            source: middle_source.into(),
+            tree: middle_tree,
+        });
         assert!(base_errors.is_empty());
         assert!(middle_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &base_path,
-                program: &base,
+                parsed: &base_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &middle_path,
-                program: &middle,
+                parsed: &middle_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -21070,7 +21581,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: source.has_parse_errors,
                         has_unresolved_parts: false,
                     },
@@ -21078,9 +21589,12 @@ final integer = integers.first;
             }),
             &identities,
         );
-        let files = [(base_path.clone(), &base), (middle_path, &middle)];
+        let files = [
+            (base_path.clone(), base_parsed.clone()),
+            (middle_path, middle_parsed.clone()),
+        ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        let model = SemanticModel::new(&base_path, &identities, Some(&types));
+        let model = SemanticModel::new(&base_path, &base_parsed, &identities, Some(&types));
         let base_identity = model.resolve_name("Base").unwrap();
         let child = ResolvedType::Interface {
             occurrence: Default::default(),
@@ -21206,38 +21720,54 @@ final integer = integers.first;
         let base_path = PathBuf::from("/project/lib/base.dart");
         let middle_path = PathBuf::from("/project/lib/middle.dart");
         let leaf_path = PathBuf::from("/project/lib/leaf.dart");
+        let base_source = "class Base<T> { final T value; Base(this.value); }";
         let falcon_dart_parser::ParseResult {
-            program: base,
+            tree: base_tree,
             errors: base_errors,
             ..
-        } = parse("class Base<T> { final T value; Base(this.value); }");
+        } = parse(base_source);
+        let base_parsed = Arc::new(crate::ParsedFile {
+            source: base_source.into(),
+            tree: base_tree,
+        });
+        let middle_source =
+            "import 'base.dart'; class Middle extends Base<String> { Middle(super.value); }";
         let falcon_dart_parser::ParseResult {
-            program: middle,
+            tree: middle_tree,
             errors: middle_errors,
             ..
-        } = parse("import 'base.dart'; class Middle extends Base<String> { Middle(super.value); }");
+        } = parse(middle_source);
+        let middle_parsed = Arc::new(crate::ParsedFile {
+            source: middle_source.into(),
+            tree: middle_tree,
+        });
+        let leaf_source = "import 'middle.dart'; class Leaf extends Middle { Leaf(super.value); }";
         let falcon_dart_parser::ParseResult {
-            program: leaf,
+            tree: leaf_tree,
             errors: leaf_errors,
             ..
-        } = parse("import 'middle.dart'; class Leaf extends Middle { Leaf(super.value); }");
+        } = parse(leaf_source);
+        let leaf_parsed = Arc::new(crate::ParsedFile {
+            source: leaf_source.into(),
+            tree: leaf_tree,
+        });
         assert!(base_errors.is_empty());
         assert!(middle_errors.is_empty());
         assert!(leaf_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &leaf_path,
-                program: &leaf,
+                parsed: &leaf_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &middle_path,
-                program: &middle,
+                parsed: &middle_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &base_path,
-                program: &base,
+                parsed: &base_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -21247,7 +21777,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: source.has_parse_errors,
                         has_unresolved_parts: false,
                     },
@@ -21256,12 +21786,12 @@ final integer = integers.first;
             &identities,
         );
         let files = [
-            (leaf_path.clone(), &leaf),
-            (middle_path, &middle),
-            (base_path, &base),
+            (leaf_path.clone(), leaf_parsed.clone()),
+            (middle_path, middle_parsed.clone()),
+            (base_path, base_parsed.clone()),
         ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        let model = SemanticModel::new(&leaf_path, &identities, Some(&types));
+        let model = SemanticModel::new(&leaf_path, &leaf_parsed, &identities, Some(&types));
         let leaf_identity = model.resolve_name("Leaf").unwrap();
         assert!(
             signatures.declaration(&leaf_identity).unwrap().constructors[0].parameters[0]
@@ -21281,31 +21811,37 @@ final integer = integers.first;
     fn constructor_formal_fixpoint_handles_deep_chains_across_two_files() {
         let a_path = PathBuf::from("/project/lib/a.dart");
         let b_path = PathBuf::from("/project/lib/b.dart");
+        let a_source = "import 'b.dart'; class A0<T> { final T value; A0(this.value); } class A2 extends B1 { A2(super.value); } class A4 extends B3 { A4(super.value); } class A6 extends B5 { A6(super.value); }";
         let falcon_dart_parser::ParseResult {
-            program: a,
+            tree: a_tree,
             errors: a_errors,
             ..
-        } = parse(
-            "import 'b.dart'; class A0<T> { final T value; A0(this.value); } class A2 extends B1 { A2(super.value); } class A4 extends B3 { A4(super.value); } class A6 extends B5 { A6(super.value); }",
-        );
+        } = parse(a_source);
+        let a_parsed = Arc::new(crate::ParsedFile {
+            source: a_source.into(),
+            tree: a_tree,
+        });
+        let b_source = "import 'a.dart'; class B1 extends A0<String> { B1(super.value); } class B3 extends A2 { B3(super.value); } class B5 extends A4 { B5(super.value); }";
         let falcon_dart_parser::ParseResult {
-            program: b,
+            tree: b_tree,
             errors: b_errors,
             ..
-        } = parse(
-            "import 'a.dart'; class B1 extends A0<String> { B1(super.value); } class B3 extends A2 { B3(super.value); } class B5 extends A4 { B5(super.value); }",
-        );
+        } = parse(b_source);
+        let b_parsed = Arc::new(crate::ParsedFile {
+            source: b_source.into(),
+            tree: b_tree,
+        });
         assert!(a_errors.is_empty());
         assert!(b_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &a_path,
-                program: &a,
+                parsed: &a_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &b_path,
-                program: &b,
+                parsed: &b_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -21315,7 +21851,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: source.has_parse_errors,
                         has_unresolved_parts: false,
                     },
@@ -21323,9 +21859,12 @@ final integer = integers.first;
             }),
             &identities,
         );
-        let files = [(a_path.clone(), &a), (b_path, &b)];
+        let files = [
+            (a_path.clone(), a_parsed.clone()),
+            (b_path, b_parsed.clone()),
+        ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        let model = SemanticModel::new(&a_path, &identities, Some(&types));
+        let model = SemanticModel::new(&a_path, &a_parsed, &identities, Some(&types));
         let leaf = model.resolve_name("A6").unwrap();
 
         assert!(
@@ -21345,29 +21884,37 @@ final integer = integers.first;
         // judge `_value` from its scope, where every `_` name is invisible.
         let other_path = PathBuf::from("/project/lib/other.dart");
         let fake_path = PathBuf::from("/project/lib/fake.dart");
+        let other_source = "class Other {}";
         let falcon_dart_parser::ParseResult {
-            program: other,
+            tree: other_tree,
             errors: other_errors,
             ..
-        } = parse("class Other {}");
+        } = parse(other_source);
+        let other_parsed = Arc::new(crate::ParsedFile {
+            source: other_source.into(),
+            tree: other_tree,
+        });
+        let fake_source = "abstract class Api { int? get _value; } class Fake { dynamic noSuchMethod(Invocation invocation) => null; } class Impl extends Fake implements Api { final int? _value; Impl(this._value); }";
         let falcon_dart_parser::ParseResult {
-            program: fake,
+            tree: fake_tree,
             errors: fake_errors,
             ..
-        } = parse(
-            "abstract class Api { int? get _value; } class Fake { dynamic noSuchMethod(Invocation invocation) => null; } class Impl extends Fake implements Api { final int? _value; Impl(this._value); }",
-        );
+        } = parse(fake_source);
+        let fake_parsed = Arc::new(crate::ParsedFile {
+            source: fake_source.into(),
+            tree: fake_tree,
+        });
         assert!(other_errors.is_empty());
         assert!(fake_errors.is_empty());
         let sources = [
             IdentitySource {
                 path: &other_path,
-                program: &other,
+                parsed: &other_parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &fake_path,
-                program: &fake,
+                parsed: &fake_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -21377,7 +21924,7 @@ final integer = integers.first;
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -21385,9 +21932,12 @@ final integer = integers.first;
             }),
             &identities,
         );
-        let files = [(other_path, &other), (fake_path.clone(), &fake)];
+        let files = [
+            (other_path, other_parsed.clone()),
+            (fake_path.clone(), fake_parsed.clone()),
+        ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
-        let model = SemanticModel::new(&fake_path, &identities, Some(&types));
+        let model = SemanticModel::new(&fake_path, &fake_parsed, &identities, Some(&types));
         let receiver = ResolvedType::Interface {
             occurrence: Default::default(),
             identity: model.resolve_name("Impl").unwrap(),
@@ -21434,13 +21984,14 @@ final integer = integers.first;
              int call(Target target) => target.callback();",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                for declaration in &program.declarations[2..] {
+                for declaration in program.declarations().skip(2) {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    let Some(FunctionBody::Arrow(expression)) = function.body() else {
                         panic!()
                     };
+                    let expression = expression.expr();
                     let scope = TypeParameterScope::default();
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);

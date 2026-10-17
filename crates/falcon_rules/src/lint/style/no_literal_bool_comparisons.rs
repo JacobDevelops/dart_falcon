@@ -15,8 +15,8 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::{BinaryOp, Expr};
+use falcon_syntax::cst::Program;
+use falcon_syntax::cst::{BinaryOp, Expr};
 
 use crate::lint::expressions::is_parenthesized;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -27,7 +27,7 @@ pub struct NoLiteralBoolComparisons;
 impl Rule for NoLiteralBoolComparisons {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -42,36 +42,36 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
+fn non_nullable_bool(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
     let ty = state.infer(expression);
     ty.interface("dart:core", "bool") && !ty.nullable()
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op:
-                BinaryOp::EqEq
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'_>) {
+        let Expr::Binary(binary) = node else {
+            return;
+        };
+        if !matches!(
+            binary.op(),
+            BinaryOp::EqEq
                 | BinaryOp::NotEq
                 | BinaryOp::BitOr
                 | BinaryOp::Or
                 | BinaryOp::BitAnd
                 | BinaryOp::And
-                | BinaryOp::BitXor,
-            left,
-            right,
-            ..
-        } = node
-        else {
+                | BinaryOp::BitXor
+        ) {
             return;
-        };
+        }
+        let (left, right) = (binary.left(), binary.right());
         // A parenthesized literal is not a BooleanLiteral operand.
         let is_literal =
-            |operand: &Expr| matches!(operand, Expr::BoolLit { .. }) && !is_parenthesized(operand);
+            |operand: Expr<'_>| matches!(operand, Expr::BoolLit(_)) && !is_parenthesized(operand);
         let literal = if is_literal(right) && non_nullable_bool(left, state) {
             right
         } else if is_literal(left) && non_nullable_bool(right, state) {
@@ -82,7 +82,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         self.diags.push(self.ctx.diagnostic(
             "no-literal-bool-comparisons",
             "Unnecessary comparison to a boolean literal.",
-            *literal.span(),
+            literal.span(),
         ));
     }
 }

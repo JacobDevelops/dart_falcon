@@ -19,14 +19,14 @@ use crate::lint::string_lit::{interpolated_literals, multiline_lead_len};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryStringInterpolations;
 impl Rule for UnnecessaryStringInterpolations {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -39,21 +39,22 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
 }
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let Expr::StringLit(node) = node else {
             return;
         };
-        let [interpolation] = node.interpolations.as_slice() else {
-            return;
-        };
-        if node.is_adjacent {
+        if node.is_adjacent() {
             return;
         }
+        let mut interpolations = node.interpolations();
+        let (Some(interpolation), None) = (interpolations.next(), interpolations.next()) else {
+            return;
+        };
         for (lit, span) in interpolated_literals(node) {
             let trim = if lit.triple {
                 multiline_lead_len(lit.content)
@@ -69,12 +70,12 @@ impl SemanticRuleVisitor for Collector<'_> {
             } else {
                 continue;
             };
-            if interpolation.span.start != start + prefix
-                || interpolation.span.end != start + content.len() - suffix
+            if interpolation.span().start != start + prefix
+                || interpolation.span().end != start + content.len() - suffix
             {
                 continue;
             }
-            let ty = state.infer(&interpolation.expr);
+            let ty = state.infer(interpolation.expr());
             if ty.interface("dart:core", "String") && !ty.nullable() {
                 self.diags.push(self.ctx.diagnostic(
                     "unnecessary-string-interpolations",
@@ -96,15 +97,17 @@ mod tests {
     use falcon_dart_parser::parse;
     use std::path::Path;
 
-    fn resolving(source: &str, check: impl FnOnce(&Program, &AnalyzeContext<'_>)) {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+    fn resolving(source: &str, check: impl for<'a> FnOnce(Program<'a>, &'a AnalyzeContext<'a>)) {
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parse(source).tree,
+        });
+        let program = parsed.program();
         let path = Path::new("test.dart");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
@@ -113,33 +116,33 @@ mod tests {
             [(
                 path,
                 falcon_analyze::LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
             )],
             &identities,
         );
-        let model = SemanticModel::new(path, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        check(&program, &ctx);
+        check(program, &ctx);
     }
 
     #[test]
     fn canonical_inference_preserves_numeric_and_string_joins() {
         struct Probe(Vec<falcon_analyze::ResolvedType>);
-        impl SemanticRuleVisitor for Probe {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                if let Expr::Call { callee, args, .. } = node
-                    && matches!(callee.unparenthesized(), Expr::Ident(id) if id.name == "probe")
+        impl<'a> SemanticRuleVisitor<'a> for Probe {
+            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+                if let Expr::Call(call) = node
+                    && matches!(call.callee().unparenthesized(), Expr::Ident(id) if id.name() == "probe")
                 {
                     self.0
-                        .extend(args.positional.iter().map(|expr| state.infer(expr)));
+                        .extend(call.args().positional().map(|expr| state.infer(expr)));
                 }
             }
         }

@@ -8,7 +8,7 @@ mod dcl {
         AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
     };
     use falcon_diagnostics::Diagnostic;
-    use falcon_syntax::ast::*;
+    use falcon_syntax::cst::*;
 
     use falcon_analyze::resolve::lexical_usage::{used_constructor_parameters, used_parameters};
 
@@ -18,7 +18,7 @@ mod dcl {
     impl Rule for AvoidUnusedParameters {
         fn prepare<'a>(
             &self,
-            _program: &'a Program,
+            _program: Program<'a>,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
             let collector = Collector {
@@ -34,54 +34,59 @@ mod dcl {
         diagnostics: Vec<Diagnostic>,
     }
 
-    impl Collector<'_, '_> {
-        fn check(&mut self, params: &FormalParamList, body: Option<&FunctionBody>, exempt: bool) {
+    impl<'a> Collector<'_, 'a> {
+        fn check(
+            &mut self,
+            params: FormalParamList<'a>,
+            body: Option<FunctionBody<'a>>,
+            exempt: bool,
+        ) {
             let Some(body) = body.filter(|_| !exempt) else {
                 return;
             };
             self.report(params, &used_parameters(params, body));
         }
 
-        fn report(&mut self, params: &FormalParamList, used: &std::collections::HashSet<usize>) {
-            for param in params.params.iter() {
-                let name = &param.name.name;
-                if param.initializing.is_some()
+        fn report(&mut self, params: FormalParamList<'a>, used: &std::collections::HashSet<usize>) {
+            for param in params.params() {
+                let name = param.name().name();
+                if param.initializing().is_some()
                     || (!name.is_empty() && name.bytes().all(|byte| byte == b'_'))
-                    || used.contains(&param.name.span.start)
+                    || used.contains(&param.name().span().start)
                 {
                     continue;
                 }
                 self.diagnostics.push(self.ctx.diagnostic(
                     "avoid-unused-parameters",
                     format!("Parameter '{name}' is declared but not used"),
-                    param.name.span,
+                    param.name().span(),
                 ));
             }
         }
     }
 
     falcon_analyze::structural_visitor! {
-    impl StructuralRuleVisitor for Collector<'_, '_> {
-        fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
+        fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
             if let Some(params) = node.params() {
-                self.check(params, node.body.as_ref(), false);
+                self.check(params, node.body(), false);
             }
             StructuralTraversal::Continue
         }
 
-        fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-            let exempt = node.name.name == "noSuchMethod"
-                || node.annotations.iter().any(|annotation| {
+        fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+            let exempt = node.name().name() == "noSuchMethod"
+                || node.annotations().any(|annotation| {
                     annotation
-                        .name
+                        .name()
                         .last()
-                        .is_some_and(|name| name.name == "override")
+                        .is_some_and(|name| name.name() == "override")
                 });
-            self.check(&node.params, node.body.as_ref(), exempt);
+            self.check(node.params(), node.body(), exempt);
             StructuralTraversal::Continue
         }
 
-        fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
+        fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
             if node.is_primary || (node.body.is_none() && node.initializers.is_empty()) {
                 return StructuralTraversal::Continue;
             }
@@ -90,9 +95,9 @@ mod dcl {
             StructuralTraversal::Continue
         }
 
-        fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
             if let Stmt::LocalFunc(function) = node {
-                self.check(&function.params, Some(&function.body), false);
+                self.check(function.params(), Some(function.body()), false);
             }
             StructuralTraversal::Continue
         }

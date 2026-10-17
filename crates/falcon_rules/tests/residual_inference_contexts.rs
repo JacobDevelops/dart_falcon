@@ -347,17 +347,24 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
             include_str!("support/residual_contexts/hidden.dart"),
         ),
     ];
-    let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
+    let parsed: Vec<_> = inputs
+        .iter()
+        .map(|(path, source)| {
+            let result = parse(source);
+            assert!(result.errors.is_empty(), "{path}: {:?}", result.errors);
+            std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: (*source).into(),
+                tree: result.tree,
+            })
+        })
+        .collect();
     let sources: Vec<_> = inputs
         .iter()
         .zip(&parsed)
-        .map(|((path, _), parsed)| {
-            assert!(parsed.errors.is_empty(), "{path}: {:?}", parsed.errors);
-            IdentitySource {
-                path: Path::new(path),
-                program: &parsed.program,
-                has_parse_errors: false,
-            }
+        .map(|((path, _), parsed)| IdentitySource {
+            path: Path::new(path),
+            parsed,
+            has_parse_errors: false,
         })
         .collect();
     let identities = IdentityIndex::from_project_files(&sources, &[]);
@@ -366,7 +373,7 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
             (
                 source.path,
                 LibrarySource {
-                    program: source.program,
+                    program: source.parsed.program(),
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -376,23 +383,19 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
     );
     let files: Vec<_> = sources
         .iter()
-        .map(|source| (source.path.to_path_buf(), source.program))
+        .zip(&parsed)
+        .map(|(source, parsed)| (source.path.to_path_buf(), parsed.clone()))
         .collect();
     let signatures = SignatureIndex::build(&files, None, &identities, &types);
     let rules = all_rules();
     let rule_name = "omit-local-variable-types";
     let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(
-        Path::new(inputs[0].0),
-        inputs[0].1,
-        &config,
-        &parsed[0].syntax,
-    )
-    .with_types(&types)
-    .with_identities(&identities)
-    .with_signatures(&signatures);
-    let diagnostics = rule.analyze(&parsed[0].program, &context);
+    let context = AnalyzeContext::new(Path::new(inputs[0].0), &config, &parsed[0])
+        .with_types(&types)
+        .with_identities(&identities)
+        .with_signatures(&signatures);
+    let diagnostics = rule.analyze(parsed[0].program(), &context);
     assert_diagnostics(inputs[0].1, rule_name, &diagnostics, 4);
 }
 

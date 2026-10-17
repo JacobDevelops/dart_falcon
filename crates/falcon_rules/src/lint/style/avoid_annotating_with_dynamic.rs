@@ -19,8 +19,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::core_imports::CoreImports;
 
@@ -33,7 +32,7 @@ pub struct AvoidAnnotatingWithDynamic;
 impl Rule for AvoidAnnotatingWithDynamic {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -58,45 +57,42 @@ impl Collector<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
         if node
-            .param_type
-            .as_ref()
+            .param_type()
             .is_some_and(|ty| self.core.is_dynamic(ty))
         {
-            self.report(node.span);
+            self.report(node.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        if let Some(ty) = &node.param_type
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        if let Some(ty) = node.param_type()
             && self.core.is_dynamic(ty)
         {
-            self.report(ty.span().merge(&node.param.span));
+            self.report(ty.span().merge(&node.param().span()));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node {
-            for param in &function.params {
-                let ty = &param.param_type;
+            for param in function.params() {
+                let ty = param.param_type();
                 // Legacy typedefs (`typedef F(event);`) synthesize `dynamic` for
                 // untyped parameters, spanning the whole parameter; a written
                 // type always ends before the name.
                 let synthesized = param
-                    .name
-                    .as_ref()
-                    .is_some_and(|name| ty.span().end > name.span.start);
+                    .name()
+                    .is_some_and(|name| ty.span().end > name.span().start);
                 if !synthesized && self.core.is_dynamic(ty) {
                     let span = param
-                        .name
-                        .as_ref()
-                        .map_or(*ty.span(), |name| ty.span().merge(&name.span));
+                        .name()
+                        .map_or(ty.span(), |name| ty.span().merge(&name.span()));
                     self.report(span);
                 }
             }

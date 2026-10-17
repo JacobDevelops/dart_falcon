@@ -14,7 +14,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 #[derive(Default)]
 pub struct EolAtEndOfFile;
@@ -22,7 +22,7 @@ pub struct EolAtEndOfFile;
 impl Rule for EolAtEndOfFile {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let source = ctx.source;
@@ -72,9 +72,13 @@ mod tests {
             ("void f() {}\u{3000}", Some("\u{3000}")),
         ] {
             let parsed = parse(source);
+            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: source.into(),
+                tree: parsed.tree,
+            });
             let config = FalconConfig::default();
-            let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-            let diagnostics = EolAtEndOfFile.analyze(&parsed.program, &ctx);
+            let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+            let diagnostics = EolAtEndOfFile.analyze(parsed.tree.program(source), &ctx);
             assert_eq!(diagnostics.len(), 1);
             let span = &diagnostics[0].span;
             assert_eq!(&source[..span.start], "void f() {}");

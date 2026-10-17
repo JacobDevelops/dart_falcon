@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferAdjacentStringConcatenation;
@@ -19,7 +19,7 @@ pub struct PreferAdjacentStringConcatenation;
 impl Rule for PreferAdjacentStringConcatenation {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,26 +35,21 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Binary {
-            op: BinaryOp::Add,
-            left,
-            right,
-            span,
-            ..
-        } = node.unparenthesized()
-            && matches!(left.unparenthesized(), Expr::StringLit(_))
-            && matches!(right.unparenthesized(), Expr::StringLit(_))
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Binary(binary) = node.unparenthesized()
+            && binary.op() == BinaryOp::Add
+            && matches!(binary.left().unparenthesized(), Expr::StringLit(_))
+            && matches!(binary.right().unparenthesized(), Expr::StringLit(_))
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-adjacent-string-concatenation",
                 "Use adjacent string literals instead of the `+` operator.",
-                *span,
+                binary.span(),
             ));
         }
         StructuralTraversal::Continue

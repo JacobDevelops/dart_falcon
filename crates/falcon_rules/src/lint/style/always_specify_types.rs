@@ -36,8 +36,8 @@ use falcon_analyze::{
     RulePreparation, StructuralRuleVisitor, StructuralTraversal, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::{Program, TokenKind};
+use falcon_syntax::TokenKind;
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{documented_node_span, member_names, members_of};
 use falcon_analyze::semantic_scope::SemanticState;
@@ -46,17 +46,20 @@ const RULE: &str = "always-specify-types";
 const MESSAGE: &str = "Missing type annotation.";
 
 /// Setter ASTs retain the name rather than the complete formal parameter range.
-pub(crate) fn setter_parameter_span(node: &SetterDecl, ctx: &AnalyzeContext) -> Span {
+pub(crate) fn setter_parameter_span(node: SetterDecl<'_>, ctx: &AnalyzeContext) -> Span {
     let start = ctx
-        .syntax
-        .tokens_in(Span::new(node.name.span.end, node.param.span.end))
-        .skip_while(|token| token.kind != TokenKind::LParen)
+        .tree()
+        .tokens_in(
+            ctx.source,
+            Span::new(node.name().span().end, node.param().span().end),
+        )
+        .skip_while(|token| token.kind() != TokenKind::LParen)
         .skip(1)
         .find(|token| !token.is_trivia())
-        .map_or(node.param.span.start, |token| token.offset());
+        .map_or(node.param().span().start, |token| token.offset());
     documented_node_span(
-        Span::new(start, node.param.span.end),
-        &node.param_annotations,
+        Span::new(start, node.param().span().end),
+        node.param_annotations(),
         ctx,
     )
 }
@@ -67,7 +70,7 @@ pub struct AlwaysSpecifyTypes;
 impl Rule for AlwaysSpecifyTypes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let state = SemanticState::new(program, ctx);
@@ -94,19 +97,19 @@ impl Rule for AlwaysSpecifyTypes {
 }
 
 /// The type parameters a top-level declaration scopes over its body.
-fn declared_type_parameters(node: &TopLevelDecl) -> &[TypeParam] {
-    match node {
-        TopLevelDecl::Class(node) => &node.type_params,
-        TopLevelDecl::Mixin(node) => &node.type_params,
-        TopLevelDecl::MixinClass(node) => &node.type_params,
-        TopLevelDecl::Enum(node) => &node.type_params,
-        TopLevelDecl::Extension(node) => &node.type_params,
-        TopLevelDecl::ExtensionType(node) => &node.type_params,
-        TopLevelDecl::Function(node) => &node.type_params,
-        TopLevelDecl::ClassTypeAlias(node) => &node.type_params,
-        TopLevelDecl::TypeAlias(node) => &node.type_params,
-        TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => &[],
-    }
+fn declared_type_parameters(node: TopLevelDecl<'_>) -> Option<AstChildren<'_, TypeParam<'_>>> {
+    Some(match node {
+        TopLevelDecl::Class(node) => node.type_params(),
+        TopLevelDecl::Mixin(node) => node.type_params(),
+        TopLevelDecl::MixinClass(node) => node.type_params(),
+        TopLevelDecl::Enum(node) => node.type_params(),
+        TopLevelDecl::Extension(node) => node.type_params(),
+        TopLevelDecl::ExtensionType(node) => node.type_params(),
+        TopLevelDecl::Function(node) => node.type_params(),
+        TopLevelDecl::ClassTypeAlias(node) => node.type_params(),
+        TopLevelDecl::TypeAlias(node) => node.type_params(),
+        TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => return None,
+    })
 }
 
 /// The number of type parameters of an SDK or allowlisted package type, which
@@ -160,10 +163,10 @@ struct Collector<'a> {
     /// Start offsets of identifiers that name a local, never a type.
     locals: HashSet<usize>,
     /// Members of the enclosing declaration, which shadow library types.
-    members: HashSet<String>,
+    members: HashSet<&'a str>,
     /// Names of the enclosing declarations' type parameters, which shadow
     /// library types.
-    type_parameters: Vec<String>,
+    type_parameters: Vec<&'a str>,
     /// The type tested by the innermost `is` expression, which may stay raw.
     is_type_test: Option<Span>,
     /// The callee or member-access target of the expression being visited:
@@ -172,20 +175,20 @@ struct Collector<'a> {
     /// Inside the pattern of a pattern assignment, whose variables are
     /// assigned rather than declared.
     assigned_pattern: bool,
-    assignment_value: Option<*const Expr>,
+    assignment_value: Option<NodeId>,
     expression_scopes: Vec<(Option<Span>, Option<Span>)>,
     diags: Vec<Diagnostic>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
         self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
     }
 
     fn first_token(&self, span: Span) -> Span {
         self.ctx
-            .syntax
-            .tokens_in(span)
+            .tree()
+            .tokens_in(self.ctx.source, span)
             .find(|token| !token.is_trivia())
             .map_or(span, |token| {
                 Span::new(token.offset(), token.offset() + token.len())
@@ -211,12 +214,14 @@ impl Collector<'_> {
 
     /// Whether a type name without type arguments leaves generic parameters
     /// to default; an enclosing type parameter's name shadows library types.
-    fn is_raw_generic(&self, segments: &[Identifier]) -> bool {
+    fn is_raw_generic(&self, segments: impl Iterator<Item = Identifier<'a>> + Clone) -> bool {
         let Some(state) = &self.state else {
             return false;
         };
-        if let [name] = segments
-            && self.type_parameters.contains(&name.name)
+        let mut names = segments.clone();
+        if let Some(name) = names.next()
+            && names.next().is_none()
+            && self.type_parameters.contains(&name.name())
         {
             return false;
         }
@@ -242,30 +247,27 @@ impl Collector<'_> {
         state.signatures.has_constructor(&identity, name)
     }
 
-    fn push_type_parameters(&mut self, parameters: &[TypeParam]) {
-        self.type_parameters.extend(
-            parameters
-                .iter()
-                .map(|parameter| parameter.name.name.clone()),
-        );
+    fn push_type_parameters(&mut self, parameters: impl Iterator<Item = TypeParam<'a>>) {
+        self.type_parameters
+            .extend(parameters.map(|parameter| parameter.name().name()));
     }
 
-    fn pop_type_parameters(&mut self, parameters: &[TypeParam]) {
+    fn pop_type_parameters(&mut self, parameters: impl Iterator<Item = TypeParam<'a>>) {
         self.type_parameters
-            .truncate(self.type_parameters.len() - parameters.len());
+            .truncate(self.type_parameters.len() - parameters.count());
     }
 
     /// Whether `name`, read as an expression, is a type literal of a raw
     /// generic type: a library type that neither a local, a type parameter,
     /// nor a member of the enclosing declaration shadows. `head` is its first
     /// identifier.
-    fn names_raw_generic(&self, head: &Identifier, name: QualifiedName<'_>) -> bool {
+    fn names_raw_generic(&self, head: Identifier<'a>, name: QualifiedName<'_>) -> bool {
         let Some(state) = &self.state else {
             return false;
         };
-        !self.locals.contains(&head.span.start)
-            && !self.members.contains(&head.name)
-            && !self.type_parameters.contains(&head.name)
+        !self.locals.contains(&head.span().start)
+            && !self.members.contains(head.name())
+            && !self.type_parameters.contains(&head.name())
             && state.model.name_identity(name) == NameIdentity::Type
             && state
                 .model
@@ -274,20 +276,18 @@ impl Collector<'_> {
     }
 
     /// `Box` / `p.Box` as an expression naming a raw generic type.
-    fn raw_type_literal(&self, node: &Expr) -> Option<Span> {
+    fn raw_type_literal(&self, node: Expr<'a>) -> Option<Span> {
         match node {
             Expr::Ident(identifier) => self
-                .names_raw_generic(identifier, (&identifier.name).into())
-                .then_some(identifier.span),
-            Expr::Field {
-                object,
-                field,
-                is_null_safe: false,
-                span,
-            } => match object.as_ref() {
+                .names_raw_generic(identifier, identifier.name().into())
+                .then_some(identifier.span()),
+            Expr::Field(field) if !field.is_null_safe() => match field.object() {
                 Expr::Ident(prefix) => self
-                    .names_raw_generic(prefix, QualifiedName::prefixed(&prefix.name, &field.name))
-                    .then_some(*span),
+                    .names_raw_generic(
+                        prefix,
+                        QualifiedName::prefixed(prefix.name(), field.field().name()),
+                    )
+                    .then_some(field.span()),
                 _ => None,
             },
             _ => None,
@@ -297,11 +297,11 @@ impl Collector<'_> {
     /// The `var`/`final`/`const` keyword within `start..end`.
     fn keyword(&self, start: usize, end: usize) -> Option<Span> {
         self.ctx
-            .syntax
-            .tokens_in(Span::new(start, end))
+            .tree()
+            .tokens_in(self.ctx.source, Span::new(start, end))
             .find(|token| {
                 matches!(
-                    token.kind,
+                    token.kind(),
                     TokenKind::Var | TokenKind::Final | TokenKind::Const
                 )
             })
@@ -310,10 +310,10 @@ impl Collector<'_> {
 
     fn check_declaration(
         &mut self,
-        annotations: &[Annotation],
+        annotations: AstChildren<'a, Annotation<'a>>,
         span: Span,
-        var_type: Option<&DartType>,
-        declarators: &[VarDeclarator],
+        var_type: Option<DartType<'a>>,
+        declarators: AstChildren<'a, VarDeclarator<'a>>,
     ) {
         if var_type.is_some() {
             return;
@@ -323,26 +323,23 @@ impl Collector<'_> {
         };
         let start = annotations
             .last()
-            .map_or(span.start, |annotation| annotation.span.end);
+            .map_or(span.start, |annotation| annotation.span().end);
         let keyword = self
-            .keyword(start, first.name.span.start)
-            .unwrap_or(Span::new(start, first.name.span.start));
+            .keyword(start, first.name().span().start)
+            .unwrap_or(Span::new(start, first.name().span().start));
         self.report(keyword);
     }
 
     /// `for (var x in xs)` / `for (final x in xs)`: the keyword directly
     /// precedes the loop variable name.
-    fn check_for_in(&mut self, var_type: Option<&DartType>, name: &Identifier) {
+    fn check_for_in(&mut self, var_type: Option<DartType<'a>>, name: Identifier<'a>) {
         if var_type.is_some() {
             return;
         }
-        let syntax = self.ctx.syntax.syntax_for_span(name.span);
-        let range = syntax.token_range(name.span);
-        if let Some(token) = syntax.tokens()[..range.start.index()]
-            .iter()
-            .rev()
-            .find(|token| !token.is_trivia())
-            .filter(|token| matches!(token.kind, TokenKind::Var | TokenKind::Final))
+        if let Some(token) = name
+            .token()
+            .prev_significant()
+            .filter(|token| matches!(token.kind(), TokenKind::Var | TokenKind::Final))
         {
             self.report(Span::new(token.offset(), token.offset() + token.len()));
         }
@@ -350,20 +347,20 @@ impl Collector<'_> {
 
     /// A parameter without a type, including a function-typed formal without
     /// a return type (`void f(cb())`); `_`-only names are exempt.
-    fn check_untyped_param(&mut self, node: &FormalParam) {
-        if node.param_type.is_none()
-            && node.initializing.is_none()
-            && !is_just_underscores(&node.name.name)
+    fn check_untyped_param(&mut self, node: FormalParam<'a>) {
+        if node.param_type().is_none()
+            && node.initializing().is_none()
+            && !is_just_underscores(node.name().name())
         {
-            let span = if node.is_final || node.is_var {
+            let span = if node.is_final() || node.is_var() {
                 let start = node
-                    .annotations
+                    .annotations()
                     .last()
-                    .map_or(node.span.start, |annotation| annotation.span.end);
-                self.keyword(start, node.name.span.start)
-                    .unwrap_or(node.span)
+                    .map_or(node.span().start, |annotation| annotation.span().end);
+                self.keyword(start, node.name().span().start)
+                    .unwrap_or(node.span())
             } else {
-                documented_node_span(node.span, &node.annotations, self.ctx)
+                documented_node_span(node.span(), node.annotations(), self.ctx)
             };
             self.report(span);
         }
@@ -371,51 +368,53 @@ impl Collector<'_> {
 
     /// `Box(1)` / `Box.named(1)` / `p.Box(1)`: an invocation of a generic
     /// class's constructor without type arguments; the span of its type name.
-    fn raw_generic_construction(&self, callee: &Expr) -> Option<Span> {
+    fn raw_generic_construction(&self, callee: Expr<'a>) -> Option<Span> {
         let state = self.state.as_ref()?;
         let (identity, constructor) = resolve_call_constructor(callee, &state.model, false)?;
         if !self.is_generic(&identity) || !self.declares_constructor(&identity, constructor) {
             return None;
         }
         match callee {
-            Expr::Field { object, .. } if constructor != "new" => Some(*object.span()),
-            _ => Some(*callee.span()),
+            Expr::Field(field) if constructor != "new" => Some(field.object().span()),
+            _ => Some(callee.span()),
         }
     }
 
     /// `const p.Box.named(1)` parses its type as `p.Box.named` without a
     /// separate constructor name: when the full name is no type, its last
     /// segment names the constructor.
-    fn raw_generic_new(&self, named: &NamedType) -> Option<Span> {
+    fn raw_generic_new(&self, named: NamedType<'a>) -> Option<Span> {
         let state = self.state.as_ref()?;
-        let (constructor, type_segments) = named.segments.split_last()?;
-        if type_segments.is_empty()
-            || !named.type_args.is_empty()
-            || falcon_analyze::QualifiedName::from_identifiers(&named.segments)
+        let segments = named.segments();
+        let mut type_segments = segments.clone();
+        let constructor = type_segments.next_back()?;
+        if type_segments.clone().next().is_none()
+            || !named.type_args().is_empty()
+            || QualifiedName::from_identifiers(segments)
                 .and_then(|name| state.model.resolve_name(name))
                 .is_some()
         {
             return None;
         }
-        let identity =
-            state
-                .model
-                .resolve_name(falcon_analyze::QualifiedName::from_identifiers(
-                    type_segments,
-                )?)?;
-        (self.is_generic(&identity) && self.declares_constructor(&identity, &constructor.name))
+        let identity = state
+            .model
+            .resolve_name(QualifiedName::from_identifiers(type_segments.clone())?)?;
+        (self.is_generic(&identity) && self.declares_constructor(&identity, constructor.name()))
             .then(|| {
-                type_segments[0]
-                    .span
-                    .merge(&type_segments[type_segments.len() - 1].span)
+                type_segments
+                    .clone()
+                    .next()
+                    .unwrap()
+                    .span()
+                    .merge(&type_segments.last().unwrap().span())
             })
     }
 
-    fn check_pattern_shorthands(&mut self, pattern: &Pattern) {
+    fn check_pattern_shorthands(&mut self, pattern: Pattern<'a>) {
         if let Pattern::Object(object) = pattern {
-            for field in &object.fields {
-                if field.pattern.is_none() {
-                    self.report(field.name.span);
+            for field in object.fields() {
+                if field.pattern().is_none() {
+                    self.report(field.name().span());
                 }
             }
         }
@@ -423,16 +422,16 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(variable) = node {
             self.check_declaration(
-                &variable.annotations,
-                variable.span,
-                variable.var_type.as_ref(),
-                &variable.declarators,
+                variable.annotations(),
+                variable.span(),
+                variable.var_type(),
+                variable.declarators(),
             );
         }
         if self.state.is_some()
@@ -440,209 +439,186 @@ impl StructuralRuleVisitor for Collector<'_> {
         {
             self.members = member_names(members);
         }
-        self.push_type_parameters(declared_type_parameters(node));
+        self.push_type_parameters(declared_type_parameters(node).into_iter().flatten());
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        self.pop_type_parameters(declared_type_parameters(node));
+    fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
+        self.pop_type_parameters(declared_type_parameters(node).into_iter().flatten());
         self.members.clear();
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
-        let parameters = match node {
-            ClassMember::Method(method) => method.type_params.as_slice(),
-            _ => &[],
-        };
-        self.push_type_parameters(parameters);
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
+        if let ClassMember::Method(method) = node {
+            self.push_type_parameters(method.type_params());
+        }
         StructuralTraversal::Continue
     }
 
-    fn exit_class_member(&mut self, node: &ClassMember) {
+    fn exit_class_member(&mut self, node: ClassMember<'a>) {
         if let ClassMember::Method(method) = node {
-            self.pop_type_parameters(&method.type_params);
+            self.pop_type_parameters(method.type_params());
         }
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
         self.check_declaration(
-            &node.annotations,
-            node.span,
-            node.field_type.as_ref(),
-            &node.declarators,
+            node.annotations(),
+            node.span(),
+            node.field_type(),
+            node.declarators(),
         );
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        if node.var_type.is_none()
-            && let Some(keyword) = node.keyword_span
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        if node.var_type().is_none()
+            && let Some(keyword) = node.keyword_span()
         {
             self.report(keyword);
         } else {
             self.check_declaration(
-                &node.annotations,
+                node.annotations(),
                 node.range(),
-                node.var_type.as_ref(),
-                &node.declarators,
+                node.var_type(),
+                node.declarators(),
             );
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
         self.check_untyped_param(node);
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        if node.param_type.is_none() && !is_just_underscores(&node.param.name) {
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        if node.param_type().is_none() && !is_just_underscores(node.param().name()) {
             let parameter_span = setter_parameter_span(node, self.ctx);
             let keyword_start = node
-                .param_annotations
+                .param_annotations()
                 .last()
-                .map_or(parameter_span.start, |annotation| annotation.span.end);
+                .map_or(parameter_span.start, |annotation| annotation.span().end);
             let span = self
-                .keyword(keyword_start, node.param.span.start)
+                .keyword(keyword_start, node.param().span().start)
                 .unwrap_or(parameter_span);
             self.report(span);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
-            self.push_type_parameters(&function.type_params);
+            self.push_type_parameters(function.type_params());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, node: &Stmt) {
+    fn exit_stmt(&mut self, node: Stmt<'a>) {
         if let Stmt::LocalFunc(function) = node {
-            self.pop_type_parameters(&function.type_params);
+            self.pop_type_parameters(function.type_params());
         }
     }
 
-    fn visit_pattern_assign_stmt(&mut self, node: &PatternAssignStmt) -> StructuralTraversal {
+    fn visit_pattern_assign_stmt(&mut self, node: PatternAssignStmt<'a>) -> StructuralTraversal {
         self.assigned_pattern = true;
-        self.assignment_value = Some(&node.value);
+        self.assignment_value = Some(node.value().syntax().id());
         StructuralTraversal::Continue
     }
 
 
     /// Loop variables of `for` statements and collection `for` elements.
-    fn visit_for_header(&mut self, node: &ForHeader) -> StructuralTraversal {
-        if let Some(ForInit::ForIn {
-            declares_variable: true,
-            var_type,
-            name,
-            ..
-        }) = &node.init
+    fn visit_for_header(&mut self, node: ForHeader<'a>) -> StructuralTraversal {
+        if let Some(ForInit::ForIn(init)) = node.init()
+            && init.declares_variable()
         {
-            self.check_for_in(var_type.as_ref(), name);
+            self.check_for_in(init.var_type(), init.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
         if !self.assigned_pattern {
-            if let Pattern::Variable {
-                type_: None,
-                name,
-                span,
-            } = node
-                && name.name != "_"
+            if let Pattern::Variable(variable) = node
+                && variable.type_().is_none()
+                && variable.name().name() != "_"
             {
-                self.report(self.first_token(*span));
+                self.report(self.first_token(variable.span()));
             }
             self.check_pattern_shorthands(node);
         }
         if let Pattern::Const(constant) = node
-            && let ConstPatternValue::Name(name) = &constant.value
+            && let ConstPatternValue::Name(name) = constant.value()
             && let (Some(head), Some(last), Some(qualified)) = (
                 name.first(),
-                name.last(),
+                name.clone().last(),
                 QualifiedName::from_identifiers(name),
             )
             && self.names_raw_generic(head, qualified)
         {
-            self.report(head.span.merge(&last.span));
+            self.report(head.span().merge(&last.span()));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Named(named) = node
-            && named.type_args.is_empty()
-            && self.is_type_test != Some(named.span)
-            && self.is_raw_generic(&named.segments)
+            && named.type_args().is_empty()
+            && self.is_type_test != Some(named.span())
+            && self.is_raw_generic(named.segments())
         {
-            self.report(named.span);
+            self.report(named.span());
         }
         if let DartType::Function(function) = node {
-            self.push_type_parameters(&function.type_params);
+            self.push_type_parameters(function.type_params());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_dart_type(&mut self, node: &DartType) {
+    fn exit_dart_type(&mut self, node: DartType<'a>) {
         if let DartType::Function(function) = node {
-            self.pop_type_parameters(&function.type_params);
+            self.pop_type_parameters(function.type_params());
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if self.assignment_value.is_some_and(|value| std::ptr::eq(value, node)) {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if self.assignment_value == Some(node.syntax().id()) {
             self.assigned_pattern = false;
             self.assignment_value = None;
         }
         self.expression_scopes.push((self.is_type_test, self.reference));
-        if self.reference != Some(*node.span())
+        if self.reference != Some(node.span())
             && let Some(span) = self.raw_type_literal(node)
         {
             self.report(span);
         }
         self.reference = match node {
-            Expr::Call { callee, .. } => Some(*callee.span()),
-            Expr::Field { object, .. } if !matches!(object.as_ref(), Expr::Paren { .. }) => {
-                Some(*object.span())
+            Expr::Call(call) => Some(call.callee().span()),
+            Expr::Field(field) if !matches!(field.object(), Expr::Paren(_)) => {
+                Some(field.object().span())
             }
-            Expr::GenericInstantiation { target, .. } => Some(*target.span()),
+            Expr::GenericInstantiation(instantiation) => Some(instantiation.target().span()),
             _ => None,
         };
-        if let Expr::FuncExpr { type_params, .. } = node {
-            self.push_type_parameters(type_params);
+        if let Expr::FuncExpr(function) = node {
+            self.push_type_parameters(function.type_params());
             return StructuralTraversal::Continue;
         }
         match node {
-            Expr::List {
-                type_arg: None,
-                span,
-                ..
-            }
-            | Expr::Set {
-                type_arg: None,
-                span,
-                ..
-            } => self.report(self.first_token(*span)),
-            Expr::Map {
-                type_args, span, ..
-            } if type_args.is_empty() => self.report(self.first_token(*span)),
+            Expr::List(list) if list.type_arg().is_none() => self.report(self.first_token(list.span())),
+            Expr::Set(set) if set.type_arg().is_none() => self.report(self.first_token(set.span())),
+            Expr::Map(map) if map.type_args().is_empty() => self.report(self.first_token(map.span())),
             // The tested type of an `is` check may stay raw; its arguments may not.
-            Expr::Is { dart_type, .. } => self.is_type_test = Some(*dart_type.span()),
-            Expr::Call {
-                callee, type_args, ..
-            } if type_args.is_empty() => {
-                if let Some(span) = self.raw_generic_construction(callee) {
+            Expr::Is(is) => self.is_type_test = Some(is.dart_type().span()),
+            Expr::Call(call) if call.type_args().is_empty() => {
+                if let Some(span) = self.raw_generic_construction(call.callee()) {
                     self.report(span);
                 }
             }
-            Expr::New {
-                dart_type: DartType::Named(named),
-                constructor_name: None,
-                ..
-            } => {
-                if let Some(span) = self.raw_generic_new(named) {
+            Expr::New(new) if new.constructor_name().is_none() => {
+                if let DartType::Named(named) = new.dart_type()
+                    && let Some(span) = self.raw_generic_new(named)
+                {
                     self.report(span);
                 }
             }
@@ -651,9 +627,9 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, node: &Expr) {
-        if let Expr::FuncExpr { type_params, .. } = node {
-            self.pop_type_parameters(type_params);
+    fn exit_expr(&mut self, node: Expr<'a>) {
+        if let Expr::FuncExpr(function) = node {
+            self.pop_type_parameters(function.type_params());
         }
         if let Some((type_test, reference)) = self.expression_scopes.pop() {
             self.is_type_test = type_test;

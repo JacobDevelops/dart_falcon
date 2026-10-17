@@ -30,7 +30,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidImplementingValueTypes;
@@ -38,7 +38,7 @@ pub struct AvoidImplementingValueTypes;
 impl Rule for AvoidImplementingValueTypes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -46,7 +46,7 @@ impl Rule for AvoidImplementingValueTypes {
         };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
             diags: Vec::new(),
         }))
@@ -61,10 +61,10 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
             let implements = match decl {
-                TopLevelDecl::Class(class) => &class.implements,
+                TopLevelDecl::Class(class) => class.implements(),
                 _ => return StructuralTraversal::SkipChildren,
             };
             for interface in implements {
@@ -72,7 +72,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                     self.diags.push(self.ctx.diagnostic(
                         "avoid-implementing-value-types",
                         "Classes that override '==' should not be implemented.",
-                        *interface.span(),
+                        interface.span(),
                     ));
                 }
             }
@@ -87,7 +87,7 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 /// Whether the interface's `==` is declared outside `dart:core`.
 fn overrides_equals(
-    interface: &DartType,
+    interface: DartType<'_>,
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
 ) -> bool {

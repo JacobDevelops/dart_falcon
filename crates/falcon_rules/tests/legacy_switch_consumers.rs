@@ -1,4 +1,4 @@
-//! AST-consumer compatibility tests, not analyzer diagnostic fixtures.
+//! Syntax-consumer compatibility tests, not analyzer diagnostic fixtures.
 //! The language override changes case operands from patterns to expressions;
 //! rules must retain their existing behavior on the same operand syntax.
 
@@ -12,8 +12,8 @@ use falcon_dart_parser::parse;
 use falcon_rules::lint::complexity::max_switch_cases::MaxSwitchCases;
 use falcon_rules::lint::correctness::exhaustive_cases::ExhaustiveCases;
 use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStringsInList;
-use falcon_syntax::ast::{Stmt, SwitchCaseKind};
-use falcon_syntax::visitor::{Visitor, walk_stmt};
+use falcon_syntax::cst::visit::{Visitor, walk_stmt};
+use falcon_syntax::cst::{Stmt, SwitchCaseKind};
 
 fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
     let source = format!(
@@ -23,11 +23,11 @@ fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
     let parsed = parse(&source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     struct CaseKinds(bool, usize);
-    impl Visitor for CaseKinds {
-        fn visit_stmt(&mut self, node: &Stmt) {
+    impl<'a> Visitor<'a> for CaseKinds {
+        fn visit_stmt(&mut self, node: Stmt<'a>) {
             if let Stmt::Switch(switch) = node {
-                for case in switch.cases.iter().flat_map(|group| &group.cases) {
-                    if matches!(case, SwitchCaseKind::Default) {
+                for case in switch.cases().flat_map(|group| group.cases()) {
+                    if matches!(case, SwitchCaseKind::Default(_)) {
                         continue;
                     }
                     assert_eq!(matches!(case, SwitchCaseKind::Expr(_)), self.0);
@@ -38,24 +38,27 @@ fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
         }
     }
     let mut kinds = CaseKinds(legacy, 0);
-    kinds.visit_program(&parsed.program);
+    kinds.visit_program(parsed.tree.program(&source));
     assert!(kinds.1 > 0);
     parsed
 }
 
 fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
-    let falcon_dart_parser::ParseResult {
-        program, syntax, ..
-    } = case_program(source, legacy);
+    let falcon_dart_parser::ParseResult { tree, .. } = case_program(source, legacy);
     let source = format!(
         "// @dart = {}\n{source}",
         if legacy { "2.19" } else { "3.13" }
     );
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into_boxed_str(),
+        tree,
+    });
+    let program = parsed.program();
     let path = Path::new("legacy-switch.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -64,7 +67,7 @@ fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
         [(
             path,
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -72,11 +75,11 @@ fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
         &identities,
     );
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(path, &source, &config, &syntax)
+    let ctx = AnalyzeContext::new(path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types);
     let mut messages: Vec<_> = rule
-        .analyze(&program, &ctx)
+        .analyze(program, &ctx)
         .into_iter()
         .map(|diagnostic| diagnostic.message)
         .collect();
@@ -119,7 +122,7 @@ fn legacy_case_expressions_visit_adjacent_strings_in_lists() {
 
 #[test]
 fn legacy_case_expressions_preserve_this_access_shape() {
-    // Invalid constant operands constrain AST shape, not lint diagnostics.
+    // Invalid constant operands constrain syntax shape, not lint diagnostics.
     let source = "class C {
         int value = 0;
         void f(Object input) { switch (input) { case const [this.value]: break; } }
@@ -130,7 +133,7 @@ fn legacy_case_expressions_preserve_this_access_shape() {
 
 #[test]
 fn legacy_case_expressions_preserve_closure_shape() {
-    // A closure is not a legal constant; only check the two case AST forms.
+    // A closure is not a legal constant; only check the two case syntax forms.
     let source = "var top = 0;
         void f(Object input) {
             switch (input) { case const [(top) => top]: break; }

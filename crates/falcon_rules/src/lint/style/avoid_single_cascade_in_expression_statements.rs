@@ -9,7 +9,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst;
 
 #[derive(Default)]
 pub struct AvoidSingleCascadeInExpressionStatements;
@@ -17,7 +17,7 @@ pub struct AvoidSingleCascadeInExpressionStatements;
 impl Rule for AvoidSingleCascadeInExpressionStatements {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -33,20 +33,20 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::Expr(e) = node
-            && let Expr::Cascade { sections, span, .. } = e.expr.unparenthesized()
-            && sections.len() == 1
+    fn visit_stmt(&mut self, node: cst::Stmt<'_>) -> StructuralTraversal {
+        if let cst::Stmt::Expr(e) = node
+            && let cst::Expr::Cascade(cascade) = e.expr().unparenthesized()
+            && cascade.sections().count() == 1
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-single-cascade-in-expression-statements",
                 "Single cascade in an expression statement — use `.` instead of `..`",
-                *span,
+                cascade.span(),
             ));
         }
         StructuralTraversal::Continue

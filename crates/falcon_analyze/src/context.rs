@@ -3,8 +3,7 @@ use std::sync::{Arc, OnceLock};
 
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
-use falcon_syntax::ast::{FunctionKind, Program, TopLevelDecl};
-use falcon_syntax::token::{SyntaxStore, Token};
+use falcon_syntax::cst::{FunctionKind, NodeId, Program, SyntaxToken, SyntaxTree, TopLevelDecl};
 
 use crate::environment::{AnalysisEnvironment, LanguageVersion};
 use crate::resolve::flow_writes::FlowWrites;
@@ -14,17 +13,19 @@ use crate::resolve::{
     TypeParameterScope,
 };
 
+use crate::ParsedFile;
+
 /// Lazily computed facts shared by all rules analyzing one file.
 #[derive(Default)]
-pub struct AnalysisCache {
+pub struct AnalysisCache<'a> {
     flow_writes: OnceLock<Arc<FlowWrites>>,
     local_writes: OnceLock<LocalWrites>,
-    globals: OnceLock<HashMap<String, ResolvedType>>,
+    globals: OnceLock<HashMap<&'a str, ResolvedType>>,
 }
 
 struct LocalWrites {
     writes: Vec<LocalWrite>,
-    mutated: HashSet<usize>,
+    mutated: HashSet<NodeId>,
 }
 
 /// Per-file analysis context passed to every rule.
@@ -34,7 +35,7 @@ struct LocalWrites {
 pub struct AnalyzeContext<'a> {
     pub file_path: &'a std::path::Path,
     pub source: &'a str,
-    pub syntax: &'a SyntaxStore,
+    pub parsed: &'a Arc<ParsedFile>,
     pub config: &'a FalconConfig,
     /// Cross-file type facts, when resolving analysis is enabled.
     pub types: Option<&'a TypeIndex>,
@@ -55,21 +56,20 @@ pub struct AnalyzeContext<'a> {
     /// `// @dart` override, then this, then the analyzer's default.
     pub package_language_version: Option<LanguageVersion>,
     /// Per-file facts; create a fresh cache when constructing a context for another file.
-    pub cache: AnalysisCache,
+    pub cache: AnalysisCache<'a>,
 }
 
 impl<'a> AnalyzeContext<'a> {
     /// Construct a non-resolving context.
     pub fn new(
         file_path: &'a std::path::Path,
-        source: &'a str,
         config: &'a FalconConfig,
-        syntax: &'a SyntaxStore,
+        parsed: &'a Arc<ParsedFile>,
     ) -> Self {
         Self {
             file_path,
-            source,
-            syntax,
+            source: &parsed.source,
+            parsed,
             config,
             types: None,
             identities: None,
@@ -81,8 +81,12 @@ impl<'a> AnalyzeContext<'a> {
         }
     }
 
+    pub fn tree(&self) -> &'a SyntaxTree {
+        &self.parsed.tree
+    }
+
     /// Lexical writes collected once for this file's parsed program.
-    pub fn flow_writes(&self, program: &Program) -> &FlowWrites {
+    pub fn flow_writes(&self, program: Program<'a>) -> &FlowWrites {
         self.cache.flow_writes.get_or_init(|| {
             self.identities
                 .and_then(|identities| identities.file(self.file_path))
@@ -92,15 +96,15 @@ impl<'a> AnalyzeContext<'a> {
         })
     }
 
-    pub fn local_writes(&self, program: &Program) -> &[LocalWrite] {
+    pub fn local_writes(&self, program: Program<'a>) -> &[LocalWrite] {
         &self.lexical_writes(program).writes
     }
 
-    pub fn mutated_declarations(&self, program: &Program) -> &HashSet<usize> {
+    pub fn mutated_declarations(&self, program: Program<'a>) -> &HashSet<NodeId> {
         &self.lexical_writes(program).mutated
     }
 
-    fn lexical_writes(&self, program: &Program) -> &LocalWrites {
+    fn lexical_writes(&self, program: Program<'a>) -> &LocalWrites {
         self.cache.local_writes.get_or_init(|| {
             let writes = local_writes(program);
             let mutated = writes.iter().map(|write| write.declaration).collect();
@@ -109,30 +113,30 @@ impl<'a> AnalyzeContext<'a> {
     }
 
     /// Top-level variable and setter types shared by semantic rule visitors.
-    pub fn globals(&self, program: &Program) -> &HashMap<String, ResolvedType> {
+    pub fn globals(&self, program: Program<'a>) -> &HashMap<&'a str, ResolvedType> {
         self.cache.globals.get_or_init(|| {
             let mut globals = HashMap::new();
             let Some(identities) = self.identities else {
                 return globals;
             };
-            let model = SemanticModel::new(self.file_path, identities, self.types);
-            for declaration in &program.declarations {
+            let model = SemanticModel::new(self.file_path, self.parsed, identities, self.types);
+            for declaration in program.declarations() {
                 match declaration {
                     TopLevelDecl::Variable(variable) => {
-                        let declared = variable.var_type.as_ref().map(|ty| model.resolve_type(ty));
-                        for declarator in &variable.declarators {
+                        let declared = variable.var_type().map(|ty| model.resolve_type(ty));
+                        for declarator in variable.declarators() {
                             globals.insert(
-                                declarator.name.name.clone(),
+                                declarator.name().name(),
                                 declared.clone().unwrap_or(ResolvedType::Unknown),
                             );
                         }
                     }
                     TopLevelDecl::Function(function) => {
-                        if let FunctionKind::Setter(parameters) = &function.kind
-                            && let Some(parameter) = parameters.params.first()
+                        if let FunctionKind::Setter(parameters) = function.kind()
+                            && let Some(parameter) = parameters.params().first()
                         {
                             globals.insert(
-                                function.name.name.clone(),
+                                function.name().name(),
                                 model.resolve_formal_parameter_in(
                                     parameter,
                                     &TypeParameterScope::default(),
@@ -147,9 +151,9 @@ impl<'a> AnalyzeContext<'a> {
         })
     }
 
-    /// Retained source tokens, including trivia.
-    pub fn tokens(&self) -> &[Token] {
-        self.syntax.tokens()
+    /// Retained source tokens outside interpolation bodies, including trivia.
+    pub fn tokens(&self) -> impl DoubleEndedIterator<Item = SyntaxToken<'a>> + Clone {
+        self.tree().top_level_tokens(self.source)
     }
 
     /// The language version the file is analyzed at, as the analyzer

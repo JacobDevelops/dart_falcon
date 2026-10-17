@@ -12,7 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoWildcardVariableUses;
@@ -20,7 +20,7 @@ pub struct NoWildcardVariableUses;
 impl Rule for NoWildcardVariableUses {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let visitor = WildcardUseVisitor {
@@ -43,18 +43,18 @@ struct WildcardUseVisitor<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for WildcardUseVisitor<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for WildcardUseVisitor<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::Ident(id) = node
-            && is_wildcard(&id.name)
+            && is_wildcard(id.name())
         {
             self.diags.push(
                 self.ctx
-                    .diagnostic("no-wildcard-variable-uses", MESSAGE, id.span),
+                    .diagnostic("no-wildcard-variable-uses", MESSAGE, id.span()),
             );
         }
         StructuralTraversal::Continue

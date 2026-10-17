@@ -12,12 +12,12 @@ use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
     RulePreparation, SemanticModel, SignatureIndex, evaluate_constant,
-    evaluate_constant_in_member_context, evaluate_constant_with_local_values,
+    evaluate_constant_in_member_context, evaluate_constant_name_with_local_values,
+    evaluate_constant_with_local_values,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_pattern};
+use falcon_syntax::cst::visit::{Visitor, walk_pattern};
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ExhaustiveCases;
@@ -25,7 +25,7 @@ pub struct ExhaustiveCases;
 impl Rule for ExhaustiveCases {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -42,16 +42,15 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check_switch(&mut self, node: &SwitchStmt, state: &SemanticState<'_>) {
-        if node.cases.iter().any(|group| {
+    fn check_switch<'a>(&mut self, node: SwitchStmt<'a>, state: &SemanticState<'a>) {
+        if node.cases().any(|group| {
             group
-                .cases
-                .iter()
-                .any(|case| matches!(case, SwitchCaseKind::Default))
+                .cases()
+                .any(|case| matches!(case, SwitchCaseKind::Default(_)))
         }) {
             return;
         }
-        let ResolvedType::Interface { identity, .. } = state.infer(&node.subject) else {
+        let ResolvedType::Interface { identity, .. } = state.infer(node.subject()) else {
             return;
         };
         if state.signatures.type_kind(&identity) == Some(falcon_analyze::resolve::TypeKind::Enum) {
@@ -73,8 +72,8 @@ impl Collector<'_> {
             _ => None,
         };
         let mut covered = HashSet::new();
-        for group in &node.cases {
-            for case in &group.cases {
+        for group in node.cases() {
+            for case in group.cases() {
                 let mut cover = |constant: CaseConstant<'_>| {
                     let value = match constant {
                         CaseConstant::Expr(expr) => evaluate_constant_with_local_values(
@@ -84,34 +83,23 @@ impl Collector<'_> {
                             &state.model,
                             &state.signatures,
                         ),
-                        CaseConstant::Name(names) => {
-                            let expr = names.iter().skip(1).fold(
-                                Expr::Ident(names[0].clone()),
-                                |object, field| Expr::Field {
-                                    span: Span::new(object.span().start, field.span.end),
-                                    object: Box::new(object),
-                                    field: field.clone(),
-                                    is_null_safe: false,
-                                },
-                            );
-                            evaluate_constant_with_local_values(
-                                &expr,
-                                enclosing,
-                                &locals,
-                                &state.model,
-                                &state.signatures,
-                            )
-                        }
+                        CaseConstant::Name(names) => evaluate_constant_name_with_local_values(
+                            names,
+                            enclosing,
+                            &locals,
+                            &state.model,
+                            &state.signatures,
+                        ),
                         // `.name` reads a static member of the switched type.
                         CaseConstant::Shorthand(name) => {
-                            values.get(&name.name).cloned().or_else(|| {
+                            values.get(name.name()).cloned().or_else(|| {
                                 facts
                                     .static_consts
                                     .iter()
-                                    .find(|constant| constant.name == name.name)
+                                    .find(|constant| constant.name == name.name())
                                     .and_then(|constant| {
                                         evaluate_constant_in_member_context(
-                                            &constant.initializer,
+                                            constant.initializer.expr(),
                                             &identity,
                                             &state.model,
                                             &state.signatures,
@@ -125,15 +113,19 @@ impl Collector<'_> {
                     }
                 };
                 match case {
-                    SwitchCaseKind::Pattern(pattern, _) => visit_case_constant(pattern, &mut cover),
-                    SwitchCaseKind::Expr(expression) => match expression.unparenthesized() {
-                        Expr::DotShorthand { name, .. } => cover(CaseConstant::Shorthand(name)),
-                        Expr::Ident(_) | Expr::Field { .. } => {
-                            cover(CaseConstant::Expr(expression))
+                    SwitchCaseKind::Pattern(pattern) => {
+                        visit_case_constant(pattern.pattern(), &mut cover)
+                    }
+                    SwitchCaseKind::Expr(expression) => match expression.expr().unparenthesized() {
+                        Expr::DotShorthand(shorthand) => {
+                            cover(CaseConstant::Shorthand(shorthand.name()))
+                        }
+                        Expr::Ident(_) | Expr::Field(_) => {
+                            cover(CaseConstant::Expr(expression.expr()))
                         }
                         _ => {}
                     },
-                    SwitchCaseKind::Default => {}
+                    SwitchCaseKind::Default(_) => {}
                 }
             }
         }
@@ -154,11 +146,14 @@ impl Collector<'_> {
         // The analyzer reports from `switch` through the closing `)`.
         let end = self
             .ctx
-            .syntax
-            .tokens_in(Span::new(node.subject.span().end, node.span.end))
+            .tree()
+            .tokens_in(
+                self.ctx.source,
+                Span::new(node.subject().span().end, node.span().end),
+            )
             .find(|token| !token.is_trivia())
-            .filter(|token| token.kind == falcon_syntax::TokenKind::RParen)
-            .map_or(node.subject.span().end, |token| {
+            .filter(|token| token.kind() == falcon_syntax::TokenKind::RParen)
+            .map_or(node.subject().span().end, |token| {
                 token.offset() + token.len()
             });
         for constant in &facts.static_consts {
@@ -175,18 +170,18 @@ impl Collector<'_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 "exhaustive-cases",
                 format!("Add a case for '{}.{}'.", identity.name(), preferred.name),
-                Span::new(node.span.start, end),
+                Span::new(node.span().start, end),
             ));
         }
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         if let Stmt::Switch(switch) = node {
             self.check_switch(switch, state);
         }
@@ -223,7 +218,7 @@ fn constant_values(
     let fields = facts
         .static_consts
         .iter()
-        .map(|constant| (constant.name.as_str(), &constant.initializer))
+        .map(|constant| (constant.name.as_str(), constant.initializer.expr()))
         .collect::<HashMap<_, _>>();
     facts
         .static_consts
@@ -231,7 +226,7 @@ fn constant_values(
         .filter(|constant| exact_identity(&constant.ty, identity))
         .filter_map(|constant| {
             evaluate_constant(
-                &constant.initializer,
+                constant.initializer.expr(),
                 Some(identity),
                 &fields,
                 model,
@@ -245,16 +240,16 @@ fn constant_values(
 /// The case's constant reference, as the linter accepts it: an identifier,
 /// property access, or dot shorthand inside (parenthesized) constant patterns.
 enum CaseConstant<'a> {
-    Name(&'a [Identifier]),
-    Expr(&'a Expr),
-    Shorthand(&'a Identifier),
+    Name(PatternNames<'a>),
+    Expr(Expr<'a>),
+    Shorthand(Identifier<'a>),
 }
 
-fn visit_case_constant(pattern: &Pattern, visit: impl for<'a> FnMut(CaseConstant<'a>)) {
+fn visit_case_constant<'a>(pattern: Pattern<'a>, visit: impl FnMut(CaseConstant<'a>)) {
     struct ConstantVisitor<F>(F);
-    impl<F: for<'a> FnMut(CaseConstant<'a>)> Visitor for ConstantVisitor<F> {
-        fn visit_pattern(&mut self, pattern: &Pattern) {
-            if matches!(pattern, Pattern::ParenPattern { .. }) {
+    impl<'a, F: FnMut(CaseConstant<'a>)> Visitor<'a> for ConstantVisitor<F> {
+        fn visit_pattern(&mut self, pattern: Pattern<'a>) {
+            if matches!(pattern, Pattern::ParenPattern(_)) {
                 // Only parentheses are transparent; shared traversal must not
                 // turn nested logical, object, or collection patterns into cases.
                 walk_pattern(self, pattern);
@@ -266,14 +261,16 @@ fn visit_case_constant(pattern: &Pattern, visit: impl for<'a> FnMut(CaseConstant
     ConstantVisitor(visit).visit_pattern(pattern);
 }
 
-fn direct_case_constant(pattern: &Pattern) -> Option<CaseConstant<'_>> {
+fn direct_case_constant(pattern: Pattern<'_>) -> Option<CaseConstant<'_>> {
     match pattern {
-        Pattern::Const(constant) => match &constant.value {
-            ConstPatternValue::Name(names) if !names.is_empty() => Some(CaseConstant::Name(names)),
+        Pattern::Const(constant) => match constant.value() {
+            ConstPatternValue::Name(names) if names.clone().next().is_some() => {
+                Some(CaseConstant::Name(names))
+            }
             ConstPatternValue::Name(_) => None,
             ConstPatternValue::Expr(expr) => match expr.unparenthesized() {
-                Expr::DotShorthand { name, .. } => Some(CaseConstant::Shorthand(name)),
-                Expr::Ident(_) | Expr::Field { .. } => Some(CaseConstant::Expr(expr)),
+                Expr::DotShorthand(shorthand) => Some(CaseConstant::Shorthand(shorthand.name())),
+                Expr::Ident(_) | Expr::Field(_) => Some(CaseConstant::Expr(expr)),
                 _ => None,
             },
         },
@@ -284,8 +281,9 @@ fn direct_case_constant(pattern: &Pattern) -> Option<CaseConstant<'_>> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::Arc;
 
-    use falcon_analyze::{IdentityIndex, IdentitySource, RuleAnalysis, TypeIndex};
+    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 
@@ -299,18 +297,18 @@ mod tests {
             "switch ( /* before */ (token) /* after */ )",
         );
         let source = source.as_str();
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("owner-dependencies.dart");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
@@ -319,7 +317,7 @@ mod tests {
             [(
                 path,
                 falcon_analyze::LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -327,10 +325,10 @@ mod tests {
             &identities,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types);
-        let diagnostics = ExhaustiveCases.analyze(&program, &ctx);
+        let diagnostics = ExhaustiveCases.analyze(program, &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].message, "Add a case for 'Token.second'.");
         let span = &diagnostics[0].span;
@@ -344,28 +342,28 @@ mod tests {
     fn missing_cases_follow_declaration_order_with_preferred_aliases() {
         let source =
             include_str!("../../../tests/corpus/exhaustive-cases/review_declaration_order.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("review_declaration_order.dart");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let types = TypeIndex::from_program(&program);
+        let types = TypeIndex::from_program(program);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types);
-        let diagnostics = ExhaustiveCases.analyze(&program, &ctx);
+        let diagnostics = ExhaustiveCases.analyze(program, &ctx);
         let messages: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.message.as_str())

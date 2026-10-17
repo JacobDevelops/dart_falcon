@@ -226,7 +226,7 @@ fn test_byte_to_lsp_position_clamped_to_end() {
 
 #[test]
 fn test_diagnostic_accepts_syntax_span() {
-    let span = falcon_syntax::ast::Span { start: 5, end: 10 };
+    let span = falcon_syntax::cst::Span { start: 5, end: 10 };
     let diag = Diagnostic::new("rule", Severity::Warning, "message", "file.dart", span);
     assert_eq!(diag.span, Span { start: 5, end: 10 });
 }

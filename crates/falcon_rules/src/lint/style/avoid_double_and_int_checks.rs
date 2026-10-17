@@ -29,8 +29,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -41,7 +40,7 @@ pub struct AvoidDoubleAndIntChecks;
 impl Rule for AvoidDoubleAndIntChecks {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -58,64 +57,53 @@ struct Collector<'a> {
     bindings: HashSet<usize>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let Stmt::If(statement) = node else {
             return;
         };
-        let Some(else_branch) = &statement.else_branch else {
+        let Some(else_branch) = statement.else_branch() else {
             return;
         };
-        let Stmt::If(else_if) = else_branch.as_ref() else {
+        let Stmt::If(else_if) = else_branch else {
             return;
         };
         let (IfCondition::Expr(if_condition), IfCondition::Expr(else_condition)) =
-            (&statement.condition, &else_if.condition)
+            (statement.condition(), else_if.condition())
         else {
             return;
         };
-        let (
-            Expr::Is {
-                expr: if_subject,
-                dart_type: if_type,
-                ..
-            },
-            Expr::Is {
-                expr: else_subject,
-                dart_type: else_type,
-                ..
-            },
-        ) = (
+        let (Expr::Is(if_test), Expr::Is(else_test)) = (
             if_condition.unparenthesized(),
             else_condition.unparenthesized(),
-        )
-        else {
+        ) else {
             return;
         };
-        let (Expr::Ident(if_name), Expr::Ident(else_name)) =
-            (if_subject.unparenthesized(), else_subject.unparenthesized())
-        else {
+        let (Expr::Ident(if_name), Expr::Ident(else_name)) = (
+            if_test.expr().unparenthesized(),
+            else_test.expr().unparenthesized(),
+        ) else {
             return;
         };
-        if if_name.name != else_name.name
-            || !self.bindings.contains(&if_name.span.start)
-            || !is_core_type(if_type, "double", state)
-            || !is_core_type(else_type, "int", state)
+        if if_name.name() != else_name.name()
+            || !self.bindings.contains(&if_name.span().start)
+            || !is_core_type(if_test.dart_type(), "double", state)
+            || !is_core_type(else_test.dart_type(), "int", state)
         {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(
             "avoid-double-and-int-checks",
             "Explicit check for double or int.",
-            *else_condition.unparenthesized().span(),
+            else_condition.unparenthesized().span(),
         ));
     }
 }
 
-fn is_core_type(ty: &DartType, name: &'static str, state: &SemanticState<'_>) -> bool {
+fn is_core_type(ty: DartType<'_>, name: &'static str, state: &SemanticState<'_>) -> bool {
     state.model.resolve_type_in(ty, &state.type_parameters) == state.model.core_type(name, false)
 }

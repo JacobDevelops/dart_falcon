@@ -16,7 +16,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidDynamic;
@@ -24,7 +24,7 @@ pub struct AvoidDynamic;
 impl Rule for AvoidDynamic {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let visitor = DynamicVisitor {
@@ -41,41 +41,41 @@ struct DynamicVisitor<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for DynamicVisitor<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for DynamicVisitor<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
-        if let DartType::Dynamic { span } = node {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
+        if let DartType::Dynamic(dynamic) = node {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-dynamic",
                 "Avoid using the 'dynamic' type",
-                *span,
+                dynamic.span(),
             ));
         }
         StructuralTraversal::Continue
     }
 
-    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+    fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
         let map_arguments = match parent {
             StructuralNode::NamedType(named) => named
-                .segments
+                .segments()
                 .last()
-                .is_some_and(|segment| segment.name == "Map"),
-            StructuralNode::Expr(Expr::Map { .. })
+                .is_some_and(|segment| segment.name() == "Map"),
+            StructuralNode::Expr(Expr::Map(_))
             | StructuralNode::MapPattern(_) => true,
-            StructuralNode::Expr(Expr::Call { callee, .. }) if is_map_name(callee) => {
-                if let StructuralNode::Expr(expr) = child
-                    && std::ptr::eq(expr, callee.as_ref())
+            StructuralNode::Expr(Expr::Call(call)) if is_map_name(call.callee()) => {
+                if let StructuralNode::Expr(expr) = &child
+                    && expr.syntax().id() == call.callee().syntax().id()
                 {
                     return false;
                 }
                 true
             }
-            StructuralNode::Expr(Expr::GenericInstantiation { target, .. }) if is_map_name(target) => {
-                if let StructuralNode::Expr(expr) = child
-                    && std::ptr::eq(expr, target.as_ref())
+            StructuralNode::Expr(Expr::GenericInstantiation(generic)) if is_map_name(generic.target()) => {
+                if let StructuralNode::Expr(expr) = &child
+                    && expr.syntax().id() == generic.target().syntax().id()
                 {
                     return false;
                 }
@@ -83,16 +83,17 @@ impl StructuralRuleVisitor for DynamicVisitor<'_, '_> {
             }
             _ => false,
         };
-        !map_arguments || !matches!(child, StructuralNode::DartType(DartType::Dynamic { .. }))
+        !map_arguments || !matches!(child, StructuralNode::DartType(DartType::Dynamic(_)))
     }
 }
 }
 
-fn is_map_name(expr: &Expr) -> bool {
+fn is_map_name(expr: Expr<'_>) -> bool {
     match expr.unparenthesized() {
-        Expr::Ident(identifier) => identifier.name == "Map",
-        Expr::Field { object, field, .. } => {
-            matches!(object.unparenthesized(), Expr::Ident(_)) && field.name == "Map"
+        Expr::Ident(identifier) => identifier.name() == "Map",
+        Expr::Field(field) => {
+            matches!(field.object().unparenthesized(), Expr::Ident(_))
+                && field.field().name() == "Map"
         }
         _ => false,
     }

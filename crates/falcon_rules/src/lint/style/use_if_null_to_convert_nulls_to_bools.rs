@@ -12,7 +12,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -23,7 +23,7 @@ pub struct UseIfNullToConvertNullsToBools;
 impl Rule for UseIfNullToConvertNullsToBools {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -43,32 +43,28 @@ fn is_nullable_bool(ty: &ResolvedType) -> bool {
         if identity.is_sdk("dart:core", "bool"))
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op,
-            left,
-            right,
-            span,
-            ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Binary(binary) = node else {
             return;
         };
-        let matches = matches!(
-            (op, right.as_ref()),
-            (BinaryOp::EqEq, Expr::BoolLit { value: true, .. })
-                | (BinaryOp::NotEq, Expr::BoolLit { value: false, .. })
-        );
-        if matches && !is_parenthesized(right) && is_nullable_bool(&state.infer(left)) {
+        let matches = match (binary.op(), binary.right()) {
+            (BinaryOp::EqEq, Expr::BoolLit(literal)) => literal.value(),
+            (BinaryOp::NotEq, Expr::BoolLit(literal)) => !literal.value(),
+            _ => false,
+        };
+        if matches
+            && !is_parenthesized(binary.right())
+            && is_nullable_bool(&state.infer(binary.left()))
+        {
             self.diags.push(self.ctx.diagnostic(
                 "use-if-null-to-convert-nulls-to-bools",
                 "Use an if-null operator to convert a 'null' to a 'bool'.",
-                *span,
+                binary.span(),
             ));
         }
     }

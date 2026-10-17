@@ -9,7 +9,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct EmptyConstructorBodies;
@@ -17,7 +17,7 @@ pub struct EmptyConstructorBodies;
 impl Rule for EmptyConstructorBodies {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -33,8 +33,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let Some(members) = crate::lint::declarations::members_of(decl) else {
             return StructuralTraversal::SkipChildren;
         };
@@ -52,22 +52,22 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn check_constructor(ctor: &ConstructorDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let FunctionBody::Block(block) = (match &ctor.body {
+fn check_constructor(ctor: ConstructorDecl<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    let FunctionBody::Block(block) = (match ctor.body() {
         Some(b) => b,
         None => return,
     }) else {
         return;
     };
-    if !block.stmts.is_empty() {
+    if !block.stmts().is_empty() {
         return;
     }
     diags.push(ctx.diagnostic(
         "empty-constructor-bodies",
         "Empty constructor body — use `;` instead of `{}`",
         DiagSpan {
-            start: block.span.start,
-            end: block.span.start + 1,
+            start: block.span().start,
+            end: block.span().start + 1,
         },
     ));
 }

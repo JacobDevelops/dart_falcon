@@ -606,7 +606,7 @@ fn hover(state: &LspState, params: &HoverParams) -> Option<Hover> {
         .as_str();
     let document = state.document(uri)?;
     let offset = lsp_position_to_byte(
-        &document.text,
+        document.text(),
         params.text_document_position_params.position,
     );
     let lines: Vec<String> = document
@@ -690,7 +690,7 @@ fn publish(
         Some(document) => (
             diagnostics
                 .iter()
-                .map(|d| d.format_lsp(&document.text))
+                .map(|d| d.format_lsp(document.text()))
                 .collect(),
             document.version,
         ),

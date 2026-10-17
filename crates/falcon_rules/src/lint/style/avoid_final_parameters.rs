@@ -22,7 +22,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
 const RULE: &str = "avoid-final-parameters";
@@ -34,7 +34,7 @@ pub struct AvoidFinalParameters;
 impl Rule for AvoidFinalParameters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         // With primary constructors `final` declares a field, not a final
@@ -53,18 +53,18 @@ impl Rule for AvoidFinalParameters {
     }
 }
 
-struct Collector<'a, 'ctx> {
-    ctx: &'a AnalyzeContext<'ctx>,
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl Collector<'_, '_> {
+impl Collector<'_> {
     /// Reports the first `final` token in `[start, end)`.
     fn report_final_in(&mut self, start: usize, end: usize) {
         if let Some(token) = self
             .ctx
-            .syntax
-            .keywords_in(Span::new(start, end), TokenKind::Final)
+            .tree()
+            .keywords_in(self.ctx.source, Span::new(start, end), TokenKind::Final)
             .next()
         {
             self.diags.push(self.ctx.diagnostic(
@@ -77,21 +77,24 @@ impl Collector<'_, '_> {
 
     /// A class setter's parameter is not modelled as a formal parameter, so
     /// its `final` is found in the tokens of `set name(...)`.
-    fn check_setter(&mut self, setter: &SetterDecl) {
+    fn check_setter(&mut self, setter: SetterDecl<'_>) {
         let mut tokens = self
             .ctx
-            .syntax
-            .tokens_in(Span::new(setter.name.span.end, setter.span.end))
+            .tree()
+            .tokens_in(
+                self.ctx.source,
+                Span::new(setter.name().span().end, setter.span().end),
+            )
             .filter(|token| !token.is_trivia());
-        if tokens.next().map(|token| token.kind) != Some(TokenKind::LParen) {
+        if tokens.next().map(|token| token.kind()) != Some(TokenKind::LParen) {
             return;
         }
         let mut final_span = None;
-        for token in tokens.take_while(|token| token.kind != TokenKind::RParen) {
-            if token.kind == TokenKind::LParen {
+        for token in tokens.take_while(|token| token.kind() != TokenKind::RParen) {
+            if token.kind() == TokenKind::LParen {
                 return;
             }
-            if token.kind == TokenKind::Final && final_span.is_none() {
+            if token.kind() == TokenKind::Final && final_span.is_none() {
                 final_span = Some(Span::new(token.offset(), token.offset() + token.len()));
             }
         }
@@ -102,17 +105,17 @@ impl Collector<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
-        if node.is_final && node.function_params.is_none() && node.initializing.is_none() {
-            self.report_final_in(node.span.start, node.name.span.start);
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        if node.is_final() && node.function_params().is_none() && node.initializing().is_none() {
+            self.report_final_in(node.span().start, node.name().span().start);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Setter(setter) = node {
             self.check_setter(setter);
         }

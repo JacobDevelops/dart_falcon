@@ -13,7 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryConst;
@@ -21,7 +21,7 @@ pub struct UnnecessaryConst;
 impl Rule for UnnecessaryConst {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -34,18 +34,20 @@ impl Rule for UnnecessaryConst {
 }
 
 /// An explicit `const` expression starts at the redundant keyword.
-fn const_marker_span(expr: &Expr) -> Option<Span> {
-    match expr.unparenthesized() {
-        Expr::New { is_const: true, .. }
-        | Expr::List { is_const: true, .. }
-        | Expr::Map { is_const: true, .. }
-        | Expr::Set { is_const: true, .. }
-        | Expr::DotShorthand { is_const: true, .. } => {
-            let start = expr.unparenthesized().span().start;
-            Some(Span::new(start, start + "const".len()))
-        }
-        _ => None,
-    }
+fn const_marker_span(expr: Expr<'_>) -> Option<Span> {
+    let inner = expr.unparenthesized();
+    let is_const = match inner {
+        Expr::New(node) => node.is_const(),
+        Expr::List(node) => node.is_const(),
+        Expr::Map(node) => node.is_const(),
+        Expr::Set(node) => node.is_const(),
+        Expr::DotShorthand(node) => node.is_const(),
+        _ => false,
+    };
+    is_const.then(|| {
+        let start = inner.span().start;
+        Span::new(start, start + "const".len())
+    })
 }
 
 struct Collector<'a> {
@@ -55,44 +57,44 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
-        if matches!(node, TopLevelDecl::Variable(v) if v.keyword == VarKeyword::Const) {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
+        if matches!(node, TopLevelDecl::Variable(v) if v.keyword() == VarKeyword::Const) {
             self.const_depth += 1;
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        if matches!(node, TopLevelDecl::Variable(v) if v.keyword == VarKeyword::Const) {
+    fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
+        if matches!(node, TopLevelDecl::Variable(v) if v.keyword() == VarKeyword::Const) {
             self.const_depth -= 1;
         }
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        self.const_depth += usize::from(node.keyword == VarKeyword::Const);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        self.const_depth += usize::from(node.keyword() == VarKeyword::Const);
         StructuralTraversal::Continue
     }
 
-    fn exit_field_decl(&mut self, node: &FieldDecl) {
-        self.const_depth -= usize::from(node.keyword == VarKeyword::Const);
+    fn exit_field_decl(&mut self, node: FieldDecl<'a>) {
+        self.const_depth -= usize::from(node.keyword() == VarKeyword::Const);
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        self.const_depth += usize::from(node.keyword == VarKeyword::Const);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        self.const_depth += usize::from(node.keyword() == VarKeyword::Const);
         StructuralTraversal::Continue
     }
 
-    fn exit_local_var(&mut self, node: &LocalVarDecl) {
-        self.const_depth -= usize::from(node.keyword == VarKeyword::Const);
+    fn exit_local_var(&mut self, node: LocalVarDecl<'a>) {
+        self.const_depth -= usize::from(node.keyword() == VarKeyword::Const);
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if !matches!(node, Expr::Paren { .. })
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if !matches!(node, Expr::Paren(_))
             && let Some(span) = const_marker_span(node)
         {
             if self.const_depth > 0 {
@@ -107,8 +109,8 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, node: &Expr) {
-        if !matches!(node, Expr::Paren { .. }) && const_marker_span(node).is_some() {
+    fn exit_expr(&mut self, node: Expr<'a>) {
+        if !matches!(node, Expr::Paren(_)) && const_marker_span(node).is_some() {
             self.const_depth -= 1;
         }
     }
@@ -118,19 +120,24 @@ impl StructuralRuleVisitor for Collector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::RuleAnalysis;
+    use falcon_analyze::{ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn reports_only_the_redundant_keyword() {
         let source = "const values = const [const <int>[1], const Duration(seconds: 1)];";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = UnnecessaryConst.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = UnnecessaryConst.analyze(parsed.program(), &ctx);
         let starts: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.span.start)

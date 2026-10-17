@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use falcon_analyze::{CrossFileRule, PackageIdentity, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
-use falcon_syntax::ast::{Program, TopLevelDecl};
+use falcon_syntax::cst::{FunctionKind, Program, TopLevelDecl};
 
 use super::{
     build_reference_graph, canonical_package_path, detect_package, has_lib_component, is_under_lib,
@@ -61,7 +61,7 @@ impl CrossFileRule for UnusedFiles {
         let mut reachable = vec![false; files.len()];
         let mut queue = VecDeque::new();
         for (i, f) in files.iter().enumerate() {
-            if is_root(&f.program, &canons[i], pkg.as_ref()) && !reachable[repr[i]] {
+            if is_root(f.program(), &canons[i], pkg.as_ref()) && !reachable[repr[i]] {
                 reachable[repr[i]] = true;
                 queue.push_back(repr[i]);
             }
@@ -88,7 +88,7 @@ impl CrossFileRule for UnusedFiles {
                 continue;
             }
             // A `part of` file belongs to its owner and is never a standalone unit.
-            if f.program.part_of_directive.is_some() {
+            if f.program().part_of_directive().is_some() {
                 continue;
             }
             if reachable[repr[i]] {
@@ -113,7 +113,7 @@ impl CrossFileRule for UnusedFiles {
 
 /// Whether `canon` is an entrypoint that is always considered used, seeding the
 /// reachability search. See the module docs for the three root kinds.
-fn is_root(program: &Program, canon: &Path, pkg: Option<&PackageIdentity>) -> bool {
+fn is_root(program: Program<'_>, canon: &Path, pkg: Option<&PackageIdentity>) -> bool {
     if has_main(program) {
         return true;
     }
@@ -134,9 +134,9 @@ fn is_root(program: &Program, canon: &Path, pkg: Option<&PackageIdentity>) -> bo
 }
 
 /// Whether the program declares a top-level `main` function.
-fn has_main(program: &Program) -> bool {
-    program.declarations.iter().any(|d| {
-        matches!(d, TopLevelDecl::Function(f) if f.name.name == "main" && matches!(f.kind, falcon_syntax::ast::FunctionKind::Function(_)))
+fn has_main(program: Program<'_>) -> bool {
+    program.declarations().any(|d| {
+        matches!(d, TopLevelDecl::Function(f) if f.name().name() == "main" && matches!(f.kind(), FunctionKind::Function(_)))
     })
 }
 
@@ -146,14 +146,13 @@ mod tests {
     use falcon_dart_parser::parser::parse;
 
     fn pf(path: &str, src: &str) -> ProjectFile {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(src);
+        let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
         ProjectFile {
             path: PathBuf::from(path),
-            source: src.to_string(),
-            program,
-            syntax,
+            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: src.into(),
+                tree,
+            }),
             has_parse_errors: false,
         }
     }

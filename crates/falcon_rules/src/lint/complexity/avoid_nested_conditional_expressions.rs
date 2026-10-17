@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidNestedConditionalExpressions;
@@ -19,7 +19,7 @@ pub struct AvoidNestedConditionalExpressions;
 impl Rule for AvoidNestedConditionalExpressions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -41,22 +41,22 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.ancestors.push(self.cond_ancestor);
-        if matches!(node, Expr::FuncExpr { .. }) {
+        if matches!(node, Expr::FuncExpr(_)) {
             self.cond_ancestor = false;
         }
-        if let Expr::Conditional { span, .. } = node {
+        if let Expr::Conditional(conditional) = node {
             if self.cond_ancestor {
                 self.diags.push(self.ctx.diagnostic(
                     "avoid-nested-conditional-expressions",
                     "Avoid nested conditional expressions",
-                    *span,
+                    conditional.span(),
                 ));
             }
             self.cond_ancestor = true;
@@ -64,7 +64,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.cond_ancestor = self.ancestors.pop().unwrap();
     }
 }

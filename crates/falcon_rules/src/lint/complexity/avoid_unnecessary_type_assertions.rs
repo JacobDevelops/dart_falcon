@@ -1,7 +1,7 @@
 //! Flags an `is` check whose result is already guaranteed by the resolved static type.
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
-use falcon_syntax::ast::Program;
+use falcon_syntax::cst::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperation, TypeOperationKind, TypeOperations};
 use falcon_analyze::semantic_scope::SemanticState;
@@ -25,7 +25,7 @@ fn same_type_or_raw_target(operand: &ResolvedType, target: &ResolvedType) -> boo
 impl Rule for AvoidUnnecessaryTypeAssertions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(TypeOperations {

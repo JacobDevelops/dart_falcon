@@ -12,8 +12,8 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{StatementListKind, body_list, member_list, stmt_lists};
+use falcon_syntax::cst::visit::{StatementListKind, body_list, member_list, stmt_lists};
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NewlineBeforeReturn;
@@ -21,7 +21,7 @@ pub struct NewlineBeforeReturn;
 impl Rule for NewlineBeforeReturn {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -37,7 +37,7 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, stmts: &[Stmt], kind: StatementListKind) {
+    fn check(&mut self, stmts: AstChildren<'_, Stmt<'_>>, kind: StatementListKind) {
         if kind == StatementListKind::Block {
             check_stmts_for_return(stmts, &mut self.diags, self.ctx);
         }
@@ -45,27 +45,27 @@ impl Collector<'_> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        body_list(node.body.as_ref(), &mut |stmts, kind| self.check(stmts, kind));
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        body_list(node.body(), &mut |stmts, kind| self.check(stmts, kind));
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         member_list(node, &mut |stmts, kind| self.check(stmts, kind));
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         stmt_lists(node, &mut |stmts, kind| self.check(stmts, kind));
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::FuncExpr { body, .. } = node {
-            body_list(Some(body), &mut |stmts, kind| self.check(stmts, kind));
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::FuncExpr(function) = node {
+            body_list(Some(function.body()), &mut |stmts, kind| self.check(stmts, kind));
         }
         StructuralTraversal::Continue
     }
@@ -94,15 +94,19 @@ fn has_blank_line_before(source: &str, pos: usize) -> bool {
     false
 }
 
-fn check_stmts_for_return(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for stmt in stmts.iter().skip(1) {
+fn check_stmts_for_return(
+    stmts: AstChildren<'_, Stmt<'_>>,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
+    for stmt in stmts.skip(1) {
         if let Stmt::Return(ret) = stmt
-            && !has_blank_line_before(ctx.source, ret.span.start)
+            && !has_blank_line_before(ctx.source, ret.span().start)
         {
             diags.push(ctx.diagnostic(
                 "newline-before-return",
                 "Add a blank line before return statement",
-                ret.span,
+                ret.span(),
             ));
         }
     }
@@ -129,9 +133,14 @@ mod tests {
         ] {
             let parsed = falcon_dart_parser::parse(source);
             assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: source.into(),
+                tree: parsed.tree,
+            });
+            let program = parsed.program();
             let config = FalconConfig::default();
-            let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-            let diagnostics = NewlineBeforeReturn.analyze(&parsed.program, &ctx);
+            let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+            let diagnostics = NewlineBeforeReturn.analyze(program, &ctx);
             let actual: Vec<_> = diagnostics
                 .iter()
                 .map(|diagnostic| diagnostic.span.start)

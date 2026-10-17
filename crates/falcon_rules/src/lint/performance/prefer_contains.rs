@@ -19,7 +19,7 @@ use falcon_analyze::{
     evaluate_constant_with_local_values, parse_int,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -31,7 +31,7 @@ pub struct PreferContains;
 impl Rule for PreferContains {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -53,22 +53,19 @@ enum Finding {
     AlwaysTrue,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op,
-            left,
-            right,
-            span,
-            ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Binary(binary) = node else {
             return;
         };
+        let op = binary.op();
+        let left = binary.left();
+        let right = binary.right();
+        let span = binary.span();
         if !matches!(
             op,
             BinaryOp::EqEq
@@ -82,11 +79,11 @@ impl SemanticRuleVisitor for Collector<'_> {
         }
         let finding = match int_value(right, state) {
             Some(value) => (value <= 0 && unassigned_index_of(left, state))
-                .then(|| finding(value, *op))
+                .then(|| finding(value, op))
                 .flatten(),
             None => int_value(left, state).and_then(|value| {
                 (value <= 0 && unassigned_index_of(right, state))
-                    .then(|| finding(value, inverted(*op)))
+                    .then(|| finding(value, inverted(op)))
                     .flatten()
             }),
         };
@@ -98,7 +95,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             Some(Finding::AlwaysTrue) => "This comparison of 'indexOf' is always true.",
             None => return,
         };
-        self.diags.push(self.ctx.diagnostic(RULE, message, *span));
+        self.diags.push(self.ctx.diagnostic(RULE, message, span));
     }
 }
 
@@ -129,20 +126,20 @@ fn inverted(op: BinaryOp) -> BinaryOp {
 /// Whether `expression`, behind `as` casts, invokes `indexOf` on an explicit
 /// `Iterable` or `String` receiver, with a zero start index when it has two
 /// arguments.
-fn unassigned_index_of(mut expression: &Expr, state: &SemanticState<'_>) -> bool {
-    while let Expr::As { expr, .. } = expression.unparenthesized() {
-        expression = expr;
+fn unassigned_index_of<'a>(mut expression: Expr<'a>, state: &SemanticState<'a>) -> bool {
+    while let Expr::As(cast) = expression.unparenthesized() {
+        expression = cast.expr();
     }
-    let Expr::Call { callee, args, .. } = expression.unparenthesized() else {
+    let Expr::Call(call) = expression.unparenthesized() else {
         return false;
     };
-    let Expr::Field { object, field, .. } = callee.unparenthesized() else {
+    let Expr::Field(field) = call.callee().unparenthesized() else {
         return false;
     };
-    if field.name != "indexOf" {
+    if field.field().name() != "indexOf" {
         return false;
     }
-    let receiver = state.infer(object);
+    let receiver = state.infer(field.object());
     if state
         .signatures
         .interface_check_sdk(&receiver, "dart:core", "Iterable", &state.model)
@@ -154,10 +151,10 @@ fn unassigned_index_of(mut expression: &Expr, state: &SemanticState<'_>) -> bool
     {
         return false;
     }
-    let mut arguments = args
-        .positional
-        .iter()
-        .chain(args.named.iter().map(|argument| &argument.value));
+    let mut arguments = call
+        .args()
+        .positional()
+        .chain(call.args().named().map(|argument| argument.value()));
     match (arguments.next(), arguments.next(), arguments.next()) {
         (Some(_), Some(start), None) => int_value(start, state) == Some(0),
         _ => true,
@@ -166,25 +163,23 @@ fn unassigned_index_of(mut expression: &Expr, state: &SemanticState<'_>) -> bool
 
 /// The linter's `getIntValue`: an integer literal or an identifier naming an
 /// integer constant, optionally negated.
-fn int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i128> {
+fn int_value<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Option<i128> {
     match expression.unparenthesized() {
-        Expr::Unary {
-            op: UnaryOp::Minus,
-            operand,
-            ..
-        } => unsigned_int_value(operand, state)?.checked_neg(),
+        Expr::Unary(unary) if unary.op() == UnaryOp::Minus => {
+            unsigned_int_value(unary.operand(), state)?.checked_neg()
+        }
         expression => unsigned_int_value(expression, state),
     }
 }
 
-fn unsigned_int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i128> {
+fn unsigned_int_value<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Option<i128> {
     match expression.unparenthesized() {
-        Expr::IntLit { value, .. } => parse_int(value),
+        Expr::IntLit(literal) => parse_int(literal.value()),
         Expr::Ident(identifier) => {
             let constants = state.visible_local_constants();
-            if (state.environment.is_bound(&identifier.name)
-                && !constants.contains_key(identifier.name.as_str()))
-                || !is_int_constant(expression, &identifier.name, state)
+            if (state.environment.is_bound(identifier.name())
+                && !constants.contains_key(identifier.name()))
+                || !is_int_constant(expression, identifier.name(), state)
             {
                 return None;
             }
@@ -206,7 +201,7 @@ fn unsigned_int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i1
 /// Whether the identifier `expression` names a constant of static type `int`
 /// (the evaluator folds integral doubles into integers, so `-1.0` must be told
 /// apart here).
-fn is_int_constant(expression: &Expr, name: &str, state: &SemanticState<'_>) -> bool {
+fn is_int_constant<'a>(expression: Expr<'a>, name: &str, state: &SemanticState<'a>) -> bool {
     let declared = state.infer(expression);
     if declared.interface("dart:core", "int") {
         return true;

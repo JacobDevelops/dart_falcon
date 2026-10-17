@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferSpreadCollections;
@@ -19,7 +19,7 @@ pub struct PreferSpreadCollections;
 impl Rule for PreferSpreadCollections {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,25 +35,23 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Cascade {
-            object, sections, ..
-        } = node.unparenthesized()
-            && is_collection_literal(object)
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Cascade(cascade) = node.unparenthesized()
+            && is_collection_literal(cascade.object())
         {
-            for section in sections {
+            for section in cascade.sections() {
                 // Stop after one match because operations in a section share its span.
-                for op in &section.ops {
-                    if let CascadeOp::Call(ident, _, args) = op
-                        && ident.name == "addAll"
-                        && args.positional.len() == 1
-                        && args.named.is_empty()
+                for op in section.ops() {
+                    if let CascadeOp::Call(call) = op
+                        && call.name().name() == "addAll"
+                        && call.args().positional().len() == 1
+                        && call.args().named().is_empty()
                     {
                         self.diags.push(self.ctx.diagnostic(
                             "prefer-spread-collections",
                             "Use the spread operator '...' instead of 'addAll'.",
-                            section.span,
+                            section.span(),
                         ));
                         break;
                     }
@@ -69,9 +67,9 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn is_collection_literal(expr: &Expr) -> bool {
+fn is_collection_literal(expr: Expr<'_>) -> bool {
     matches!(
         expr.unparenthesized(),
-        Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. }
+        Expr::List(_) | Expr::Set(_) | Expr::Map(_)
     )
 }

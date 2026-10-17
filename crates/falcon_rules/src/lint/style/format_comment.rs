@@ -18,7 +18,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use regex::Regex;
 
 #[derive(Default)]
@@ -52,7 +52,7 @@ fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
 impl Rule for FormatComment {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();

@@ -29,7 +29,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 const MAX_LENGTH: usize = 80;
 
@@ -39,7 +39,7 @@ pub struct LinesLongerThan80Chars;
 impl Rule for LinesLongerThan80Chars {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let source = ctx.source;
@@ -146,7 +146,7 @@ struct AllowedStrings<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for AllowedStrings<'_> {
+impl<'a> StructuralRuleVisitor<'a> for AllowedStrings<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.long_lines
             .iter()
@@ -163,17 +163,18 @@ impl StructuralRuleVisitor for AllowedStrings<'_> {
     }
 
     // Interpolated paths cannot exempt their surrounding line.
-    fn visit_string_interpolation(&mut self, _node: &StringInterpolation) -> StructuralTraversal {
+    fn visit_string_interpolation(&mut self, _node: StringInterpolation<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
+    fn visit_string_lit(&mut self, node: StringLitNode<'a>) -> StructuralTraversal {
+        let mut interpolations = node.interpolations();
         for (lit, span) in node.segments() {
             let first = self.lines.line_of(span.start);
             if lit.triple {
                 let last = self.lines.line_of(span.end);
                 self.allowed[first..=last].fill(true);
-            } else if literal_contains_path(&lit, span.start + lit.content_offset, self.ctx.syntax) {
+            } else if literal_contains_path(&lit, span.start + lit.content_offset, &mut interpolations) {
                 self.allowed[first] = true;
             }
         }
@@ -183,10 +184,10 @@ impl StructuralRuleVisitor for AllowedStrings<'_> {
 }
 
 /// Only literal text counts: a path inside an interpolated expression does not.
-fn literal_contains_path(
+fn literal_contains_path<'a>(
     lit: &StringDelimiter<'_>,
     content_start: usize,
-    syntax: &falcon_syntax::SyntaxStore,
+    interpolations: &mut impl Iterator<Item = StringInterpolation<'a>>,
 ) -> bool {
     if lit.is_raw {
         return looks_like_uri_or_path(lit.content);
@@ -202,7 +203,10 @@ fn literal_contains_path(
                     return true;
                 }
                 let inner = index + 2;
-                let Some(close) = syntax.interpolation_end(content_start + inner) else {
+                let Some(close) = interpolations
+                    .find(|part| part.span().start == content_start + inner)
+                    .map(|part| part.span().end)
+                else {
                     return false;
                 };
                 index = close + 1 - content_start;
@@ -216,9 +220,8 @@ fn literal_contains_path(
 
 /// Allow comment lines, including comments inside interpolations.
 fn allow_comment_lines(ctx: &AnalyzeContext, lines: &Lines<'_>, allowed: &mut [bool]) {
-    let source = ctx.source;
     for token in comment_tokens(ctx) {
-        let lexeme = token.text(source);
+        let lexeme = token.text();
         let first = lines.line_of(token.offset());
         if let Some(text) = lexeme.strip_prefix("///") {
             if looks_like_uri_or_path(text) {

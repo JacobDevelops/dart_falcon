@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidMutableGlobalVariables;
@@ -19,7 +19,7 @@ pub struct AvoidMutableGlobalVariables;
 impl Rule for AvoidMutableGlobalVariables {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,15 +35,15 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(var_decl) = decl
-            && var_decl.keyword == VarKeyword::Var
+            && var_decl.keyword() == VarKeyword::Var
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-mutable-global-variables",
                 "Avoid mutable global variables. Use const or final instead.",
-                var_decl.span,
+                var_decl.span(),
             ));
         }
         StructuralTraversal::SkipChildren

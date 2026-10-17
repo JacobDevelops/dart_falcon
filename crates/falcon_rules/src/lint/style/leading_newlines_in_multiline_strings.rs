@@ -22,7 +22,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct LeadingNewlinesInMultilineStrings;
@@ -30,7 +30,7 @@ pub struct LeadingNewlinesInMultilineStrings;
 impl Rule for LeadingNewlinesInMultilineStrings {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -47,10 +47,10 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
+    fn visit_string_lit(&mut self, node: StringLitNode<'a>) -> StructuralTraversal {
         for (lit, span) in node.segments() {
             if !lit.triple || lit.content.starts_with(['\n', '\r']) {
                 continue;

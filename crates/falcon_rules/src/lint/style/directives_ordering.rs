@@ -25,7 +25,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, library_doc_imports};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use super::conditional_uri_does_not_exist::uri_value;
 
@@ -44,28 +44,26 @@ struct Namespace {
 impl Rule for DirectivesOrdering {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let imports: Vec<Namespace> = program
-            .imports
-            .iter()
+            .imports()
             .map(|import| Namespace {
-                uri: uri_value(&import.uri),
-                span: import.span,
+                uri: uri_value(import.uri()),
+                span: import.span(),
             })
             .collect();
         let exports: Vec<Namespace> = program
-            .exports
-            .iter()
+            .exports()
             .map(|export| Namespace {
-                uri: uri_value(&export.uri),
-                span: export.span,
+                uri: uri_value(export.uri()),
+                span: export.span(),
             })
             .collect();
-        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source, ctx.syntax)
+        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source, ctx.tree())
             .map(|import| Namespace {
-                uri: uri_value(&import.literal),
+                uri: uri_value(import.literal.cast()),
                 span: import.span,
             })
             .collect();
@@ -116,32 +114,29 @@ impl Rule for DirectivesOrdering {
         // skip trailing parts, then the trailing export block; any export left
         // precedes an import.
         let mut directives: Vec<(usize, DirectiveKind, Span)> = program
-            .imports
-            .iter()
-            .map(|d| (d.span.start, DirectiveKind::Import, d.span))
+            .imports()
+            .map(|d| (d.span().start, DirectiveKind::Import, d.span()))
             .chain(
                 program
-                    .exports
-                    .iter()
-                    .map(|d| (d.span.start, DirectiveKind::Export, d.span)),
+                    .exports()
+                    .map(|d| (d.span().start, DirectiveKind::Export, d.span())),
             )
             .chain(
                 program
-                    .part_directives
-                    .iter()
-                    .map(|d| (d.span.start, DirectiveKind::Part, d.span)),
+                    .part_directives()
+                    .map(|d| (d.span().start, DirectiveKind::Part, d.span())),
             )
             .chain(
                 program
-                    .library_directive
-                    .iter()
-                    .map(|d| (d.span.start, DirectiveKind::Other, d.span)),
+                    .library_directive()
+                    .into_iter()
+                    .map(|d| (d.span().start, DirectiveKind::Other, d.span())),
             )
             .chain(
                 program
-                    .part_of_directive
-                    .iter()
-                    .map(|d| (d.span.start, DirectiveKind::Other, d.span)),
+                    .part_of_directive()
+                    .into_iter()
+                    .map(|d| (d.span().start, DirectiveKind::Other, d.span())),
             )
             .collect();
         directives.sort_by_key(|(start, _, _)| *start);
@@ -227,17 +222,13 @@ mod tests {
     #[test]
     fn doc_imports_use_literal_segments_and_import_spans() {
         let source = "/// @docImport r'dart:' '\\x63ollection';\n/// @docImport r'dart:' '\\x61sync';\nlibrary;\n";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
+        let imports: Vec<_> = library_doc_imports(tree.program(source), source, &tree).collect();
         assert_eq!(imports.len(), 2);
-        assert_eq!(uri_value(&imports[0].literal), "dart:collection");
-        assert_eq!(uri_value(&imports[1].literal), "dart:async");
+        assert_eq!(uri_value(imports[0].literal.cast()), "dart:collection");
+        assert_eq!(uri_value(imports[1].literal.cast()), "dart:async");
         assert_eq!(
             &source[imports[1].span.start..imports[1].span.end],
             "Import r'dart:' '\\x61sync';"
@@ -247,10 +238,8 @@ mod tests {
     #[test]
     fn doc_import_spans_preserve_tabs_crlf_and_block_offsets() {
         let source = "\t/**\r\n\t * @docImport r'dart:collection';\r\n\t * @docImport 'dart:async';\r\n\t */\r\nlibrary;\r\n";
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = falcon_dart_parser::parse(source);
-        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
+        let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
+        let imports: Vec<_> = library_doc_imports(tree.program(source), source, &tree).collect();
         assert_eq!(imports.len(), 2);
         assert_eq!(
             &source[imports[0].span.start..imports[0].span.end],
@@ -265,10 +254,8 @@ mod tests {
     #[test]
     fn doc_import_keyword_requires_a_space_and_maps_extra_whitespace() {
         let source = "/// @docImport\t'dart:io';\n/// @docImport   'dart:async';\nlibrary;\n";
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = falcon_dart_parser::parse(source);
-        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
+        let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
+        let imports: Vec<_> = library_doc_imports(tree.program(source), source, &tree).collect();
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].span.start, source.rfind("Import").unwrap() + 2);
         assert_eq!(imports[0].span.end - imports[0].span.start, 20);
@@ -277,14 +264,10 @@ mod tests {
     #[test]
     fn doc_import_span_excludes_trailing_comment_trivia() {
         let source = "/// @docImport 'dart:async'; /* trailing trivia */\r\nlibrary;\r\n";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
+        let imports: Vec<_> = library_doc_imports(tree.program(source), source, &tree).collect();
         assert_eq!(imports.len(), 1);
         assert_eq!(
             &source[imports[0].span.start..imports[0].span.end],
@@ -298,11 +281,9 @@ mod tests {
             "/// @docImport 'dart:async';\n/** replacement */\nlibrary;",
             "/** @docImport 'dart:async'; */\n/// replacement\nlibrary;",
         ] {
-            let falcon_dart_parser::ParseResult {
-                program, syntax, ..
-            } = falcon_dart_parser::parse(source);
+            let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
             assert_eq!(
-                library_doc_imports(&program, source, &syntax).count(),
+                library_doc_imports(tree.program(source), source, &tree).count(),
                 0,
                 "{source}"
             );

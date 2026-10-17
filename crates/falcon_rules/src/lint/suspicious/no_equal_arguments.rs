@@ -13,7 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoEqualArguments;
@@ -21,7 +21,7 @@ pub struct NoEqualArguments;
 impl Rule for NoEqualArguments {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -39,17 +39,17 @@ impl Rule for NoEqualArguments {
 /// Matches the analyzer's `Literal` hierarchy: scalar literals, collection
 /// literals (`TypedLiteral`), and a prefix expression whose operand is a literal
 /// (e.g. `-1`).
-fn is_literal(expr: &Expr) -> bool {
+fn is_literal(expr: Expr<'_>) -> bool {
     match expr.unparenthesized() {
-        Expr::IntLit { .. }
-        | Expr::DoubleLit { .. }
-        | Expr::StringLit { .. }
-        | Expr::BoolLit { .. }
-        | Expr::NullLit { .. }
-        | Expr::List { .. }
-        | Expr::Map { .. }
-        | Expr::Set { .. } => true,
-        Expr::Unary { operand, .. } => is_literal(operand),
+        Expr::IntLit(_)
+        | Expr::DoubleLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::NullLit(_)
+        | Expr::List(_)
+        | Expr::Map(_)
+        | Expr::Set(_) => true,
+        Expr::Unary(unary) => is_literal(unary.operand()),
         _ => false,
     }
 }
@@ -59,22 +59,20 @@ fn is_literal(expr: &Expr) -> bool {
 /// what lets hand-written `// falcon-ignore lint/suspicious/no-equal-arguments`
 /// comments — which developers place on the trailing duplicate — line up and
 /// suppress the hit.
-fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn check_args(args: ArgList<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     // Positional args match other positional args by full source text; named
     // args match other named args by their *value* expression text (the label
     // is ignored). dcl never matches a positional against a named argument.
     // Literal-valued arguments are excluded entirely (compared by identity).
-    let positional: Vec<(&str, &Span)> = args
-        .positional
-        .iter()
-        .filter(|a| !is_literal(a))
+    let positional: Vec<(&str, Span)> = args
+        .positional()
+        .filter(|a| !is_literal(*a))
         .map(|a| (expr_src(a, ctx.source), a.span()))
         .collect();
-    let named: Vec<(&str, &Span)> = args
-        .named
-        .iter()
-        .filter(|n| !is_literal(&n.value))
-        .map(|n| (expr_src(&n.value, ctx.source), &n.span))
+    let named: Vec<(&str, Span)> = args
+        .named()
+        .filter(|n| !is_literal(n.value()))
+        .map(|n| (expr_src(n.value(), ctx.source), n.span()))
         .collect();
 
     for group in [&positional, &named] {
@@ -82,7 +80,7 @@ fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
     }
 }
 
-fn report_duplicates(entries: &[(&str, &Span)], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn report_duplicates(entries: &[(&str, Span)], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for (i, (src, _)) in entries.iter().enumerate() {
         // Index of the last entry equal to this one.
         let last = entries
@@ -97,7 +95,7 @@ fn report_duplicates(entries: &[(&str, &Span)], diags: &mut Vec<Diagnostic>, ctx
             diags.push(ctx.diagnostic(
                 "no-equal-arguments",
                 "The argument has already been passed",
-                *span,
+                span,
             ));
         }
     }
@@ -113,22 +111,23 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::Call { args, .. } | Expr::New { args, .. } => {
-                check_args(args, &mut self.diags, self.ctx);
-            }
+            Expr::Call(call) => check_args(call.args(), &mut self.diags, self.ctx),
+            Expr::New(new) => check_args(new.args(), &mut self.diags, self.ctx),
             // A cascade call carries its own ArgList and is never rebuilt as an
             // Expr::Call, so the arm above never sees `a..f(x, x)`.
-            Expr::Cascade { sections, .. } => {
-                for op in sections.iter().flat_map(|s| &s.ops) {
-                    if let CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) = op {
-                        check_args(args, &mut self.diags, self.ctx);
+            Expr::Cascade(cascade) => {
+                for op in cascade.sections().flat_map(|s| s.ops()) {
+                    match op {
+                        CascadeOp::Call(call) => check_args(call.args(), &mut self.diags, self.ctx),
+                        CascadeOp::Invoke(invoke) => check_args(invoke.args(), &mut self.diags, self.ctx),
+                        _ => {}
                     }
                 }
             }

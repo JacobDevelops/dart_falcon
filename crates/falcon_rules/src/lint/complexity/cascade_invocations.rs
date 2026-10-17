@@ -47,8 +47,8 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, Rule, RulePreparation,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, for_each_stmt_list, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, for_each_stmt_list, walk_expr};
+use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::mentions_type_parameter;
 use falcon_analyze::resolve::lexical_usage::local_declarations;
@@ -60,7 +60,7 @@ pub struct CascadeInvocations;
 impl Rule for CascadeInvocations {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Statements {
@@ -68,10 +68,9 @@ impl Rule for CascadeInvocations {
             ctx,
             locals: local_declarations(program),
             prefixes: program
-                .imports
-                .iter()
-                .filter_map(|import| import.as_name.as_ref())
-                .map(|prefix| prefix.name.clone())
+                .imports()
+                .filter_map(|import| import.as_name())
+                .map(|prefix| prefix.name())
                 .collect(),
             facts: HashMap::new(),
         }))
@@ -105,21 +104,21 @@ enum Owner {
 
 /// The element a statement's simple target identifier resolves to.
 #[derive(Clone, PartialEq, Eq)]
-enum Element {
+enum Element<'a> {
     /// A local variable or parameter.
-    Local(usize),
+    Local(NodeId),
     /// A field or top-level variable, read through its getter.
-    Property { name: String, owner: Owner },
+    Property { name: &'a str, owner: Owner },
     /// A type name, as in `Type.property`.
-    Type(String),
+    Type(&'a str),
 }
 
 /// What a statement's critical nodes reference, as far as dependencies on
 /// its own receiver go.
 #[derive(Default)]
-struct Critical {
+struct Critical<'a> {
     /// Unqualified identifiers, with their local declaration when applicable.
-    names: Vec<(String, Option<usize>)>,
+    names: Vec<(&'a str, Option<NodeId>)>,
     /// Whether a closure occurs; it may read any property.
     closure: bool,
     /// Whether a member or top-level declaration of the receiver's owner is
@@ -127,9 +126,9 @@ struct Critical {
     owner_referenced: bool,
 }
 
-impl Critical {
+impl Critical<'_> {
     /// Whether these nodes depend on `element`.
-    fn depends_on(&self, element: &Element) -> bool {
+    fn depends_on(&self, element: &Element<'_>) -> bool {
         if self.names.iter().any(|(name, declaration)| match element {
             Element::Local(target) => declaration == &Some(*target),
             Element::Property { name: target, .. } | Element::Type(target) => {
@@ -144,18 +143,18 @@ impl Critical {
 
 /// One statement's role in a potential cascade.
 #[derive(Default)]
-struct Cascadable {
-    element: Option<Element>,
-    critical: Critical,
+struct Cascadable<'a> {
+    element: Option<Element<'a>>,
+    critical: Critical<'a>,
     can_join: bool,
     can_receive: bool,
     can_be_cascaded: bool,
 }
 
-impl Cascadable {
+impl<'a> Cascadable<'a> {
     /// A call, property read, or cascade on `element`, which both joins and
     /// receives.
-    fn member_access(element: Element, critical: Critical) -> Self {
+    fn member_access(element: Element<'a>, critical: Critical<'a>) -> Self {
         Self {
             element: Some(element),
             critical,
@@ -166,7 +165,7 @@ impl Cascadable {
     }
 
     /// Whether this statement can be cascaded onto `previous`.
-    fn compatible_with(&self, previous: &Cascadable) -> bool {
+    fn compatible_with(&self, previous: &Cascadable<'_>) -> bool {
         let Some(element) = &self.element else {
             return false;
         };
@@ -182,16 +181,16 @@ impl Cascadable {
 /// Cascade facts of every expression and declaration statement, keyed by the
 /// statement's start.
 struct Statements<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     /// Local declarations keyed by their identifier uses.
-    locals: HashMap<usize, usize>,
+    locals: HashMap<usize, NodeId>,
     /// Import prefixes of this file.
-    prefixes: HashSet<String>,
-    facts: HashMap<usize, Cascadable>,
+    prefixes: HashSet<&'a str>,
+    facts: HashMap<usize, Cascadable<'a>>,
 }
 
-impl SemanticRuleVisitor for Statements<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Statements<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for_each_stmt_list(self.program, &mut |list, _| {
@@ -200,7 +199,7 @@ impl SemanticRuleVisitor for Statements<'_> {
         diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let scope = Scope {
             state,
             locals: &self.locals,
@@ -208,7 +207,7 @@ impl SemanticRuleVisitor for Statements<'_> {
         };
         let facts = match node {
             Stmt::LocalVar(declaration) => scope.declaration(declaration),
-            Stmt::Expr(statement) => scope.expression(&statement.expr),
+            Stmt::Expr(statement) => scope.expression(statement.expr()),
             _ => return,
         };
         self.facts.insert(node.span().start, facts);
@@ -218,64 +217,62 @@ impl SemanticRuleVisitor for Statements<'_> {
 /// Name resolution at one statement.
 struct Scope<'s, 'a> {
     state: &'s SemanticState<'a>,
-    locals: &'s HashMap<usize, usize>,
-    prefixes: &'s HashSet<String>,
+    locals: &'s HashMap<usize, NodeId>,
+    prefixes: &'s HashSet<&'a str>,
 }
 
-impl Scope<'_, '_> {
-    fn is_local(&self, identifier: &Identifier) -> bool {
-        self.locals.contains_key(&identifier.span.start)
+impl<'a> Scope<'_, 'a> {
+    fn is_local(&self, identifier: Identifier<'a>) -> bool {
+        self.locals.contains_key(&identifier.span().start)
     }
 
-    fn declaration(&self, declaration: &LocalVarDecl) -> Cascadable {
-        let [declarator] = declaration.declarators.as_slice() else {
+    fn declaration(&self, declaration: LocalVarDecl<'a>) -> Cascadable<'a> {
+        let mut declarators = declaration.declarators();
+        let Some(declarator) = declarators.next() else {
             return Cascadable::default();
         };
-        // `await` binds looser than it looks next to a cascade.
-        if matches!(declarator.initializer, Some(Expr::Await { .. })) {
+        if declarators.next().is_some() {
             return Cascadable::default();
         }
-        let initializer: Vec<&Expr> = declarator.initializer.iter().collect();
+        // `await` binds looser than it looks next to a cascade.
+        if matches!(declarator.initializer(), Some(Expr::Await(_))) {
+            return Cascadable::default();
+        }
+        let initializer = declarator.initializer();
         Cascadable {
-            element: Some(Element::Local(declarator.name.span.start)),
-            critical: self.critical(&initializer, None),
-            can_receive: declaration.keyword != VarKeyword::Const,
+            element: Some(Element::Local(declarator.name().syntax().id())),
+            critical: self.critical(initializer.as_slice(), None),
+            can_receive: declaration.keyword() != VarKeyword::Const,
             ..Cascadable::default()
         }
     }
 
-    fn expression(&self, expr: &Expr) -> Cascadable {
+    fn expression(&self, expr: Expr<'a>) -> Cascadable<'a> {
         match expr {
-            Expr::Assign {
-                target, op, value, ..
-            } => match target.as_ref() {
+            Expr::Assign(assignment) => match assignment.target() {
                 // `v = e` receives a following cascade on a local `v`; for a
                 // field or top-level variable the analyzer sees the setter.
                 Expr::Ident(identifier) => {
-                    let Some(&declaration) = self.locals.get(&identifier.span.start) else {
+                    let Some(&declaration) = self.locals.get(&identifier.span().start) else {
                         return Cascadable::default();
                     };
                     Cascadable {
                         element: Some(Element::Local(declaration)),
-                        critical: self.critical(&[value], None),
-                        can_receive: *op != AssignOp::NullCoalesceEq,
+                        critical: self.critical(&[assignment.value()], None),
+                        can_receive: assignment.op() != AssignOp::NullCoalesceEq,
                         ..Cascadable::default()
                     }
                 }
                 // `v.p = e` sets a property on `v`; only a local `v` is a
                 // variable element that can receive.
-                Expr::Field {
-                    object,
-                    is_null_safe: false,
-                    ..
-                } => {
-                    let Some(element) = self.simple_element(object) else {
+                Expr::Field(field) if !field.is_null_safe() => {
+                    let Some(element) = self.simple_element(field.object()) else {
                         return Cascadable::default();
                     };
                     Cascadable {
-                        critical: self.critical(&[value], Some(&element)),
+                        critical: self.critical(&[assignment.value()], Some(&element)),
                         can_join: true,
-                        can_receive: *op != AssignOp::NullCoalesceEq
+                        can_receive: assignment.op() != AssignOp::NullCoalesceEq
                             && matches!(element, Element::Local(_)),
                         can_be_cascaded: true,
                         element: Some(element),
@@ -283,54 +280,60 @@ impl Scope<'_, '_> {
                 }
                 _ => Cascadable::default(),
             },
-            Expr::Call { callee, args, .. } => match callee.as_ref() {
+            Expr::Call(call) => match call.callee() {
                 // Static methods (on a type) never cascade.
-                Expr::Field {
-                    object,
-                    field,
-                    is_null_safe: false,
-                    ..
-                } => match self.simple_element(object) {
-                    Some(element @ (Element::Local(_) | Element::Property { .. }))
-                        if self.invokes_method(object, &field.name, args) =>
-                    {
-                        let mut nodes = Vec::new();
-                        for_each_argument(args, |argument| nodes.push(argument));
-                        let mut critical = self.critical(&nodes, Some(&element));
-                        if let Element::Property { owner, .. } = &element {
-                            critical.owner_referenced |=
-                                self.member_of_owner(Some(object), &field.name, owner);
+                Expr::Field(field) if !field.is_null_safe() => {
+                    match self.simple_element(field.object()) {
+                        Some(element @ (Element::Local(_) | Element::Property { .. }))
+                            if self.invokes_method(
+                                field.object(),
+                                field.field().name(),
+                                call.args(),
+                            ) =>
+                        {
+                            let mut nodes = Vec::new();
+                            for_each_argument(call.args(), |argument| nodes.push(argument));
+                            let mut critical = self.critical(&nodes, Some(&element));
+                            if let Element::Property { owner, .. } = &element {
+                                critical.owner_referenced |= self.member_of_owner(
+                                    Some(field.object()),
+                                    field.field().name(),
+                                    owner,
+                                );
+                            }
+                            Cascadable::member_access(element, critical)
                         }
-                        Cascadable::member_access(element, critical)
+                        _ => Cascadable::default(),
                     }
-                    _ => Cascadable::default(),
-                },
+                }
                 _ => Cascadable::default(),
             },
-            Expr::Cascade {
-                object, sections, ..
-            } => {
+            Expr::Cascade(cascade) => {
+                let object = cascade.object();
                 let Some(element) = self.simple_element(object) else {
                     return Cascadable::default();
                 };
                 let mut nodes = Vec::new();
                 let mut member_names = Vec::new();
-                for op in sections.iter().flat_map(|section| &section.ops) {
+                for op in cascade.sections().flat_map(|section| section.ops()) {
                     match op {
-                        CascadeOp::NullAssert { .. } => {}
-                        CascadeOp::Field { name, .. } => member_names.push(name),
-                        CascadeOp::Index { index, .. } => nodes.push(index.as_ref()),
-                        CascadeOp::Call(name, _, args) => {
-                            member_names.push(name);
-                            for_each_argument(args, |argument| nodes.push(argument));
+                        CascadeOp::NullAssert(_) => {}
+                        CascadeOp::Field(field) => member_names.push(field.name()),
+                        CascadeOp::Index(index) => nodes.push(index.index()),
+                        CascadeOp::Call(call) => {
+                            member_names.push(call.name());
+                            for_each_argument(call.args(), |argument| nodes.push(argument));
                         }
-                        CascadeOp::Invoke(_, args) => {
-                            for_each_argument(args, |argument| nodes.push(argument));
+                        CascadeOp::Invoke(invoke) => {
+                            for_each_argument(invoke.args(), |argument| nodes.push(argument));
                         }
-                        CascadeOp::Assign(target, _, value)
-                        | CascadeOp::IndexAssign(target, _, value) => {
-                            nodes.push(target.as_ref());
-                            nodes.push(value.as_ref());
+                        CascadeOp::Assign(assignment) => {
+                            nodes.push(assignment.target());
+                            nodes.push(assignment.value());
+                        }
+                        CascadeOp::IndexAssign(assignment) => {
+                            nodes.push(assignment.target());
+                            nodes.push(assignment.value());
                         }
                     }
                 }
@@ -338,23 +341,19 @@ impl Scope<'_, '_> {
                 if let Element::Property { owner, .. } = &element {
                     critical.owner_referenced |= member_names
                         .iter()
-                        .any(|name| self.member_of_owner(Some(object), &name.name, owner));
+                        .any(|name| self.member_of_owner(Some(object), name.name(), owner));
                 }
                 Cascadable::member_access(element, critical)
             }
-            Expr::Field {
-                object,
-                field,
-                is_null_safe: false,
-                ..
-            } => {
+            Expr::Field(field) if !field.is_null_safe() => {
+                let object = field.object();
                 let Some(element) = self.simple_element(object) else {
                     return Cascadable::default();
                 };
                 let mut critical = Critical::default();
                 if let Element::Property { owner, .. } = &element {
                     critical.owner_referenced =
-                        self.member_of_owner(Some(object), &field.name, owner);
+                        self.member_of_owner(Some(object), field.field().name(), owner);
                 }
                 Cascadable::member_access(element, critical)
             }
@@ -364,12 +363,12 @@ impl Scope<'_, '_> {
 
     /// The element a simple target identifier resolves to; `None` for
     /// anything else, including unresolved names and functions.
-    fn simple_element(&self, expr: &Expr) -> Option<Element> {
+    fn simple_element(&self, expr: Expr<'a>) -> Option<Element<'a>> {
         let Expr::Ident(identifier) = expr else {
             return None;
         };
-        let name = identifier.name.as_str();
-        if let Some(&declaration) = self.locals.get(&identifier.span.start) {
+        let name = identifier.name();
+        if let Some(&declaration) = self.locals.get(&identifier.span().start) {
             return Some(Element::Local(declaration));
         }
         match self.enclosing_member_owner(name) {
@@ -384,7 +383,7 @@ impl Scope<'_, '_> {
                     return None;
                 }
                 return Some(Element::Property {
-                    name: name.to_owned(),
+                    name,
                     owner: Owner::Type(owner),
                 });
             }
@@ -399,7 +398,7 @@ impl Scope<'_, '_> {
             _ => {}
         }
         if self.prefixes.contains(name) {
-            return Some(Element::Type(name.to_owned()));
+            return Some(Element::Type(name));
         }
         if let Some(identity) = self.state.model.resolve_value(name) {
             return self
@@ -408,14 +407,14 @@ impl Scope<'_, '_> {
                 .function(&identity)
                 .is_none()
                 .then(|| Element::Property {
-                    name: name.to_owned(),
+                    name,
                     owner: Owner::Library(Library::of(&identity)),
                 });
         }
         self.state
             .model
             .resolve_name(name)
-            .map(|_| Element::Type(name.to_owned()))
+            .map(|_| Element::Type(name))
     }
 
     /// The declaring type of the enclosing type's member `name`: `None` when
@@ -430,14 +429,14 @@ impl Scope<'_, '_> {
 
     /// Whether member `name` accessed on `object` (or unqualified, when
     /// `None`) may be declared by `owner`.
-    fn member_of_owner(&self, object: Option<&Expr>, name: &str, owner: &Owner) -> bool {
+    fn member_of_owner(&self, object: Option<Expr<'a>>, name: &str, owner: &Owner) -> bool {
         let Owner::Type(owner) = owner else {
             // Members never live in a library.
             return false;
         };
         let receiver = match object {
             None => return self.enclosing_member_owner(name).flatten().as_ref() == Some(owner),
-            Some(Expr::Super { .. }) => {
+            Some(Expr::Super(_)) => {
                 let Some(ResolvedType::Interface { identity, .. }) = &self.state.enclosing_type
                 else {
                     return true;
@@ -448,7 +447,7 @@ impl Scope<'_, '_> {
                 };
             }
             Some(Expr::Ident(identifier))
-                if self.prefixes.contains(&identifier.name) && !self.is_local(identifier) =>
+                if self.prefixes.contains(identifier.name()) && !self.is_local(identifier) =>
             {
                 return false;
             }
@@ -467,7 +466,7 @@ impl Scope<'_, '_> {
     /// Whether the invoked name resolves to a method rather than a callable
     /// field/getter. Dynamic receivers resolve only matching `Object` methods;
     /// `call` on a function has no method element.
-    fn invokes_method(&self, object: &Expr, name: &str, args: &ArgList) -> bool {
+    fn invokes_method(&self, object: Expr<'a>, name: &str, args: ArgList<'a>) -> bool {
         let mut receiver = self.static_type(object);
         while let Some(
             ResolvedType::TypeParameter { bound, .. }
@@ -484,7 +483,7 @@ impl Scope<'_, '_> {
                     "noSuchMethod" => 1,
                     _ => return false,
                 };
-                args.named.is_empty() && args.positional.len() == parameters
+                args.named().is_empty() && args.positional().count() == parameters
             }
             Some(ResolvedType::Function { .. }) => name != "call",
             Some(ResolvedType::Record {
@@ -526,10 +525,10 @@ impl Scope<'_, '_> {
     /// The type of a member access target; a type name stands for its static
     /// members' declaring type, and `super` for the enclosing type's
     /// inherited members.
-    fn static_type(&self, object: &Expr) -> Option<ResolvedType> {
+    fn static_type(&self, object: Expr<'a>) -> Option<ResolvedType> {
         match object {
             Expr::Ident(identifier) if !self.is_local(identifier) => {
-                let name = identifier.name.as_str();
+                let name = identifier.name();
                 if matches!(self.enclosing_member_owner(name), Some(Some(_))) {
                     let enclosing = self.state.enclosing_type.as_ref()?;
                     return self
@@ -558,7 +557,7 @@ impl Scope<'_, '_> {
     }
 
     /// Summarizes critical `nodes` for a statement targeting `element`.
-    fn critical(&self, nodes: &[&Expr], element: Option<&Element>) -> Critical {
+    fn critical(&self, nodes: &[Expr<'a>], element: Option<&Element<'a>>) -> Critical<'a> {
         let owner = match element {
             Some(Element::Property { owner, .. }) => Some(owner),
             _ => None,
@@ -568,7 +567,7 @@ impl Scope<'_, '_> {
             owner,
             critical: Critical::default(),
         };
-        for node in nodes {
+        for &node in nodes {
             finder.visit_expr(node);
         }
         finder.critical
@@ -617,10 +616,9 @@ fn member_owner(
     }
 }
 
-fn for_each_argument<'e>(args: &'e ArgList, mut f: impl FnMut(&'e Expr)) {
-    args.positional
-        .iter()
-        .chain(args.named.iter().map(|argument| &argument.value))
+fn for_each_argument<'a>(args: ArgList<'a>, mut f: impl FnMut(Expr<'a>)) {
+    args.positional()
+        .chain(args.named().map(|argument| argument.value()))
         .for_each(&mut f);
 }
 
@@ -629,45 +627,48 @@ fn for_each_argument<'e>(args: &'e ArgList, mut f: impl FnMut(&'e Expr)) {
 struct Finder<'f, 's, 'a> {
     scope: &'f Scope<'s, 'a>,
     owner: Option<&'f Owner>,
-    critical: Critical,
+    critical: Critical<'a>,
 }
 
-impl Visitor for Finder<'_, '_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> Visitor<'a> for Finder<'_, '_, 'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         match node {
             Expr::Ident(identifier) => {
-                let declaration = self.scope.locals.get(&identifier.span.start).copied();
-                self.critical
-                    .names
-                    .push((identifier.name.clone(), declaration));
+                let declaration = self.scope.locals.get(&identifier.span().start).copied();
+                self.critical.names.push((identifier.name(), declaration));
                 if let Some(owner) = self.owner
                     && declaration.is_none()
                 {
                     self.critical.owner_referenced |=
-                        self.scope.unqualified_in_owner(&identifier.name, owner);
+                        self.scope.unqualified_in_owner(identifier.name(), owner);
                 }
             }
-            Expr::FuncExpr { .. } => {
+            Expr::FuncExpr(_) => {
                 self.critical.closure = true;
                 if self.owner.is_some() {
                     return;
                 }
             }
-            Expr::Field { object, field, .. } => {
+            Expr::Field(field) => {
                 if let Some(owner) = self.owner {
-                    self.critical.owner_referenced |=
-                        self.scope.member_of_owner(Some(object), &field.name, owner);
+                    self.critical.owner_referenced |= self.scope.member_of_owner(
+                        Some(field.object()),
+                        field.field().name(),
+                        owner,
+                    );
                 }
             }
-            Expr::Cascade {
-                object, sections, ..
-            } => {
+            Expr::Cascade(cascade) => {
                 if let Some(owner) = self.owner {
-                    for op in sections.iter().flat_map(|section| &section.ops) {
-                        if let CascadeOp::Field { name, .. } | CascadeOp::Call(name, _, _) = op {
-                            self.critical.owner_referenced |=
-                                self.scope.member_of_owner(Some(object), &name.name, owner);
-                        }
+                    for op in cascade.sections().flat_map(|section| section.ops()) {
+                        let name = match op {
+                            CascadeOp::Field(field) => field.name(),
+                            CascadeOp::Call(call) => call.name(),
+                            _ => continue,
+                        };
+                        self.critical.owner_referenced |=
+                            self.scope
+                                .member_of_owner(Some(cascade.object()), name.name(), owner);
                     }
                 }
             }
@@ -678,12 +679,12 @@ impl Visitor for Finder<'_, '_, '_> {
 }
 
 fn check_statements(
-    statements: &[Stmt],
-    facts: &HashMap<usize, Cascadable>,
+    statements: AstChildren<'_, Stmt<'_>>,
+    facts: &HashMap<usize, Cascadable<'_>>,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    if statements.len() < 2 {
+    if statements.clone().count() < 2 {
         return;
     }
     let none = Cascadable::default();
@@ -717,42 +718,49 @@ fn report(start: usize, end: usize, ctx: &AnalyzeContext, diags: &mut Vec<Diagno
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource, SignatureIndex, TypeIndex};
+    use falcon_analyze::{
+        IdentityIndex, IdentitySource, LibrarySource, ParsedFile, SignatureIndex, TypeIndex,
+    };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
+    use std::sync::Arc;
 
     fn diagnostics(source: &str, imported: &str) -> Vec<Diagnostic> {
         let path = Path::new("/project/lib/main.dart");
         let imported_path = Path::new("/project/lib/output.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult {
-            program: output,
-            errors,
-            ..
-        } = parse(imported);
-        assert!(errors.is_empty(), "{errors:?}");
-        let files = [(path, &program), (imported_path, &output)];
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let program = parsed.program();
+        let parsed_output = parse(imported);
+        assert!(
+            parsed_output.errors.is_empty(),
+            "{:?}",
+            parsed_output.errors
+        );
+        let parsed_output = Arc::new(ParsedFile {
+            source: imported.into(),
+            tree: parsed_output.tree,
+        });
+        let files = [(path, &parsed), (imported_path, &parsed_output)];
         let identities = IdentityIndex::from_project_files(
-            &files.map(|(path, program)| IdentitySource {
+            &files.map(|(path, parsed)| IdentitySource {
                 path,
-                program,
+                parsed,
                 has_parse_errors: false,
             }),
             &[],
         );
         let types = TypeIndex::from_resolved_files(
-            files.map(|(path, program)| {
+            files.map(|(path, parsed)| {
                 (
                     path,
                     LibrarySource {
-                        program,
+                        program: parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -761,17 +769,17 @@ mod tests {
             &identities,
         );
         let signatures = SignatureIndex::build(
-            &files.map(|(path, program)| (path.to_path_buf(), program)),
+            &files.map(|(path, parsed)| (path.to_path_buf(), Arc::clone(parsed))),
             None,
             &identities,
             &types,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        CascadeInvocations.analyze(&program, &ctx)
+        CascadeInvocations.analyze(program, &ctx)
     }
 
     #[test]

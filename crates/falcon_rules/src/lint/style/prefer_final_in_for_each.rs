@@ -20,7 +20,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::lexical_usage::collection_for_inits;
 
@@ -32,7 +32,7 @@ pub struct PreferFinalInForEach;
 impl Rule for PreferFinalInForEach {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mutated = ctx.mutated_declarations(program);
@@ -48,16 +48,16 @@ impl Rule for PreferFinalInForEach {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    mutated: &'a HashSet<usize>,
+    mutated: &'a HashSet<NodeId>,
     diagnostics: Vec<Diagnostic>,
     bodies: Vec<Span>,
 }
 
 impl Collector<'_, '_> {
-    fn check(&mut self, init: &ForInit) {
+    fn check(&mut self, init: ForInit<'_>) {
         let span = match init {
-            ForInit::ForIn { name, .. } => name.span,
-            ForInit::PatternForIn { pattern, .. } => *pattern.span(),
+            ForInit::ForIn(for_in) => for_in.name().span(),
+            ForInit::PatternForIn(for_in) => for_in.pattern().span(),
             ForInit::VarDecl(_) | ForInit::Exprs(_) => return,
         };
         if !self
@@ -68,36 +68,32 @@ impl Collector<'_, '_> {
             return;
         }
         match init {
-            ForInit::ForIn {
-                keyword: VarKeyword::Var,
-                declares_variable: true,
-                name,
-                ..
-            } if !self.mutated.contains(&name.span.start) => {
+            ForInit::ForIn(for_in)
+                if for_in.keyword() == VarKeyword::Var
+                    && for_in.declares_variable()
+                    && !self.mutated.contains(&for_in.name().syntax().id()) =>
+            {
                 self.diagnostics.push(self.ctx.diagnostic(
                     RULE,
-                    format!("The variable '{}' should be final.", name.name),
-                    name.span,
+                    format!("The variable '{}' should be final.", for_in.name().name()),
+                    for_in.name().span(),
                 ));
             }
-            ForInit::PatternForIn {
-                keyword: VarKeyword::Var,
-                pattern,
-                ..
-            } => {
+            ForInit::PatternForIn(for_in) if for_in.keyword() == VarKeyword::Var => {
+                let pattern = for_in.pattern();
                 let Some(variables) = top_level_variables(pattern) else {
                     return;
                 };
                 if variables
                     .iter()
-                    .any(|name| self.mutated.contains(&name.span.start))
+                    .any(|name| self.mutated.contains(&name.syntax().id()))
                 {
                     return;
                 }
                 self.diagnostics.push(self.ctx.diagnostic(
                     RULE,
                     "The pattern should be final.",
-                    *pattern.span(),
+                    pattern.span(),
                 ));
             }
             _ => {}
@@ -108,82 +104,78 @@ impl Collector<'_, '_> {
 /// The variables of a top-level record/object/list/map pattern whose every
 /// field or element is a plain variable pattern; `None` when any is not
 /// (the analyzer then treats the pattern as potentially mutated).
-fn top_level_variables(pattern: &Pattern) -> Option<Vec<&Identifier>> {
-    fn variable(pattern: &Pattern) -> Option<&Identifier> {
+fn top_level_variables(pattern: Pattern<'_>) -> Option<Vec<Identifier<'_>>> {
+    fn variable(pattern: Pattern<'_>) -> Option<Identifier<'_>> {
         match pattern {
-            Pattern::Variable { name, .. } => Some(name),
+            Pattern::Variable(variable) => Some(variable.name()),
             _ => None,
         }
     }
     match pattern {
         Pattern::Record(record) => record
-            .fields
-            .iter()
-            .map(|field| variable(&field.pattern))
+            .fields()
+            .map(|field| variable(field.pattern()))
             .collect(),
         Pattern::Object(object) => object
-            .fields
-            .iter()
-            .map(|field| field.pattern.as_ref().and_then(variable))
+            .fields()
+            .map(|field| field.pattern().and_then(variable))
             .collect(),
         Pattern::List(list) => list
-            .elements
-            .iter()
+            .elements()
             .map(|element| match element {
                 ListPatternElement::Pattern(pattern) => variable(pattern),
                 ListPatternElement::Rest(..) => None,
             })
             .collect(),
-        Pattern::Map(map) if !map.has_rest => map
-            .entries
-            .iter()
-            .map(|entry| variable(&entry.pattern))
+        Pattern::Map(map) if !map.has_rest() => map
+            .entries()
+            .map(|entry| variable(entry.pattern()))
             .collect(),
         _ => None,
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Function(function) = node
-            && let Some(body) = &function.body
+            && let Some(body) = function.body()
         {
-            self.bodies.push(*body.span());
+            self.bodies.push(body.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         let body = match node {
-            ClassMember::Method(node) => &node.body,
-            ClassMember::Constructor(node) => &node.body,
-            ClassMember::Getter(node) => &node.body,
-            ClassMember::Setter(node) => &node.body,
-            ClassMember::Operator(node) => &node.body,
-            ClassMember::PrimaryConstructorBody(node) => &node.body,
+            ClassMember::Method(node) => node.body(),
+            ClassMember::Constructor(node) => node.body(),
+            ClassMember::Getter(node) => node.body(),
+            ClassMember::Setter(node) => node.body(),
+            ClassMember::Operator(node) => node.body(),
+            ClassMember::PrimaryConstructorBody(node) => node.body(),
             ClassMember::Field(_) | ClassMember::Error(_) => {
                 return StructuralTraversal::Continue;
             }
         };
         if let Some(body) = body {
-            self.bodies.push(*body.span());
+            self.bodies.push(body.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::For(statement) = node
-            && let Some(init) = &statement.header.init
+            && let Some(init) = statement.header().init()
         {
             self.check(init);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::FuncExpr { body, .. } = node {
-            self.bodies.push(*body.span());
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::FuncExpr(function) = node {
+            self.bodies.push(function.body().span());
         }
         // Collection `for` elements are for-each loops too.
         for init in collection_for_inits(node) {

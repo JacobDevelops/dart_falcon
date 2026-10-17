@@ -15,16 +15,16 @@
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
-use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::{self, AstChildren};
 
+use falcon_diagnostics::Diagnostic;
 #[derive(Default)]
 pub struct AvoidMultipleDeclarationsPerLine;
 
 impl Rule for AvoidMultipleDeclarationsPerLine {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -41,38 +41,38 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    fn check(&mut self, declarators: &[VarDeclarator]) {
-        if let Some(second) = declarators.get(1) {
+    fn check<'a>(&mut self, mut declarators: AstChildren<'a, cst::VarDeclarator<'a>>) {
+        if let Some(second) = declarators.nth(1) {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-multiple-declarations-per-line",
                 "Multiple variables declared on a single line.",
-                second.name.span,
+                second.name().span(),
             ));
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
-        if let TopLevelDecl::Variable(variable) = node {
-            self.check(&variable.declarators);
+    fn visit_top_level_decl(&mut self, node: cst::TopLevelDecl<'_>) -> StructuralTraversal {
+        if let cst::TopLevelDecl::Variable(variable) = node {
+            self.check(variable.declarators());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        self.check(&node.declarators);
+    fn visit_field_decl(&mut self, node: cst::FieldDecl<'_>) -> StructuralTraversal {
+        self.check(node.declarators());
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::LocalVar(local) = node {
-            self.check(&local.declarators);
+    fn visit_stmt(&mut self, node: cst::Stmt<'_>) -> StructuralTraversal {
+        if let cst::Stmt::LocalVar(local) = node {
+            self.check(local.declarators());
         }
         StructuralTraversal::Continue
     }

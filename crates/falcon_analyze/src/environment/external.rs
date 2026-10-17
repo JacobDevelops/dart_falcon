@@ -6,8 +6,8 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use falcon_dart_parser::parser::ParseError;
 use falcon_dart_parser::try_parse_for_package;
-use falcon_syntax::ast::{ClassMember, FunctionDecl, Program, TopLevelDecl, VarKeyword};
-use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
+use falcon_syntax::cst::visit::{Visitor, walk_top_level_decl};
+use falcon_syntax::cst::{ClassMember, FunctionDecl, Program, Span, TopLevelDecl};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
@@ -31,19 +31,20 @@ pub enum ExternalOrigin {
     Project,
 }
 
-/// Compact, unresolved declaration facts for one external file.
-/// Executable bodies are discarded; initializers survive only for missing
-/// declaration types and constant evaluation.
+/// Owned syntax and declaration facts for one external file.
 #[derive(Debug)]
 pub struct ExternalFile {
     pub path: PathBuf,
-    pub facts: Program,
-    /// Library documentation imports retained after the source text is dropped.
+    pub parsed: Arc<crate::ParsedFile>,
+    /// Library documentation imports.
     pub doc_imports: Vec<String>,
-    /// Declaration/member ordinals of concrete operators. Their body-presence
-    /// bit is not explicit in the parser AST and must survive body removal.
-    pub concrete_operators: Vec<(usize, usize)>,
     pub has_parse_errors: bool,
+}
+
+impl ExternalFile {
+    pub fn program(&self) -> Program<'_> {
+        self.parsed.program()
+    }
 }
 
 /// An external library: its defining file first, then its parts.
@@ -128,11 +129,10 @@ impl ExternalLibraries {
     /// Load every library reachable from `project` (path, program, source)
     /// through imports, exports and documentation imports, plus implicit
     /// `dart:core`. Conditional directives use their default URI.
-    /// Stop at canonical project paths; each parallel worker retains only one
-    /// full AST/source.
+    /// Stop at canonical project paths.
     pub fn load(
         environment: &AnalysisEnvironment,
-        project: &[(&Path, &Program, &str)],
+        project: &[(&Path, Program<'_>, &str)],
         is_project: impl Fn(&Path) -> bool,
     ) -> Self {
         let mut loaded = Self::default();
@@ -147,7 +147,7 @@ impl ExternalLibraries {
     pub fn extend(
         &mut self,
         environment: &AnalysisEnvironment,
-        project: &[(&Path, &Program, &str)],
+        project: &[(&Path, Program<'_>, &str)],
         is_project: impl Fn(&Path) -> bool,
     ) {
         self.canonical_paths
@@ -191,22 +191,21 @@ impl ExternalLibraries {
             !companions.is_empty() && (is_project(root) || self.eviction_roots.contains_key(root))
         });
         let mut wave = Vec::new();
-        for (path, program, source) in project {
+        for &(path, program, source) in project {
             let context = environment.context_index(path);
             let mut dependencies =
                 dependencies(environment, &self.canonical_paths, context, path, program);
             dependencies.extend(
                 program
-                    .part_of_directive
-                    .as_ref()
-                    .and_then(|part| part.uri.as_ref())
+                    .part_of_directive()
+                    .and_then(|part| part.uri())
                     .and_then(|uri| {
                         resolve(
                             environment,
                             &self.canonical_paths,
                             context,
                             path,
-                            &uri.value,
+                            &uri.value(),
                         )
                     }),
             );
@@ -220,15 +219,14 @@ impl ExternalLibraries {
             self.project_companions.remove(&root);
             let mut seen = FxHashSet::from_iter([root.clone()]);
             let mut parts: Vec<_> = program
-                .part_directives
-                .iter()
+                .part_directives()
                 .filter_map(|part| {
                     resolve(
                         environment,
                         &self.canonical_paths,
                         context,
                         path,
-                        &part.uri.value,
+                        &part.uri().value(),
                     )
                 })
                 .collect();
@@ -298,7 +296,7 @@ impl ExternalLibraries {
                 &self.canonical_paths,
                 context,
                 path,
-                &file.facts,
+                file.program(),
             );
             dependencies.extend(
                 file.doc_imports.iter().filter_map(|uri| {
@@ -306,16 +304,15 @@ impl ExternalLibraries {
                 }),
             );
             let parts = file
-                .facts
-                .part_directives
-                .iter()
+                .program()
+                .part_directives()
                 .filter_map(|part| {
                     resolve(
                         environment,
                         &self.canonical_paths,
                         context,
                         path,
-                        &part.uri.value,
+                        &part.uri().value(),
                     )
                 })
                 .collect();
@@ -977,21 +974,19 @@ fn resolve(
     Some(path)
 }
 
-fn directive_uris(file: &ExternalFile) -> impl Iterator<Item = &str> {
-    program_uris(&file.facts).chain(file.doc_imports.iter().map(String::as_str))
+fn directive_uris(file: &ExternalFile) -> impl Iterator<Item = std::borrow::Cow<'_, str>> {
+    program_uris(file.program()).chain(
+        file.doc_imports
+            .iter()
+            .map(|uri| std::borrow::Cow::Borrowed(uri.as_str())),
+    )
 }
 
-fn program_uris(program: &Program) -> impl Iterator<Item = &str> {
+fn program_uris(program: Program<'_>) -> impl Iterator<Item = std::borrow::Cow<'_, str>> {
     program
-        .imports
-        .iter()
-        .map(|import| import.uri.value.as_str())
-        .chain(
-            program
-                .exports
-                .iter()
-                .map(|export| export.uri.value.as_str()),
-        )
+        .imports()
+        .map(|import| import.uri().value())
+        .chain(program.exports().map(|export| export.uri().value()))
 }
 
 fn library_dependencies(
@@ -1007,7 +1002,7 @@ fn library_dependencies(
             directive_uris(file)
                 .filter(|uri| !uri.starts_with("dart:"))
                 .filter_map(move |uri| {
-                    resolve(environment, canonical_paths, context, &file.path, uri)
+                    resolve(environment, canonical_paths, context, &file.path, &uri)
                 })
         })
         .collect()
@@ -1101,11 +1096,11 @@ fn dependencies(
     canonical_paths: &CanonicalPaths,
     context: Option<usize>,
     path: &Path,
-    program: &Program,
+    program: Program<'_>,
 ) -> Vec<PathBuf> {
     program_uris(program)
-        .chain(["dart:core"])
-        .filter_map(|uri| resolve(environment, canonical_paths, context, path, uri))
+        .chain([std::borrow::Cow::Borrowed("dart:core")])
+        .filter_map(|uri| resolve(environment, canonical_paths, context, path, &uri))
         .collect()
 }
 
@@ -1136,7 +1131,7 @@ fn load_library(
     let Some(defining) = read(path)? else {
         return Ok(None);
     };
-    if defining.facts.part_of_directive.is_some() {
+    if defining.program().part_of_directive().is_some() {
         return Ok(None);
     }
     let mut files = vec![defining];
@@ -1145,16 +1140,15 @@ fn load_library(
     let mut has_unresolved_parts = false;
     while index < files.len() {
         let parts: Vec<_> = files[index]
-            .facts
-            .part_directives
-            .iter()
+            .program()
+            .part_directives()
             .filter_map(|part| {
                 let resolved = resolve(
                     environment,
                     canonical_paths,
                     context,
                     &files[index].path,
-                    &part.uri.value,
+                    &part.uri().value(),
                 );
                 has_unresolved_parts |= resolved.is_none();
                 resolved
@@ -1175,7 +1169,7 @@ fn load_library(
                     canonical_paths,
                     context,
                     &file.path,
-                    &file.facts,
+                    file.program(),
                 )
                 .into_iter()
                 .chain(file.doc_imports.iter().filter_map(|uri| {
@@ -1212,21 +1206,20 @@ fn read_source(
     source: &str,
     package_version: Option<LanguageVersion>,
 ) -> std::io::Result<ExternalFile> {
-    let falcon_dart_parser::ParseResult {
-        mut program,
-        errors,
-        ..
-    } = try_parse_for_package(source, package_version)?;
-    let has_parse_errors = !declarations_intact(&program, &errors);
-    let doc_imports = crate::resolve::doc_imports(&program, source)
+    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+        try_parse_for_package(source, package_version)?;
+    let program = tree.program(source);
+    let has_parse_errors = !declarations_intact(program, &errors);
+    let doc_imports = crate::resolve::doc_imports(program, source)
         .map(str::to_owned)
         .collect();
-    let concrete_operators = compact_declarations(&mut program);
     Ok(ExternalFile {
         path: path.to_path_buf(),
-        facts: program,
+        parsed: Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        }),
         doc_imports,
-        concrete_operators,
         has_parse_errors,
     })
 }
@@ -1235,17 +1228,17 @@ fn read_source(
 /// inside a function or member body (bodies are never indexed), or it is a
 /// language-feature gate on otherwise well-formed syntax (external sources
 /// are written for their own, possibly newer, language version).
-fn declarations_intact(program: &Program, errors: &[ParseError]) -> bool {
+fn declarations_intact(program: Program<'_>, errors: &[ParseError]) -> bool {
     if errors.is_empty() {
         return true;
     }
     #[derive(Default)]
     struct Integrity {
-        bodies: Vec<falcon_syntax::ast::Span>,
+        bodies: Vec<Span>,
         has_error: bool,
     }
-    impl Visitor for Integrity {
-        fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) {
+    impl<'a> Visitor<'a> for Integrity {
+        fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) {
             if matches!(declaration, TopLevelDecl::Error(_)) {
                 self.has_error = true;
             } else {
@@ -1253,26 +1246,25 @@ fn declarations_intact(program: &Program, errors: &[ParseError]) -> bool {
             }
         }
 
-        fn visit_function_decl(&mut self, function: &FunctionDecl) {
-            self.bodies
-                .extend(function.body.as_ref().map(|body| *body.span()));
+        fn visit_function_decl(&mut self, function: FunctionDecl<'a>) {
+            self.bodies.extend(function.body().map(|body| body.span()));
         }
 
-        fn visit_class_member(&mut self, member: &ClassMember) {
+        fn visit_class_member(&mut self, member: ClassMember<'a>) {
             let body = match member {
-                ClassMember::Constructor(member) => member.body.as_ref(),
-                ClassMember::Method(member) => member.body.as_ref(),
-                ClassMember::Getter(member) => member.body.as_ref(),
-                ClassMember::Setter(member) => member.body.as_ref(),
-                ClassMember::Operator(member) => member.body.as_ref(),
-                ClassMember::PrimaryConstructorBody(member) => member.body.as_ref(),
+                ClassMember::Constructor(member) => member.body(),
+                ClassMember::Method(member) => member.body(),
+                ClassMember::Getter(member) => member.body(),
+                ClassMember::Setter(member) => member.body(),
+                ClassMember::Operator(member) => member.body(),
+                ClassMember::PrimaryConstructorBody(member) => member.body(),
                 ClassMember::Error(_) => {
                     self.has_error = true;
                     None
                 }
                 ClassMember::Field(_) => None,
             };
-            self.bodies.extend(body.map(|body| *body.span()));
+            self.bodies.extend(body.map(|body| body.span()));
         }
     }
     let mut integrity = Integrity::default();
@@ -1287,105 +1279,6 @@ fn declarations_intact(program: &Program, errors: &[ParseError]) -> bool {
                 .iter()
                 .any(|body| body.start <= error.offset && error.offset < body.end)
     })
-}
-
-/// Move the parsed declaration headers into retained facts without cloning the
-/// full tree. Preserve defaults, annotations, redirects and super-constructor
-/// names. Retain missing-type initializers for signature inference, plus
-/// const-constructor execution facts.
-fn compact_declarations(program: &mut Program) -> Vec<(usize, usize)> {
-    let mut concrete_operators = Vec::new();
-    for (declaration_index, declaration) in program.declarations.iter_mut().enumerate() {
-        let implicit_const = match &*declaration {
-            TopLevelDecl::Class(class) => class
-                .primary_constructor
-                .as_ref()
-                .is_some_and(|constructor| constructor.is_const),
-            TopLevelDecl::MixinClass(class) => class
-                .primary_constructor
-                .as_ref()
-                .is_some_and(|constructor| constructor.is_const),
-            TopLevelDecl::Enum(_) => true,
-            _ => false,
-        };
-        let members = match declaration {
-            TopLevelDecl::Function(function) => {
-                function.body = None;
-                continue;
-            }
-            TopLevelDecl::Variable(variable) => {
-                if variable.keyword != VarKeyword::Const && variable.var_type.is_some() {
-                    for declarator in &mut variable.declarators {
-                        declarator.initializer = None;
-                    }
-                }
-                continue;
-            }
-            TopLevelDecl::Class(class) => &mut class.members,
-            TopLevelDecl::MixinClass(class) => &mut class.members,
-            TopLevelDecl::Mixin(mixin) => &mut mixin.members,
-            TopLevelDecl::Enum(enumeration) => &mut enumeration.members,
-            TopLevelDecl::Extension(extension) => &mut extension.members,
-            TopLevelDecl::ExtensionType(extension) => &mut extension.members,
-            _ => continue,
-        };
-        let has_const_constructor = implicit_const
-            || members.iter().any(|member| {
-                matches!(member, ClassMember::Constructor(constructor)
-                if constructor.is_const && !constructor.is_external)
-            });
-        for (member_index, member) in members.iter_mut().enumerate() {
-            match member {
-                ClassMember::Constructor(member) => {
-                    member.body = None;
-                    if member.is_const && !member.is_external {
-                        continue;
-                    }
-                    let super_call = std::mem::take(&mut member.initializers)
-                        .into_iter()
-                        .find(|initializer| {
-                            matches!(
-                                initializer,
-                                falcon_syntax::ast::ConstructorInitializer::SuperCall { .. }
-                            )
-                        })
-                        .map(|mut initializer| {
-                            if let falcon_syntax::ast::ConstructorInitializer::SuperCall {
-                                args,
-                                ..
-                            } = &mut initializer
-                            {
-                                args.positional = Vec::new();
-                                args.named = Vec::new();
-                            }
-                            initializer
-                        });
-                    member.initializers = super_call.into_iter().collect();
-                }
-                ClassMember::Method(member) => member.body = None,
-                ClassMember::Getter(member) => member.body = None,
-                ClassMember::Setter(member) => member.body = None,
-                ClassMember::PrimaryConstructorBody(member) => member.body = None,
-                ClassMember::Operator(member) => {
-                    if member.body.is_some() {
-                        concrete_operators.push((declaration_index, member_index));
-                    }
-                    member.body = None;
-                }
-                ClassMember::Field(field)
-                    if field.keyword != VarKeyword::Const
-                        && field.field_type.is_some()
-                        && (field.is_static || !has_const_constructor) =>
-                {
-                    for declarator in &mut field.declarators {
-                        declarator.initializer = None;
-                    }
-                }
-                ClassMember::Field(_) | ClassMember::Error(_) => {}
-            }
-        }
-    }
-    concrete_operators
 }
 
 /// The parser's message prefix for syntax gated behind a language feature.
@@ -1491,7 +1384,7 @@ mod tests {
         let parsed = falcon_dart_parser::parse(source);
         let libraries = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &parsed.program, source)],
+            &[(path.as_path(), parsed.tree.program(source), source)],
             |candidate| candidate.starts_with(&root),
         );
         assert!(libraries.is_empty());
@@ -1605,14 +1498,14 @@ mod tests {
         let parsed = falcon_dart_parser::parse(source);
         let mut libraries = ExternalLibraries::load(
             &environment,
-            &[(owner.as_path(), &parsed.program, source)],
+            &[(owner.as_path(), parsed.tree.program(source), source)],
             |path| path == owner,
         );
         assert!(libraries.companion_dependencies.contains_key(&part));
         let cached = libraries.companion_dependencies[&part].source.as_ptr();
         libraries.extend(
             &environment,
-            &[(owner.as_path(), &parsed.program, source)],
+            &[(owner.as_path(), parsed.tree.program(source), source)],
             |path| path == owner,
         );
         assert_eq!(
@@ -1622,39 +1515,65 @@ mod tests {
         let parsed = falcon_dart_parser::parse("");
         libraries.extend(
             &environment,
-            &[(owner.as_path(), &parsed.program, "")],
+            &[(owner.as_path(), parsed.tree.program(""), "")],
             |path| path == owner,
         );
         assert!(libraries.companion_dependencies.is_empty());
     }
 
     #[test]
-    fn const_primary_and_implicit_enum_fields_survive_compaction() {
-        let falcon_dart_parser::ParseResult {
-            mut program,
-            errors,
-            ..
-        } = falcon_dart_parser::parse(
-            "class const C(final int x) { final int y = 1; }\n\
-             enum E { first; final int y = 2; }\n\
-             class Ordinary { final int y = 3; }",
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        compact_declarations(&mut program);
-        for (index, declaration) in program.declarations.iter().enumerate() {
-            let members = match declaration {
-                TopLevelDecl::Class(class) => &class.members,
-                TopLevelDecl::Enum(enumeration) => &enumeration.members,
+    fn external_initializers_retain_const_execution_and_inference_inputs() {
+        let source = "class const C(final int x) { final int y = 1; }\n\
+                      enum E { first; final int y = 2; }\n\
+                      class Ordinary { final int y = 3; }";
+        let file = read_source(Path::new("external.dart"), source, None).unwrap();
+        assert!(!file.has_parse_errors);
+        for declaration in file.program().declarations() {
+            let mut members = match declaration {
+                TopLevelDecl::Class(class) => class.members(),
+                TopLevelDecl::Enum(enumeration) => enumeration.members(),
                 _ => panic!("expected class or enum"),
             };
             let field = members
-                .iter()
                 .find_map(|member| match member {
                     ClassMember::Field(field) => Some(field),
                     _ => None,
                 })
                 .unwrap();
-            assert_eq!(field.declarators[0].initializer.is_some(), index < 2);
+            assert!(field.declarators().next().unwrap().initializer().is_some());
         }
+    }
+
+    #[test]
+    fn external_operator_bodies_preserve_abstract_and_concrete_members() {
+        let source = "abstract class A {\n\
+                        int operator +(A other);\n\
+                        int operator -(A other) => 1;\n\
+                      }\n\
+                      int topLevel() => 0;\n\
+                      class B {\n\
+                        final int value = 1;\n\
+                        int operator *(B other) { return value; }\n\
+                      }";
+        let file = read_source(Path::new("external.dart"), source, None).unwrap();
+        assert!(!file.has_parse_errors);
+        let TopLevelDecl::Class(class) = file.program().declarations().next().unwrap() else {
+            panic!("expected class");
+        };
+        let ClassMember::Operator(abstract_operator) = class.members().next().unwrap() else {
+            panic!("expected abstract operator");
+        };
+        assert!(abstract_operator.body().is_none());
+        let ClassMember::Operator(operator) = class.members().nth(1).unwrap() else {
+            panic!("expected operator");
+        };
+        assert!(operator.body().is_some());
+        let TopLevelDecl::Class(class) = file.program().declarations().nth(2).unwrap() else {
+            panic!("expected second class");
+        };
+        let ClassMember::Operator(operator) = class.members().nth(1).unwrap() else {
+            panic!("expected block-bodied operator");
+        };
+        assert!(operator.body().is_some());
     }
 }

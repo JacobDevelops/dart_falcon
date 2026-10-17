@@ -12,7 +12,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferLast;
@@ -20,7 +20,7 @@ pub struct PreferLast;
 impl Rule for PreferLast {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -38,22 +38,17 @@ struct Collector<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Index {
-            object,
-            index,
-            span,
-            ..
-        } = node
-            && is_length_minus_one(object, index)
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Index(index) = node
+            && is_length_minus_one(index.object(), index.index())
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-last",
                 "Prefer .last over [length - 1] to access the last element",
-                *span,
+                index.span(),
             ));
         }
         StructuralTraversal::Continue
@@ -62,29 +57,21 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 /// Matches `ident[ident.length - 1]` where both idents are the same name.
-fn is_length_minus_one(object: &Expr, index: &Expr) -> bool {
+fn is_length_minus_one(object: Expr<'_>, index: Expr<'_>) -> bool {
     let obj_name = match object.unparenthesized() {
-        Expr::Ident(id) => &id.name,
+        Expr::Ident(id) => id.name(),
         _ => return false,
     };
     match index.unparenthesized() {
-        Expr::Binary {
-            op: BinaryOp::Sub,
-            left,
-            right,
-            ..
-        } => {
-            if !matches!(right.unparenthesized(), Expr::IntLit { value, .. } if value == "1") {
+        Expr::Binary(binary) if binary.op() == BinaryOp::Sub => {
+            if !matches!(binary.right().unparenthesized(), Expr::IntLit(value) if value.value() == "1")
+            {
                 return false;
             }
-            match left.unparenthesized() {
-                Expr::Field {
-                    object: len_obj,
-                    field,
-                    ..
-                } => {
-                    field.name == "length"
-                        && matches!(len_obj.unparenthesized(), Expr::Ident(id) if &id.name == obj_name)
+            match binary.left().unparenthesized() {
+                Expr::Field(field) => {
+                    field.field().name() == "length"
+                        && matches!(field.object().unparenthesized(), Expr::Ident(id) if id.name() == obj_name)
                 }
                 _ => false,
             }

@@ -35,7 +35,7 @@ use falcon_analyze::{
     TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 /// Public instance fields and getters that `Object`, `Widget`, and `State`
 /// declare; a subclass member with one of these names overrides it.
@@ -56,20 +56,20 @@ pub struct DiagnosticDescribeAllProperties;
 impl Rule for DiagnosticDescribeAllProperties {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         RulePreparation::Structural(Box::new(Collector {
             checker: Checker {
                 model,
                 signatures,
                 ctx,
             },
-            declarations: program.declarations.iter(),
+            declarations: program.declarations(),
             properties: Vec::new(),
             described: Described(HashSet::new()),
             debug_method: false,
@@ -86,8 +86,8 @@ struct Checker<'a> {
 }
 
 impl Checker<'_> {
-    fn properties<'n>(&self, class: &'n ClassDecl) -> Vec<&'n Identifier> {
-        let Some(identity) = self.model.resolve_name(&class.name.name) else {
+    fn properties<'n>(&self, class: ClassDecl<'n>) -> Vec<Identifier<'n>> {
+        let Some(identity) = self.model.resolve_name(class.name().name()) else {
             return Vec::new();
         };
         let diagnosticable = |supertype: &DeclarationIdentity| {
@@ -104,51 +104,51 @@ impl Checker<'_> {
             return Vec::new();
         }
         let mut parameters = TypeParameterScope::default();
-        parameters.push(&class.type_params, &self.model);
-        let mut properties: Vec<&Identifier> = Vec::new();
+        parameters.push(class.type_params(), &self.model);
+        let mut properties = Vec::new();
         for parameter in (EffectiveMembers {
-            declared: &class.members,
-            primary: class.primary_constructor.as_ref(),
+            declared: class.members(),
+            primary: class.primary_constructor(),
             representation: false,
         }
         .declaring_params())
         {
             if self.should_describe(
                 &identity,
-                &parameter.name.name,
-                &parameter.annotations,
-                parameter.param_type.as_ref(),
+                parameter.name().name(),
+                parameter.annotations(),
+                parameter.param_type(),
                 &parameters,
             ) {
-                properties.push(&parameter.name);
+                properties.push(parameter.name());
             }
         }
-        for member in &class.members {
+        for member in class.members() {
             match member {
-                ClassMember::Field(field) if !field.is_static => {
-                    for declarator in &field.declarators {
+                ClassMember::Field(field) if !field.is_static() => {
+                    for declarator in field.declarators() {
                         if self.should_describe(
                             &identity,
-                            &declarator.name.name,
-                            &field.annotations,
-                            field.field_type.as_ref(),
+                            declarator.name().name(),
+                            field.annotations(),
+                            field.field_type(),
                             &parameters,
                         ) {
-                            properties.push(&declarator.name);
+                            properties.push(declarator.name());
                         }
                     }
                 }
                 ClassMember::Getter(getter)
-                    if !getter.is_static
+                    if !getter.is_static()
                         && self.should_describe(
                             &identity,
-                            &getter.name.name,
-                            &getter.annotations,
-                            getter.return_type.as_ref(),
+                            getter.name().name(),
+                            getter.annotations(),
+                            getter.return_type(),
                             &parameters,
                         ) =>
                 {
-                    properties.push(&getter.name);
+                    properties.push(getter.name());
                 }
                 _ => {}
             }
@@ -161,8 +161,8 @@ impl Checker<'_> {
         &self,
         owner: &DeclarationIdentity,
         name: &str,
-        annotations: &[Annotation],
-        ty: Option<&DartType>,
+        annotations: AstChildren<'_, Annotation<'_>>,
+        ty: Option<DartType<'_>>,
         parameters: &TypeParameterScope,
     ) -> bool {
         if name.starts_with('_') || self.overrides(owner, name, annotations) {
@@ -178,14 +178,14 @@ impl Checker<'_> {
         &self,
         owner: &DeclarationIdentity,
         name: &str,
-        annotations: &[Annotation],
+        annotations: AstChildren<'_, Annotation<'_>>,
     ) -> bool {
-        annotations.iter().any(|annotation| {
-            annotation.args.is_none()
+        annotations.into_iter().any(|annotation| {
+            annotation.args().is_none()
                 && annotation
-                    .name
+                    .name()
                     .last()
-                    .is_some_and(|segment| segment.name == "override")
+                    .is_some_and(|segment| segment.name() == "override")
         }) || match self.signatures.inherited_member_facts(owner, name) {
             // A field or getter overrides an inherited member of its name
             // unless that member is only a setter.
@@ -284,13 +284,15 @@ fn change_first<I: Iterator<Item = char>>(text: &str, change: impl Fn(char) -> I
 }
 
 impl Described {
-    fn expression(&mut self, node: &Expr) {
+    fn expression(&mut self, node: Expr<'_>) {
         match node {
-            Expr::Field { field, .. } => self.reference(&field.name),
-            Expr::Cascade { sections, .. } => {
-                for op in sections.iter().flat_map(|section| &section.ops) {
-                    if let CascadeOp::Field { name, .. } | CascadeOp::Call(name, _, _) = op {
-                        self.reference(&name.name);
+            Expr::Field(field) => self.reference(field.field().name()),
+            Expr::Cascade(cascade) => {
+                for op in cascade.sections().flat_map(|section| section.ops()) {
+                    match op {
+                        CascadeOp::Field(field) => self.reference(field.name().name()),
+                        CascadeOp::Call(call) => self.reference(call.name().name()),
+                        _ => {}
                     }
                 }
             }
@@ -301,8 +303,8 @@ impl Described {
 
 struct Collector<'a> {
     checker: Checker<'a>,
-    declarations: std::slice::Iter<'a, TopLevelDecl>,
-    properties: Vec<&'a Identifier>,
+    declarations: AstChildren<'a, TopLevelDecl<'a>>,
+    properties: Vec<Identifier<'a>>,
     described: Described,
     debug_method: bool,
     body_depth: usize,
@@ -310,8 +312,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_class_decl(&mut self, _node: &ClassDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_class_decl(&mut self, _node: ClassDecl<'a>) -> StructuralTraversal {
         let class = self.declarations.find_map(|declaration| match declaration {
             TopLevelDecl::Class(class) => Some(class),
             _ => None,
@@ -325,45 +327,45 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_method_decl(&mut self, method: &MethodDecl) -> StructuralTraversal {
-        self.debug_method = matches!(method.name.name.as_str(), "debugFillProperties" | "debugDescribeChildren");
+    fn visit_method_decl(&mut self, method: MethodDecl<'a>) -> StructuralTraversal {
+        self.debug_method = matches!(method.name().name(), "debugFillProperties" | "debugDescribeChildren");
         StructuralTraversal::Continue
     }
 
-    fn exit_method_decl(&mut self, _method: &MethodDecl) {
+    fn exit_method_decl(&mut self, _method: MethodDecl<'a>) {
         self.debug_method = false;
     }
 
-    fn visit_function_body(&mut self, _body: &FunctionBody) -> StructuralTraversal {
+    fn visit_function_body(&mut self, _body: FunctionBody<'a>) -> StructuralTraversal {
         self.body_depth += 1;
         StructuralTraversal::Continue
     }
 
-    fn exit_function_body(&mut self, _body: &FunctionBody) {
+    fn exit_function_body(&mut self, _body: FunctionBody<'a>) {
         self.body_depth -= 1;
     }
 
-    fn visit_identifier(&mut self, node: &Identifier) -> StructuralTraversal {
+    fn visit_identifier(&mut self, node: Identifier<'a>) -> StructuralTraversal {
         if self.debug_method && self.body_depth > 0 {
-            self.described.reference(&node.name);
+            self.described.reference(node.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if self.debug_method && self.body_depth > 0 {
             self.described.expression(node);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_class_decl(&mut self, _node: &ClassDecl) {
+    fn exit_class_decl(&mut self, _node: ClassDecl<'a>) {
         for property in self.properties.drain(..) {
-            if !self.described.0.contains(&property.name) {
+            if !self.described.0.contains(property.name()) {
                 self.diags.push(self.checker.ctx.diagnostic(
                     "diagnostic-describe-all-properties",
                     "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'.",
-                    property.span,
+                    property.span(),
                 ));
             }
         }

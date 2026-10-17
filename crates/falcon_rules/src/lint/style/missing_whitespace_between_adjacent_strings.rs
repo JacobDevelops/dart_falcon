@@ -24,7 +24,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct MissingWhitespaceBetweenAdjacentStrings;
@@ -32,7 +32,7 @@ pub struct MissingWhitespaceBetweenAdjacentStrings;
 impl Rule for MissingWhitespaceBetweenAdjacentStrings {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -68,27 +68,23 @@ impl Seam {
 }
 
 /// Whether a call passes its positional arguments as a regular expression.
-fn is_pattern_call(node: &Expr) -> Option<&ArgList> {
+fn is_pattern_call<'a>(node: Expr<'a>) -> Option<ArgList<'a>> {
     match node.unparenthesized() {
-        Expr::Call { callee, args, .. } => match callee.unparenthesized() {
-            Expr::Ident(name) if matches!(name.name.as_str(), "RegExp" | "matches") => Some(args),
-            Expr::Field { object, field, .. }
-                if field.name == "RegExp" && matches!(object.unparenthesized(), Expr::Ident(_)) =>
+        Expr::Call(call) => match call.callee().unparenthesized() {
+            Expr::Ident(name) if matches!(name.name(), "RegExp" | "matches") => Some(call.args()),
+            Expr::Field(field)
+                if field.field().name() == "RegExp"
+                    && matches!(field.object().unparenthesized(), Expr::Ident(_)) =>
             {
-                Some(args)
+                Some(call.args())
             }
             _ => None,
         },
-        Expr::New {
-            dart_type: DartType::Named(named),
-            args,
-            ..
-        } if named
-            .segments
-            .last()
-            .is_some_and(|segment| segment.name == "RegExp") =>
+        Expr::New(expr)
+            if matches!(expr.dart_type(), DartType::Named(named)
+            if named.segments().last().is_some_and(|segment| segment.name() == "RegExp")) =>
         {
-            Some(args)
+            Some(expr.args())
         }
         _ => None,
     }
@@ -102,17 +98,17 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if matches!(node, Expr::Paren { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if matches!(node, Expr::Paren(_)) {
             return StructuralTraversal::Continue;
         }
         if let Some(args) = is_pattern_call(node) {
-            self.exempt.extend(args.positional.iter().filter_map(
+            self.exempt.extend(args.positional().filter_map(
                 |arg| match arg.unparenthesized() {
-                    Expr::StringLit(string) if string.is_adjacent => Some(string.span),
+                    Expr::StringLit(string) if string.is_adjacent() => Some(string.span()),
                     _ => None,
                 },
             ));
@@ -120,8 +116,8 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
-        if !node.is_adjacent || self.exempt.contains(&node.span) {
+    fn visit_string_lit(&mut self, node: StringLitNode<'a>) -> StructuralTraversal {
+        if !node.is_adjacent() || self.exempt.contains(&node.span()) {
             return StructuralTraversal::SkipChildren;
         }
         let seams: Vec<(Seam, Span)> = node

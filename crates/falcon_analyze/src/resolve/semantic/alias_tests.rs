@@ -3,22 +3,24 @@ use crate::resolve::IdentitySource;
 use falcon_dart_parser::parse;
 
 fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
-    let falcon_dart_parser::ParseResult {
-        program, errors, ..
-    } = parse(source);
-    assert!(errors.is_empty(), "{errors:?}");
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parsed = Arc::new(crate::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
     let path = Path::new("/project/aliases.dart");
     let identities = IdentityIndex::build(
         &[IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[source],
         &[],
         None,
     );
-    test(&SemanticModel::new(path, &identities, None));
+    test(&SemanticModel::new(path, &parsed, &identities, None));
 }
 
 #[test]

@@ -32,7 +32,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ImplicitReopen;
@@ -40,78 +40,74 @@ pub struct ImplicitReopen;
 impl Rule for ImplicitReopen {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             program,
             ctx,
-            model: ctx
-                .identities
-                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+            model: ctx.identities.map(|identities| {
+                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            }),
             diags: Vec::new(),
         }))
     }
 }
 
 struct Collector<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     model: Option<SemanticModel<'a>>,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let siblings = ctx.library.map_or(&[][..], |library| library.siblings());
         let library = || std::iter::once(self.program).chain(siblings.iter().copied());
         let model = &self.model;
-            let (name, annotations, modifiers, superclass) = match decl {
-                TopLevelDecl::Class(node) => match &node.extends {
-                    Some(superclass) => (&node.name, &node.annotations, node.modifiers, superclass),
+            let (name, mut annotations, modifiers, superclass) = match decl {
+                TopLevelDecl::Class(node) => match node.extends() {
+                    Some(superclass) => (node.name(), node.annotations(), node.modifiers(), superclass),
                     None => return StructuralTraversal::SkipChildren,
                 },
                 TopLevelDecl::ClassTypeAlias(node) => (
-                    &node.name,
-                    &node.annotations,
-                    node.modifiers,
-                    &node.superclass,
+                    node.name(),
+                    node.annotations(),
+                    node.modifiers(),
+                    node.superclass(),
                 ),
                 _ => return StructuralTraversal::SkipChildren,
             };
             if annotations
-                .iter()
-                .any(|annotation| annotation.name.last().is_some_and(|n| n.name == "reopen"))
+                .any(|annotation| annotation.name().next_back().is_some_and(|n| n.name() == "reopen"))
             {
                 return StructuralTraversal::SkipChildren;
             }
             // A prefixed supertype comes from another library.
-            let DartType::Named(NamedType { segments, .. }) = superclass else {
+            let DartType::Named(named) = superclass else {
                 return StructuralTraversal::SkipChildren;
             };
-            let [super_name] = segments.as_slice() else {
+            let mut segments = named.segments();
+            let (Some(super_name), None) = (segments.next(), segments.next()) else {
                 return StructuralTraversal::SkipChildren;
             };
             let mut found = library()
-                .flat_map(|program| &program.declarations)
+                .flat_map(|program| program.declarations())
                 .filter_map(|candidate| match candidate {
-                    TopLevelDecl::Class(node) if node.name.name == super_name.name => {
-                        Some(Some(node.modifiers))
+                    TopLevelDecl::Class(node) if node.name().name() == super_name.name() => {
+                        Some(Some(node.modifiers()))
                     }
-                    TopLevelDecl::ClassTypeAlias(node) if node.name.name == super_name.name => {
-                        Some(Some(node.modifiers))
+                    TopLevelDecl::ClassTypeAlias(node) if node.name().name() == super_name.name() => {
+                        Some(Some(node.modifiers()))
                     }
-                    TopLevelDecl::Mixin(MixinDecl { name, .. })
-                    | TopLevelDecl::MixinClass(MixinClassDecl { name, .. })
-                    | TopLevelDecl::Enum(EnumDecl { name, .. })
-                    | TopLevelDecl::ExtensionType(ExtensionTypeDecl { name, .. })
-                    | TopLevelDecl::TypeAlias(TypeAliasDecl { name, .. })
-                        if name.name == super_name.name =>
-                    {
-                        Some(None)
-                    }
+                    TopLevelDecl::Mixin(node) if node.name().name() == super_name.name() => Some(None),
+                    TopLevelDecl::MixinClass(node) if node.name().name() == super_name.name() => Some(None),
+                    TopLevelDecl::Enum(node) if node.name().name() == super_name.name() => Some(None),
+                    TopLevelDecl::ExtensionType(node) if node.name().name() == super_name.name() => Some(None),
+                    TopLevelDecl::TypeAlias(node) if node.name().name() == super_name.name() => Some(None),
                     _ => None,
                 });
             // Exactly one same-library class declaration must own the name.
@@ -126,7 +122,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                             .zip(ctx.signatures)
                             .and_then(|(model, signatures)| {
                                 signatures
-                                    .effective_restriction(&model.resolve_name(&*super_name.name)?)
+                                    .effective_restriction(&model.resolve_name(super_name.name())?)
                             });
                     let Some(induced) = induced else {
                         return StructuralTraversal::SkipChildren;
@@ -146,9 +142,9 @@ impl StructuralRuleVisitor for Collector<'_> {
                 "implicit-reopen",
                 format!(
                     "The class '{}' reopens '{}' because it is not marked '{reason}'.",
-                    name.name, super_name.name
+                    name.name(), super_name.name()
                 ),
-                name.span,
+                name.span(),
             ));
         StructuralTraversal::SkipChildren
     }

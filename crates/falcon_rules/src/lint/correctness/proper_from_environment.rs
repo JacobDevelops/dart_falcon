@@ -13,7 +13,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ProperFromEnvironment;
@@ -21,7 +21,7 @@ pub struct ProperFromEnvironment;
 impl Rule for ProperFromEnvironment {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -55,70 +55,70 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.contexts.push(self.in_const);
-        if matches!(node, Expr::Paren { .. }) {
+        if matches!(node, Expr::Paren(_)) {
             return StructuralTraversal::Continue;
         }
         if let Some((span, is_const_ctor)) = from_environment_invocation(node)
             && !is_const_ctor
             && !self.in_const
         {
-            self.diags.push(self.ctx.diagnostic("proper-from-environment", "*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.", *span));
+            self.diags.push(self.ctx.diagnostic("proper-from-environment", "*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.", span));
         }
 
         match node {
-            Expr::New { is_const: true, .. }
-            | Expr::List { is_const: true, .. }
-            | Expr::Set { is_const: true, .. }
-            | Expr::Map { is_const: true, .. } => self.in_const = true,
+            Expr::New(expression) if expression.is_const() => self.in_const = true,
+            Expr::List(expression) if expression.is_const() => self.in_const = true,
+            Expr::Set(expression) if expression.is_const() => self.in_const = true,
+            Expr::Map(expression) if expression.is_const() => self.in_const = true,
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.leave_const();
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        self.enter_const(node.keyword == VarKeyword::Const);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        self.enter_const(node.keyword() == VarKeyword::Const);
         StructuralTraversal::Continue
     }
 
-    fn exit_local_var(&mut self, _node: &LocalVarDecl) {
+    fn exit_local_var(&mut self, _node: LocalVarDecl<'a>) {
         self.leave_const();
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        self.enter_const(node.keyword == VarKeyword::Const);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        self.enter_const(node.keyword() == VarKeyword::Const);
         StructuralTraversal::Continue
     }
 
-    fn exit_field_decl(&mut self, _node: &FieldDecl) {
+    fn exit_field_decl(&mut self, _node: FieldDecl<'a>) {
         self.leave_const();
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
-        self.enter_const(matches!(node, TopLevelDecl::Variable(v) if v.keyword == VarKeyword::Const));
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
+        self.enter_const(matches!(node, TopLevelDecl::Variable(v) if v.keyword() == VarKeyword::Const));
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+    fn exit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) {
         self.leave_const();
     }
 
-    fn visit_annotation(&mut self, _node: &Annotation) -> StructuralTraversal {
+    fn visit_annotation(&mut self, _node: Annotation<'a>) -> StructuralTraversal {
         self.enter_const(true);
         StructuralTraversal::Continue
     }
 
-    fn exit_annotation(&mut self, _node: &Annotation) {
+    fn exit_annotation(&mut self, _node: Annotation<'a>) {
         self.leave_const();
     }
 
@@ -140,28 +140,26 @@ impl StructuralRuleVisitor for Collector<'_> {
 /// the implicit-call form (`String.fromEnvironment(...)`) or the explicit
 /// `new`/`const` form. Returns the invocation span and whether it is a `const`
 /// construction.
-fn from_environment_invocation(expr: &Expr) -> Option<(&Span, bool)> {
+fn from_environment_invocation(expr: Expr<'_>) -> Option<(Span, bool)> {
     match expr.unparenthesized() {
-        Expr::Call { callee, span, .. } => {
-            if let Expr::Field { object, field, .. } = callee.unparenthesized()
-                && field.name == "fromEnvironment"
-                && let Expr::Ident(id) = object.unparenthesized()
-                && is_env_type(&id.name)
+        Expr::Call(call) => {
+            if let Expr::Field(field) = call.callee().unparenthesized()
+                && field.field().name() == "fromEnvironment"
+                && let Expr::Ident(id) = field.object().unparenthesized()
+                && is_env_type(id.name())
             {
-                return Some((span, false));
+                return Some((call.span(), false));
             }
             None
         }
-        Expr::New {
-            dart_type: DartType::Named(nt),
-            constructor_name: Some(cn),
-            is_const,
-            span,
-            ..
-        } if cn.name == "fromEnvironment"
-            && nt.segments.last().is_some_and(|s| is_env_type(&s.name)) =>
+        Expr::New(construction)
+            if construction
+                .constructor_name()
+                .is_some_and(|name| name.name() == "fromEnvironment")
+                && matches!(construction.dart_type(), DartType::Named(named)
+                    if named.segments().last().is_some_and(|segment| is_env_type(segment.name()))) =>
         {
-            Some((span, *is_const))
+            Some((construction.span(), construction.is_const()))
         }
         _ => None,
     }

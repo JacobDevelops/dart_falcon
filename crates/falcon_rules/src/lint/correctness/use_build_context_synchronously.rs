@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::{Program, ast::*, visitor::*};
+use falcon_syntax::cst::*;
 
 #[path = "use_build_context_semantics.rs"]
 mod semantics;
@@ -17,7 +17,7 @@ pub struct UseBuildContextSynchronously;
 impl Rule for UseBuildContextSynchronously {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if is_test_file(ctx.file_path) {
@@ -31,7 +31,7 @@ impl Rule for UseBuildContextSynchronously {
 }
 
 fn analyze_semantics(
-    program: &Program,
+    program: Program<'_>,
     ctx: &AnalyzeContext,
     mut semantics: semantics::Semantics,
 ) -> Vec<Diagnostic> {
@@ -48,7 +48,7 @@ fn analyze_semantics(
         tree: &tree,
         semantics: &semantics,
         mounted: false,
-        reference: Key(0, 0),
+        reference: Key(NodeId(0), 0),
         cache: HashMap::new(),
     };
     for (&expression, &mounted) in &semantics.uses {
@@ -93,21 +93,21 @@ fn analyze_semantics(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct Key(usize, u8);
-fn expr(node: &Expr) -> Key {
-    Key(node as *const Expr as usize, 0)
+struct Key(NodeId, u8);
+fn expr(node: Expr<'_>) -> Key {
+    Key(node.syntax().id(), 0)
 }
-fn stmt(node: &Stmt) -> Key {
-    Key(node as *const Stmt as usize, 1)
+fn stmt(node: Stmt<'_>) -> Key {
+    Key(node.syntax().id(), 1)
 }
-fn block(node: &Block) -> Key {
-    Key(node as *const Block as usize, 2)
+fn block(node: Block<'_>) -> Key {
+    Key(node.syntax().id(), 2)
 }
-fn collection(node: &CollectionElement) -> Key {
-    Key(node as *const CollectionElement as usize, 6)
+fn collection(node: CollectionElement<'_>) -> Key {
+    Key(node.syntax().id(), 6)
 }
-fn map(node: &MapElement) -> Key {
-    Key(node as *const MapElement as usize, 7)
+fn map(node: MapElement<'_>) -> Key {
+    Key(node.syntax().id(), 7)
 }
 
 #[derive(Clone)]
@@ -174,14 +174,14 @@ struct Node {
     literal: Option<bool>,
 }
 #[derive(Default)]
-struct Tree {
+struct Tree<'a> {
     nodes: HashMap<Key, Node>,
     stack: Vec<Key>,
-    never: std::collections::HashSet<usize>,
-    labels: Vec<(String, Key)>,
+    never: std::collections::HashSet<NodeId>,
+    labels: Vec<(&'a str, Key)>,
     label_breaks: std::collections::HashSet<Key>,
 }
-impl Tree {
+impl Tree<'_> {
     fn enter(&mut self, key: Key, kind: Kind, span: Span) {
         let parent = self.stack.last().copied();
         if let Some(parent) = parent {
@@ -204,9 +204,8 @@ impl Tree {
         );
         self.stack.push(key);
     }
-    // These syntax containers are explicit ancestors in analyzer, but flattened
-    // by our AST. Keep evaluation children unchanged and restore parent identity
-    // so the official reference-relative algorithm sees the same barriers.
+    // Restore explicit container ancestors after visiting their evaluation
+    // children so the reference-relative algorithm sees the same barriers.
     fn group(&mut self, key: Key, parent: Key, skip: Option<Key>) {
         let children: Vec<_> = self.nodes[&parent]
             .children
@@ -291,11 +290,11 @@ impl Tree {
         node.breaks = breaks;
         node.continues = continues;
     }
-    fn for_exits(&self, header: &ForHeader, body: Key) -> bool {
-        if let Some(ForInit::ForIn { iterable, .. } | ForInit::PatternForIn { iterable, .. }) =
-            &header.init
-        {
-            return self.nodes[&expr(iterable)].exits;
+    fn for_exits(&self, header: ForHeader<'_>, body: Key) -> bool {
+        match header.init() {
+            Some(ForInit::ForIn(init)) => return self.nodes[&expr(init.iterable())].exits,
+            Some(ForInit::PatternForIn(init)) => return self.nodes[&expr(init.iterable())].exits,
+            _ => {}
         }
         let loop_node = &self.nodes[self.stack.last().unwrap()];
         loop_node
@@ -303,163 +302,135 @@ impl Tree {
             .iter()
             .filter(|&&k| k != body)
             .any(|k| self.nodes[k].exits)
-            || ((header.condition.is_none()
+            || ((header.condition().is_none()
                 || matches!(
-                    header.condition.as_ref().map(Expr::unparenthesized),
-                    Some(Expr::BoolLit { value: true, .. })
+                    header.condition().map(Expr::unparenthesized),
+                    Some(Expr::BoolLit(value)) if value.value()
                 ))
                 && (self.nodes[&body].exits || !self.nodes[&body].breaks))
     }
 }
-fn condition(node: &IfCondition) -> (Key, Option<Key>) {
+fn condition(node: IfCondition<'_>) -> (Key, Option<Key>) {
     match node {
         IfCondition::Expr(e) => (expr(e), None),
-        IfCondition::Case(e, _, guard) => (expr(e), guard.as_deref().map(expr)),
+        IfCondition::Case(c) => (expr(c.expr()), c.guard().map(expr)),
     }
 }
-impl Visitor for Tree {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> Visitor<'a> for Tree<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         let kind = match node {
-            Expr::Paren { .. } => Kind::Revisit,
-            Expr::Await { .. } => Kind::Await,
-            Expr::As { .. } => Kind::Cast,
-            Expr::Ident(_) | Expr::Field { .. } => Kind::Mounted,
-            Expr::Unary { op, .. } => Kind::Unary(*op == UnaryOp::Bang),
-            Expr::Binary { op, .. } => Kind::Binary(*op),
-            Expr::Assign { .. } => Kind::Assign,
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => Kind::If {
-                condition: expr(condition),
+            Expr::Paren(_) => Kind::Revisit,
+            Expr::Await(_) => Kind::Await,
+            Expr::As(_) => Kind::Cast,
+            Expr::Ident(_) | Expr::Field(_) => Kind::Mounted,
+            Expr::Unary(n) => Kind::Unary(n.op() == UnaryOp::Bang),
+            Expr::Binary(n) => Kind::Binary(n.op()),
+            Expr::Assign(_) => Kind::Assign,
+            Expr::Conditional(n) => Kind::If {
+                condition: expr(n.condition()),
                 guard: None,
-                yes: expr(then_expr),
-                no: Some(expr(else_expr)),
+                yes: expr(n.then_expr()),
+                no: Some(expr(n.else_expr())),
             },
-            Expr::FuncExpr { .. } => Kind::None,
-            Expr::Throw { .. } => Kind::Exit,
+            Expr::FuncExpr(_) => Kind::None,
+            Expr::Throw(_) => Kind::Exit,
             _ => Kind::Any,
         };
-        self.enter(expr(node), kind, *node.span());
+        self.enter(expr(node), kind, node.span());
         walk_expr(self, node);
         match node {
-            Expr::Call { callee, args, .. } => self.group(
-                Key(args as *const ArgList as usize, 9),
+            Expr::Call(n) => self.group(
+                Key(n.args().syntax().id(), 9),
                 expr(node),
-                Some(expr(callee)),
+                Some(expr(n.callee())),
             ),
-            Expr::New { args, .. } => {
-                self.group(Key(args as *const ArgList as usize, 9), expr(node), None)
-            }
+            Expr::New(n) => self.group(Key(n.args().syntax().id(), 9), expr(node), None),
             _ => {}
         }
         let children = &self.nodes[&expr(node)].children;
         let exits = |key: Key| self.nodes[&key].exits;
         let override_exit = match node {
-            Expr::Paren { expr: inner, .. } => {
-                let literal = self.nodes[&expr(inner)].literal;
-                let exits = self.nodes[&expr(inner)].exits;
+            Expr::Paren(n) => {
+                let literal = self.nodes[&expr(n.expr())].literal;
+                let exits = self.nodes[&expr(n.expr())].exits;
                 self.nodes.get_mut(&expr(node)).unwrap().literal = literal;
                 Some(exits)
             }
-            Expr::BoolLit { value, .. } => {
-                self.nodes.get_mut(&expr(node)).unwrap().literal = Some(*value);
+            Expr::BoolLit(n) => {
+                self.nodes.get_mut(&expr(node)).unwrap().literal = Some(n.value());
                 Some(false)
             }
-            Expr::Unary { .. } | Expr::PostfixIncDec { .. } => Some(false),
-            Expr::Binary {
-                op, left, right, ..
-            } => Some(match op {
+            Expr::Unary(_) | Expr::PostfixIncDec(_) => Some(false),
+            Expr::Binary(n) => Some(match n.op() {
                 BinaryOp::Or => {
-                    exits(expr(left))
-                        || (matches!(left.unparenthesized(), Expr::BoolLit { value: false, .. })
-                            && exits(expr(right)))
+                    exits(expr(n.left()))
+                        || (matches!(
+                            n.left().unparenthesized(),
+                            Expr::BoolLit(value) if !value.value()
+                        ) && exits(expr(n.right())))
                 }
                 BinaryOp::And => {
-                    exits(expr(left))
-                        || (matches!(left.unparenthesized(), Expr::BoolLit { value: true, .. })
-                            && exits(expr(right)))
+                    exits(expr(n.left()))
+                        || (matches!(
+                            n.left().unparenthesized(),
+                            Expr::BoolLit(value) if value.value()
+                        ) && exits(expr(n.right())))
                 }
-                BinaryOp::NullCoalesce => exits(expr(left)),
-                _ => exits(expr(left)) || exits(expr(right)),
+                BinaryOp::NullCoalesce => exits(expr(n.left())),
+                _ => exits(expr(n.left())) || exits(expr(n.right())),
             }),
-            Expr::Assign {
-                target, op, value, ..
-            } => Some(
-                exits(expr(target))
-                    || (*op != AssignOp::NullCoalesceEq
-                        && !matches!(
-                            target.as_ref(),
-                            Expr::Field {
-                                is_null_safe: true,
-                                ..
-                            }
-                        )
-                        && exits(expr(value))),
+            Expr::Assign(n) => Some(
+                exits(expr(n.target()))
+                    || (n.op() != AssignOp::NullCoalesceEq
+                        && !matches!(n.target(), Expr::Field(field) if field.is_null_safe())
+                        && exits(expr(n.value()))),
             ),
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => Some(exits(expr(condition)) || (exits(expr(then_expr)) && exits(expr(else_expr)))),
-            Expr::Call { callee, .. } => Some(
-                exits(expr(callee))
-                    || (!matches!(
-                        callee.as_ref(),
-                        Expr::Field {
-                            is_null_safe: true,
-                            ..
-                        }
-                    ) && (self.never.contains(&expr(node).0)
-                        || children.iter().skip(1).any(|&k| exits(k)))),
+            Expr::Conditional(n) => Some(
+                exits(expr(n.condition()))
+                    || (exits(expr(n.then_expr())) && exits(expr(n.else_expr()))),
             ),
-            Expr::Switch { .. } => Some(children.iter().skip(1).all(|&k| exits(k))),
+            Expr::Call(n) => Some(
+                exits(expr(n.callee()))
+                    || (!matches!(n.callee(), Expr::Field(field) if field.is_null_safe())
+                        && (self.never.contains(&expr(node).0)
+                            || children.iter().skip(1).any(|&k| exits(k)))),
+            ),
+            Expr::Switch(_) => Some(children.iter().skip(1).all(|&k| exits(k))),
             _ => None,
         };
         self.nodes.get_mut(&expr(node)).unwrap().exit_override = override_exit;
         self.leave();
     }
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         let kind = match node {
             Stmt::Block(_) => Kind::Forward,
             Stmt::Labeled(_) => Kind::Label,
             Stmt::If(n) => {
-                let (condition, guard) = condition(&n.condition);
+                let (condition, guard) = condition(n.condition());
                 Kind::If {
                     condition,
                     guard,
-                    yes: stmt(&n.then_branch),
-                    no: n.else_branch.as_deref().map(stmt),
+                    yes: stmt(n.then_branch()),
+                    no: n.else_branch().map(stmt),
                 }
             }
             Stmt::For(n) => Kind::For {
-                condition: n.header.condition.as_ref().map(expr),
-                body: stmt(&n.body),
+                condition: n.header().condition().map(expr),
+                body: stmt(n.body()),
             },
             Stmt::While(_) => Kind::While,
             Stmt::DoWhile(n) => Kind::Do {
-                body: stmt(&n.body),
-                condition: expr(&n.condition),
+                body: stmt(n.body()),
+                condition: expr(n.condition()),
             },
             Stmt::TryCatch(n) => Kind::Try {
-                body: block(&n.body),
-                catches: n
-                    .catches
-                    .iter()
-                    .map(|c| Key(c as *const CatchClause as usize, 5))
-                    .collect(),
-                finally: n.finally.as_ref().map(block),
+                body: block(n.body()),
+                catches: n.catches().map(|c| Key(c.syntax().id(), 5)).collect(),
+                finally: n.finally().map(block),
             },
             Stmt::Switch(n) => Kind::Switch {
-                subject: expr(&n.subject),
-                cases: n
-                    .cases
-                    .iter()
-                    .map(|c| Key(c as *const SwitchCase as usize, 4))
-                    .collect(),
+                subject: expr(n.subject()),
+                cases: n.cases().map(|c| Key(c.syntax().id(), 4)).collect(),
             },
             Stmt::Return(_)
             | Stmt::Throw(_)
@@ -470,26 +441,26 @@ impl Visitor for Tree {
             Stmt::PatternDecl(_) | Stmt::PatternAssign(_) => Kind::Inert,
             _ => Kind::Any,
         };
-        self.enter(stmt(node), kind, *node.span());
+        self.enter(stmt(node), kind, node.span());
         if let Stmt::Labeled(n) = node {
-            self.labels.push((n.label.name.clone(), stmt(&n.stmt)));
+            self.labels.push((n.label().name(), stmt(n.stmt())));
         }
         if let Stmt::Break(n) = node
-            && let Some(label) = &n.label
+            && let Some(label) = n.label()
             && let Some((_, target)) = self
                 .labels
                 .iter()
                 .rev()
-                .find(|(name, _)| name == &label.name)
+                .find(|(name, _)| *name == label.name())
         {
             self.label_breaks.insert(*target);
         }
         walk_stmt(self, node);
         if let Stmt::For(n) = node {
             self.group(
-                Key(&n.header as *const ForHeader as usize, 10),
+                Key(n.header().syntax().id(), 10),
                 stmt(node),
-                Some(stmt(&n.body)),
+                Some(stmt(n.body())),
             );
         }
         let override_exit = match node {
@@ -503,199 +474,151 @@ impl Visitor for Tree {
             }
             Stmt::Labeled(n) => {
                 self.labels.pop();
-                let broke = self.label_breaks.remove(&stmt(&n.stmt));
-                Some(self.nodes[&stmt(&n.stmt)].exits && !broke)
+                let broke = self.label_breaks.remove(&stmt(n.stmt()));
+                Some(self.nodes[&stmt(n.stmt())].exits && !broke)
             }
             Stmt::While(n) => Some(
-                self.nodes[&expr(&n.condition)].exits
+                self.nodes[&expr(n.condition())].exits
                     || (matches!(
-                        n.condition.unparenthesized(),
-                        Expr::BoolLit { value: true, .. }
-                    ) && !self.nodes[&stmt(&n.body)].breaks),
+                        n.condition().unparenthesized(),
+                        Expr::BoolLit(value) if value.value()
+                    ) && !self.nodes[&stmt(n.body())].breaks),
             ),
             Stmt::DoWhile(n) => {
-                let body = &self.nodes[&stmt(&n.body)];
+                let body = &self.nodes[&stmt(n.body())];
                 Some(
                     (body.exits && !body.breaks && !body.continues)
-                        || self.nodes[&expr(&n.condition)].exits
+                        || self.nodes[&expr(n.condition())].exits
                         || (matches!(
-                            n.condition.unparenthesized(),
-                            Expr::BoolLit { value: true, .. }
+                            n.condition().unparenthesized(),
+                            Expr::BoolLit(value) if value.value()
                         ) && !body.breaks),
                 )
             }
-            Stmt::For(n) => Some(self.for_exits(&n.header, stmt(&n.body))),
+            Stmt::For(n) => Some(self.for_exits(n.header(), stmt(n.body()))),
             Stmt::Switch(n) => Some(
-                n.cases
-                    .iter()
-                    .any(|c| c.cases.iter().any(|k| matches!(k, SwitchCaseKind::Default)))
-                    && n.cases.last().is_some_and(|c| !c.body.is_empty())
-                    && n.cases
-                        .iter()
-                        .filter(|c| !c.body.is_empty())
-                        .all(|c| self.nodes[&Key(c as *const SwitchCase as usize, 4)].exits),
+                n.cases()
+                    .any(|c| c.cases().any(|k| matches!(k, SwitchCaseKind::Default(_))))
+                    && n.cases().last().is_some_and(|c| !c.body().is_empty())
+                    && n.cases()
+                        .filter(|c| !c.body().is_empty())
+                        .all(|c| self.nodes[&Key(c.syntax().id(), 4)].exits),
             ),
             _ => None,
         };
         self.nodes.get_mut(&stmt(node)).unwrap().exit_override = override_exit;
         self.leave();
     }
-    fn visit_block(&mut self, node: &Block) {
-        self.enter(block(node), Kind::Block, node.span);
+    fn visit_block(&mut self, node: Block<'a>) {
+        self.enter(block(node), Kind::Block, node.span());
         walk_block(self, node);
         self.leave();
     }
-    fn visit_function_body(&mut self, node: &FunctionBody) {
-        self.enter(
-            Key(node as *const FunctionBody as usize, 3),
-            Kind::Body,
-            *node.span(),
-        );
+    fn visit_function_body(&mut self, node: FunctionBody<'a>) {
+        self.enter(Key(node.syntax().id(), 3), Kind::Body, node.span());
         walk_function_body(self, node);
         self.leave();
     }
-    fn visit_catch_clause(&mut self, node: &CatchClause) {
-        self.enter(
-            Key(node as *const CatchClause as usize, 5),
-            Kind::Catch,
-            node.span,
-        );
+    fn visit_catch_clause(&mut self, node: CatchClause<'a>) {
+        self.enter(Key(node.syntax().id(), 5), Kind::Catch, node.span());
         walk_catch_clause(self, node);
         self.leave();
     }
-    fn visit_switch_case(&mut self, node: &SwitchCase) {
+    fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
         let guards = node
-            .cases
-            .iter()
+            .cases()
             .map(|c| match c {
-                SwitchCaseKind::Pattern(_, guard) => Some(guard.as_deref().map(expr)),
+                SwitchCaseKind::Pattern(label) => Some(label.guard().map(expr)),
                 SwitchCaseKind::Expr(_) => Some(None),
-                SwitchCaseKind::Default => None,
+                SwitchCaseKind::Default(_) => None,
             })
             .collect();
         self.enter(
-            Key(node as *const SwitchCase as usize, 4),
+            Key(node.syntax().id(), 4),
             Kind::Case {
                 guards,
-                statements: node.body.iter().map(stmt).collect(),
+                statements: node.body().map(stmt).collect(),
             },
-            node.span,
+            node.span(),
         );
         walk_switch_case(self, node);
-        let exits = node.body.iter().any(|s| self.nodes[&stmt(s)].exits);
+        let exits = node.body().any(|s| self.nodes[&stmt(s)].exits);
         self.nodes
-            .get_mut(&Key(node as *const SwitchCase as usize, 4))
+            .get_mut(&Key(node.syntax().id(), 4))
             .unwrap()
             .exit_override = Some(exits);
         self.leave();
     }
-    fn visit_switch_expr_arm(&mut self, node: &SwitchExprArm) {
+    fn visit_switch_expr_arm(&mut self, node: SwitchExprArm<'a>) {
         self.enter(
-            Key(node as *const SwitchExprArm as usize, 8),
+            Key(node.syntax().id(), 8),
             Kind::Arm {
-                guard: node.guard.as_ref().map(expr),
-                body: expr(&node.body),
+                guard: node.guard().map(expr),
+                body: expr(node.body()),
             },
-            node.span,
+            node.span(),
         );
         walk_switch_expr_arm(self, node);
         self.leave();
     }
-    fn visit_collection_element(&mut self, node: &CollectionElement) {
-        let (kind, span) = match node {
-            CollectionElement::Expr(e) => (Kind::Any, *e.span()),
-            CollectionElement::NullAware { span, .. } | CollectionElement::Spread { span, .. } => {
-                (Kind::Any, *span)
+    fn visit_collection_element(&mut self, node: CollectionElement<'a>) {
+        let kind = match node {
+            CollectionElement::Expr(_)
+            | CollectionElement::NullAware(_)
+            | CollectionElement::Spread(_) => Kind::Any,
+            CollectionElement::If(n) => {
+                let (condition, guard) = condition(n.condition());
+                Kind::If {
+                    condition,
+                    guard,
+                    yes: collection(n.then_elem()),
+                    no: n.else_elem().map(collection),
+                }
             }
-            CollectionElement::If {
-                condition: c,
-                then_elem,
-                else_elem,
-                span,
-            } => {
-                let (condition, guard) = condition(c);
-                (
-                    Kind::If {
-                        condition,
-                        guard,
-                        yes: collection(then_elem),
-                        no: else_elem.as_deref().map(collection),
-                    },
-                    *span,
-                )
-            }
-            CollectionElement::For {
-                header,
-                element,
-                span,
-                ..
-            } => (
-                Kind::For {
-                    condition: header.condition.as_ref().map(expr),
-                    body: collection(element),
-                },
-                *span,
-            ),
+            CollectionElement::For(n) => Kind::For {
+                condition: n.header().condition().map(expr),
+                body: collection(n.element()),
+            },
         };
-        self.enter(collection(node), kind, span);
+        self.enter(collection(node), kind, node.span());
         walk_collection_element(self, node);
-        if let CollectionElement::For {
-            header, element, ..
-        } = node
-        {
+        if let CollectionElement::For(n) = node {
             self.group(
-                Key(&**header as *const ForHeader as usize, 10),
+                Key(n.header().syntax().id(), 10),
                 collection(node),
-                Some(collection(element)),
+                Some(collection(n.element())),
             );
-            let exits = self.for_exits(header, collection(element));
+            let exits = self.for_exits(n.header(), collection(n.element()));
             self.nodes.get_mut(&collection(node)).unwrap().exit_override = Some(exits);
         }
         self.leave();
     }
-    fn visit_map_element(&mut self, node: &MapElement) {
-        let (kind, span) = match node {
-            MapElement::Entry(e) => (Kind::Any, e.span),
-            MapElement::Spread { span, .. } => (Kind::Any, *span),
-            MapElement::If {
-                condition: c,
-                then_entry,
-                else_entry,
-                span,
-            } => {
-                let (condition, guard) = condition(c);
-                (
-                    Kind::If {
-                        condition,
-                        guard,
-                        yes: map(then_entry),
-                        no: else_entry.as_deref().map(map),
-                    },
-                    *span,
-                )
+    fn visit_map_element(&mut self, node: MapElement<'a>) {
+        let kind = match node {
+            MapElement::Entry(_) | MapElement::Spread(_) => Kind::Any,
+            MapElement::If(n) => {
+                let (condition, guard) = condition(n.condition());
+                Kind::If {
+                    condition,
+                    guard,
+                    yes: map(n.then_entry()),
+                    no: n.else_entry().map(map),
+                }
             }
-            MapElement::For {
-                header,
-                entry,
-                span,
-                ..
-            } => (
-                Kind::For {
-                    condition: header.condition.as_ref().map(expr),
-                    body: map(entry),
-                },
-                *span,
-            ),
+            MapElement::For(n) => Kind::For {
+                condition: n.header().condition().map(expr),
+                body: map(n.entry()),
+            },
         };
-        self.enter(map(node), kind, span);
+        self.enter(map(node), kind, node.span());
         walk_map_element(self, node);
-        if let MapElement::For { header, entry, .. } = node {
+        if let MapElement::For(n) = node {
             self.group(
-                Key(header as *const ForHeader as usize, 10),
+                Key(n.header().syntax().id(), 10),
                 map(node),
-                Some(map(entry)),
+                Some(map(n.entry())),
             );
-            let exits = self.for_exits(header, map(entry));
+            let exits = self.for_exits(n.header(), map(n.entry()));
             self.nodes.get_mut(&map(node)).unwrap().exit_override = Some(exits);
         }
         self.leave();
@@ -729,7 +652,7 @@ fn and(left: State, right: State) -> State {
     }
 }
 struct AsyncStateVisitor<'a> {
-    tree: &'a Tree,
+    tree: &'a Tree<'a>,
     semantics: &'a semantics::Semantics,
     mounted: bool,
     reference: Key,
@@ -787,7 +710,7 @@ impl AsyncStateVisitor<'_> {
             Kind::Unary(false) => None,
             Kind::Binary(op) => self.binary(*op, children),
             Kind::Assign => self.ordered(children, |k| children.last() == Some(&k)),
-            // Stmt::Block wraps a Block in our AST; analyzer has one node.
+            // Statement and block evaluation layers share one analyzer node.
             Kind::Forward => children
                 .first()
                 .filter(|&&k| k != self.reference)
@@ -1013,13 +936,13 @@ mod test_directories {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("pubspec.yaml"), "name: example\n").unwrap();
         let source = "class Suite { test_example() {} solo_test_example() {} }";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let config = FalconConfig::default();
         for (relative, expected) in [
             ("test/suite.dart", true),
@@ -1034,10 +957,10 @@ mod test_directories {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, source).unwrap();
             assert_eq!(is_test_file(&path), expected, "{relative}");
-            let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
+            let ctx = AnalyzeContext::new(&path, &config, &parsed);
             let diagnostics =
                 crate::lint::style::always_declare_return_types::AlwaysDeclareReturnTypes
-                    .analyze(&program, &ctx);
+                    .analyze(program, &ctx);
             assert_eq!(
                 diagnostics.len(),
                 if expected { 0 } else { 2 },

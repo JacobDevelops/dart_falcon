@@ -6,12 +6,12 @@ use falcon_analyze::{
     evaluate_constant_with_local_values, evaluate_construction_with_local_values,
     expression_segments, invocation_type_args, resolve_call_constructor,
 };
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
+use falcon_syntax::cst::visit::{
     Visitor, for_each_expr, walk_annotation, walk_arg_list, walk_enum_decl, walk_expr,
     walk_field_decl, walk_formal_param, walk_local_var, walk_pattern, walk_program,
     walk_switch_case, walk_top_level_decl,
 };
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::SemanticState;
 
@@ -23,7 +23,7 @@ pub(crate) struct ConstructorConstContexts {
 }
 
 impl ConstructorConstContexts {
-    pub(crate) fn new(program: &Program) -> Self {
+    pub(crate) fn new(program: Program<'_>) -> Self {
         let mut contexts = Self::default();
         contexts.visit_program(program);
         contexts
@@ -44,154 +44,126 @@ impl ConstructorConstContexts {
     }
 }
 
-impl Visitor for ConstructorConstContexts {
-    fn visit_program(&mut self, node: &Program) {
-        for declaration in &node.declarations {
+impl<'a> Visitor<'a> for ConstructorConstContexts {
+    fn visit_program(&mut self, node: Program<'a>) {
+        for declaration in node.declarations() {
             if let TopLevelDecl::Variable(variable) = declaration
-                && variable.keyword == VarKeyword::Const
+                && variable.keyword() == VarKeyword::Const
             {
                 self.spans.extend(
                     variable
-                        .declarators
-                        .iter()
-                        .filter_map(|declarator| declarator.initializer.as_ref())
-                        .map(|initializer| *initializer.span()),
+                        .declarators()
+                        .filter_map(|declarator| declarator.initializer())
+                        .map(|initializer| initializer.span()),
                 );
             }
         }
         walk_program(self, node);
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        if node.keyword == VarKeyword::Const {
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
+        if node.keyword() == VarKeyword::Const {
             self.spans.extend(
-                node.declarators
-                    .iter()
-                    .filter_map(|declarator| declarator.initializer.as_ref())
-                    .map(|initializer| *initializer.span()),
+                node.declarators()
+                    .filter_map(|declarator| declarator.initializer())
+                    .map(|initializer| initializer.span()),
             );
         }
         walk_field_decl(self, node);
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        if node.keyword == VarKeyword::Const {
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
+        if node.keyword() == VarKeyword::Const {
             self.spans.extend(
-                node.declarators
-                    .iter()
-                    .filter_map(|declarator| declarator.initializer.as_ref())
-                    .map(|initializer| *initializer.span()),
+                node.declarators()
+                    .filter_map(|declarator| declarator.initializer())
+                    .map(|initializer| initializer.span()),
             );
         }
         walk_local_var(self, node);
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) {
         if node.is_const {
             for initializer in node.initializers {
-                if let ConstructorInitializer::Assert { span, .. } = initializer {
-                    self.const_constructor_asserts.push(*span);
+                if let ConstructorInitializer::Assert(assertion) = initializer {
+                    self.const_constructor_asserts.push(assertion.span());
                 }
             }
         }
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) {
         self.spans.extend(
-            node.variants
-                .iter()
-                .filter_map(|variant| variant.args.as_ref())
-                .map(|args| args.span),
+            node.variants()
+                .filter_map(|variant| variant.args())
+                .map(|args| args.span()),
         );
         walk_enum_decl(self, node);
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
-        if let Some(args) = &node.args {
-            self.spans.push(args.span);
+    fn visit_annotation(&mut self, node: Annotation<'a>) {
+        if let Some(args) = node.args() {
+            self.spans.push(args.span());
         }
         walk_annotation(self, node);
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
-        if let Some(default) = &node.default_value {
-            self.spans.push(*default.span());
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) {
+        if let Some(default) = node.default_value() {
+            self.spans.push(default.span());
         }
         walk_formal_param(self, node);
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
-        self.spans.push(*node.span());
+    fn visit_pattern(&mut self, node: Pattern<'a>) {
+        self.spans.push(node.span());
         walk_pattern(self, node);
     }
 
-    fn visit_switch_case(&mut self, node: &SwitchCase) {
-        for kind in &node.cases {
+    fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
+        for kind in node.cases() {
             if let SwitchCaseKind::Expr(expression) = kind {
-                self.spans.push(*expression.span());
+                self.spans.push(expression.span());
             }
         }
         walk_switch_case(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::List {
-            is_const: true,
-            span,
-            ..
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        let explicit = match node {
+            Expr::List(node) => node.is_const(),
+            Expr::Map(node) => node.is_const(),
+            Expr::Set(node) => node.is_const(),
+            Expr::Record(node) => node.is_const(),
+            Expr::New(node) => node.is_const(),
+            Expr::DotShorthand(node) => node.is_const(),
+            _ => false,
+        };
+        if explicit {
+            self.spans.push(node.span());
         }
-        | Expr::Map {
-            is_const: true,
-            span,
-            ..
-        }
-        | Expr::Set {
-            is_const: true,
-            span,
-            ..
-        }
-        | Expr::Record {
-            is_const: true,
-            span,
-            ..
-        }
-        | Expr::New {
-            is_const: true,
-            span,
-            ..
-        }
-        | Expr::DotShorthand {
-            is_const: true,
-            span,
-            ..
-        } = node
+        if let Expr::Call(call) = node
+            && matches!(call.callee().unparenthesized(),
+                Expr::DotShorthand(shorthand) if shorthand.is_const())
         {
-            self.spans.push(*span);
-        }
-        if let Expr::Call { callee, span, .. } = node
-            && matches!(
-                callee.unparenthesized(),
-                Expr::DotShorthand { is_const: true, .. }
-            )
-        {
-            self.spans.push(*span);
+            self.spans.push(call.span());
         }
         walk_expr(self, node);
     }
 }
 
-pub(crate) fn arguments_potentially_constant(
-    args: &ArgList,
-    allowed: &HashSet<String>,
-    shadowed: &HashSet<String>,
+pub(crate) fn arguments_potentially_constant<'a>(
+    args: ArgList<'a>,
+    allowed: &HashSet<&str>,
+    shadowed: &HashSet<&str>,
     owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
+    fields: &HashMap<&str, Expr<'a>>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> bool {
-    args.positional
-        .iter()
-        .chain(args.named.iter().map(|argument| &argument.value))
+    args.positional()
+        .chain(args.named().map(|argument| argument.value()))
         .all(|argument| {
             potentially_constant_with_shadowed(
                 argument, allowed, shadowed, owner, fields, model, signatures,
@@ -199,23 +171,23 @@ pub(crate) fn arguments_potentially_constant(
         })
 }
 
-pub(crate) fn potentially_constant(
-    expr: &Expr,
-    allowed: &HashSet<String>,
+pub(crate) fn potentially_constant<'a>(
+    expr: Expr<'a>,
+    allowed: &HashSet<&str>,
     owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
+    fields: &HashMap<&str, Expr<'a>>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> bool {
     potentially_constant_with_shadowed(expr, allowed, allowed, owner, fields, model, signatures)
 }
 
-pub(crate) fn potentially_constant_with_shadowed(
-    expr: &Expr,
-    allowed: &HashSet<String>,
-    shadowed: &HashSet<String>,
+pub(crate) fn potentially_constant_with_shadowed<'a>(
+    expr: Expr<'a>,
+    allowed: &HashSet<&str>,
+    shadowed: &HashSet<&str>,
     owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
+    fields: &HashMap<&str, Expr<'a>>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> bool {
@@ -242,12 +214,12 @@ pub(crate) fn potentially_constant_with_shadowed(
 /// collection literals must be explicitly `const` with constant operands;
 /// type literals and function and constructor tear-offs are constant; `!` is
 /// rejected.
-pub(crate) fn initializer_potentially_constant(
-    expr: &Expr,
-    parameters: &HashSet<String>,
-    shadowed: &HashSet<String>,
+pub(crate) fn initializer_potentially_constant<'a>(
+    expr: Expr<'a>,
+    parameters: &HashSet<&str>,
+    shadowed: &HashSet<&str>,
     owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
+    fields: &HashMap<&str, Expr<'a>>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> bool {
@@ -265,11 +237,11 @@ pub(crate) fn initializer_potentially_constant(
     checker.valid
 }
 
-struct PotentiallyConstant<'a, 'model> {
-    allowed: &'a HashSet<String>,
-    shadowed: &'a HashSet<String>,
+struct PotentiallyConstant<'a, 'model, 'tree> {
+    allowed: &'a HashSet<&'a str>,
+    shadowed: &'a HashSet<&'a str>,
     owner: &'a DeclarationIdentity,
-    fields: &'a HashMap<&'a str, &'a Expr>,
+    fields: &'a HashMap<&'a str, Expr<'tree>>,
     model: &'a SemanticModel<'model>,
     signatures: &'a SignatureIndex,
     /// Checking a constructor initializer (not a constant context): nested
@@ -278,16 +250,16 @@ struct PotentiallyConstant<'a, 'model> {
     valid: bool,
 }
 
-impl Visitor for PotentiallyConstant<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
+impl<'tree> Visitor<'tree> for PotentiallyConstant<'_, '_, 'tree> {
+    fn visit_expr(&mut self, node: Expr<'tree>) {
+        if matches!(node, Expr::Paren(_)) {
+            falcon_syntax::cst::visit::walk_expr(self, node);
             return;
         }
         if !self.valid {
             return;
         }
-        if !matches!(node, Expr::Call { .. } | Expr::New { .. })
+        if !matches!(node, Expr::Call(_) | Expr::New(_))
             && !(self.initializer && has_non_const_collection(node))
             && evaluate_constant(
                 node,
@@ -305,13 +277,13 @@ impl Visitor for PotentiallyConstant<'_, '_> {
             return;
         }
         match node {
-            Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::SymbolLit { .. } => {}
+            Expr::IntLit(_)
+            | Expr::DoubleLit(_)
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
+            | Expr::SymbolLit(_) => {}
             Expr::Ident(identifier) => {
-                self.valid = self.allowed.contains(&identifier.name)
+                self.valid = self.allowed.contains(identifier.name())
                     || evaluate_constant(
                         node,
                         Some(self.owner),
@@ -321,72 +293,76 @@ impl Visitor for PotentiallyConstant<'_, '_> {
                     )
                     .is_some();
             }
-            Expr::Call { callee, args, .. } => {
+            Expr::Call(call) => {
+                let callee = call.callee();
                 let shadowed = expression_segments(callee, false)
                     .and_then(|segments| segments.into_iter().next())
                     .is_some_and(|name| self.shadowed.contains(name));
                 self.valid = !shadowed && const_constructor(callee, self.model, self.signatures);
                 if self.valid {
-                    self.visit_arguments(args);
+                    self.visit_arguments(call.args());
                 }
             }
-            Expr::New {
-                is_const: true,
-                args,
-                ..
-            } => self.visit_arguments(args),
-            Expr::Field { field, .. } if field.name == "length" => walk_expr(self, node),
+            Expr::New(construction) if construction.is_const() => {
+                self.visit_arguments(construction.args())
+            }
+            Expr::Field(field) if field.field().name() == "length" => walk_expr(self, node),
             // A constant type literal receiver does not make an unresolved
             // member read constant (for example, `C.staticFinal`).
-            Expr::Field { .. } => self.valid = self.constant_member(node),
+            Expr::Field(_) => self.valid = self.constant_member(node),
             Expr::StringLit(_)
-            | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Conditional { .. }
-            | Expr::As { .. }
-            | Expr::NullAssert { .. }
-            | Expr::List { .. }
-            | Expr::Map { .. }
-            | Expr::Set { .. }
-            | Expr::Record { .. } => walk_expr(self, node),
+            | Expr::Unary(_)
+            | Expr::Binary(_)
+            | Expr::Conditional(_)
+            | Expr::As(_)
+            | Expr::NullAssert(_)
+            | Expr::List(_)
+            | Expr::Map(_)
+            | Expr::Set(_)
+            | Expr::Record(_) => walk_expr(self, node),
             _ => self.valid = false,
         }
     }
 }
 
-impl PotentiallyConstant<'_, '_> {
-    fn visit_arguments(&mut self, args: &ArgList) {
+impl<'tree> PotentiallyConstant<'_, '_, 'tree> {
+    fn visit_arguments(&mut self, args: ArgList<'tree>) {
         walk_arg_list(self, args);
     }
 
-    fn visit_initializer_expr(&mut self, node: &Expr) {
+    fn visit_initializer_expr(&mut self, node: Expr<'tree>) {
         match node.unparenthesized() {
-            Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::SymbolLit { .. } => {}
+            Expr::IntLit(_)
+            | Expr::DoubleLit(_)
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
+            | Expr::SymbolLit(_) => {}
             Expr::Ident(identifier) => {
-                self.valid = self.allowed.contains(&identifier.name)
-                    || (!self.shadowed.contains(&identifier.name)
-                        && self.type_literal_or_tear_off(&identifier.name));
+                self.valid = self.allowed.contains(identifier.name())
+                    || (!self.shadowed.contains(identifier.name())
+                        && self.type_literal_or_tear_off(identifier.name()));
             }
-            Expr::Field { field, .. } if field.name == "length" => walk_expr(self, node),
-            Expr::Field { .. } => self.valid = self.constant_member(node),
-            Expr::Call { callee, args, .. } => {
-                self.valid = matches!(callee.unparenthesized(), Expr::Ident(name)
-                    if name.name == "identical"
-                        && !self.shadowed.contains(&name.name)
+            Expr::Field(field) if field.field().name() == "length" => walk_expr(self, node),
+            Expr::Field(_) => self.valid = self.constant_member(node),
+            Expr::Call(call) => {
+                self.valid = matches!(call.callee().unparenthesized(), Expr::Ident(name)
+                    if name.name() == "identical"
+                        && !self.shadowed.contains(name.name())
                         && self.model.resolve_sdk_member("identical").is_some());
                 if self.valid {
-                    self.visit_arguments(args);
+                    self.visit_arguments(call.args());
                 }
             }
-            Expr::New { is_const: true, .. }
-            | Expr::List { is_const: true, .. }
-            | Expr::Map { is_const: true, .. }
-            | Expr::Set { is_const: true, .. }
-            | Expr::Record { is_const: true, .. } => {
+            expression
+                if match expression {
+                    Expr::New(node) => node.is_const(),
+                    Expr::List(node) => node.is_const(),
+                    Expr::Map(node) => node.is_const(),
+                    Expr::Set(node) => node.is_const(),
+                    Expr::Record(node) => node.is_const(),
+                    _ => false,
+                } =>
+            {
                 let constant = HashSet::new();
                 self.valid = potentially_constant_with_shadowed(
                     node,
@@ -399,12 +375,12 @@ impl PotentiallyConstant<'_, '_> {
                 );
             }
             Expr::StringLit(_)
-            | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Conditional { .. }
-            | Expr::Is { .. }
-            | Expr::As { .. }
-            | Expr::Record { .. } => walk_expr(self, node),
+            | Expr::Unary(_)
+            | Expr::Binary(_)
+            | Expr::Conditional(_)
+            | Expr::Is(_)
+            | Expr::As(_)
+            | Expr::Record(_) => walk_expr(self, node),
             _ => self.valid = false,
         }
     }
@@ -423,7 +399,7 @@ impl PotentiallyConstant<'_, '_> {
     }
 
     /// Constant eligibility depends on declarations, not evaluator coverage.
-    fn constant_member(&self, expr: &Expr) -> bool {
+    fn constant_member(&self, expr: Expr<'tree>) -> bool {
         let Some(segments) = expression_segments(expr, false) else {
             return false;
         };
@@ -462,14 +438,14 @@ impl PotentiallyConstant<'_, '_> {
     }
 
     /// Whether `expr` tears off a constructor (`C.named`, `C.new`): a constant.
-    fn constructor_tear_off(&self, expr: &Expr) -> bool {
+    fn constructor_tear_off(&self, expr: Expr<'tree>) -> bool {
         let Some((identity, name)) = resolve_call_constructor(expr, self.model, false) else {
             return false;
         };
         // A bare class name resolves as its unnamed constructor; only an
         // explicit `.new` tears it off.
         let explicit = name != "new"
-            || matches!(expr.unparenthesized(), Expr::Field { field, .. } if field.name == "new");
+            || matches!(expr.unparenthesized(), Expr::Field(field) if field.field().name() == "new");
         explicit
             && !self.signatures.is_enum(&identity)
             && self.signatures.has_constructor(&identity, name)
@@ -478,25 +454,19 @@ impl PotentiallyConstant<'_, '_> {
 
 /// Whether `expr` contains a collection literal outside any constant
 /// expression: such a literal is not implicitly `const`.
-fn has_non_const_collection(expr: &Expr) -> bool {
+fn has_non_const_collection(expr: Expr<'_>) -> bool {
     struct Finder(bool);
-    impl Visitor for Finder {
-        fn visit_expr(&mut self, node: &Expr) {
+    impl<'a> Visitor<'a> for Finder {
+        fn visit_expr(&mut self, node: Expr<'a>) {
             match node {
-                Expr::List {
-                    is_const: false, ..
-                }
-                | Expr::Map {
-                    is_const: false, ..
-                }
-                | Expr::Set {
-                    is_const: false, ..
-                } => self.0 = true,
-                Expr::List { is_const: true, .. }
-                | Expr::Map { is_const: true, .. }
-                | Expr::Set { is_const: true, .. }
-                | Expr::Record { is_const: true, .. }
-                | Expr::New { is_const: true, .. } => {}
+                Expr::List(list) if !list.is_const() => self.0 = true,
+                Expr::Map(map) if !map.is_const() => self.0 = true,
+                Expr::Set(set) if !set.is_const() => self.0 = true,
+                Expr::List(list) if list.is_const() => {}
+                Expr::Map(map) if map.is_const() => {}
+                Expr::Set(set) if set.is_const() => {}
+                Expr::Record(record) if record.is_const() => {}
+                Expr::New(construction) if construction.is_const() => {}
                 _ => walk_expr(self, node),
             }
         }
@@ -507,7 +477,7 @@ fn has_non_const_collection(expr: &Expr) -> bool {
 }
 
 fn const_constructor(
-    callee: &Expr,
+    callee: Expr<'_>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> bool {
@@ -532,7 +502,7 @@ pub(crate) struct ConstContexts {
 }
 
 impl ConstContexts {
-    pub(crate) fn of(program: &Program) -> Self {
+    pub(crate) fn of(program: Program<'_>) -> Self {
         let mut collector = ConstContextCollector(Vec::new());
         collector.visit_program(program);
         let mut spans = collector.0;
@@ -570,13 +540,16 @@ impl ConstContexts {
 struct ConstContextCollector(Vec<Span>);
 
 impl ConstContextCollector {
-    fn initializers(&mut self, keyword: VarKeyword, declarators: &[VarDeclarator]) {
+    fn initializers<'a>(
+        &mut self,
+        keyword: VarKeyword,
+        declarators: AstChildren<'a, VarDeclarator<'a>>,
+    ) {
         if keyword == VarKeyword::Const {
             self.0.extend(
                 declarators
-                    .iter()
-                    .filter_map(|declarator| declarator.initializer.as_ref())
-                    .map(|initializer| widen(*initializer.span())),
+                    .filter_map(|declarator| declarator.initializer())
+                    .map(|initializer| widen(initializer.span())),
             );
         }
     }
@@ -588,60 +561,56 @@ fn widen(span: Span) -> Span {
     Span::new(span.start.saturating_sub(1), span.end + 1)
 }
 
-impl Visitor for ConstContextCollector {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for ConstContextCollector {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if let TopLevelDecl::Variable(variable) = node {
-            self.initializers(variable.keyword, &variable.declarators);
+            self.initializers(variable.keyword(), variable.declarators());
         }
         walk_top_level_decl(self, node);
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.initializers(node.keyword, &node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
+        self.initializers(node.keyword(), node.declarators());
         walk_field_decl(self, node);
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        self.initializers(node.keyword, &node.declarators);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
+        self.initializers(node.keyword(), node.declarators());
         walk_local_var(self, node);
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
-        self.0.push(widen(node.span));
+    fn visit_annotation(&mut self, node: Annotation<'a>) {
+        self.0.push(widen(node.span()));
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) {
         self.0
-            .extend(node.variants.iter().map(|variant| widen(variant.span)));
+            .extend(node.variants().map(|variant| widen(variant.span())));
         walk_enum_decl(self, node);
     }
-    fn visit_switch_case(&mut self, node: &SwitchCase) {
-        for kind in &node.cases {
+    fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
+        for kind in node.cases() {
             if let SwitchCaseKind::Expr(expression) = kind {
-                self.0.push(widen(*expression.span()));
+                self.0.push(widen(expression.span()));
             }
         }
         walk_switch_case(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        match node {
-            Expr::New { is_const: true, .. }
-            | Expr::List { is_const: true, .. }
-            | Expr::Map { is_const: true, .. }
-            | Expr::Set { is_const: true, .. }
-            | Expr::Record { is_const: true, .. } => self.0.push(*node.span()),
-            // `const .named(...)`: the shorthand node covers only the name, so the
-            // invocation that wraps it carries the constant arguments.
-            Expr::Call { callee, span, .. }
-                if matches!(
-                    callee.unparenthesized(),
-                    Expr::DotShorthand { is_const: true, .. }
-                ) =>
-            {
-                self.0.push(*span);
-            }
-            _ => {}
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        let explicit = match node {
+            Expr::New(node) => node.is_const(),
+            Expr::List(node) => node.is_const(),
+            Expr::Map(node) => node.is_const(),
+            Expr::Set(node) => node.is_const(),
+            Expr::Record(node) => node.is_const(),
+            // The invocation includes the shorthand's constant arguments.
+            Expr::Call(call) => matches!(call.callee().unparenthesized(),
+                Expr::DotShorthand(shorthand) if shorthand.is_const()),
+            _ => false,
+        };
+        if explicit {
+            self.0.push(node.span());
         }
         walk_expr(self, node);
     }
@@ -649,13 +618,12 @@ impl Visitor for ConstContextCollector {
 
 /// The prefixes of the program's deferred imports: names through them are
 /// never constant.
-pub(crate) fn deferred_prefixes(program: &Program) -> Vec<&str> {
+pub(crate) fn deferred_prefixes(program: Program<'_>) -> Vec<&str> {
     program
-        .imports
-        .iter()
-        .filter(|import| import.is_deferred)
-        .filter_map(|import| import.as_name.as_ref())
-        .map(|prefix| prefix.name.as_str())
+        .imports()
+        .filter(|import| import.is_deferred())
+        .filter_map(|import| import.as_name())
+        .map(|prefix| prefix.name())
         .collect()
 }
 
@@ -663,7 +631,7 @@ pub(crate) fn deferred_prefixes(program: &Program) -> Vec<&str> {
 /// is a valid constant expression — the analyzer's `canBeConst` question for
 /// a non-const operand. Unresolvable references answer `false`.
 pub(crate) fn constant_in_context(
-    expression: &Expr,
+    expression: Expr<'_>,
     deferred: &[&str],
     state: &SemanticState<'_>,
 ) -> bool {
@@ -675,8 +643,8 @@ pub(crate) fn constant_in_context(
 pub(crate) fn constant_invocation(
     identity: &DeclarationIdentity,
     constructor: &str,
-    type_args: &[DartType],
-    args: &ArgList,
+    type_args: AstChildren<'_, DartType<'_>>,
+    args: ArgList<'_>,
     deferred: &[&str],
     state: &SemanticState<'_>,
 ) -> bool {
@@ -690,32 +658,28 @@ struct ConstantExpressions<'s, 'a> {
 }
 
 impl ConstantExpressions<'_, '_> {
-    fn constant(&self, expression: &Expr) -> bool {
+    fn constant(&self, expression: Expr<'_>) -> bool {
         match expression {
-            Expr::Paren { expr, .. } => self.constant(expr.unparenthesized()),
-            Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::SymbolLit { .. } => true,
+            Expr::Paren(paren) => self.constant(paren.expr().unparenthesized()),
+            Expr::IntLit(_)
+            | Expr::DoubleLit(_)
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
+            | Expr::SymbolLit(_) => true,
             Expr::StringLit(string) => self.string(string),
-            Expr::Ident(_) | Expr::Field { .. } => self.reference(expression),
-            Expr::Unary { .. } | Expr::Binary { .. } | Expr::Conditional { .. } => {
+            Expr::Ident(_) | Expr::Field(_) => self.reference(expression),
+            Expr::Unary(_) | Expr::Binary(_) | Expr::Conditional(_) => {
                 self.value(expression).is_some()
             }
-            Expr::Is {
-                expr, dart_type, ..
-            } => self.constant(expr) && self.type_constant(dart_type),
-            Expr::As {
-                expr, dart_type, ..
-            } => {
-                self.constant(expr)
-                    && self.type_constant(dart_type)
-                    && self.value(expr).is_none_or(|value| {
+            Expr::Is(test) => self.constant(test.expr()) && self.type_constant(test.dart_type()),
+            Expr::As(cast) => {
+                self.constant(cast.expr())
+                    && self.type_constant(cast.dart_type())
+                    && self.value(cast.expr()).is_none_or(|value| {
                         let target = self
                             .state
                             .model
-                            .resolve_type_in(dart_type, &self.state.type_parameters);
+                            .resolve_type_in(cast.dart_type(), &self.state.type_parameters);
                         falcon_analyze::constant_value::constant_cast_validity(
                             &value,
                             &target,
@@ -724,57 +688,43 @@ impl ConstantExpressions<'_, '_> {
                         ) != Some(false)
                     })
             }
-            Expr::List {
-                type_arg, elements, ..
-            } => {
-                type_arg.iter().all(|ty| self.type_constant(ty))
-                    && elements.iter().all(|element| self.element(element, false))
+            Expr::List(list) => {
+                list.type_arg().is_none_or(|ty| self.type_constant(ty))
+                    && list.elements().all(|element| self.element(element, false))
             }
-            Expr::Set {
-                type_arg, elements, ..
-            } => {
-                type_arg.iter().all(|ty| self.type_constant(ty))
-                    && elements.iter().all(|element| self.element(element, true))
+            Expr::Set(set) => {
+                set.type_arg().is_none_or(|ty| self.type_constant(ty))
+                    && set.elements().all(|element| self.element(element, true))
             }
-            Expr::Map {
-                type_args,
-                elements,
-                ..
-            } => {
-                type_args.iter().all(|ty| self.type_constant(ty))
-                    && elements.iter().all(|element| self.map_element(element))
+            Expr::Map(map) => {
+                map.type_args().all(|ty| self.type_constant(ty))
+                    && map.elements().all(|element| self.map_element(element))
             }
-            Expr::Record { fields, .. } => fields.iter().all(|field| self.constant(&field.value)),
+            Expr::Record(record) => record.fields().all(|field| self.constant(field.value())),
             // An explicit `new` is a compile error in a constant context.
-            Expr::New { is_const, .. } => *is_const,
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => self.call(callee, type_args, args),
-            Expr::This { .. }
-            | Expr::Super { .. }
-            | Expr::PostfixIncDec { .. }
-            | Expr::Assign { .. }
-            | Expr::Index { .. }
-            | Expr::Cascade { .. }
-            | Expr::FuncExpr { .. }
-            | Expr::DotShorthand { .. }
-            | Expr::Await { .. }
-            | Expr::Throw { .. }
-            | Expr::Switch { .. }
-            | Expr::NullAssert { .. }
-            | Expr::Error { .. } => false,
+            Expr::New(construction) => construction.is_const(),
+            Expr::Call(call) => self.call(call.callee(), call.type_args(), call.args()),
+            Expr::This(_)
+            | Expr::Super(_)
+            | Expr::PostfixIncDec(_)
+            | Expr::Assign(_)
+            | Expr::Index(_)
+            | Expr::Cascade(_)
+            | Expr::FuncExpr(_)
+            | Expr::DotShorthand(_)
+            | Expr::Await(_)
+            | Expr::Throw(_)
+            | Expr::Switch(_)
+            | Expr::NullAssert(_)
+            | Expr::Error(_) => false,
             // `List<int>` type literals and `f<int>` tear-off instantiations.
-            Expr::GenericInstantiation {
-                target, type_args, ..
-            } => {
+            Expr::GenericInstantiation(instantiation) => {
+                let target = instantiation.target();
                 let type_literal = expression_segments(target, true)
                     .is_some_and(|segments| self.state.model.resolve_dotted(&segments).is_some());
                 // Analyzer treats type literals and constructor tear-offs as
                 // constant here even with type-parameter or deferred arguments.
-                (type_literal || type_args.iter().all(|ty| self.type_constant(ty)))
+                (type_literal || instantiation.type_args().all(|ty| self.type_constant(ty)))
                     && self.reference(target)
             }
         }
@@ -783,13 +733,13 @@ impl ConstantExpressions<'_, '_> {
     /// Interpolations must be constants of type `num`, `bool`, `String`, or
     /// `Null`; an unparsed interpolation (a bare `$` in a non-raw literal)
     /// cannot be proven constant.
-    fn string(&self, string: &StringLitNode) -> bool {
-        if string.interpolations.is_empty() {
-            return string.has_raw_segment || !has_unescaped_dollar(&string.raw);
+    fn string(&self, string: StringLitNode<'_>) -> bool {
+        if string.interpolations().next().is_none() {
+            return string.has_raw_segment() || !has_unescaped_dollar(&string.raw());
         }
-        string.interpolations.iter().all(|interpolation| {
+        string.interpolations().all(|interpolation| {
             matches!(
-                self.value(&interpolation.expr),
+                self.value(interpolation.expr()),
                 Some(
                     ConstantValue::Null
                         | ConstantValue::Bool(_)
@@ -802,20 +752,20 @@ impl ConstantExpressions<'_, '_> {
 
     /// The constant value of `expression`, using declaration-time values for
     /// `const` locals; `None` when it references any other local binding.
-    fn value(&self, expression: &Expr) -> Option<ConstantValue> {
+    fn value(&self, expression: Expr<'_>) -> Option<ConstantValue> {
         let mut local = false;
         for_each_expr(expression, &mut |node| match node {
             Expr::Ident(identifier)
-                if self.state.environment.is_bound(&identifier.name)
-                    && self.state.local_constant(&identifier.name).is_none()
+                if self.state.environment.is_bound(identifier.name())
+                    && self.state.local_constant(identifier.name()).is_none()
                     && !(self
                         .state
                         .environment
-                        .is_bound_in_root_scope(&identifier.name)
+                        .is_bound_in_root_scope(identifier.name())
                         && self.state.constant_owner.as_ref().is_some_and(|owner| {
                             self.state
                                 .signatures
-                                .declared_member_facts(owner, &identifier.name)
+                                .declared_member_facts(owner, identifier.name())
                                 .iter()
                                 .any(|facts| facts.is_static && facts.kind == MemberKind::Method)
                                 || self
@@ -826,13 +776,13 @@ impl ConstantExpressions<'_, '_> {
                                         facts
                                             .static_consts
                                             .iter()
-                                            .any(|constant| constant.name == identifier.name)
+                                            .any(|constant| constant.name == identifier.name())
                                     })
                         })) =>
             {
                 local = true;
             }
-            Expr::Field { object, .. } if matches!(object.unparenthesized(), Expr::Ident(prefix) if self.is_deferred(&prefix.name)) =>
+            Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::Ident(prefix) if self.is_deferred(prefix.name())) =>
             {
                 local = true;
             }
@@ -852,12 +802,12 @@ impl ConstantExpressions<'_, '_> {
 
     /// A name or property access: a constant variable, enum value, type
     /// literal, or function or constructor tear-off.
-    fn reference(&self, expression: &Expr) -> bool {
+    fn reference(&self, expression: Expr<'_>) -> bool {
         let Some(segments) = expression_segments(expression, true) else {
             // `constant.length` on a constant string.
-            return matches!(expression.unparenthesized(), Expr::Field { object, field, is_null_safe: false, .. }
-                if field.name == "length"
-                    && matches!(self.value(object), Some(ConstantValue::String(_))));
+            return matches!(expression.unparenthesized(), Expr::Field(field)
+                if !field.is_null_safe() && field.field().name() == "length"
+                    && matches!(self.value(field.object()), Some(ConstantValue::String(_))));
         };
         let first = segments[0];
         if segments.len() > 1 && self.is_deferred(first) {
@@ -906,10 +856,15 @@ impl ConstantExpressions<'_, '_> {
                 .any(|facts| facts.is_static && facts.kind == MemberKind::Method)
     }
 
-    fn call(&self, callee: &Expr, type_args: &[DartType], args: &ArgList) -> bool {
-        if let Expr::DotShorthand { name, .. } = callee.unparenthesized() {
+    fn call<'a>(
+        &self,
+        callee: Expr<'a>,
+        type_args: AstChildren<'a, DartType<'a>>,
+        args: ArgList<'a>,
+    ) -> bool {
+        if let Expr::DotShorthand(shorthand) = callee.unparenthesized() {
             return matches!(self.state.expected(), Some(ResolvedType::Interface { identity, .. })
-                if self.invocation(identity, &name.name, type_args, args));
+                if self.invocation(identity, shorthand.name().name(), type_args, args));
         }
         let Some(segments) = expression_segments(callee, true) else {
             return false;
@@ -926,12 +881,9 @@ impl ConstantExpressions<'_, '_> {
                 .or_else(|| model.resolve_sdk_member(segments[0]))
                 .is_some_and(|identity| identity.is_sdk("dart:core", "identical"))
         {
-            return args.positional.len() == 2
-                && args.named.is_empty()
-                && args
-                    .positional
-                    .iter()
-                    .all(|argument| self.constant(argument));
+            return args.positional().len() == 2
+                && args.named().is_empty()
+                && args.positional().all(|argument| self.constant(argument));
         }
         let Some((identity, constructor)) = resolve_call_constructor(callee, model, true) else {
             return false;
@@ -948,23 +900,22 @@ impl ConstantExpressions<'_, '_> {
         &self,
         identity: &DeclarationIdentity,
         constructor: &str,
-        type_args: &[DartType],
-        args: &ArgList,
+        type_args: AstChildren<'_, DartType<'_>>,
+        args: ArgList<'_>,
     ) -> bool {
         let state = self.state;
         if !state.signatures.is_const_constructor(identity, constructor)
-            || !type_args.iter().all(|ty| self.type_constant(ty))
+            || !type_args.clone().all(|ty| self.type_constant(ty))
             || !args
-                .positional
-                .iter()
-                .chain(args.named.iter().map(|argument| &argument.value))
+                .positional()
+                .chain(args.named().map(|argument| argument.value()))
                 .all(|argument| self.constant(argument))
         {
             return false;
         }
         // Running the constructor proves errors such as a failing assertion.
         let type_args: Vec<_> = type_args
-            .iter()
+            .into_iter()
             .map(|ty| state.model.resolve_type_in(ty, &state.type_parameters))
             .collect();
         !evaluate_construction_with_local_values(
@@ -983,20 +934,22 @@ impl ConstantExpressions<'_, '_> {
         !self.state.environment.is_bound(prefix) && self.deferred.contains(&prefix)
     }
 
-    fn type_constant(&self, ty: &DartType) -> bool {
+    fn type_constant(&self, ty: DartType<'_>) -> bool {
         struct DeferredTypes<F> {
             is_deferred: F,
             found: bool,
         }
-        impl<F: Fn(&str) -> bool> Visitor for DeferredTypes<F> {
-            fn visit_dart_type(&mut self, ty: &DartType) {
+        impl<'a, F: Fn(&str) -> bool> Visitor<'a> for DeferredTypes<F> {
+            fn visit_dart_type(&mut self, ty: DartType<'a>) {
                 if let DartType::Named(named) = ty
-                    && named.segments.len() > 1
-                    && (self.is_deferred)(&named.segments[0].name)
+                    && named.segments().nth(1).is_some()
+                    && (self.is_deferred)(
+                        named.segments().next().expect("named type segment").name(),
+                    )
                 {
                     self.found = true;
                 }
-                falcon_syntax::visitor::walk_dart_type(self, ty);
+                falcon_syntax::cst::visit::walk_dart_type(self, ty);
             }
         }
         let mut deferred = DeferredTypes {
@@ -1014,55 +967,48 @@ impl ConstantExpressions<'_, '_> {
     }
 
     /// A list or set element; set elements must have primitive equality.
-    fn element(&self, element: &CollectionElement, set: bool) -> bool {
+    fn element(&self, element: CollectionElement<'_>, set: bool) -> bool {
         match element {
-            CollectionElement::Expr(expression)
-            | CollectionElement::NullAware {
-                expr: expression, ..
-            } => self.constant(expression) && (!set || self.primitive_equality(expression, 0)),
-            CollectionElement::Spread { expr, .. } => self.constant(expr),
-            CollectionElement::If {
-                condition,
-                then_elem,
-                else_elem,
-                ..
-            } => {
-                self.condition(condition)
-                    && self.element(then_elem, set)
-                    && else_elem
-                        .as_ref()
+            CollectionElement::Expr(expression) => {
+                self.constant(expression) && (!set || self.primitive_equality(expression, 0))
+            }
+            CollectionElement::NullAware(element) => {
+                let expression = element.expr();
+                self.constant(expression) && (!set || self.primitive_equality(expression, 0))
+            }
+            CollectionElement::Spread(spread) => self.constant(spread.expr()),
+            CollectionElement::If(element) => {
+                self.condition(element.condition())
+                    && self.element(element.then_elem(), set)
+                    && element
+                        .else_elem()
                         .is_none_or(|element| self.element(element, set))
             }
-            CollectionElement::For { .. } => false,
+            CollectionElement::For(_) => false,
         }
     }
 
     /// A map element; keys must have primitive equality.
-    fn map_element(&self, element: &MapElement) -> bool {
+    fn map_element(&self, element: MapElement<'_>) -> bool {
         match element {
             MapElement::Entry(entry) => {
-                self.constant(&entry.key)
-                    && self.constant(&entry.value)
-                    && self.primitive_equality(&entry.key, 0)
+                self.constant(entry.key())
+                    && self.constant(entry.value())
+                    && self.primitive_equality(entry.key(), 0)
             }
-            MapElement::Spread { expr, .. } => self.constant(expr),
-            MapElement::If {
-                condition,
-                then_entry,
-                else_entry,
-                ..
-            } => {
-                self.condition(condition)
-                    && self.map_element(then_entry)
-                    && else_entry
-                        .as_ref()
+            MapElement::Spread(spread) => self.constant(spread.expr()),
+            MapElement::If(element) => {
+                self.condition(element.condition())
+                    && self.map_element(element.then_entry())
+                    && element
+                        .else_entry()
                         .is_none_or(|entry| self.map_element(entry))
             }
-            MapElement::For { .. } => false,
+            MapElement::For(_) => false,
         }
     }
 
-    fn condition(&self, condition: &IfCondition) -> bool {
+    fn condition(&self, condition: IfCondition<'_>) -> bool {
         match condition {
             IfCondition::Expr(expression) => {
                 matches!(self.value(expression), Some(ConstantValue::Bool(_)))
@@ -1075,44 +1021,40 @@ impl ConstantExpressions<'_, '_> {
     /// constant set elements and map keys must: it does not use an `==`
     /// other than `Object`'s (`double` overrides it). Follows constant
     /// references through their initializers, `depth` levels deep.
-    fn primitive_equality(&self, expression: &Expr, depth: usize) -> bool {
+    fn primitive_equality(&self, expression: Expr<'_>, depth: usize) -> bool {
         if depth > 16 {
             return false;
         }
         let model = &self.state.model;
         let signatures = &self.state.signatures;
         match expression {
-            Expr::Paren { expr, .. } => self.primitive_equality(expr.unparenthesized(), depth),
-            Expr::IntLit { .. }
+            Expr::Paren(paren) => self.primitive_equality(paren.expr().unparenthesized(), depth),
+            Expr::IntLit(_)
             | Expr::StringLit(_)
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::SymbolLit { .. }
-            | Expr::List { .. }
-            | Expr::Set { .. }
-            | Expr::Map { .. } => true,
-            Expr::Record { fields, .. } => fields
-                .iter()
-                .all(|field| self.primitive_equality(&field.value, depth + 1)),
-            Expr::Conditional {
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                self.primitive_equality(then_expr, depth + 1)
-                    && self.primitive_equality(else_expr, depth + 1)
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
+            | Expr::SymbolLit(_)
+            | Expr::List(_)
+            | Expr::Set(_)
+            | Expr::Map(_) => true,
+            Expr::Record(record) => record
+                .fields()
+                .all(|field| self.primitive_equality(field.value(), depth + 1)),
+            Expr::Conditional(conditional) => {
+                self.primitive_equality(conditional.then_expr(), depth + 1)
+                    && self.primitive_equality(conditional.else_expr(), depth + 1)
             }
-            Expr::Unary { .. } | Expr::Binary { .. } => matches!(
+            Expr::Unary(_) | Expr::Binary(_) => matches!(
                 self.value(expression),
                 Some(ConstantValue::Null | ConstantValue::Bool(_) | ConstantValue::String(_))
             ),
-            Expr::New { dart_type, .. } => matches!(
-                model.resolve_type(dart_type),
+            Expr::New(construction) => matches!(
+                model.resolve_type(construction.dart_type()),
                 ResolvedType::Interface { identity, .. } if self.class_primitive(&identity)
             ),
-            Expr::Call { callee, .. } => resolve_call_constructor(callee, model, true)
+            Expr::Call(call) => resolve_call_constructor(call.callee(), model, true)
                 .is_some_and(|(identity, _)| self.class_primitive(&identity)),
-            Expr::Ident(_) | Expr::Field { .. } => {
+            Expr::Ident(_) | Expr::Field(_) => {
                 let Some(segments) = expression_segments(expression, false) else {
                     return false;
                 };
@@ -1139,7 +1081,7 @@ impl ConstantExpressions<'_, '_> {
                             .iter()
                             .find(|constant| constant.name == *member)
                     }) {
-                        return self.primitive_equality(&constant.initializer, depth + 1);
+                        return self.primitive_equality(constant.initializer.expr(), depth + 1);
                     }
                 }
                 QualifiedName::from_segments(&segments)
@@ -1147,23 +1089,23 @@ impl ConstantExpressions<'_, '_> {
                     .and_then(|identity| signatures.constant_initializer(&identity))
                     .is_some_and(|initializer| self.primitive_equality(initializer, depth + 1))
             }
-            Expr::DoubleLit { .. }
-            | Expr::This { .. }
-            | Expr::Super { .. }
-            | Expr::PostfixIncDec { .. }
-            | Expr::Assign { .. }
-            | Expr::Is { .. }
-            | Expr::As { .. }
-            | Expr::Index { .. }
-            | Expr::Cascade { .. }
-            | Expr::FuncExpr { .. }
-            | Expr::DotShorthand { .. }
-            | Expr::Await { .. }
-            | Expr::Throw { .. }
-            | Expr::Switch { .. }
-            | Expr::NullAssert { .. }
-            | Expr::GenericInstantiation { .. }
-            | Expr::Error { .. } => false,
+            Expr::DoubleLit(_)
+            | Expr::This(_)
+            | Expr::Super(_)
+            | Expr::PostfixIncDec(_)
+            | Expr::Assign(_)
+            | Expr::Is(_)
+            | Expr::As(_)
+            | Expr::Index(_)
+            | Expr::Cascade(_)
+            | Expr::FuncExpr(_)
+            | Expr::DotShorthand(_)
+            | Expr::Await(_)
+            | Expr::Throw(_)
+            | Expr::Switch(_)
+            | Expr::NullAssert(_)
+            | Expr::GenericInstantiation(_)
+            | Expr::Error(_) => false,
         }
     }
 

@@ -24,8 +24,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 /// Guards the `super.x` → super-constructor-parameter walk against a cyclic
 /// `extends` chain in malformed source.
@@ -36,7 +35,8 @@ pub struct TypeInitFormals;
 
 /// The file-local view of a class needed to resolve a formal's target type.
 struct ClassInfo<'a> {
-    members: &'a [ClassMember],
+    members: AstChildren<'a, ClassMember<'a>>,
+    id: NodeId,
     extends: Option<&'a str>,
 }
 
@@ -45,11 +45,11 @@ type ClassTable<'a> = HashMap<&'a str, ClassInfo<'a>>;
 impl Rule for TypeInitFormals {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut classes: ClassTable = HashMap::new();
-        for decl in &program.declarations {
+        for decl in program.declarations() {
             if let Some((name, info)) = class_info(decl) {
                 classes.insert(name, info);
             }
@@ -70,15 +70,15 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         // The dependency table keeps only the last declaration of each name.
         // Check that declaration once, not once per overwritten declaration.
         if let Some((name, declaration)) = class_info(decl)
             && let Some(info) = self.classes.get(name)
-            && std::ptr::eq(info.members, declaration.members)
+            && info.id == declaration.id
         {
-            for member in info.members {
+            for member in info.members.clone() {
                 if let ClassMember::Constructor(ctor) = member {
                     check_ctor(&self.classes, info, ctor, self.ctx, &mut self.diags);
                 }
@@ -93,33 +93,37 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn class_info(decl: &TopLevelDecl) -> Option<(&str, ClassInfo<'_>)> {
+fn class_info(decl: TopLevelDecl<'_>) -> Option<(&str, ClassInfo<'_>)> {
     match decl {
         TopLevelDecl::Class(c) => Some((
-            c.name.name.as_str(),
+            c.name().name(),
             ClassInfo {
-                members: &c.members,
-                extends: c.extends.as_ref().and_then(type_name),
+                members: c.members(),
+                id: c.syntax().id(),
+                extends: c.extends().and_then(type_name),
             },
         )),
         TopLevelDecl::MixinClass(m) => Some((
-            m.name.name.as_str(),
+            m.name().name(),
             ClassInfo {
-                members: &m.members,
-                extends: m.extends.as_ref().and_then(type_name),
+                members: m.members(),
+                id: m.syntax().id(),
+                extends: m.extends().and_then(type_name),
             },
         )),
         TopLevelDecl::Enum(e) => Some((
-            e.name.name.as_str(),
+            e.name().name(),
             ClassInfo {
-                members: &e.members,
+                members: e.members(),
+                id: e.syntax().id(),
                 extends: None,
             },
         )),
         TopLevelDecl::ExtensionType(e) => Some((
-            e.name.name.as_str(),
+            e.name().name(),
             ClassInfo {
-                members: &e.members,
+                members: e.members(),
+                id: e.syntax().id(),
                 extends: None,
             },
         )),
@@ -129,9 +133,9 @@ fn class_info(decl: &TopLevelDecl) -> Option<(&str, ClassInfo<'_>)> {
 
 /// The final segment of a named type (`foo.Bar` → `Bar`); `None` for function,
 /// record, and builtin types, none of which can be a superclass we index.
-fn type_name(ty: &DartType) -> Option<&str> {
+fn type_name(ty: DartType<'_>) -> Option<&str> {
     match ty {
-        DartType::Named(n) => n.segments.last().map(|s| s.name.as_str()),
+        DartType::Named(n) => n.segments().last().map(|s| s.name()),
         _ => None,
     }
 }
@@ -139,7 +143,7 @@ fn type_name(ty: &DartType) -> Option<&str> {
 fn check_ctor(
     classes: &ClassTable,
     class: &ClassInfo,
-    ctor: &ConstructorDecl,
+    ctor: ConstructorDecl<'_>,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -147,14 +151,14 @@ fn check_ctor(
     // parameter at the same index *among super formals only* — preceding plain
     // parameters of this constructor are not forwarded.
     let mut super_index = 0;
-    for param in ctor.params.positional() {
+    for param in ctor.params().positional() {
         let index = super_index;
-        if param.initializing == Some(InitializingFormal::Super) {
+        if param.initializing() == Some(InitializingFormal::Super) {
             super_index += 1;
         }
         check_param(classes, class, ctor, param, Some(index), ctx, diags);
     }
-    for param in ctor.params.named() {
+    for param in ctor.params().named() {
         check_param(classes, class, ctor, param, None, ctx, diags);
     }
 }
@@ -164,18 +168,18 @@ fn check_ctor(
 fn check_param(
     classes: &ClassTable,
     class: &ClassInfo,
-    ctor: &ConstructorDecl,
-    param: &FormalParam,
+    ctor: ConstructorDecl<'_>,
+    param: FormalParam<'_>,
     super_index: Option<usize>,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some(annotation) = &param.param_type else {
+    let Some(annotation) = param.param_type() else {
         return;
     };
-    let target = if param.initializing == Some(InitializingFormal::This) {
-        field_type(class, &param.name.name)
-    } else if param.initializing == Some(InitializingFormal::Super) {
+    let target = if param.initializing() == Some(InitializingFormal::This) {
+        field_type(class, param.name().name())
+    } else if param.initializing() == Some(InitializingFormal::Super) {
         super_param_type(classes, class, ctor, param, super_index, MAX_SUPER_DEPTH)
     } else {
         return;
@@ -186,7 +190,7 @@ fn check_param(
         diags.push(ctx.diagnostic(
             "type-init-formals",
             "Don't type annotate initializing formals.".to_string(),
-            *annotation.span(),
+            annotation.span(),
         ));
     }
 }
@@ -194,13 +198,12 @@ fn check_param(
 /// The declared type of instance field `name` on `class`. Dart requires an
 /// initializing formal's field to be declared by the enclosing class, so no
 /// supertype walk is needed.
-fn field_type<'a>(class: &ClassInfo<'a>, name: &str) -> Option<&'a DartType> {
-    class.members.iter().find_map(|member| match member {
-        ClassMember::Field(f) if !f.is_static => f
-            .declarators
-            .iter()
-            .any(|d| d.name.name == name)
-            .then_some(f.field_type.as_ref())
+fn field_type<'a>(class: &ClassInfo<'a>, name: &str) -> Option<DartType<'a>> {
+    class.members.clone().find_map(|member| match member {
+        ClassMember::Field(f) if !f.is_static() => f
+            .declarators()
+            .any(|d| d.name().name() == name)
+            .then(|| f.field_type())
             .flatten(),
         _ => None,
     })
@@ -212,11 +215,11 @@ fn field_type<'a>(class: &ClassInfo<'a>, name: &str) -> Option<&'a DartType> {
 fn super_param_type<'a>(
     classes: &ClassTable<'a>,
     class: &ClassInfo<'a>,
-    ctor: &ConstructorDecl,
-    param: &FormalParam,
+    ctor: ConstructorDecl<'_>,
+    param: FormalParam<'_>,
     super_index: Option<usize>,
     depth: usize,
-) -> Option<&'a DartType> {
+) -> Option<DartType<'a>> {
     if depth == 0 {
         return None;
     }
@@ -224,26 +227,26 @@ fn super_param_type<'a>(
     let super_ctor = find_ctor(super_class, super_ctor_name(ctor))?;
 
     let target = match super_index {
-        Some(i) => super_ctor.params.positional().nth(i)?,
+        Some(i) => super_ctor.params().positional().nth(i)?,
         None => super_ctor
-            .params
+            .params()
             .named()
-            .find(|p| p.name.name == param.name.name)?,
+            .find(|p| p.name().name() == param.name().name())?,
     };
 
-    if let Some(ty) = &target.param_type {
+    if let Some(ty) = target.param_type() {
         return Some(ty);
     }
-    if target.initializing == Some(InitializingFormal::This) {
-        return field_type(super_class, &target.name.name);
+    if target.initializing() == Some(InitializingFormal::This) {
+        return field_type(super_class, target.name().name());
     }
-    if target.initializing == Some(InitializingFormal::Super) {
+    if target.initializing() == Some(InitializingFormal::Super) {
         let index = super_index.map(|position| {
             super_ctor
-                .params
+                .params()
                 .positional()
                 .take(position)
-                .filter(|p| p.initializing == Some(InitializingFormal::Super))
+                .filter(|p| p.initializing() == Some(InitializingFormal::Super))
                 .count()
         });
         return super_param_type(classes, super_class, super_ctor, target, index, depth - 1);
@@ -253,19 +256,17 @@ fn super_param_type<'a>(
 
 /// The name of the super constructor this constructor delegates to (`None` for
 /// the unnamed one), from an explicit `: super.named(...)` initializer.
-fn super_ctor_name(ctor: &ConstructorDecl) -> Option<&str> {
-    ctor.initializers.iter().find_map(|init| match init {
-        ConstructorInitializer::SuperCall { call_name, .. } => {
-            call_name.as_ref().map(|n| n.name.as_str())
-        }
+fn super_ctor_name(ctor: ConstructorDecl<'_>) -> Option<&str> {
+    ctor.initializers().find_map(|init| match init {
+        ConstructorInitializer::SuperCall(call) => call.call_name().map(|n| n.name()),
         _ => None,
     })
 }
 
-fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<&'a ConstructorDecl> {
-    class.members.iter().find_map(|member| match member {
-        ClassMember::Constructor(c) if !c.is_factory => {
-            let this_name = c.constructor_name.as_ref().map(|n| n.name.as_str());
+fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<ConstructorDecl<'a>> {
+    class.members.clone().find_map(|member| match member {
+        ClassMember::Constructor(c) if !c.is_factory() => {
+            let this_name = c.constructor_name().map(|n| n.name());
             (this_name == name).then_some(c)
         }
         _ => None,
@@ -274,11 +275,11 @@ fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<&'a Constr
 
 /// Compares written type text with whitespace removed, without resolving scope
 /// or substituting type parameters. Equal spellings need not denote equal types.
-fn same_type(ctx: &AnalyzeContext, a: &DartType, b: &DartType) -> bool {
-    let text = |ty: &DartType| {
-        ctx.syntax
-            .tokens_in(*ty.span())
-            .flat_map(move |token| token.text(ctx.source).chars())
+fn same_type(ctx: &AnalyzeContext, a: DartType<'_>, b: DartType<'_>) -> bool {
+    let text = |ty: DartType<'_>| {
+        ctx.tree()
+            .tokens_in(ctx.source, ty.span())
+            .flat_map(move |token| token.text().chars())
             .filter(|character| !character.is_whitespace())
     };
     text(a).eq(text(b))
@@ -292,17 +293,16 @@ mod tests {
     #[test]
     fn duplicate_class_names_check_only_the_last_declaration_once() {
         let source = "class C { int x; C(int this.x); }\nclass C { int y; C(int this.y); }";
-        let falcon_dart_parser::ParseResult {
-            program,
-            syntax,
-            errors,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let config = falcon_config::FalconConfig::default();
-        let context =
-            AnalyzeContext::new(std::path::Path::new("test.dart"), source, &config, &syntax);
-        let diagnostics = TypeInitFormals.analyze(&program, &context);
+        let context = AnalyzeContext::new(std::path::Path::new("test.dart"), &config, &parsed);
+        let diagnostics = TypeInitFormals.analyze(parsed.program(), &context);
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
         assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "int");

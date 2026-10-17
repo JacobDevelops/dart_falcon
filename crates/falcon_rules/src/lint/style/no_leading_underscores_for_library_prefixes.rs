@@ -9,7 +9,7 @@
 
 use crate::lint::naming::has_leading_underscore;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoLeadingUnderscoresForLibraryPrefixes;
@@ -17,18 +17,18 @@ pub struct NoLeadingUnderscoresForLibraryPrefixes;
 impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        for import in &program.imports {
-            if let Some(prefix) = &import.as_name
-                && has_leading_underscore(&prefix.name)
+        for import in program.imports() {
+            if let Some(prefix) = import.as_name()
+                && has_leading_underscore(prefix.name())
             {
                 diags.push(ctx.diagnostic(
                     "no-leading-underscores-for-library-prefixes",
                     MESSAGE,
-                    prefix.span,
+                    prefix.span(),
                 ));
             }
         }

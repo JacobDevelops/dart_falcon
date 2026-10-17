@@ -15,8 +15,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 const RULE: &str = "prefer-asserts-with-message";
 const MESSAGE: &str = "Missing a message in an assert.";
@@ -27,7 +26,7 @@ pub struct PreferAssertsWithMessage;
 impl Rule for PreferAssertsWithMessage {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -43,31 +42,25 @@ struct Collector<'a, 'ctx> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         for initializer in node.initializers {
-            if let ConstructorInitializer::Assert {
-                message: None,
-                span,
-                ..
-            } = initializer
+            if let ConstructorInitializer::Assert(assertion) = initializer
+                && assertion.message().is_none()
             {
-                self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, *span));
+                self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, assertion.span()));
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::Assert(AssertStmt {
-            message: None,
-            span,
-            ..
-        }) = node
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
+        if let Stmt::Assert(assertion) = node
+            && assertion.message().is_none()
         {
-            self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, *span));
+            self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, assertion.span()));
         }
         StructuralTraversal::Continue
     }

@@ -25,7 +25,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::{TokenKind, ast::*};
+use falcon_syntax::{TokenKind, cst::*};
 
 use crate::lint::declarations::has_meta_annotation;
 
@@ -36,7 +36,7 @@ pub(crate) struct ApiDeclaration<'a> {
     pub name: &'a str,
     pub span: Span,
     pub start: usize,
-    pub annotations: &'a [Annotation],
+    pub annotations: AstChildren<'a, Annotation<'a>>,
     pub owner: Option<&'a str>,
     pub kind: Option<MemberKind>,
     pub is_static: bool,
@@ -49,8 +49,8 @@ pub(crate) struct ApiDeclaration<'a> {
     pub internal: bool,
 }
 
-pub(crate) fn documented(tokens: &[falcon_syntax::Token], start: usize) -> bool {
-    let end = tokens.partition_point(|t| t.offset() < start);
+pub(crate) fn documented(tokens: &[SyntaxToken<'_>], start: usize) -> bool {
+    let end = tokens.partition_point(|token| token.offset() < start);
     tokens[..end]
         .iter()
         .rev()
@@ -58,69 +58,77 @@ pub(crate) fn documented(tokens: &[falcon_syntax::Token], start: usize) -> bool 
         // The lexer leaves `/**/` as ordinary trivia; analyzer still attaches
         // that empty block as a declaration's documentation comment.
         .any(|t| {
-            t.kind == TokenKind::DocComment || (t.kind == TokenKind::BlockComment && t.len() == 4)
+            t.kind() == TokenKind::DocComment
+                || (t.kind() == TokenKind::BlockComment && t.len() == 4)
         })
 }
 
 impl ApiDeclaration<'_> {
     /// Whether a doc comment precedes the declaration, its metadata, or any
     /// annotation within it.
-    pub(crate) fn documented(&self, tokens: &[falcon_syntax::Token]) -> bool {
-        let Some(last) = self.annotations.last() else {
+    pub(crate) fn documented(&self, tokens: &[SyntaxToken<'_>]) -> bool {
+        let Some(last) = self.annotations.clone().last() else {
             return documented(tokens, self.start);
         };
-        let after = tokens.partition_point(|t| t.offset() < last.span.end);
+        let after = tokens.partition_point(|token| token.offset() < last.span().end);
         let keyword = tokens[after..]
             .iter()
             .find(|t| !t.is_trivia())
-            .map_or(last.span.end, |t| t.offset());
+            .map_or(last.span().end, |t| t.offset());
         documented(tokens, self.start)
             || self
                 .annotations
-                .iter()
-                .any(|a| documented(tokens, a.span.start))
+                .clone()
+                .any(|a| documented(tokens, a.span().start))
             || documented(tokens, keyword)
     }
 }
 
 fn declaration_candidates<'a>(
-    decl: &'a TopLevelDecl,
+    decl: TopLevelDecl<'a>,
     model: Option<&SemanticModel<'_>>,
     mut emit: impl FnMut(ApiDeclaration<'a>),
 ) {
-    let is_internal = |annotations: &[Annotation]| {
+    let is_internal = |annotations: AstChildren<'a, Annotation<'a>>| {
         model.is_some_and(|model| has_meta_annotation(annotations, "internal", model))
     };
     let (name, annotations) = match decl {
-        TopLevelDecl::Class(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::ClassTypeAlias(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::Mixin(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::MixinClass(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::Enum(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::Extension(n) => (n.name.as_ref(), n.annotations.as_slice()),
-        TopLevelDecl::ExtensionType(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::Function(n) => (Some(&n.name), n.annotations.as_slice()),
-        TopLevelDecl::TypeAlias(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::Class(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::ClassTypeAlias(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::Mixin(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::MixinClass(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::Enum(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::Extension(n) => (n.name(), n.annotations()),
+        TopLevelDecl::ExtensionType(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::Function(n) => (Some(n.name()), n.annotations()),
+        TopLevelDecl::TypeAlias(n) => (Some(n.name()), n.annotations()),
         TopLevelDecl::Variable(n) => {
-            let internal = is_internal(&n.annotations);
-            for v in &n.declarators {
+            let internal = is_internal(n.annotations());
+            for v in n.declarators() {
                 emit(ApiDeclaration {
                     internal,
-                    ..candidate(&v.name, n.span.start, &n.annotations, None, None, true)
+                    ..candidate(v.name(), n.span().start, n.annotations(), None, None, true)
                 });
             }
             return;
         }
         TopLevelDecl::Error(_) => return,
     };
-    let Some(name) = name.filter(|n| !n.name.starts_with('_')) else {
+    let Some(name) = name.filter(|n| !n.name().starts_with('_')) else {
         return;
     };
-    let mut top = candidate(name, decl.span().start, annotations, None, None, true);
+    let mut top = candidate(
+        name,
+        decl.span().start,
+        annotations.clone(),
+        None,
+        None,
+        true,
+    );
     top.internal = is_internal(annotations);
     if let TopLevelDecl::Function(n) = decl {
         top.is_top_level_function = true;
-        top.kind = match n.kind {
+        top.kind = match n.kind() {
             FunctionKind::Getter => Some(MemberKind::Getter),
             FunctionKind::Setter(_) => Some(MemberKind::Setter),
             FunctionKind::Function(_) => None,
@@ -137,20 +145,20 @@ fn declaration_candidates<'a>(
         && let Some(primary) = elements.primary
     {
         let constructor = elements.constructors().find(|c| c.is_primary).unwrap();
-        let body = elements.declared.iter().find_map(|member| match member {
+        let body = elements.declared.clone().find_map(|member| match member {
             ClassMember::PrimaryConstructorBody(body) => Some(body),
             _ => None,
         });
         let mut c = candidate(
-            primary.constructor_name.as_ref().unwrap_or(name),
-            body.map_or(primary.span.start, |body| body.span.start),
+            primary.constructor_name().unwrap_or(name),
+            body.map_or(primary.span().start, |body| body.span().start),
             constructor.annotations,
-            Some(&name.name),
+            Some(name.name()),
             None,
             true,
         );
         if let Some(body) = body {
-            c.span = body.this_span;
+            c.span = body.this_span();
             c.internal = internal;
         }
         emit(c);
@@ -158,12 +166,11 @@ fn declaration_candidates<'a>(
 }
 
 fn member_candidates<'a>(
-    member: &'a ClassMember,
+    member: ClassMember<'a>,
     name: &'a str,
     internal: bool,
     closed: bool,
     extension: bool,
-    syntax: &falcon_syntax::SyntaxStore,
     mut emit: impl FnMut(ApiDeclaration<'a>),
 ) {
     let mut report = |mut declaration: ApiDeclaration<'a>| {
@@ -175,46 +182,46 @@ fn member_candidates<'a>(
     };
     match member {
         ClassMember::Field(n) => {
-            for v in &n.declarators {
+            for v in n.declarators() {
                 report(candidate(
-                    &v.name,
-                    n.span.start,
-                    &n.annotations,
+                    v.name(),
+                    n.span().start,
+                    n.annotations(),
                     Some(name),
                     Some(MemberKind::field(n, v)),
-                    n.is_static,
+                    n.is_static(),
                 ));
             }
         }
         ClassMember::Method(n) => report(candidate(
-            &n.name,
-            n.span.start,
-            &n.annotations,
+            n.name(),
+            n.span().start,
+            n.annotations(),
             Some(name),
             Some(MemberKind::Method),
-            n.is_static,
+            n.is_static(),
         )),
         ClassMember::Getter(n) => report(candidate(
-            &n.name,
-            n.span.start,
-            &n.annotations,
+            n.name(),
+            n.span().start,
+            n.annotations(),
             Some(name),
             Some(MemberKind::Getter),
-            n.is_static,
+            n.is_static(),
         )),
         ClassMember::Setter(n) => report(candidate(
-            &n.name,
-            n.span.start,
-            &n.annotations,
+            n.name(),
+            n.span().start,
+            n.annotations(),
             Some(name),
             Some(MemberKind::Setter),
-            n.is_static,
+            n.is_static(),
         )),
         ClassMember::Constructor(n) => {
             let mut c = candidate(
-                n.constructor_name.as_ref().unwrap_or(&n.name),
-                n.span.start,
-                &n.annotations,
+                n.constructor_name().unwrap_or(n.name()),
+                n.span().start,
+                n.annotations(),
                 Some(name),
                 None,
                 true,
@@ -224,9 +231,12 @@ fn member_candidates<'a>(
         }
         ClassMember::Operator(n) => report(ApiDeclaration {
             name: n.lookup_name(),
-            span: crate::lint::declarations::operator_token_span(n, syntax),
-            start: n.annotations.first().map_or(n.span.start, |a| a.span.start),
-            annotations: &n.annotations,
+            span: crate::lint::declarations::operator_token_span(n),
+            start: n
+                .annotations()
+                .first()
+                .map_or(n.span().start, |a| a.span().start),
+            annotations: n.annotations(),
             owner: Some(name),
             kind: Some(MemberKind::Operator),
             is_static: false,
@@ -239,19 +249,19 @@ fn member_candidates<'a>(
 }
 
 fn candidate<'a>(
-    name: &'a Identifier,
+    name: Identifier<'a>,
     start: usize,
-    annotations: &'a [Annotation],
+    annotations: AstChildren<'a, Annotation<'a>>,
     owner: Option<&'a str>,
     kind: Option<MemberKind>,
     is_static: bool,
 ) -> ApiDeclaration<'a> {
     ApiDeclaration {
-        name: &name.name,
-        span: name.span,
+        name: name.name(),
+        span: name.span(),
         start: annotations
             .first()
-            .map_or(start, |a| a.span.start.min(start)),
+            .map_or(start, |a| a.span().start.min(start)),
         annotations,
         owner,
         kind,
@@ -265,7 +275,7 @@ fn candidate<'a>(
 impl Rule for PublicMemberApiDocs {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if crate::cross_file::lib_dir_package(ctx.file_path).is_none() {
@@ -273,10 +283,11 @@ impl Rule for PublicMemberApiDocs {
         }
         let model = ctx
             .identities
-            .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
+            .map(|identities| SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types));
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
+            tokens: ctx.tokens().collect(),
             owner: None,
             pending: Vec::new(),
         }))
@@ -301,6 +312,7 @@ struct PendingDoc<'a> {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: Option<SemanticModel<'a>>,
+    tokens: Vec<SyntaxToken<'a>>,
     owner: Option<Owner<'a>>,
     pending: Vec<PendingDoc<'a>>,
 }
@@ -309,12 +321,11 @@ impl Collector<'_> {
     fn missing(&self, d: &ApiDeclaration<'_>) -> bool {
         let ctx = self.ctx;
         let model = self.model.as_ref();
-        let tokens = ctx.tokens();
         if d.name.starts_with('_')
             || d.internal
             || d.exempt_constructor
             || (d.is_top_level_function && d.name == "main")
-            || d.documented(tokens)
+            || d.documented(&self.tokens)
         {
             return false;
         }
@@ -373,8 +384,8 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         self.owner = None;
         let model = self.model;
         declaration_candidates(decl, model.as_ref(), |declaration| {
@@ -383,10 +394,10 @@ impl StructuralRuleVisitor for Collector<'_> {
                     name: &self.ctx.source[declaration.span.start..declaration.span.end],
                     internal: declaration.internal,
                     closed: match decl {
-                        TopLevelDecl::Class(n) => match n.modifiers.restriction {
+                        TopLevelDecl::Class(n) => match n.modifiers().restriction {
                             Some(ClassRestriction::Sealed) => true,
                             Some(ClassRestriction::Final | ClassRestriction::Interface) => {
-                                n.modifiers.is_abstract
+                                n.modifiers().is_abstract
                             }
                             _ => false,
                         },
@@ -404,7 +415,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         if let Some(owner) = self.owner {
             member_candidates(
                 member,
@@ -412,19 +423,18 @@ impl StructuralRuleVisitor for Collector<'_> {
                 owner.internal,
                 owner.closed,
                 owner.extension,
-                self.ctx.syntax,
                 |declaration| self.record(&declaration),
             );
         }
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_enum_variant(&mut self, variant: &EnumVariant) -> StructuralTraversal {
+    fn visit_enum_variant(&mut self, variant: EnumVariant<'a>) -> StructuralTraversal {
         if let Some(owner) = self.owner {
             let mut declaration = candidate(
-                &variant.name,
-                variant.span.start,
-                &variant.annotations,
+                variant.name(),
+                variant.span().start,
+                variant.annotations(),
                 Some(owner.name),
                 None,
                 true,
@@ -467,18 +477,19 @@ mod tests {
     #[test]
     fn carriage_return_line_comments_do_not_hide_public_declarations() {
         let source = "// ordinary comment\rvoid visible() {}";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/cr_only.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
-        let diagnostics = PublicMemberApiDocs.analyze(&program, &ctx);
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
+        let diagnostics = PublicMemberApiDocs.analyze(program, &ctx);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
             &source[diagnostics[0].span.start..diagnostics[0].span.end],
@@ -496,25 +507,26 @@ mod tests {
             sealed class Closed();\n\
             class _Private();\n\
             extension type Wrapper(int value) {}";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
-        let mut declarations = Vec::with_capacity(program.declarations.len() * 2);
-        for decl in &program.declarations {
+        let mut declarations = Vec::with_capacity(program.declarations().len() * 2);
+        for decl in program.declarations() {
             declaration_candidates(decl, None, |declaration| declarations.push(declaration));
         }
-        let tokens = syntax.tokens();
+        let tokens: Vec<_> = parsed.tree.tokens(&parsed.source).collect();
         let constructor = declarations.iter().find(|d| d.name == "named").unwrap();
         assert_eq!(
             &source[constructor.span.start..constructor.span.end],
             "this"
         );
         assert_eq!(constructor.owner, Some("Public"));
-        assert!(!constructor.documented(tokens));
+        assert!(!constructor.documented(&tokens));
         assert!(constructor.annotations.is_empty());
         assert_eq!(
             declarations
@@ -544,19 +556,20 @@ mod tests {
             class C();\n\
             /// Documents only the mixin class.\n\
             mixin class M();";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/primary.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
         let names: Vec<_> = PublicMemberApiDocs
-            .analyze(&program, &ctx)
+            .analyze(program, &ctx)
             .into_iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
             .collect();
@@ -576,12 +589,13 @@ class Accessors {
 set top(int next) {}
 int get top => 0;
 ";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -589,17 +603,17 @@ int get top => 0;
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(&path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
+        let model = SemanticModel::new(&path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
+        let ctx = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = PublicMemberApiDocs.analyze(&program, &ctx);
+        let diagnostics = PublicMemberApiDocs.analyze(program, &ctx);
         let spans: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))

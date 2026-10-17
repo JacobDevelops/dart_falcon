@@ -13,7 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ProvideDeprecationMessage;
@@ -21,7 +21,7 @@ pub struct ProvideDeprecationMessage;
 impl Rule for ProvideDeprecationMessage {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -38,23 +38,23 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_annotation(&mut self, node: &Annotation) -> StructuralTraversal {
-        let Some(last) = node.name.last() else {
+    fn visit_annotation(&mut self, node: Annotation<'a>) -> StructuralTraversal {
+        let Some(last) = node.name().last() else {
             return StructuralTraversal::SkipChildren;
         };
-        let flagged = match last.name.as_str() {
+        let flagged = match last.name() {
             // `@deprecated`: the predefined constant, never carries a message.
-            "deprecated" => node.args.is_none(),
+            "deprecated" => node.args().is_none(),
             // `@Deprecated(...)`: flag a missing argument, or a single positional
             // message that is an empty/whitespace-only string literal.
-            "Deprecated" => match &node.args {
+            "Deprecated" => match node.args() {
                 None => true,
-                Some(args) => match args.positional.first().map(Expr::unparenthesized) {
+                Some(args) => match args.positional().first().map(Expr::unparenthesized) {
                     None => true,
-                    Some(Expr::StringLit(s)) => s.value.trim().is_empty(),
+                    Some(Expr::StringLit(s)) => s.value().trim().is_empty(),
                     Some(_) => false,
                 },
             },
@@ -64,7 +64,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             self.diags.push(self.ctx.diagnostic(
                 "provide-deprecation-message",
                 "Provide a deprecation message, via @Deprecated(\"message\").",
-                node.span,
+                node.span(),
             ));
         }
         StructuralTraversal::SkipChildren

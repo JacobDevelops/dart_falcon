@@ -14,7 +14,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseSpacerAsExpandedChild;
@@ -22,7 +22,7 @@ pub struct UseSpacerAsExpandedChild;
 impl Rule for UseSpacerAsExpandedChild {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -38,12 +38,12 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, expr: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, expr: Expr<'a>) -> StructuralTraversal {
         if is_unqualified_construction(expr)
             && let Some((name, args, span)) = crate::lint::flutter::widget_construction(expr)
         {
@@ -56,27 +56,27 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 fn check_expanded(
     name: &str,
-    args: &ArgList,
-    span: &Span,
+    args: ArgList<'_>,
+    span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
     if name != "Expanded" {
         return;
     }
-    for named in &args.named {
-        if named.name.name == "child" && is_empty_spacer_widget(&named.value) {
+    for named in args.named() {
+        if named.name().name() == "child" && is_empty_spacer_widget(named.value()) {
             diags.push(ctx.diagnostic(
                 "use-spacer-as-expanded-child",
                 "Use Spacer() instead of an Expanded with an empty Container or SizedBox child.",
-                *span,
+                span,
             ));
             return;
         }
     }
 }
 
-fn is_empty_spacer_widget(expr: &Expr) -> bool {
+fn is_empty_spacer_widget(expr: Expr<'_>) -> bool {
     if !is_unqualified_construction(expr) {
         return false;
     }
@@ -86,10 +86,10 @@ fn is_empty_spacer_widget(expr: &Expr) -> bool {
     if name != "Container" && name != "SizedBox" {
         return false;
     }
-    !args.named.iter().any(|n| n.name.name == "child")
+    !args.named().any(|n| n.name().name() == "child")
 }
 
-fn is_unqualified_construction(expr: &Expr) -> bool {
-    !matches!(expr.unparenthesized(), Expr::New { dart_type: DartType::Named(named), .. }
-        if named.segments.len() != 1)
+fn is_unqualified_construction(expr: Expr<'_>) -> bool {
+    !matches!(expr.unparenthesized(), Expr::New(new)
+        if matches!(new.dart_type(), DartType::Named(named) if named.segments().count() != 1))
 }

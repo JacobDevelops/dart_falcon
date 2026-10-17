@@ -21,7 +21,7 @@
 //! but source-derived receiver types are still inferred.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 use super::collection_checks::{Emptiness, analyze_emptiness};
 
@@ -30,7 +30,7 @@ pub struct PreferIsEmpty;
 impl Rule for PreferIsEmpty {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(analyze_emptiness(ctx, Emptiness::Empty))

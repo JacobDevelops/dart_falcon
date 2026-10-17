@@ -33,8 +33,7 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[cfg(test)]
 use falcon_analyze::semantic_scope::visit_program;
@@ -49,7 +48,7 @@ pub struct AvoidDynamicCalls;
 impl Rule for AvoidDynamicCalls {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -71,7 +70,7 @@ struct Collector<'a> {
     cascade_sections: HashMap<usize, Span>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
         self.diagnostics.push(self.ctx.diagnostic(
             "avoid-dynamic-calls",
@@ -81,50 +80,52 @@ impl Collector<'_> {
     }
 
     /// Reports `target` when it is provably `dynamic`; explicit casts are allowed.
-    fn report_if_dynamic(&mut self, target: &Expr, state: &SemanticState<'_>) -> bool {
-        if matches!(target.unparenthesized(), Expr::As { .. }) || !self.is_dynamic(target, state) {
+    fn report_if_dynamic(&mut self, target: Expr<'a>, state: &SemanticState<'a>) -> bool {
+        if matches!(target.unparenthesized(), Expr::As(_)) || !self.is_dynamic(target, state) {
             return false;
         }
-        self.report(*target.span());
+        self.report(target.span());
         true
     }
 
-    fn is_dynamic(&self, expr: &Expr, state: &SemanticState<'_>) -> bool {
+    fn is_dynamic(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
         matches!(state.infer(expr), ResolvedType::Dynamic)
             || dynamic_receiver(expr).is_some_and(|receiver| self.is_dynamic(receiver, state))
     }
 
-    fn is_function_typed(&self, expr: &Expr, state: &SemanticState<'_>) -> bool {
+    fn is_function_typed(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
         state.infer(expr).interface("dart:core", "Function")
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
     fn visit_cascade_operation(
         &mut self,
-        operation: &CascadeOp,
+        operation: CascadeOp<'a>,
         receiver: &ResolvedType,
         section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         let end = match operation {
-            CascadeOp::Field { name, .. } => name.span.end,
-            CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) => args.span.end,
-            CascadeOp::Index { span, .. } | CascadeOp::NullAssert { span } => span.end,
-            CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => section.end,
+            CascadeOp::Field(field) => field.name().span().end,
+            CascadeOp::Call(call) => call.args().span().end,
+            CascadeOp::Invoke(invoke) => invoke.args().span().end,
+            CascadeOp::Index(index) => index.span().end,
+            CascadeOp::NullAssert(assertion) => assertion.span().end,
+            CascadeOp::Assign(_) | CascadeOp::IndexAssign(_) => section.end,
         };
         let previous = self
             .cascade_sections
             .insert(section.start, Span::new(section.start, end));
-        if let CascadeOp::Call(name, _, args) = operation
-            && !is_universal_call(&name.name, args)
+        if let CascadeOp::Call(call) = operation
+            && !is_universal_call(call.name().name(), call.args())
             && state
                 .signatures
-                .resolved_field(receiver, &name.name, &state.model)
+                .resolved_field(receiver, call.name().name(), &state.model)
                 .is_some_and(|(ty, owner)| {
                     let ty = state.model.substitute(&ty, &owner);
                     matches!(ty, ResolvedType::Dynamic) || ty.interface("dart:core", "Function")
@@ -132,28 +133,28 @@ impl SemanticRuleVisitor for Collector<'_> {
         {
             // Calling a field/getter is a function-expression invocation, not
             // a statically resolved method invocation on the receiver.
-            self.report(Span::new(section.start, name.span.end));
+            self.report(Span::new(section.start, call.name().span().end));
         }
         let Some(receiver_span) = previous else {
             return;
         };
         let reportable = match operation {
-            CascadeOp::NullAssert { .. } => false,
-            CascadeOp::Call(name, _, args) => !is_universal_call(&name.name, args),
-            CascadeOp::Field { name, .. } => !ALLOWED_MEMBERS.contains(&name.name.as_str()),
-            CascadeOp::Invoke(..)
-            | CascadeOp::Index { .. }
-            | CascadeOp::Assign(..)
-            | CascadeOp::IndexAssign(..) => true,
+            CascadeOp::NullAssert(_) => false,
+            CascadeOp::Call(call) => !is_universal_call(call.name().name(), call.args()),
+            CascadeOp::Field(field) => !ALLOWED_MEMBERS.contains(&field.name().name()),
+            CascadeOp::Invoke(_)
+            | CascadeOp::Index(_)
+            | CascadeOp::Assign(_)
+            | CascadeOp::IndexAssign(_) => true,
         };
         if reportable && matches!(receiver, ResolvedType::Dynamic) {
             self.report(receiver_span);
-        } else if let CascadeOp::Call(name, _, _) = operation
-            && name.name == "call"
+        } else if let CascadeOp::Call(call) = operation
+            && call.name().name() == "call"
             && receiver.interface("dart:core", "Function")
         {
-            self.report(name.span);
-        } else if matches!(operation, CascadeOp::Invoke(..))
+            self.report(call.name().span());
+        } else if matches!(operation, CascadeOp::Invoke(_))
             && receiver.interface("dart:core", "Function")
         {
             self.report(receiver_span);
@@ -162,10 +163,10 @@ impl SemanticRuleVisitor for Collector<'_> {
 
     fn visit_cascade_assignment(
         &mut self,
-        assignment: CascadeAssignment<'_>,
+        assignment: CascadeAssignment<'a>,
         receiver: &ResolvedType,
         section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         if matches!(assignment.operator, AssignOp::Eq | AssignOp::NullCoalesceEq) {
             return;
@@ -182,11 +183,10 @@ impl SemanticRuleVisitor for Collector<'_> {
                         )
                     })
         } else if let Expr::Ident(name) = assignment.target {
-            (matches!(receiver, ResolvedType::Dynamic)
-                && !ALLOWED_MEMBERS.contains(&name.name.as_str()))
+            (matches!(receiver, ResolvedType::Dynamic) && !ALLOWED_MEMBERS.contains(&name.name()))
                 || state
                     .signatures
-                    .resolved_field(receiver, &name.name, &state.model)
+                    .resolved_field(receiver, name.name(), &state.model)
                     .is_some_and(|(ty, owner)| {
                         matches!(state.model.substitute(&ty, &owner), ResolvedType::Dynamic)
                     })
@@ -198,114 +198,114 @@ impl SemanticRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
-            Expr::Assign {
-                target, op, span, ..
-            } => {
-                if !matches!(op, AssignOp::Eq | AssignOp::NullCoalesceEq)
-                    && self.is_dynamic(target, state)
+            Expr::Assign(assignment) => {
+                if !matches!(assignment.op(), AssignOp::Eq | AssignOp::NullCoalesceEq)
+                    && self.is_dynamic(assignment.target(), state)
                 {
-                    self.report(*span);
+                    self.report(assignment.span());
                 }
             }
-            Expr::Binary { op, left, .. } => {
-                if is_user_definable(*op) && !matches!(op, BinaryOp::EqEq | BinaryOp::NotEq) {
-                    self.report_if_dynamic(left, state);
+            Expr::Binary(binary) => {
+                if is_user_definable(binary.op())
+                    && !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)
+                {
+                    self.report_if_dynamic(binary.left(), state);
                 }
             }
-            Expr::Unary {
-                op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
-                operand,
-                span,
-            }
-            | Expr::PostfixIncDec { operand, span, .. } => {
-                if self.is_dynamic(operand, state) {
-                    self.report(*span);
+            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                if self.is_dynamic(unary.operand(), state) {
+                    self.report(unary.span());
                 }
             }
-            Expr::Unary { operand, .. } => {
-                self.report_if_dynamic(operand, state);
+            Expr::PostfixIncDec(postfix) => {
+                if self.is_dynamic(postfix.operand(), state) {
+                    self.report(postfix.span());
+                }
             }
-            Expr::Index { object, .. } => {
-                self.report_if_dynamic(object, state);
+            Expr::Unary(unary) => {
+                self.report_if_dynamic(unary.operand(), state);
             }
-            Expr::Field {
-                object,
-                field,
-                span,
-                ..
-            } => {
+            Expr::Index(index) => {
+                self.report_if_dynamic(index.object(), state);
+            }
+            Expr::Field(field) => {
+                let span = field.span();
                 if !self.callees.contains(&(span.start, span.end))
-                    && !ALLOWED_MEMBERS.contains(&field.name.as_str())
+                    && !ALLOWED_MEMBERS.contains(&field.field().name())
                 {
-                    self.report_if_dynamic(object, state);
+                    self.report_if_dynamic(field.object(), state);
                 }
             }
-            Expr::Call { callee, args, .. } => match callee.as_ref() {
-                Expr::Field {
-                    object,
-                    field,
-                    span,
-                    ..
-                } => {
-                    self.callees.insert((span.start, span.end));
-                    if !is_universal_call(&field.name, args)
-                        && !matches!(object.unparenthesized(), Expr::As { .. })
-                        && !self.report_if_dynamic(object, state)
-                        && (self.is_dynamic(callee, state)
-                            || self.is_function_typed(callee, state)
-                            || (field.name == "call" && self.is_function_typed(object, state)))
-                    {
-                        self.report(
-                            if field.name == "call" && self.is_function_typed(object, state) {
-                                field.span
-                            } else {
-                                *callee.span()
-                            },
-                        );
+            Expr::Call(call) => {
+                let callee = call.callee();
+                match callee {
+                    Expr::Field(field) => {
+                        let object = field.object();
+                        let name = field.field();
+                        let span = field.span();
+                        self.callees.insert((span.start, span.end));
+                        if !is_universal_call(name.name(), call.args())
+                            && !matches!(object.unparenthesized(), Expr::As(_))
+                            && !self.report_if_dynamic(object, state)
+                            && (self.is_dynamic(callee, state)
+                                || self.is_function_typed(callee, state)
+                                || (name.name() == "call" && self.is_function_typed(object, state)))
+                        {
+                            self.report(
+                                if name.name() == "call" && self.is_function_typed(object, state) {
+                                    name.span()
+                                } else {
+                                    callee.span()
+                                },
+                            );
+                        }
+                    }
+                    other => {
+                        if !matches!(other.unparenthesized(), Expr::As(_))
+                            && (self.is_dynamic(other, state)
+                                || self.is_function_typed(other, state)
+                                || matches!(
+                                    other.unparenthesized(),
+                                    Expr::Field(field)
+                                        if field.field().name() == "call"
+                                            && self.is_function_typed(field.object(), state)
+                                ))
+                        {
+                            self.report(callee.span());
+                        }
                     }
                 }
-                other => {
-                    if !matches!(other.unparenthesized(), Expr::As { .. })
-                        && (self.is_dynamic(other, state)
-                            || self.is_function_typed(other, state)
-                            || matches!(
-                                other.unparenthesized(),
-                                Expr::Field { object, field, .. }
-                                    if field.name == "call" && self.is_function_typed(object, state)
-                            ))
-                    {
-                        self.report(*callee.span());
-                    }
-                }
-            },
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                let dynamic_section = sections.iter().any(|section| match section.ops.first() {
-                    Some(CascadeOp::Call(..) | CascadeOp::Invoke(..)) => true,
-                    Some(CascadeOp::Field { name, .. }) => {
-                        !ALLOWED_MEMBERS.contains(&name.name.as_str())
-                    }
-                    Some(CascadeOp::Index { .. } | CascadeOp::IndexAssign(..)) => true,
-                    Some(CascadeOp::Assign(target, ..)) => !matches!(
-                        target.unparenthesized(),
-                        Expr::Ident(name) if ALLOWED_MEMBERS.contains(&name.name.as_str())
-                    ),
-                    Some(CascadeOp::NullAssert { .. }) | None => false,
-                });
+            }
+            Expr::Cascade(cascade) => {
+                let object = cascade.object();
+                let dynamic_section =
+                    cascade
+                        .sections()
+                        .any(|section| match section.ops().next() {
+                            Some(CascadeOp::Call(_) | CascadeOp::Invoke(_)) => true,
+                            Some(CascadeOp::Field(field)) => {
+                                !ALLOWED_MEMBERS.contains(&field.name().name())
+                            }
+                            Some(CascadeOp::Index(_) | CascadeOp::IndexAssign(_)) => true,
+                            Some(CascadeOp::Assign(assignment)) => !matches!(
+                                assignment.target().unparenthesized(),
+                                Expr::Ident(name) if ALLOWED_MEMBERS.contains(&name.name())
+                            ),
+                            Some(CascadeOp::NullAssert(_)) | None => false,
+                        });
                 if dynamic_section {
                     self.report_if_dynamic(object, state);
                 }
-                if !matches!(object.unparenthesized(), Expr::As { .. })
+                if !matches!(object.unparenthesized(), Expr::As(_))
                     && self.is_function_typed(object, state)
                 {
-                    for section in sections {
-                        if let Some(CascadeOp::Call(name, _, _)) = section.ops.first()
-                            && name.name == "call"
+                    for section in cascade.sections() {
+                        if let Some(CascadeOp::Call(call)) = section.ops().next()
+                            && call.name().name() == "call"
                         {
-                            self.report(name.span);
+                            self.report(call.name().span());
                         }
                     }
                 }
@@ -316,30 +316,31 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 /// `toString()` and `noSuchMethod(invocation)` exist on every object.
-fn is_universal_call(name: &str, args: &ArgList) -> bool {
-    (name == "toString" && args.positional.is_empty() && args.named.is_empty())
-        || (name == "noSuchMethod" && args.positional.len() == 1 && args.named.is_empty())
+fn is_universal_call(name: &str, args: ArgList<'_>) -> bool {
+    (name == "toString" && args.positional().is_empty() && args.named().is_empty())
+        || (name == "noSuchMethod" && args.positional().len() == 1 && args.named().is_empty())
 }
 
 /// The operand whose `dynamic` type a dynamic operation on it passes on, for
 /// operations whose result is `dynamic` when that operand is.
-fn dynamic_receiver(expr: &Expr) -> Option<&Expr> {
+fn dynamic_receiver(expr: Expr<'_>) -> Option<Expr<'_>> {
     match expr.unparenthesized() {
-        Expr::NullAssert { operand, .. } => Some(operand),
-        Expr::Field { object, field, .. } if !ALLOWED_MEMBERS.contains(&field.name.as_str()) => {
-            Some(object)
+        Expr::NullAssert(assertion) => Some(assertion.operand()),
+        Expr::Field(field) if !ALLOWED_MEMBERS.contains(&field.field().name()) => {
+            Some(field.object())
         }
-        Expr::Index { object, .. } => Some(object),
-        Expr::Call { callee, args, .. } => match callee.unparenthesized() {
-            Expr::Field { object, field, .. } => {
-                (!is_universal_call(&field.name, args)).then_some(object.as_ref())
+        Expr::Index(index) => Some(index.object()),
+        Expr::Call(call) => match call.callee().unparenthesized() {
+            Expr::Field(field) => {
+                (!is_universal_call(field.field().name(), call.args())).then_some(field.object())
             }
             other => Some(other),
         },
-        Expr::Binary { op, left, .. }
-            if is_user_definable(*op) && !matches!(op, BinaryOp::EqEq | BinaryOp::NotEq) =>
+        Expr::Binary(binary)
+            if is_user_definable(binary.op())
+                && !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) =>
         {
-            Some(left)
+            Some(binary.left())
         }
         _ => None,
     }
@@ -353,11 +354,11 @@ fn is_user_definable(op: BinaryOp) -> bool {
 mod tests {
     use super::*;
     use falcon_analyze::{
-        IdentityIndex, IdentitySource, RuleAnalysis, SemanticModel, SignatureIndex,
+        IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, SemanticModel, SignatureIndex,
     };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
 
     #[test]
     fn dynamic_result_context_preserves_inferred_accumulator_type() {
@@ -371,35 +372,37 @@ void use(dynamic value) {
 ";
         let path = Path::new("/project/lib/test.dart");
         let expect_path = Path::new("/project/lib/expect.dart");
-        let falcon_dart_parser::ParseResult {
-            program: expect_program,
-            errors,
-            ..
-        } = parse("void expect(dynamic actual) {}");
+        let expect_source = "void expect(dynamic actual) {}";
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(expect_source);
         assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let expect_parsed = Arc::new(ParsedFile {
+            source: expect_source.into(),
+            tree,
+        });
+        let expect_program = expect_parsed.program();
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[
                 IdentitySource {
                     path,
-                    program: &program,
+                    parsed: &parsed,
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: expect_path,
-                    program: &expect_program,
+                    parsed: &expect_parsed,
                     has_parse_errors: false,
                 },
             ],
             &[],
         );
-        let files = [(path, &program), (expect_path, &expect_program)];
+        let files = [(path, program), (expect_path, expect_program)];
         let types = falcon_analyze::TypeIndex::from_resolved_files(
             files.map(|(path, program)| {
                 (
@@ -414,19 +417,22 @@ void use(dynamic value) {
             &identities,
         );
         let signatures = SignatureIndex::build(
-            &files.map(|(path, program)| (path.to_path_buf(), program)),
+            &[
+                (path.to_path_buf(), Arc::clone(&parsed)),
+                (expect_path.to_path_buf(), Arc::clone(&expect_parsed)),
+            ],
             None,
             &identities,
             &types,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
         struct AccumulatorTypes(Vec<ResolvedType>);
-        impl SemanticRuleVisitor for AccumulatorTypes {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                if matches!(node, Expr::Ident(identifier) if identifier.name == "sum") {
+        impl<'a> SemanticRuleVisitor<'a> for AccumulatorTypes {
+            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+                if matches!(node, Expr::Ident(identifier) if identifier.name() == "sum") {
                     self.0.push(state.infer(node));
                 }
             }
@@ -434,8 +440,8 @@ void use(dynamic value) {
         let mut accumulator = AccumulatorTypes(Vec::new());
         visit_program(
             &mut accumulator,
-            &program,
-            SemanticState::new(&program, &ctx).unwrap(),
+            program,
+            SemanticState::new(program, &ctx).unwrap(),
         );
         assert_eq!(accumulator.0.len(), 1);
         assert!(
@@ -443,7 +449,7 @@ void use(dynamic value) {
             "{:?}",
             accumulator.0
         );
-        let diagnostics = AvoidDynamicCalls.analyze(&program, &ctx);
+        let diagnostics = AvoidDynamicCalls.analyze(program, &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -455,28 +461,28 @@ void use(dynamic value) {
     fn reports_dynamic_operations_at_their_ast_receivers() {
         let source = "class Callbacks { final Function callback; Callbacks(this.callback); }\nvoid f(dynamic d, Function fn, Callbacks callbacks) {\n  d\n    ..x += 1;\n  d\n    ..a.b();\n  fn.call();\n  --d.z;\n  (d)();\n  d.toString();\n  (d as dynamic).foo();\n  callbacks\n      .callback();\n}";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = AvoidDynamicCalls.analyze(&program, &ctx);
+        let diagnostics = AvoidDynamicCalls.analyze(program, &ctx);
         let mut starts: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.span.start)
@@ -501,30 +507,30 @@ void use(dynamic value) {
     fn cascade_receivers_and_updates_keep_exact_spans_through_registry() {
         let source = "class SpanOps {\n  dynamic a;\n  Function f;\n  SpanOps(this.a, this.f);\n}\nvoid cascadeSpanWitness(SpanOps o, dynamic e) {\n  o..f.call();\n  ++e;\n  e--;\n  o..a.x += 1;\n  o..a.b();\n  o..a[0].x;\n  o..a[0].x += 1;\n}\n";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("avoid-dynamic-calls", Box::new(AvoidDynamicCalls));
-        let diagnostics = registry.run_all(&program, &ctx);
+        let diagnostics = registry.run_all(program, &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
@@ -594,30 +600,30 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("avoid-dynamic-calls", Box::new(AvoidDynamicCalls));
-        let diagnostics = registry.run_all(&program, &ctx);
+        let diagnostics = registry.run_all(program, &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
@@ -689,30 +695,30 @@ void cases(dynamic d, Function fn, Holder h) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("avoid-dynamic-calls", Box::new(AvoidDynamicCalls));
-        let diagnostics = registry.run_all(&program, &ctx);
+        let diagnostics = registry.run_all(program, &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))

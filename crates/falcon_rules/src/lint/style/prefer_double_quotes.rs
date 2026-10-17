@@ -19,7 +19,7 @@
 
 use crate::lint::style::prefer_single_quotes::{QuotePreference, QuoteVisitor};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferDoubleQuotes;
@@ -27,7 +27,7 @@ pub struct PreferDoubleQuotes;
 impl Rule for PreferDoubleQuotes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(QuoteVisitor::new(

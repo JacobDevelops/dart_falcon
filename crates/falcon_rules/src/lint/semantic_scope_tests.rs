@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use falcon_analyze::semantic_scope::*;
 use falcon_analyze::{AnalyzeContext, ResolvedType, RuleAnalysis, RulePreparation, SignatureIndex};
 use falcon_dart_parser::parse;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[test]
 fn generic_predicate_closure_keeps_completed_input_context() {
@@ -14,17 +14,17 @@ fn generic_predicate_closure_keeps_completed_input_context() {
     let source = "bool predicate<T>(bool Function(T) callback) => true; \
                   void use() { predicate((trace) { trace as StackTrace; return true; }); }";
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -33,28 +33,31 @@ fn generic_predicate_closure_keeps_completed_input_context() {
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
     struct Observed;
-    impl SemanticRuleVisitor for Observed {
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
         fn visit_call_arguments(
             &mut self,
-            _: &ArgList,
+            _: ArgList<'a>,
             positional: &[ResolvedType],
             _: &HashMap<String, ResolvedType>,
-            state: &SemanticState<'_>,
+            state: &SemanticState<'a>,
         ) {
             let ResolvedType::Function {
                 positional: inputs, ..
@@ -69,10 +72,10 @@ fn generic_predicate_closure_keeps_completed_input_context() {
             );
         }
 
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-            if let Expr::As { expr, .. } = node {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::As(cast) = node {
                 assert_eq!(
-                    state.infer(expr),
+                    state.infer(cast.expr()),
                     state.model.core_type("Object", true),
                     "closure binding",
                 );
@@ -81,8 +84,8 @@ fn generic_predicate_closure_keeps_completed_input_context() {
     }
     visit_program(
         &mut Observed,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
 }
 
@@ -116,17 +119,17 @@ class GenericLookup {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -135,17 +138,20 @@ class GenericLookup {
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
@@ -157,10 +163,10 @@ class GenericLookup {
         shadowed: bool,
         static_generic: bool,
     }
-    impl SemanticRuleVisitor for Observed {
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
             match node {
-                Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Ident(name) if name.name == "maybeFind") =>
+                Expr::Call(call) if matches!(call.callee(), Expr::Ident(name) if name.name() == "maybeFind") =>
                 {
                     assert!(state.implicit_member_type("maybeFind").is_none());
                     let result = state.infer(node);
@@ -168,26 +174,24 @@ class GenericLookup {
                     assert!(result.nullable());
                     self.static_generic = true;
                 }
-                Expr::Field { object, field, .. } if field.name == "type" => {
-                    self.elements.push(state.infer(object));
+                Expr::Field(field) if field.field().name() == "type" => {
+                    self.elements.push(state.infer(field.object()));
                 }
-                Expr::Call {
-                    callee,
-                    type_args,
-                    args,
-                    ..
-                } if matches!(callee.as_ref(), Expr::Ident(name) if name.name == "call")
-                    || matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "call") =>
+                Expr::Call(call)
+                    if matches!(call.callee(), Expr::Ident(name) if name.name() == "call")
+                        || matches!(call.callee(), Expr::Field(field) if field.field().name() == "call") =>
                 {
-                    let signature = state.call_signature(callee, type_args, args, None);
-                    if args.positional.len() == 2 && matches!(callee.as_ref(), Expr::Ident(_)) {
+                    let callee = call.callee();
+                    let args = call.args();
+                    let signature = state.call_signature(callee, call.type_args(), args, None);
+                    if args.positional().len() == 2 && matches!(callee, Expr::Ident(_)) {
                         assert!(state.infer(callee).interface("dart:core", "Function"));
                         assert!(signature.is_none());
                         self.implicit_call = Some(Vec::new());
                         return;
                     }
                     let signature = signature.unwrap();
-                    if args.positional.len() == 1 {
+                    if args.positional().len() == 1 {
                         assert_eq!(signature.positional.len(), 1);
                         assert!(signature.positional[0].interface("dart:core", "int"));
                         assert!(state.implicit_member_type("call").is_none());
@@ -203,8 +207,8 @@ class GenericLookup {
     let mut observed = Observed::default();
     visit_program(
         &mut observed,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
     assert_eq!(
         observed.elements,
@@ -251,11 +255,16 @@ identity(value);
     let path = PathBuf::from("/project/lib/main.dart");
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let program = parsed.program;
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
+
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -264,17 +273,20 @@ identity(value);
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &parsed.syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
@@ -283,26 +295,23 @@ identity(value);
     struct Observed {
         calls: usize,
     }
-    impl SemanticRuleVisitor for Observed {
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-            let Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } = node
-            else {
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let Expr::Call(call) = node else {
                 return;
             };
-            if !matches!(callee.as_ref(), Expr::Ident(name) if name.name == "identity") {
+            let callee = call.callee();
+            if !matches!(callee, Expr::Ident(name) if name.name() == "identity") {
                 return;
             }
             let token =
                 ResolvedType::interface_identity(state.model.resolve_name("Token").unwrap());
-            let target = state.call_target(callee, type_args).unwrap();
+            let target = state.call_target(callee, call.type_args()).unwrap();
             assert_eq!(target.signature.call_parameters.len(), 1);
             assert!(target.signature.defaults.contains_key("flag"));
-            let signature = state.call_signature(callee, type_args, args, None).unwrap();
+            let signature = state
+                .call_signature(callee, call.type_args(), call.args(), None)
+                .unwrap();
             assert_eq!(
                 signature.positional.as_slice(),
                 std::slice::from_ref(&token)
@@ -315,8 +324,8 @@ identity(value);
     let mut observed = Observed::default();
     visit_program(
         &mut observed,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
     assert_eq!(observed.calls, 4);
 }
@@ -365,17 +374,17 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -384,17 +393,20 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
@@ -416,40 +428,34 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
         echoes: usize,
         record_fields: usize,
     }
-    impl SemanticRuleVisitor for Observed {
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
             match node {
-                Expr::Call {
-                    callee,
-                    type_args,
-                    args,
-                    ..
-                } if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "echo") =>
+                Expr::Call(call) if matches!(call.callee(), Expr::Field(field) if field.field().name() == "echo") =>
                 {
-                    let Expr::Field { object, .. } = callee.as_ref() else {
+                    let Expr::Field(field) = call.callee() else {
                         unreachable!()
                     };
                     assert_value(
                         state,
-                        &state.infer_access_receiver(object, "echo", false),
+                        &state.infer_access_receiver(field.object(), "echo", false),
                         false,
                     );
-                    let signature = state.call_signature(callee, type_args, args, None).unwrap();
+                    let signature = state
+                        .call_signature(call.callee(), call.type_args(), call.args(), None)
+                        .unwrap();
                     assert!(signature.positional.is_empty());
                     assert_value(state, &state.infer_with_context(node, None), true);
                     assert_value(state, &state.infer(node), true);
                     self.echoes += 1;
                 }
-                Expr::Call {
-                    callee,
-                    type_args,
-                    args,
-                    ..
-                } if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "take") =>
+                Expr::Call(call) if matches!(call.callee(), Expr::Field(field) if field.field().name() == "take") =>
                 {
-                    let signature = state.call_signature(callee, type_args, args, None).unwrap();
+                    let signature = state
+                        .call_signature(call.callee(), call.type_args(), call.args(), None)
+                        .unwrap();
                     let (positional, named) = state
-                        .call_parameter_types(callee, type_args, args, None)
+                        .call_parameter_types(call.callee(), call.type_args(), call.args(), None)
                         .unwrap();
                     assert!(named.is_empty());
                     assert_eq!(positional.len(), 1);
@@ -458,18 +464,17 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
                     assert_value(state, &state.infer(node), true);
                     self.calls += 1;
                 }
-                Expr::Assign { target, .. } => {
-                    let nullable = matches!(target.as_ref(), Expr::Field { field, .. } if field.name == "maybe");
+                Expr::Assign(assignment) => {
+                    let target = assignment.target();
+                    let nullable =
+                        matches!(target, Expr::Field(field) if field.field().name() == "maybe");
                     assert_value(state, &state.writable_type(target), nullable);
                     self.assignments += 1;
                 }
-                Expr::Field {
-                    object,
-                    field,
-                    is_null_safe: true,
-                    ..
-                } if field.name == "$1" || field.name == "slot" => {
-                    let nullable = matches!(object.as_ref(), Expr::Ident(identifier) if identifier.name == "maybe");
+                Expr::Field(field)
+                    if field.is_null_safe() && matches!(field.field().name(), "$1" | "slot") =>
+                {
+                    let nullable = matches!(field.object(), Expr::Ident(identifier) if identifier.name() == "maybe");
                     assert_value(
                         state,
                         &state.infer_access_receiver(node, "", false),
@@ -478,17 +483,13 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
                     assert_value(state, &state.infer(node), true);
                     self.record_fields += 1;
                 }
-                Expr::Field {
-                    field,
-                    is_null_safe: true,
-                    ..
-                } if field.name == "item" || field.name == "maybe" => {
+                Expr::Field(field)
+                    if field.is_null_safe() && matches!(field.field().name(), "item" | "maybe") =>
+                {
                     assert_value(state, &state.infer(node), true);
                     self.reads += 1;
                 }
-                Expr::Index {
-                    is_null_safe: true, ..
-                } => {
+                Expr::Index(index) if index.is_null_safe() => {
                     assert_value(state, &state.infer(node), true);
                     self.reads += 1;
                 }
@@ -499,8 +500,8 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
     let mut observed = Observed::default();
     visit_program(
         &mut observed,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
     assert_eq!(observed.calls, 4);
     assert_eq!(observed.assignments, 6);
@@ -517,28 +518,28 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
 
     let source = "// @dart=2.19\nvoid f(int x) { switch (x) { case 7: break; } }";
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax).with_identities(&identities);
+    let context = AnalyzeContext::new(&path, &config, &parsed).with_identities(&identities);
     #[derive(Default)]
     struct CaseOperand(usize);
-    impl SemanticRuleVisitor for CaseOperand {
-        fn visit_expr(&mut self, node: &Expr, _state: &SemanticState<'_>) {
-            if matches!(node, Expr::IntLit { value, .. } if value == "7") {
+    impl<'a> SemanticRuleVisitor<'a> for CaseOperand {
+        fn visit_expr(&mut self, node: Expr<'a>, _state: &SemanticState<'a>) {
+            if matches!(node, Expr::IntLit(literal) if literal.value() == "7") {
                 self.0 += 1;
             }
         }
@@ -546,8 +547,8 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
     let mut operand = CaseOperand::default();
     visit_program(
         &mut operand,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
     assert_eq!(operand.0, 1);
 }
@@ -576,17 +577,17 @@ extension type E(int? y) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -595,17 +596,20 @@ extension type E(int? y) {
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
@@ -616,11 +620,11 @@ extension type E(int? y) {
         promoted_field: bool,
         body_field_types: Vec<ResolvedType>,
     }
-    impl SemanticRuleVisitor for Observed {
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
             if let Expr::Ident(identifier) = node {
                 let ty = state.infer(node);
-                match identifier.name.as_str() {
+                match identifier.name() {
                     "Future" => self.future_types.push(ty),
                     "f" => self.member_types.push(ty),
                     "y" => self.body_field_types.push(ty),
@@ -635,8 +639,8 @@ extension type E(int? y) {
     let mut observed = Observed::default();
     visit_program(
         &mut observed,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
     assert_eq!(observed.future_types.len(), 5);
     for (ty, name) in observed
@@ -677,17 +681,17 @@ void run(Numeric number) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -696,22 +700,25 @@ void run(Numeric number) {
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
     let diagnostics =
-        crate::lint::style::prefer_int_literals::PreferIntLiterals.analyze(&program, &context);
+        crate::lint::style::prefer_int_literals::PreferIntLiterals.analyze(program, &context);
     let reported: Vec<_> = diagnostics
         .iter()
         .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -745,17 +752,17 @@ void assertedCascade(C value) {
 }
 "#;
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
@@ -764,17 +771,20 @@ void assertedCascade(C value) {
         [(
             path.as_path(),
             falcon_analyze::LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let signatures =
-        SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
@@ -784,17 +794,17 @@ void assertedCascade(C value) {
         elements: Vec<ResolvedType>,
         cascade_nullable: Vec<bool>,
     }
-    impl SemanticRuleVisitor for Observed {
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-            if let Expr::Field { object, field, .. } = node
-                && field.name == "length"
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::Field(field) = node
+                && field.field().name() == "length"
             {
-                self.promoted = state.infer(object).interface("dart:core", "String");
+                self.promoted = state.infer(field.object()).interface("dart:core", "String");
             }
-            if let Expr::List { type_arg, .. } = node {
+            if let Expr::List(list) = node {
                 // Observe the schema directly without requiring SDK
                 // List-to-Iterable inheritance in this scope-only test.
-                let ty = if type_arg.is_some() {
+                let ty = if list.type_arg().is_some() {
                     state.infer_with_context(node, state.expected())
                 } else {
                     state.expected().cloned().unwrap_or(ResolvedType::Unknown)
@@ -805,10 +815,10 @@ void assertedCascade(C value) {
         }
         fn visit_cascade_operation(
             &mut self,
-            _operation: &CascadeOp,
+            _operation: CascadeOp<'a>,
             receiver: &ResolvedType,
             _section: Span,
-            _state: &SemanticState<'_>,
+            _state: &SemanticState<'a>,
         ) {
             self.cascade_nullable.push(receiver.nullable());
         }
@@ -816,8 +826,8 @@ void assertedCascade(C value) {
     let mut observed = Observed::default();
     visit_program(
         &mut observed,
-        &program,
-        SemanticState::new(&program, &context).unwrap(),
+        program,
+        SemanticState::new(program, &context).unwrap(),
     );
     assert!(observed.promoted);
     assert_eq!(
@@ -829,10 +839,7 @@ void assertedCascade(C value) {
 
 #[test]
 fn finds_nested_returns_without_crossing_function_boundaries() {
-    let falcon_dart_parser::ParseResult {
-        program, errors, ..
-    } = parse(
-        "void f() {
+    let source = "void f() {
             if (true) { return 1; } else { return 2; }
             for (;;) { return 3; }
             while (true) { return 4; }
@@ -843,51 +850,56 @@ fn finds_nested_returns_without_crossing_function_boundaries() {
             void local() { return 12; }
             () { return 13; };
             return () { return 14; };
-        }",
-    );
+        }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
-    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
+    let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
         panic!()
     };
-    let returns = returned_expressions(function.body.as_ref().unwrap());
+    let returns = returned_expressions(function.body().unwrap());
     assert_eq!(returns.len(), 12);
     for (expression, expected) in returns
         .iter()
         .zip(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"])
     {
-        assert!(matches!(expression, Expr::IntLit { value, .. } if value == expected));
+        assert!(matches!(expression, Expr::IntLit(literal) if literal.value() == expected));
     }
-    assert!(matches!(returns[11], Expr::FuncExpr { .. }));
+    assert!(matches!(returns[11], Expr::FuncExpr(_)));
 }
 
 #[test]
 fn returns_borrowed_block_and_arrow_expressions() {
-    let falcon_dart_parser::ParseResult {
-        program, errors, ..
-    } = parse("int block() { return 1; } int arrow() => 2;");
+    let source = "int block() { return 1; } int arrow() => 2;";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
-    for declaration in &program.declarations {
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
+    for declaration in program.declarations() {
         let TopLevelDecl::Function(function) = declaration else {
             panic!()
         };
-        let body = function.body.as_ref().unwrap();
+        let body = function.body().unwrap();
         let expression = match body {
             FunctionBody::Block(block) => {
-                let Stmt::Return(ReturnStmt {
-                    value: Some(expression),
-                    ..
-                }) = &block.stmts[0]
-                else {
+                let Stmt::Return(statement) = block.stmts().next().unwrap() else {
                     panic!()
                 };
-                expression
+                statement.value().unwrap()
             }
-            FunctionBody::Arrow(expression, _) => expression.as_ref(),
-            FunctionBody::Native(_, _) => panic!(),
+            FunctionBody::Arrow(arrow) => arrow.expr(),
+            FunctionBody::Native(_) => panic!(),
         };
         let returns = returned_expressions(body);
         assert_eq!(returns.len(), 1);
-        assert!(std::ptr::eq(returns[0], expression));
+        assert_eq!(returns[0].syntax().id(), expression.syntax().id());
     }
 }
 
@@ -899,7 +911,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
     use falcon_analyze::{IdentityIndex, IdentitySource, Rule, RuleRegistry};
     use falcon_config::FalconConfig;
     use falcon_diagnostics::{Diagnostic, Severity};
-    use falcon_syntax::Program;
+    use falcon_syntax::cst::Program;
 
     type Events = Sender<(&'static str, usize)>;
 
@@ -916,8 +928,8 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
         program_ended: bool,
     }
 
-    impl SemanticRuleVisitor for Collector<'_> {
-        fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    impl<'a> SemanticRuleVisitor<'a> for Collector<'_> {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
             assert!(!self.program_ended, "expressions precede the end hook");
             self.events
                 .send((self.name, std::ptr::from_ref(state) as usize))
@@ -954,7 +966,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
     impl Rule for Observe {
         fn prepare<'a>(
             &self,
-            _program: &'a Program,
+            _program: Program<'a>,
             context: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
             RulePreparation::Semantic(Box::new(Collector {
@@ -971,17 +983,21 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
     let path = PathBuf::from("/project/lib/main.dart");
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path: &path,
-            program: &parsed.program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
     let config = FalconConfig::default();
-    let context =
-        AnalyzeContext::new(&path, source, &config, &parsed.syntax).with_identities(&identities);
+    let context = AnalyzeContext::new(&path, &config, &parsed).with_identities(&identities);
     let (events, received) = channel();
     let mut registry = RuleRegistry::new();
     for name in ["shared-first", "shared-second"] {
@@ -998,7 +1014,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
         name: "shared-disabled",
         events: events.clone(),
     };
-    let diagnostics = registry.run_all(&parsed.program, &context);
+    let diagnostics = registry.run_all(program, &context);
     let observed: Vec<_> = received.try_iter().collect();
     assert!(!observed.is_empty());
     assert_eq!(observed.len() % 2, 0);
@@ -1013,7 +1029,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
             name,
             events: events.clone(),
         }
-        .analyze(&parsed.program, &context);
+        .analyze(program, &context);
         let shared: Vec<_> = diagnostics
             .iter()
             .filter(|diag| diag.rule == name)
@@ -1036,12 +1052,12 @@ fn semantic_collectors_finish_without_identities() {
     use falcon_analyze::{Rule, RuleRegistry};
     use falcon_config::FalconConfig;
     use falcon_diagnostics::{Diagnostic, Severity};
-    use falcon_syntax::Program;
+    use falcon_syntax::cst::Program;
 
     struct FinishOnly(Arc<AtomicUsize>);
 
-    impl SemanticRuleVisitor for FinishOnly {
-        fn visit_expr(&mut self, _: &Expr, _: &SemanticState<'_>) {
+    impl<'a> SemanticRuleVisitor<'a> for FinishOnly {
+        fn visit_expr(&mut self, _: Expr<'a>, _: &SemanticState<'a>) {
             panic!("semantic traversal requires identities");
         }
 
@@ -1062,7 +1078,7 @@ fn semantic_collectors_finish_without_identities() {
     }
 
     impl Rule for FinishOnly {
-        fn prepare<'a>(&self, _: &'a Program, _: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
+        fn prepare<'a>(&self, _: Program<'a>, _: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
             RulePreparation::Semantic(Box::new(Self(Arc::clone(&self.0))))
         }
     }
@@ -1071,17 +1087,22 @@ fn semantic_collectors_finish_without_identities() {
     let path = PathBuf::from("/project/lib/main.dart");
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &parsed.syntax);
+    let context = AnalyzeContext::new(&path, &config, &parsed);
     let finishes = Arc::new(AtomicUsize::new(0));
     let rule = FinishOnly(Arc::clone(&finishes));
-    let standalone = rule.analyze(&parsed.program, &context);
+    let standalone = rule.analyze(program, &context);
     assert_eq!(finishes.load(Ordering::Relaxed), 1);
     assert_eq!(standalone.len(), 1);
 
     let mut registry = RuleRegistry::new();
     registry.register("finish-only", Box::new(rule));
-    let shared = registry.run_all(&parsed.program, &context);
+    let shared = registry.run_all(program, &context);
     assert_eq!(finishes.load(Ordering::Relaxed), 2);
     assert_eq!(shared.len(), 1);
     assert_eq!(shared[0].rule, standalone[0].rule);
@@ -1119,18 +1140,23 @@ void f(dynamic target, Value value) {
     let path = Path::new("/project/lib/main.dart");
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path,
-            program: &parsed.program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
-    let model = SemanticModel::new(path, &identities, None);
-    let signatures = SignatureIndex::from_program(&parsed.program, &model);
+    let model = SemanticModel::new(path, &parsed, &identities, None);
+    let signatures = SignatureIndex::from_program(program, &model);
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config, &parsed.syntax)
+    let context = AnalyzeContext::new(path, &config, &parsed)
         .with_identities(&identities)
         .with_signatures(&signatures);
 
@@ -1146,13 +1172,13 @@ void f(dynamic target, Value value) {
         let mut expected: Vec<_> = registry
             .rules()
             .iter()
-            .flat_map(|(_, rule)| rule.analyze(&parsed.program, &context))
+            .flat_map(|(_, rule)| rule.analyze(program, &context))
             .collect();
         let suppressions = FileSuppressions::parse(
             source,
             &path.to_string_lossy(),
             crate::meta::suppression_lookup,
-            &parsed.syntax,
+            &parsed.tree,
         );
         assert!(suppressions.diagnostics().is_empty());
         expected.retain(|diagnostic| {
@@ -1172,7 +1198,7 @@ void f(dynamic target, Value value) {
             left.rule == right.rule && left.span == right.span && left.message == right.message
         });
 
-        let actual = registry.run_all(&parsed.program, &context);
+        let actual = registry.run_all(program, &context);
         for name in [
             "void-checks",
             "avoid-dynamic-calls",
@@ -1257,13 +1283,18 @@ void f() {
     let path = Path::new("/project/lib/structural.dart");
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config, &parsed.syntax);
+    let context = AnalyzeContext::new(path, &config, &parsed);
     let suppressions = FileSuppressions::parse(
         source,
         &path.to_string_lossy(),
         crate::meta::suppression_lookup,
-        &parsed.syntax,
+        &parsed.tree,
     );
     assert!(suppressions.diagnostics().is_empty());
 
@@ -1279,7 +1310,7 @@ void f() {
         let mut expected: Vec<_> = registry
             .rules()
             .iter()
-            .flat_map(|(_, rule)| rule.analyze(&parsed.program, &context))
+            .flat_map(|(_, rule)| rule.analyze(program, &context))
             .collect();
         for (name, count) in [
             ("avoid-dynamic", 3),
@@ -1313,7 +1344,7 @@ void f() {
             left.rule == right.rule && left.span == right.span && left.message == right.message
         });
 
-        let actual = registry.run_all(&parsed.program, &context);
+        let actual = registry.run_all(program, &context);
         for (name, count) in [
             ("avoid-dynamic", 2),
             ("proper-from-environment", 2),
@@ -1405,7 +1436,7 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
     use falcon_analyze::{IdentityIndex, IdentitySource, Rule, RuleRegistry};
     use falcon_config::FalconConfig;
     use falcon_diagnostics::{Diagnostic, Severity};
-    use falcon_syntax::Program;
+    use falcon_syntax::cst::Program;
 
     struct Syntax(Sender<&'static str>);
     struct Semantic(Sender<&'static str>);
@@ -1421,21 +1452,21 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
     }
 
     impl Rule for Syntax {
-        fn prepare<'a>(&self, _: &'a Program, _: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
+        fn prepare<'a>(&self, _: Program<'a>, _: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
             self.0.send("syntax").unwrap();
             RulePreparation::Diagnostics(vec![diagnostic("syntax", 0)])
         }
     }
 
     impl Rule for Semantic {
-        fn prepare<'a>(&self, _: &'a Program, _: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
+        fn prepare<'a>(&self, _: Program<'a>, _: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
             self.0.send("prepare").unwrap();
             RulePreparation::Semantic(Box::new(Self(self.0.clone())))
         }
     }
 
-    impl SemanticRuleVisitor for Semantic {
-        fn visit_expr(&mut self, _: &Expr, _: &SemanticState<'_>) {
+    impl<'a> SemanticRuleVisitor<'a> for Semantic {
+        fn visit_expr(&mut self, _: Expr<'a>, _: &SemanticState<'a>) {
             self.0.send("expression").unwrap();
         }
 
@@ -1453,17 +1484,21 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
     let path = Path::new("/project/lib/main.dart");
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path,
-            program: &parsed.program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
     let config = FalconConfig::default();
-    let context =
-        AnalyzeContext::new(path, source, &config, &parsed.syntax).with_identities(&identities);
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
 
     for shared in [false, true] {
         let (events, received) = channel();
@@ -1473,10 +1508,10 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
             let mut registry = RuleRegistry::new();
             registry.register("syntax-rule", Box::new(syntax));
             registry.register("semantic-rule", Box::new(semantic));
-            registry.run_all(&parsed.program, &context)
+            registry.run_all(program, &context)
         } else {
-            let mut diagnostics = syntax.analyze(&parsed.program, &context);
-            diagnostics.extend(semantic.analyze(&parsed.program, &context));
+            let mut diagnostics = syntax.analyze(program, &context);
+            diagnostics.extend(semantic.analyze(program, &context));
             diagnostics
         };
         assert_eq!(

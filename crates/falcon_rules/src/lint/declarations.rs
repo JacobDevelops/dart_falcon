@@ -5,38 +5,42 @@
 use std::collections::HashSet;
 
 use falcon_analyze::AnalyzeContext;
-use falcon_syntax::ast::{
-    Annotation, ClassMember, Expr, OperatorDecl, Program, Span, TopLevelDecl,
+use falcon_syntax::cst::{
+    Annotation, AstChildren, ClassMember, Expr, NodeId, OperatorDecl, Program, Span, SyntaxTree,
+    TopLevelDecl,
 };
 
 /// Comments after metadata take precedence over comments before annotations.
-pub(crate) fn documented_node_span(
+pub(crate) fn documented_node_span<'a>(
     span: Span,
-    annotations: &[Annotation],
+    annotations: AstChildren<'a, Annotation<'a>>,
     ctx: &AnalyzeContext,
 ) -> Span {
-    let syntax = ctx.syntax.syntax_for_span(span);
     let documentation_before = |start: usize| {
-        let before = syntax.token_range(Span::new(start, start)).start.index();
-        let gap_start = syntax.tokens()[..before]
-            .iter()
+        let gap_start = ctx
+            .tree()
+            .tokens_in(ctx.source, Span::new(0, start))
             .rev()
             .take_while(|token| token.is_trivia())
             .last()
             .map_or(start, |token| token.offset());
-        syntax.documentation_start(Span::new(gap_start, start), ctx.source)
+        ctx.tree()
+            .documentation_start(Span::new(gap_start, start), ctx.source)
     };
-    let body_start = annotations.last().map_or(span.start, |annotation| {
-        syntax
-            .tokens_in(Span::new(annotation.span.end, span.end))
-            .find(|token| !token.is_trivia())
-            .map_or(span.start, |token| token.offset())
-    });
+    let body_start = annotations
+        .clone()
+        .next_back()
+        .map_or(span.start, |annotation| {
+            ctx.tree()
+                .tokens_in(ctx.source, Span::new(annotation.span().end, span.end))
+                .find(|token| !token.is_trivia())
+                .map_or(span.start, |token| token.offset())
+        });
     let documentation = documentation_before(body_start).or_else(|| {
         annotations
-            .iter()
+            .clone()
             .rev()
-            .find_map(|annotation| documentation_before(annotation.span.start))
+            .find_map(|annotation| documentation_before(annotation.span().start))
     });
     Span::new(
         documentation.map_or(span.start, |start| start.min(span.start)),
@@ -45,20 +49,23 @@ pub(crate) fn documented_node_span(
 }
 
 /// Whether metadata has the given terminal name, for syntax-only consumers.
-pub(crate) fn annotation(annotations: &[Annotation], name: &str) -> bool {
-    annotations
-        .iter()
-        .any(|annotation| annotation.name.last().is_some_and(|part| part.name == name))
+pub(crate) fn annotation<'a>(annotations: AstChildren<'a, Annotation<'a>>, name: &str) -> bool {
+    annotations.into_iter().any(|annotation| {
+        annotation
+            .name()
+            .next_back()
+            .is_some_and(|part| part.name() == name)
+    })
 }
 
 /// Resolve metadata rather than accepting an annotation from another library.
-pub(crate) fn has_meta_annotation(
-    annotations: &[Annotation],
+pub(crate) fn has_meta_annotation<'a>(
+    annotations: AstChildren<'a, Annotation<'a>>,
     name: &str,
     model: &falcon_analyze::SemanticModel<'_>,
 ) -> bool {
-    annotations.iter().any(|annotation| {
-        let Some(qualified) = falcon_analyze::QualifiedName::from_identifiers(&annotation.name)
+    annotations.into_iter().any(|annotation| {
+        let Some(qualified) = falcon_analyze::QualifiedName::from_identifiers(annotation.name())
         else {
             return false;
         };
@@ -90,65 +97,67 @@ pub(crate) fn in_test_directory(path: &std::path::Path) -> bool {
         })
 }
 
-pub(crate) fn members_of(declaration: &TopLevelDecl) -> Option<&[ClassMember]> {
+pub(crate) fn members_of<'a>(
+    declaration: TopLevelDecl<'a>,
+) -> Option<AstChildren<'a, ClassMember<'a>>> {
     match declaration {
-        TopLevelDecl::Class(node) => Some(&node.members),
-        TopLevelDecl::Mixin(node) => Some(&node.members),
-        TopLevelDecl::MixinClass(node) => Some(&node.members),
-        TopLevelDecl::Enum(node) => Some(&node.members),
-        TopLevelDecl::Extension(node) => Some(&node.members),
-        TopLevelDecl::ExtensionType(node) => Some(&node.members),
+        TopLevelDecl::Class(node) => Some(node.members()),
+        TopLevelDecl::Mixin(node) => Some(node.members()),
+        TopLevelDecl::MixinClass(node) => Some(node.members()),
+        TopLevelDecl::Enum(node) => Some(node.members()),
+        TopLevelDecl::Extension(node) => Some(node.members()),
+        TopLevelDecl::ExtensionType(node) => Some(node.members()),
         _ => None,
     }
 }
 
 /// Top-level variable and field initializers, in declaration/declarator order.
 /// Does not descend into expressions, local declarations, or constructor initializers.
-pub(crate) fn declaration_initializers(program: &Program) -> impl Iterator<Item = &Expr> {
+pub(crate) fn declaration_initializers<'a>(program: Program<'a>) -> impl Iterator<Item = Expr<'a>> {
     program
-        .declarations
-        .iter()
+        .declarations()
         .flat_map(|declaration| {
             let variables = match declaration {
-                TopLevelDecl::Variable(variable) => variable.declarators.as_slice(),
-                _ => &[],
+                TopLevelDecl::Variable(variable) => Some(variable.declarators()),
+                _ => None,
             };
-            variables.iter().chain(
+            variables.into_iter().flatten().chain(
                 members_of(declaration)
-                    .unwrap_or_default()
-                    .iter()
+                    .into_iter()
+                    .flatten()
                     .filter_map(|member| match member {
-                        ClassMember::Field(field) => Some(&field.declarators),
+                        ClassMember::Field(field) => Some(field.declarators()),
                         _ => None,
                     })
                     .flatten(),
             )
         })
-        .filter_map(|declarator| declarator.initializer.as_ref())
+        .filter_map(|declarator| declarator.initializer())
 }
 
 /// Names of the fields, methods, getters, and setters `members` declare: the
 /// names that shadow library declarations inside the declaration's body.
-pub(crate) fn member_names(members: &[ClassMember]) -> HashSet<String> {
+pub(crate) fn member_names<'a>(
+    members: impl IntoIterator<Item = ClassMember<'a>>,
+) -> HashSet<&'a str> {
     let mut names = HashSet::new();
     for member in members {
         match member {
             ClassMember::Field(field) => {
                 names.extend(
                     field
-                        .declarators
-                        .iter()
-                        .map(|declarator| declarator.name.name.clone()),
+                        .declarators()
+                        .map(|declarator| declarator.name().name()),
                 );
             }
             ClassMember::Method(method) => {
-                names.insert(method.name.name.clone());
+                names.insert(method.name().name());
             }
             ClassMember::Getter(getter) => {
-                names.insert(getter.name.name.clone());
+                names.insert(getter.name().name());
             }
             ClassMember::Setter(setter) => {
-                names.insert(setter.name.name.clone());
+                names.insert(setter.name().name());
             }
             ClassMember::Constructor(_)
             | ClassMember::PrimaryConstructorBody(_)
@@ -159,45 +168,44 @@ pub(crate) fn member_names(members: &[ClassMember]) -> HashSet<String> {
     names
 }
 
-/// Identifies a top-level declaration by its address in the visited program,
-/// for side tables keyed by declaration.
-pub(crate) fn declaration_key(declaration: &TopLevelDecl) -> usize {
-    std::ptr::from_ref(declaration).addr()
+/// Identifies a top-level declaration by its syntax node for side tables.
+pub(crate) fn declaration_key(declaration: TopLevelDecl<'_>) -> NodeId {
+    declaration.syntax().id()
 }
 
 /// The span of the operator token (`==`, `[]=`) after the `operator` keyword
 /// of `operator`; the declaration's span when the keyword is not found.
-pub(crate) fn operator_token_span(
-    operator: &OperatorDecl,
-    syntax: &falcon_syntax::SyntaxStore,
-) -> Span {
+pub(crate) fn operator_token_span(operator: OperatorDecl<'_>) -> Span {
     let header_start = operator
-        .annotations
+        .annotations()
         .last()
-        .map_or(operator.span.start, |annotation| annotation.span.end);
-    let mut tokens = syntax.tokens_in(Span::new(header_start, operator.params.span.start));
+        .map_or(operator.span().start, |annotation| annotation.span().end);
+    let syntax = operator.syntax();
+    let mut tokens = syntax.tree().tokens_in(
+        syntax.source(),
+        Span::new(header_start, operator.params().span().start),
+    );
     tokens
-        .find(|token| token.kind == falcon_syntax::TokenKind::Operator)
+        .find(|token| token.kind() == falcon_syntax::TokenKind::Operator)
         .and_then(|_| tokens.find(|token| !token.is_trivia()))
-        .map_or(operator.span, |token| {
-            Span::new(token.offset(), token.offset() + operator.op.len())
+        .map_or(operator.span(), |token| {
+            Span::new(token.offset(), token.offset() + operator.op().len())
         })
 }
 
 /// Offset of a declaration's first token after its annotations (the
 /// analyzer's `firstTokenAfterCommentAndMetadata`), skipping whitespace and
 /// comments; `span` is the declaration's span.
-pub(crate) fn first_token_after_annotations(
-    annotations: &[Annotation],
+pub(crate) fn first_token_after_annotations<'a>(
+    annotations: AstChildren<'a, Annotation<'a>>,
     span: Span,
-    syntax: &falcon_syntax::SyntaxStore,
+    tree: &SyntaxTree,
+    source: &str,
 ) -> usize {
     let offset = annotations
-        .iter()
-        .map(|annotation| annotation.span.end)
+        .map(|annotation| annotation.span().end)
         .fold(span.start, usize::max);
-    syntax
-        .tokens_in(Span::new(offset, span.end))
+    tree.tokens_in(source, Span::new(offset, span.end))
         .find(|token| !token.is_trivia())
         .map_or(span.end, |token| token.offset())
 }
@@ -211,10 +219,7 @@ mod tests {
 
     #[test]
     fn extracts_members_from_every_member_bearing_declaration() {
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(
-            "class C { void f() {} }
+        let source = "class C { void f() {} }
              mixin M { void f() {} }
              mixin class MC { void f() {} }
              enum E { value; void f() {} }
@@ -222,30 +227,50 @@ mod tests {
              extension type ET(int value) { void f() {} }
              void top() {}
              final global = 0;
-             typedef Alias = int;",
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(program.declarations.len(), 9);
-        for declaration in &program.declarations[..6] {
+             typedef Alias = int;";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(source);
+        assert_eq!(program.declarations().len(), 9);
+        for declaration in program.declarations().take(6) {
             let members = members_of(declaration).expect("member-bearing declaration");
             assert_eq!(members.len(), 1);
-            assert!(matches!(&members[0], ClassMember::Method(method) if method.name.name == "f"));
+            assert!(
+                matches!(members.first(), Some(ClassMember::Method(method)) if method.name().name() == "f")
+            );
         }
-        for declaration in &program.declarations[6..] {
+        for declaration in program.declarations().skip(6) {
             assert!(members_of(declaration).is_none());
         }
     }
 
     #[test]
     fn preserves_empty_member_lists() {
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse("class C {} enum E { value } extension on int {}");
-        assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(program.declarations.len(), 3);
-        for declaration in &program.declarations {
-            assert_eq!(members_of(declaration).map(<[ClassMember]>::len), Some(0));
+        let source = "class C {} enum E { value } extension on int {}";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(source);
+        assert_eq!(program.declarations().len(), 3);
+        for declaration in program.declarations() {
+            assert_eq!(
+                members_of(declaration).map(|members| members.len()),
+                Some(0)
+            );
         }
+    }
+
+    #[test]
+    fn declaration_keys_follow_syntax_node_identity() {
+        let source = "void first() {} void second() {}";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(source);
+        let first = program.declarations().next().unwrap();
+        let first_again = program.declarations().next().unwrap();
+        let second = program.declarations().nth(1).unwrap();
+        assert_eq!(declaration_key(first), first.syntax().id());
+        assert_eq!(declaration_key(first), declaration_key(first_again));
+        assert_ne!(declaration_key(first), declaration_key(second));
     }
     #[test]
     fn widened_container_dispatch_runs_each_rule() {
@@ -411,16 +436,14 @@ mod tests {
                 };
                 let variants = if kind == "Enum" { "value;" } else { "" };
                 let source = format!("{header} {{ {variants} {member_source} }}");
-                let falcon_dart_parser::ParseResult {
-                    program,
-                    errors,
-                    syntax,
-                    ..
-                } = parse(&source);
+                let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(&source);
                 assert!(errors.is_empty(), "{name}/{kind}: {errors:?}");
-                let ctx =
-                    AnalyzeContext::new(Path::new("containers.dart"), &source, &config, &syntax);
-                let diagnostics = rule.analyze(&program, &ctx);
+                let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+                    source: source.into_boxed_str(),
+                    tree,
+                });
+                let ctx = AnalyzeContext::new(Path::new("containers.dart"), &config, &parsed);
+                let diagnostics = rule.analyze(parsed.program(), &ctx);
                 assert_eq!(
                     diagnostics.iter().any(|diagnostic| diagnostic.rule == name),
                     name != "hash-and-equals" || matches!(kind, "Class" | "MixinClass"),

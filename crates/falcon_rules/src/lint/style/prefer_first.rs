@@ -12,7 +12,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferFirst;
@@ -20,7 +20,7 @@ pub struct PreferFirst;
 impl Rule for PreferFirst {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -38,17 +38,17 @@ struct Collector<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Index { index, span, .. } = node
-            && is_zero(index)
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Index(index) = node
+            && is_zero(index.index())
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-first",
                 "Prefer .first over [0] to access the first element",
-                *span,
+                index.span(),
             ));
         }
         StructuralTraversal::Continue
@@ -57,6 +57,6 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 /// True for the integer literal `0`.
-fn is_zero(expr: &Expr) -> bool {
-    matches!(expr.unparenthesized(), Expr::IntLit { value, .. } if value == "0")
+fn is_zero(expr: Expr<'_>) -> bool {
+    matches!(expr.unparenthesized(), Expr::IntLit(literal) if literal.value() == "0")
 }

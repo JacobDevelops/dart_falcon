@@ -1,7 +1,7 @@
 //! Flags an `is` check proven impossible by canonical resolved types.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, Truth};
-use falcon_syntax::ast::Program;
+use falcon_syntax::cst::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperation, TypeOperationKind, TypeOperations};
 use falcon_analyze::semantic_scope::SemanticState;
@@ -12,7 +12,7 @@ pub struct AvoidUnrelatedTypeAssertions;
 impl Rule for AvoidUnrelatedTypeAssertions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(TypeOperations {

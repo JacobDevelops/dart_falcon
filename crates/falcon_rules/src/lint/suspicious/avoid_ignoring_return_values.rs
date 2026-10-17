@@ -2,7 +2,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -12,7 +12,7 @@ pub struct AvoidIgnoringReturnValues;
 impl Rule for AvoidIgnoringReturnValues {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -27,26 +27,21 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let Stmt::Expr(statement) = node else {
             return;
         };
-        let Expr::Call {
-            callee,
-            type_args,
-            args,
-            span,
-            ..
-        } = statement.expr.unparenthesized()
-        else {
+        let Expr::Call(call) = statement.expr().unparenthesized() else {
             return;
         };
-        let Some(return_type) = state.call_return_type(callee, type_args, args, None) else {
+        let Some(return_type) =
+            state.call_return_type(call.callee(), call.type_args(), call.args(), None)
+        else {
             return;
         };
         if matches!(return_type, ResolvedType::Unknown | ResolvedType::Dynamic)
@@ -57,7 +52,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         self.diagnostics.push(self.ctx.diagnostic(
             "avoid-ignoring-return-values",
             "The return value is not being used",
-            *span,
+            call.span(),
         ));
     }
 }

@@ -2,12 +2,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use falcon_dart_parser::parser::parse;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 struct Recorder {
-    addresses: BTreeSet<(&'static str, usize)>,
+    addresses: BTreeSet<(&'static str, NodeId, usize, usize)>,
+    current_node: Option<(NodeId, Span)>,
     counts: BTreeMap<&'static str, usize>,
     names: Vec<String>,
     ints: Vec<String>,
@@ -15,10 +15,9 @@ struct Recorder {
 }
 
 impl Recorder {
-    fn record<T>(&mut self, kind: &'static str, node: &T) {
+    fn record(&mut self, kind: &'static str, id: NodeId, span: Span) {
         assert!(
-            self.addresses
-                .insert((kind, std::ptr::from_ref(node) as usize)),
+            self.addresses.insert((kind, id, span.start, span.end)),
             "{kind} source node visited more than once"
         );
         *self.counts.entry(kind).or_default() += 1;
@@ -27,35 +26,55 @@ impl Recorder {
 
 macro_rules! recording_visitor {
     ($($ty:ident => $hook:ident $(/ $walk:ident)?),* $(,)?) => {
-        impl Visitor for Recorder {
-            $(fn $hook(&mut self, node: &$ty) {
-                self.record(stringify!($ty), node);
+        impl<'a> Visitor<'a> for Recorder {
+            $(fn $hook(&mut self, node: $ty<'a>) {
+                self.record(stringify!($ty), node.syntax().id(), node.span());
+                let previous = self.current_node.replace((node.syntax().id(), node.span()));
                 $($walk(self, node);)?
+                self.current_node = previous;
             })*
 
-            fn visit_identifier(&mut self, node: &Identifier) {
-                self.record("Identifier", node);
-                self.names.push(node.name.clone());
+            fn visit_identifier(&mut self, node: Identifier<'a>) {
+                self.record("Identifier", node.syntax().id(), node.span());
+                self.names.push(node.name().to_owned());
             }
 
-            fn visit_name(&mut self, node: &Identifier) {
+            fn visit_name(&mut self, node: Identifier<'a>) {
                 self.visit_identifier(node);
             }
 
-            fn visit_expr(&mut self, node: &Expr) {
-                self.record("Expr", node);
-                if let Expr::IntLit { value, .. } = node {
-                    self.ints.push(value.clone());
+            fn visit_expr(&mut self, node: Expr<'a>) {
+                self.record("Expr", node.syntax().id(), node.span());
+                if let Expr::IntLit(value) = node {
+                    self.ints.push(value.value().to_owned());
                 }
                 walk_expr(self, node);
             }
 
-            fn visit_cascade_op(&mut self, node: &CascadeOp) {
-                self.record("CascadeOp", node);
-                if let CascadeOp::NullAssert { .. } = node {
+            fn visit_cascade_op(&mut self, node: CascadeOp<'a>) {
+                self.record("CascadeOp", node.syntax().id(), node.span());
+                if let CascadeOp::NullAssert(_) = node {
                     self.null_asserts += 1;
                 }
                 walk_cascade_op(self, node);
+            }
+
+            fn visit_function_kind(&mut self, node: FunctionKind<'a>) {
+                let (id, span) = self.current_node.expect("function kind owner");
+                self.record("FunctionKind", id, span);
+                walk_function_kind(self, node);
+            }
+
+            fn visit_literal_pattern_value(&mut self, node: LiteralPatternValue<'a>) {
+                let (id, span) = self.current_node.expect("literal pattern owner");
+                self.record("LiteralPatternValue", id, span);
+                walk_literal_pattern_value(self, node);
+            }
+
+            fn visit_const_pattern_value(&mut self, node: ConstPatternValue<'a>) {
+                let (id, span) = self.current_node.expect("constant pattern owner");
+                self.record("ConstPatternValue", id, span);
+                walk_const_pattern_value(self, node);
             }
         }
     };
@@ -95,7 +114,6 @@ recording_visitor! {
     ExtensionDecl => visit_extension_decl / walk_extension_decl,
     ExtensionTypeDecl => visit_extension_type / walk_extension_type,
     FunctionDecl => visit_function_decl / walk_function_decl,
-    FunctionKind => visit_function_kind / walk_function_kind,
     TopLevelVarDecl => visit_top_level_var / walk_top_level_var,
     TypeAliasDecl => visit_type_alias_decl / walk_type_alias_decl,
     DartType => visit_dart_type / walk_dart_type,
@@ -145,9 +163,7 @@ recording_visitor! {
     SwitchExprArm => visit_switch_expr_arm / walk_switch_expr_arm,
     Pattern => visit_pattern / walk_pattern,
     LiteralPattern => visit_literal_pattern / walk_literal_pattern,
-    LiteralPatternValue => visit_literal_pattern_value / walk_literal_pattern_value,
     ConstPattern => visit_const_pattern / walk_const_pattern,
-    ConstPatternValue => visit_const_pattern_value / walk_const_pattern_value,
     ListPattern => visit_list_pattern / walk_list_pattern,
     ListPatternElement => visit_list_pattern_element / walk_list_pattern_element,
     RecordPattern => visit_record_pattern / walk_record_pattern,
@@ -161,8 +177,7 @@ recording_visitor! {
 
 #[test]
 fn representative_program_walks_source_children_exactly_once() {
-    let parsed = parse(
-        r#"
+    let source = r#"
         library sample;
         import 'a.dart' as prefix show Visible;
         typedef Callback = int Function(int argument);
@@ -182,11 +197,11 @@ fn representative_program_walks_source_children_exactly_once() {
             }
           }
         }
-    "#,
-    );
+    "#;
+    let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut recorder = Recorder::default();
-    recorder.visit_program(&parsed.program);
+    recorder.visit_program(parsed.tree.program(source));
 
     // The expected leaf multiset is independent of the walkers. Missing edges
     // lose a name or sentinel; duplicate structural visits fail in record().
@@ -264,10 +279,11 @@ fn representative_program_walks_source_children_exactly_once() {
 
 #[test]
 fn recovery_nodes_and_retained_declarations_are_walked() {
-    let parsed = parse("} void retained() {}");
+    let source = "} void retained() {}";
+    let parsed = parse(source);
     assert!(!parsed.errors.is_empty());
     let mut recorder = Recorder::default();
-    recorder.visit_program(&parsed.program);
+    recorder.visit_program(parsed.tree.program(source));
     assert!(recorder.counts["ErrorNode"] > 0);
     assert_eq!(recorder.counts["FunctionDecl"], 1);
     assert_eq!(recorder.names, ["retained"]);
@@ -275,11 +291,11 @@ fn recovery_nodes_and_retained_declarations_are_walked() {
 
 #[test]
 fn legacy_typedef_walks_written_parameters_not_synthesized_copies() {
-    let parsed =
-        parse("typedef int Legacy<T>(T value, {String? label}); typedef Untyped(int value);");
+    let source = "typedef int Legacy<T>(T value, {String? label}); typedef Untyped(int value);";
+    let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut recorder = Recorder::default();
-    recorder.visit_program(&parsed.program);
+    recorder.visit_program(parsed.tree.program(source));
     let mut expected: Vec<_> = "Legacy T int T value String label Untyped int value"
         .split_whitespace()
         .map(str::to_owned)

@@ -16,8 +16,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct OneMemberAbstracts;
@@ -25,7 +24,7 @@ pub struct OneMemberAbstracts;
 impl Rule for OneMemberAbstracts {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -41,28 +40,28 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
         let candidate = match declaration {
             TopLevelDecl::Class(class)
-                if class.modifiers.is_abstract
-                    && class.extends.is_none()
-                    && class.with_clause.is_empty()
-                    && class.implements.is_empty() =>
+                if class.modifiers().is_abstract
+                    && class.extends().is_none()
+                    && class.with_clause().is_empty()
+                    && class.implements().is_empty() =>
             {
-                Some((&class.name, class.members.as_slice()))
+                Some((class.name(), class.members()))
             }
             TopLevelDecl::MixinClass(class)
-                if class.is_abstract
-                    && class.extends.is_none()
-                    && class.with_clause.is_empty()
-                    && class.implements.is_empty() =>
+                if class.is_abstract()
+                    && class.extends().is_none()
+                    && class.with_clause().is_empty()
+                    && class.implements().is_empty() =>
             {
-                Some((&class.name, class.members.as_slice()))
+                Some((class.name(), class.members()))
             }
             _ => None,
         };
@@ -74,7 +73,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                 format!(
                     "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
                 ),
-                name.span,
+                name.span(),
             ));
         }
         StructuralTraversal::SkipChildren
@@ -84,13 +83,13 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 /// The name of the class's only method when it is abstract and the class has
 /// no fields or accessors; operators count as methods, constructors do not.
-fn single_abstract_method(members: &[ClassMember]) -> Option<&str> {
+fn single_abstract_method<'a>(members: AstChildren<'a, ClassMember<'a>>) -> Option<&'a str> {
     let mut method = None;
     for member in members {
         let (name, abstract_body) = match member {
             ClassMember::Constructor(_) | ClassMember::PrimaryConstructorBody(_) => continue,
-            ClassMember::Method(m) => (m.name.name.as_str(), m.body.is_none() && !m.is_external),
-            ClassMember::Operator(o) => (o.op.as_str(), o.body.is_none() && !o.is_external),
+            ClassMember::Method(m) => (m.name().name(), m.body().is_none() && !m.is_external()),
+            ClassMember::Operator(o) => (o.op(), o.body().is_none() && !o.is_external()),
             ClassMember::Field(_)
             | ClassMember::Getter(_)
             | ClassMember::Setter(_)

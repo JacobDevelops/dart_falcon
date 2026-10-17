@@ -23,8 +23,8 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::bound_names;
+use falcon_syntax::cst::visit::bound_names;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferCorrectIdentifierLength;
@@ -56,7 +56,7 @@ fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
 impl Rule for PreferCorrectIdentifierLength {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Names {
@@ -78,13 +78,13 @@ fn is_invalid(name: &str, cfg: &IdentCfg) -> bool {
 }
 
 fn check_ident(
-    ident: &Identifier,
+    ident: Identifier<'_>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     cfg: &IdentCfg,
 ) {
-    if is_invalid(&ident.name, cfg) {
-        diags.push(make_diag(ctx, &ident.span, &ident.name, cfg));
+    if is_invalid(ident.name(), cfg) {
+        diags.push(make_diag(ctx, &ident.span(), ident.name(), cfg));
     }
 }
 
@@ -95,58 +95,58 @@ struct Names<'a, 'ctx> {
 }
 
 impl Names<'_, '_> {
-    fn check(&mut self, ident: &Identifier) {
+    fn check(&mut self, ident: Identifier<'_>) {
         check_ident(ident, &mut self.diags, self.ctx, &self.cfg);
     }
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Names<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Names<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(variable) = node {
-            for declarator in &variable.declarators {
-                self.check(&declarator.name);
+            for declarator in variable.declarators() {
+                self.check(declarator.name());
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
-        for variant in &node.variants {
-            self.check(&variant.name);
+    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) -> StructuralTraversal {
+        for variant in node.variants() {
+            self.check(variant.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        for declarator in &node.declarators {
-            self.check(&declarator.name);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        for declarator in node.declarators() {
+            self.check(declarator.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.check(&node.name);
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        self.check(node.name());
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        self.check(&node.name);
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        self.check(node.name());
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        for declarator in &node.declarators {
-            self.check(&declarator.name);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        for declarator in node.declarators() {
+            self.check(declarator.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::PatternDecl(declaration) = node {
-            for name in bound_names(&declaration.pattern) {
+            for name in bound_names(declaration.pattern()) {
                 self.check(name);
             }
         }

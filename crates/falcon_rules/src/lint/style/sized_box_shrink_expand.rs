@@ -17,7 +17,7 @@
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation, parse_int};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 
@@ -27,7 +27,7 @@ pub struct SizedBoxShrinkExpand;
 impl Rule for SizedBoxShrinkExpand {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -44,20 +44,21 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::scoped_constructor_invocation(node, state)
             && identity.matches(&self.sized_box)
-            && !matches!(node, Expr::Call { callee, .. }
-                if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "new"))
-            && !matches!(node, Expr::New { dart_type: DartType::Named(named), constructor_name, .. }
-                if constructor_name.is_some()
-                    || named.segments.last().is_some_and(|name| name.name == "new"))
+            && !matches!(node, Expr::Call(call)
+                if matches!(call.callee(), Expr::Field(field) if field.field().name() == "new"))
+            && !matches!(node, Expr::New(new)
+                if matches!(new.dart_type(), DartType::Named(named)
+                    if new.constructor_name().is_some()
+                        || named.segments().last().is_some_and(|name| name.name() == "new")))
             && let Some(replacement) = replacement(args)
         {
             self.diags.push(self.ctx.diagnostic(
@@ -72,15 +73,14 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 /// The named constructor equivalent to these arguments, if any.
-fn replacement(args: &ArgList) -> Option<&'static str> {
-    if !args.positional.is_empty() {
+fn replacement(args: ArgList<'_>) -> Option<&'static str> {
+    if !args.positional().is_empty() {
         return None;
     }
     let dimension = |name: &str| {
-        args.named
-            .iter()
-            .find(|argument| argument.name.name == name)
-            .and_then(|argument| literal_value(&argument.value))
+        args.named()
+            .find(|argument| argument.name().name() == name)
+            .and_then(|argument| literal_value(argument.value()))
     };
     match (dimension("width")?, dimension("height")?) {
         (width, height) if width == 0.0 && height == 0.0 => Some("shrink"),
@@ -91,21 +91,18 @@ fn replacement(args: &ArgList) -> Option<&'static str> {
 
 /// The value of a bare numeric literal or `double.infinity`; parenthesized
 /// values do not match the official rule.
-fn literal_value(expression: &Expr) -> Option<f64> {
+fn literal_value(expression: Expr<'_>) -> Option<f64> {
     if is_parenthesized(expression) {
         return None;
     }
     match expression {
-        Expr::IntLit { value, .. } => parse_int(value).map(|value| value as f64),
-        Expr::DoubleLit { value, .. } => value.replace('_', "").parse().ok(),
-        Expr::Field {
-            object,
-            field,
-            is_null_safe: false,
-            ..
-        } if field.name == "infinity"
-            && matches!(object.as_ref(), Expr::Ident(prefix) if prefix.name == "double")
-            && !is_parenthesized(object) =>
+        Expr::IntLit(literal) => parse_int(literal.value()).map(|value| value as f64),
+        Expr::DoubleLit(literal) => literal.value().replace('_', "").parse().ok(),
+        Expr::Field(field)
+            if !field.is_null_safe()
+                && field.field().name() == "infinity"
+                && matches!(field.object(), Expr::Ident(prefix) if prefix.name() == "double")
+                && !is_parenthesized(field.object()) =>
         {
             Some(f64::INFINITY)
         }

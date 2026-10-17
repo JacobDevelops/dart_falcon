@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferConstBorderRadius;
@@ -19,7 +19,7 @@ pub struct PreferConstBorderRadius;
 impl Rule for PreferConstBorderRadius {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -30,16 +30,16 @@ impl Rule for PreferConstBorderRadius {
     }
 }
 fn check_border_radius_only_call(
-    callee: &Expr,
-    args: &ArgList,
-    span: &Span,
+    callee: Expr<'_>,
+    args: ArgList<'_>,
+    span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if let Expr::Field { object, field, .. } = callee.unparenthesized()
-        && let Expr::Ident(ident) = object.unparenthesized()
-        && ident.name == "BorderRadius"
-        && field.name == "only"
+    if let Expr::Field(field) = callee.unparenthesized()
+        && let Expr::Ident(ident) = field.object().unparenthesized()
+        && ident.name() == "BorderRadius"
+        && field.field().name() == "only"
         && all_border_radii_equal(args)
     {
         let source = ctx.source;
@@ -47,7 +47,7 @@ fn check_border_radius_only_call(
         let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
         let report_span = if start_line == end_line {
-            *span
+            span
         } else {
             let opening_line_end = source[span.start..]
                 .find('\n')
@@ -76,15 +76,15 @@ fn check_border_radius_only_call(
     }
 }
 
-fn all_border_radii_equal(args: &ArgList) -> bool {
+fn all_border_radii_equal(args: ArgList<'_>) -> bool {
     let mut top_left = None;
     let mut top_right = None;
     let mut bottom_left = None;
     let mut bottom_right = None;
 
-    for named in &args.named {
-        let radius_value = extract_radius_value(&named.value);
-        match named.name.name.as_str() {
+    for named in args.named() {
+        let radius_value = extract_radius_value(named.value());
+        match named.name().name() {
             "topLeft" => top_left = radius_value,
             "topRight" => top_right = radius_value,
             "bottomLeft" => bottom_left = radius_value,
@@ -102,15 +102,15 @@ fn all_border_radii_equal(args: &ArgList) -> bool {
     }
 }
 
-fn extract_radius_value(expr: &Expr) -> Option<&str> {
-    if let Expr::Call { callee, args, .. } = expr.unparenthesized()
-        && let Expr::Field { object, field, .. } = callee.unparenthesized()
-        && let Expr::Ident(ident) = object.unparenthesized()
-        && ident.name == "Radius"
-        && field.name == "circular"
-        && args.positional.len() == 1
+fn extract_radius_value(expr: Expr<'_>) -> Option<&str> {
+    if let Expr::Call(call) = expr.unparenthesized()
+        && let Expr::Field(field) = call.callee().unparenthesized()
+        && let Expr::Ident(ident) = field.object().unparenthesized()
+        && ident.name() == "Radius"
+        && field.field().name() == "circular"
+        && call.args().positional().len() == 1
     {
-        return scalar_text(&args.positional[0]);
+        return scalar_text(call.args().positional().next().unwrap());
     }
     None
 }
@@ -125,17 +125,14 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Call {
-            callee, args, span, ..
-        } = node
-        {
-            check_border_radius_only_call(callee, args, span, &mut self.diags, self.ctx);
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Call(call) = node {
+            check_border_radius_only_call(call.callee(), call.args(), call.span(), &mut self.diags, self.ctx);
         }
         StructuralTraversal::Continue
     }

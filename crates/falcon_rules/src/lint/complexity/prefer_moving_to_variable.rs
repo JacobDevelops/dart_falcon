@@ -18,9 +18,9 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
-use falcon_syntax::visitor::{body_list, member_list, stmt_lists};
+use falcon_syntax::cst::visit::Visitor;
+use falcon_syntax::cst::visit::{body_list, member_list, stmt_lists};
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferMovingToVariable;
@@ -28,7 +28,7 @@ pub struct PreferMovingToVariable;
 impl Rule for PreferMovingToVariable {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -43,9 +43,9 @@ impl Rule for PreferMovingToVariable {
                     end: ctx.source.len(),
                 },
             },
-            model: ctx
-                .identities
-                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+            model: ctx.identities.map(|identities| {
+                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            }),
             lists: Vec::new(),
             scopes: Vec::new(),
             read_spans: Vec::new(),
@@ -91,12 +91,12 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn collect_list(&mut self, stmts: &[Stmt]) {
-        let (Some(first), Some(last)) = (stmts.first(), stmts.last()) else {
+    fn collect_list(&mut self, stmts: AstChildren<'_, Stmt<'_>>) {
+        let (Some(first), Some(last)) = (stmts.first(), stmts.clone().last()) else {
             return;
         };
-        let has_initializers = stmts.iter().any(|stmt| matches!(stmt, Stmt::LocalVar(local)
-            if !local.is_late && local.declarators.iter().any(|declaration| declaration.initializer.is_some())));
+        let has_initializers = stmts.clone().any(|stmt| matches!(stmt, Stmt::LocalVar(local)
+            if !local.is_late() && local.declarators().any(|declaration| declaration.initializer().is_some())));
         let mut entries = Vec::new();
         if has_initializers {
             for stmt in stmts {
@@ -104,33 +104,33 @@ impl Collector<'_> {
                     entries.push(Entry::Reset);
                     continue;
                 };
-                if local.is_late {
+                if local.is_late() {
                     entries.push(Entry::Reset);
                     continue;
                 }
-                for declaration in &local.declarators {
-                    let Some(init) = &declaration.initializer else {
+                for declaration in local.declarators() {
+                    let Some(init) = declaration.initializer() else {
                         continue;
                     };
-                    let eligible = matches!(init.unparenthesized(), Expr::Field { .. })
-                        || matches!(init.unparenthesized(), Expr::Call { callee, .. }
-                        if matches!(callee.unparenthesized(), Expr::Field { .. }));
+                    let eligible = matches!(init.unparenthesized(), Expr::Field(_))
+                        || matches!(init.unparenthesized(), Expr::Call(call)
+                        if matches!(call.callee().unparenthesized(), Expr::Field(_)));
                     let calls = eligible
                         .then(|| chain_calls(init, self.model.as_ref(), self.ctx.signatures))
                         .flatten();
                     let pure = matches!(
                         init.unparenthesized(),
-                        Expr::IntLit { .. }
-                            | Expr::DoubleLit { .. }
-                            | Expr::BoolLit { .. }
-                            | Expr::NullLit { .. }
+                        Expr::IntLit(_)
+                            | Expr::DoubleLit(_)
+                            | Expr::BoolLit(_)
+                            | Expr::NullLit(_)
                             | Expr::Ident(_)
-                            | Expr::This { .. }
-                            | Expr::Super { .. }
-                            | Expr::FuncExpr { .. }
-                    ) || matches!(init.unparenthesized(), Expr::StringLit(literal) if literal.interpolations.is_empty());
+                            | Expr::This(_)
+                            | Expr::Super(_)
+                            | Expr::FuncExpr(_)
+                    ) || matches!(init.unparenthesized(), Expr::StringLit(literal) if literal.interpolations().next().is_none());
                     entries.push(Entry::Initializer {
-                        span: *init.span(),
+                        span: init.span(),
                         calls,
                         pure,
                     });
@@ -148,14 +148,14 @@ impl Collector<'_> {
 }
 
 fn chain_calls(
-    expr: &Expr,
+    expr: Expr<'_>,
     model: Option<&falcon_analyze::SemanticModel<'_>>,
     signatures: Option<&falcon_analyze::SignatureIndex>,
 ) -> Option<bool> {
     let mut probe = ChainProbe {
         model,
         signatures,
-        next: Some(*expr.span()),
+        next: Some(expr.span()),
         valid: true,
         has_call: false,
     };
@@ -171,18 +171,19 @@ struct ChainProbe<'a, 'model> {
     has_call: bool,
 }
 
-impl Visitor for ChainProbe<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> Visitor<'a> for ChainProbe<'_, '_> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         // Follow only the receiver/callee spine, never argument expressions.
-        if self.next != Some(*node.span()) || !self.valid {
+        if self.next != Some(node.span()) || !self.valid {
             return;
         }
         self.next = match node {
-            Expr::Field { object, .. } => Some(*object.span()),
-            Expr::GenericInstantiation { target, .. } => Some(*target.span()),
-            Expr::Call { callee, .. } => {
+            Expr::Field(field) => Some(field.object().span()),
+            Expr::GenericInstantiation(instantiation) => Some(instantiation.target().span()),
+            Expr::Call(call) => {
+                let callee = call.callee();
                 self.has_call = true;
-                self.valid = matches!(callee.unparenthesized(), Expr::Field { field, .. } if field.name != "new")
+                self.valid = matches!(callee.unparenthesized(), Expr::Field(field) if field.field().name() != "new")
                     && !self.model.is_some_and(|model| {
                         falcon_analyze::resolve_call_constructor(callee, model, true).is_some_and(
                             |(identity, name)| {
@@ -193,15 +194,15 @@ impl Visitor for ChainProbe<'_, '_> {
                             },
                         )
                     });
-                Some(*callee.span())
+                Some(callee.span())
             }
-            Expr::Ident(_) | Expr::This { .. } | Expr::Super { .. } => None,
+            Expr::Ident(_) | Expr::This(_) | Expr::Super(_) => None,
             _ => {
                 self.valid = false;
                 None
             }
         };
-        falcon_syntax::visitor::walk_expr(self, node);
+        falcon_syntax::cst::visit::walk_expr(self, node);
     }
 }
 
@@ -220,7 +221,7 @@ struct LateDeclarations<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
         if self.late.has_deferred_effects {
             self.read_spans.sort_unstable_by_key(|(initializer, _)| initializer.start);
@@ -280,67 +281,67 @@ impl StructuralRuleVisitor for Collector<'_> {
         diagnostics
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         self.scopes.push(self.late.scope);
-        self.late.scope = node.span;
-        body_list(node.body.as_ref(), &mut |stmts, _| self.collect_list(stmts));
+        self.late.scope = node.span();
+        body_list(node.body(), &mut |stmts, _| self.collect_list(stmts));
         StructuralTraversal::Continue
     }
 
-    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+    fn exit_function_decl(&mut self, _node: FunctionDecl<'a>) {
         self.late.scope = self.scopes.pop().unwrap();
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         self.scopes.push(self.late.scope);
-        self.late.scope = *node.span();
+        self.late.scope = node.span();
         member_list(node, &mut |stmts, _| self.collect_list(stmts));
         StructuralTraversal::Continue
     }
 
-    fn exit_class_member(&mut self, _node: &ClassMember) {
+    fn exit_class_member(&mut self, _node: ClassMember<'a>) {
         self.late.scope = self.scopes.pop().unwrap();
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.scopes.push(self.late.scope);
         match node {
-            Stmt::LocalFunc(function) => self.late.scope = function.span,
-            Stmt::Block(block) => self.late.scope = block.span,
+            Stmt::LocalFunc(function) => self.late.scope = function.span(),
+            Stmt::Block(block) => self.late.scope = block.span(),
             _ => {}
         }
         stmt_lists(node, &mut |stmts, _| self.collect_list(stmts));
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, _node: &Stmt) {
+    fn exit_stmt(&mut self, _node: Stmt<'a>) {
         self.late.scope = self.scopes.pop().unwrap();
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.scopes.push(self.late.scope);
         self.initializers.push(self.initializer);
-        if let Expr::FuncExpr { body, .. } = node {
-            self.late.scope = *node.span();
+        if let Expr::FuncExpr(function) = node {
+            self.late.scope = node.span();
             self.initializer = None;
-            body_list(Some(body), &mut |stmts, _| self.collect_list(stmts));
+            body_list(Some(function.body()), &mut |stmts, _| self.collect_list(stmts));
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.initializer = self.initializers.pop().unwrap();
         self.late.scope = self.scopes.pop().unwrap();
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        for declaration in &node.declarators {
-            let span = declaration.name.span;
-            let deferred_effects = node.is_late && declaration.initializer.as_ref()
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        for declaration in node.declarators() {
+            let span = declaration.name().span();
+            let deferred_effects = node.is_late() && declaration.initializer()
                 .is_some_and(|expr| {
-                    !matches!(expr.unparenthesized(), Expr::IntLit { .. } | Expr::DoubleLit { .. }
-                        | Expr::BoolLit { .. } | Expr::NullLit { .. } | Expr::FuncExpr { .. })
-                        && !matches!(expr.unparenthesized(), Expr::StringLit(literal) if literal.interpolations.is_empty())
+                    !matches!(expr.unparenthesized(), Expr::IntLit(_) | Expr::DoubleLit(_)
+                        | Expr::BoolLit(_) | Expr::NullLit(_) | Expr::FuncExpr(_))
+                        && !matches!(expr.unparenthesized(), Expr::StringLit(literal) if literal.interpolations().next().is_none())
                         && chain_calls(expr, None, None) != Some(false)
                 });
             self.late.has_deferred_effects |= deferred_effects;
@@ -352,8 +353,8 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
-        let span = node.name.span;
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        let span = node.name().span();
         self.late.bindings.push(LateBinding {
             name: &self.late.source[span.start..span.end],
             scope: self.late.scope, start: span.start, deferred_effects: false,
@@ -361,19 +362,19 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_var_declarator(&mut self, node: &VarDeclarator) -> StructuralTraversal {
+    fn visit_var_declarator(&mut self, node: VarDeclarator<'a>) -> StructuralTraversal {
         self.initializers.push(self.initializer);
-        self.initializer = node.initializer.as_ref().map(|expr| *expr.span());
+        self.initializer = node.initializer().map(|expr| expr.span());
         StructuralTraversal::Continue
     }
 
-    fn exit_var_declarator(&mut self, _node: &VarDeclarator) {
+    fn exit_var_declarator(&mut self, _node: VarDeclarator<'a>) {
         self.initializer = self.initializers.pop().unwrap();
     }
 
-    fn visit_identifier(&mut self, node: &Identifier) -> StructuralTraversal {
-        if self.initializer.is_some_and(|span| span.start <= node.span.start && node.span.end <= span.end) {
-            self.read_spans.push((self.initializer.unwrap(), node.span));
+    fn visit_identifier(&mut self, node: Identifier<'a>) -> StructuralTraversal {
+        if self.initializer.is_some_and(|span| span.start <= node.span().start && node.span().end <= span.end) {
+            self.read_spans.push((self.initializer.unwrap(), node.span()));
         }
         StructuralTraversal::Continue
     }

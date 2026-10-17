@@ -20,8 +20,7 @@ use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::{Expr, Span};
+use falcon_syntax::cst::{Expr, NodeId, Program, Span};
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -31,7 +30,7 @@ pub struct AvoidBoolLiteralsInConditionalExpressions;
 impl Rule for AvoidBoolLiteralsInConditionalExpressions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -52,15 +51,15 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     conditionals: Vec<Conditional>,
     /// Branches are typed when the shared visitor reaches their promoted scope.
-    branches: HashMap<*const Expr, usize>,
+    branches: HashMap<NodeId, usize>,
 }
 
-fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
+fn non_nullable_bool<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> bool {
     let ty = state.infer(expression);
     ty.interface("dart:core", "bool") && !ty.nullable()
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         let collector = *self;
         let ctx = collector.ctx;
@@ -78,34 +77,28 @@ impl SemanticRuleVisitor for Collector<'_> {
             })
             .collect()
     }
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Some(index) = self.branches.remove(&std::ptr::from_ref(node))
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Some(index) = self.branches.remove(&node.syntax().id())
             && non_nullable_bool(node, state)
         {
             self.conditionals[index].bool_branches += 1;
         }
-        let Expr::Conditional {
-            then_expr,
-            else_expr,
-            span,
-            ..
-        } = node
-        else {
+        let Expr::Conditional(conditional) = node else {
             return;
         };
-        if !matches!(then_expr.unparenthesized(), Expr::BoolLit { .. })
-            && !matches!(else_expr.unparenthesized(), Expr::BoolLit { .. })
+        let then_expr = conditional.then_expr();
+        let else_expr = conditional.else_expr();
+        if !matches!(then_expr.unparenthesized(), Expr::BoolLit(_))
+            && !matches!(else_expr.unparenthesized(), Expr::BoolLit(_))
         {
             return;
         }
         let index = self.conditionals.len();
         self.conditionals.push(Conditional {
-            span: *span,
+            span: conditional.span(),
             bool_branches: 0,
         });
-        self.branches
-            .insert(std::ptr::from_ref(then_expr.as_ref()), index);
-        self.branches
-            .insert(std::ptr::from_ref(else_expr.as_ref()), index);
+        self.branches.insert(then_expr.syntax().id(), index);
+        self.branches.insert(else_expr.syntax().id(), index);
     }
 }

@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferIsNotOperator;
@@ -18,7 +18,7 @@ pub struct PreferIsNotOperator;
 impl Rule for PreferIsNotOperator {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -34,19 +34,16 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Unary {
-            op: UnaryOp::Bang,
-            operand,
-            span,
-        } = node.unparenthesized()
-            && matches!(operand.unparenthesized(), Expr::Is { negated: false, .. })
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Unary(unary) = node.unparenthesized()
+            && unary.op() == UnaryOp::Bang
+            && matches!(unary.operand().unparenthesized(), Expr::Is(test) if !test.negated())
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-is-not-operator",
                 "Prefer using the 'is!' operator.",
-                *span,
+                unary.span(),
             ));
         }
         StructuralTraversal::Continue

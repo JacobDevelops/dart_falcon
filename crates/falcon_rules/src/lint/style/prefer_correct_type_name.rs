@@ -14,7 +14,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferCorrectTypeName;
@@ -22,7 +22,7 @@ pub struct PreferCorrectTypeName;
 impl Rule for PreferCorrectTypeName {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -38,33 +38,33 @@ struct Collector<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         match decl {
                 TopLevelDecl::Class(c) => {
-                    check_type_name(&c.name, &mut self.diags, self.ctx);
+                    check_type_name(c.name(), &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::Mixin(m) => {
-                    check_type_name(&m.name, &mut self.diags, self.ctx);
+                    check_type_name(m.name(), &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::MixinClass(mc) => {
-                    check_type_name(&mc.name, &mut self.diags, self.ctx);
+                    check_type_name(mc.name(), &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::Enum(e) => {
-                    check_type_name(&e.name, &mut self.diags, self.ctx);
+                    check_type_name(e.name(), &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::Extension(ext) => {
-                    if let Some(name) = &ext.name {
+                    if let Some(name) = ext.name() {
                         check_type_name(name, &mut self.diags, self.ctx);
                     }
                 }
                 TopLevelDecl::ExtensionType(et) => {
-                    check_type_name(&et.name, &mut self.diags, self.ctx);
+                    check_type_name(et.name(), &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::TypeAlias(ta) => {
-                    check_type_name(&ta.name, &mut self.diags, self.ctx);
+                    check_type_name(ta.name(), &mut self.diags, self.ctx);
                 }
                 _ => {}
             }
@@ -73,8 +73,8 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn check_type_name(name_ident: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let name = &name_ident.name;
+fn check_type_name(name_ident: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    let name = name_ident.name();
 
     // Strip a single leading underscore
     let core = name.strip_prefix('_').unwrap_or(name);
@@ -91,7 +91,7 @@ fn check_type_name(name_ident: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &A
                 "Type name '{}' should be in UpperCamelCase and between 3 and 40 characters.",
                 name
             ),
-            name_ident.span,
+            name_ident.span(),
         ));
     }
 }

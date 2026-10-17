@@ -49,10 +49,11 @@ impl CrossFileRule for DependOnReferencedPackages {
             };
             let regular_dependency_required = is_public_or_executable(&file.path, &pubspec);
 
-            let import_uris = file.program.imports.iter().map(|directive| &directive.uri);
-            let export_uris = file.program.exports.iter().map(|directive| &directive.uri);
+            let import_uris = file.program().imports().map(|directive| directive.uri());
+            let export_uris = file.program().exports().map(|directive| directive.uri());
             for uri in import_uris.chain(export_uris) {
-                let Some(package) = imported_package(&uri.value) else {
+                let value = uri.value();
+                let Some(package) = imported_package(&value) else {
                     continue;
                 };
                 if package == "flutter_gen"
@@ -70,7 +71,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                         "The imported package '{package}' isn't a dependency of the importing package."
                     ),
                     file.path.to_string_lossy().into_owned(),
-                    uri.span,
+                    uri.span(),
                 ));
             }
         }
@@ -198,18 +199,15 @@ mod tests {
             .map(|relative| {
                 let path = root.join(relative);
                 let source = std::fs::read_to_string(&path).unwrap();
-                let falcon_dart_parser::ParseResult {
-                    program,
-                    errors,
-                    syntax,
-                    ..
-                } = falcon_dart_parser::parse(&source);
+                let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                    falcon_dart_parser::parse(&source);
                 assert!(errors.is_empty());
                 ProjectFile {
                     path,
-                    source,
-                    program,
-                    syntax,
+                    parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                        source: source.into(),
+                        tree,
+                    }),
                     has_parse_errors: false,
                 }
             })

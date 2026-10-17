@@ -11,7 +11,7 @@ use falcon_analyze::{
     RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryOverrides;
@@ -19,15 +19,15 @@ pub struct UnnecessaryOverrides;
 impl Rule for UnnecessaryOverrides {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let diags = Vec::new();
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(diags);
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let docs = ctx.syntax.doc_blocks(ctx.source).collect::<Vec<_>>();
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let docs = ctx.tree().doc_blocks(ctx.source).collect::<Vec<_>>();
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -42,22 +42,22 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    docs: Vec<falcon_syntax::token::DocBlock<'a>>,
+    docs: Vec<DocBlock<'a>>,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let model = &self.model;
         let Some(members) = crate::lint::declarations::members_of(decl) else {
             return StructuralTraversal::SkipChildren;
         };
         let name = match decl {
-            TopLevelDecl::Class(node) => &node.name.name,
-            TopLevelDecl::MixinClass(node) => &node.name.name,
-            TopLevelDecl::Mixin(node) => &node.name.name,
-            TopLevelDecl::Enum(node) => &node.name.name,
+            TopLevelDecl::Class(node) => node.name().name(),
+            TopLevelDecl::MixinClass(node) => node.name().name(),
+            TopLevelDecl::Mixin(node) => node.name().name(),
+            TopLevelDecl::Enum(node) => node.name().name(),
             _ => return StructuralTraversal::SkipChildren,
         };
         let Some(identity) = model.resolve_name(name) else {
@@ -78,46 +78,46 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 fn check_member(
-    member: &ClassMember,
+    member: ClassMember<'_>,
     identity: &DeclarationIdentity,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
-    docs: &[falcon_syntax::token::DocBlock<'_>],
+    docs: &[DocBlock<'_>],
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
     let (annotations, name, name_span, span, write, body) = match member {
-        ClassMember::Method(m) if !m.is_static => (
-            &m.annotations,
-            m.name.name.as_str(),
-            m.name.span,
-            m.span,
+        ClassMember::Method(m) if !m.is_static() => (
+            m.annotations(),
+            m.name().name(),
+            m.name().span(),
+            m.span(),
             false,
-            &m.body,
+            m.body(),
         ),
-        ClassMember::Getter(g) if !g.is_static => (
-            &g.annotations,
-            g.name.name.as_str(),
-            g.name.span,
-            g.span,
+        ClassMember::Getter(g) if !g.is_static() => (
+            g.annotations(),
+            g.name().name(),
+            g.name().span(),
+            g.span(),
             false,
-            &g.body,
+            g.body(),
         ),
-        ClassMember::Setter(s) if !s.is_static => (
-            &s.annotations,
-            s.name.name.as_str(),
-            s.name.span,
-            s.span,
+        ClassMember::Setter(s) if !s.is_static() => (
+            s.annotations(),
+            s.name().name(),
+            s.name().span(),
+            s.span(),
             true,
-            &s.body,
+            s.body(),
         ),
         ClassMember::Operator(o) => (
-            &o.annotations,
+            o.annotations(),
             o.lookup_name(),
-            crate::lint::declarations::operator_token_span(o, ctx.syntax),
-            o.span,
+            crate::lint::declarations::operator_token_span(o),
+            o.span(),
             false,
-            &o.body,
+            o.body(),
         ),
         _ => return,
     };
@@ -154,25 +154,27 @@ fn check_member(
                     .any(|annotation| annotation.is_package("meta", "protected"))
         });
     let own_protected =
-        crate::lint::declarations::has_meta_annotation(annotations, "protected", model);
+        crate::lint::declarations::has_meta_annotation(annotations.clone(), "protected", model);
     if (inherited_protected && !own_protected)
-        || !annotations.iter().all(|annotation| {
-            (annotation.args.is_none()
-                && falcon_analyze::QualifiedName::from_identifiers(&annotation.name)
-                    .and_then(|name| {
-                        model
-                            .resolve_value(name)
-                            .or_else(|| model.resolve_name(name))
-                            .or_else(|| model.resolve_imported_member(name))
-                            .or_else(|| model.resolve_sdk_member(name))
-                    })
-                    .is_some_and(|identity| identity.is_sdk("dart:core", "override")))
+        || !annotations.clone().all(|annotation| {
+            let Some(name) = falcon_analyze::QualifiedName::from_identifiers(annotation.name())
+            else {
+                return false;
+            };
+            let identity = model
+                .resolve_value(name)
+                .or_else(|| model.resolve_name(name))
+                .or_else(|| model.resolve_imported_member(name));
+            (annotation.args().is_none()
+                && (identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.is_sdk("dart:core", "override"))
+                    || (identity.is_none()
+                        && model
+                            .resolve_sdk_member(name)
+                            .is_some_and(|identity| identity.is_sdk("dart:core", "override")))))
                 || (inherited_protected
-                    && crate::lint::declarations::has_meta_annotation(
-                        std::slice::from_ref(annotation),
-                        "protected",
-                        model,
-                    ))
+                    && identity.is_some_and(|identity| identity.is_package("meta", "protected")))
         })
     {
         return;
@@ -267,99 +269,90 @@ fn same_parameters(
         })
 }
 
-fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
-    args.positional.len() == params.positional().count()
-        && args.named.len() == params.named().count()
-        && args
-            .positional
-            .iter()
-            .zip(params.positional())
-            .all(|(arg, parameter)| {
-                matches!(arg.unparenthesized(), Expr::Ident(id) if id.name == parameter.name.name)
-            })
+fn args_match_params(args: ArgList<'_>, params: FormalParamList<'_>) -> bool {
+    args.positional().len() == params.positional().count()
+        && args.named().len() == params.named().count()
+        && args.positional().zip(params.positional()).all(|(arg, parameter)| {
+            matches!(arg.unparenthesized(), Expr::Ident(id) if id.name() == parameter.name().name())
+        })
         && params.named().all(|parameter| {
-            args.named
-                .iter()
-                .find(|arg| arg.name.name == parameter.name.name)
+            args.named()
+                .find(|arg| arg.name().name() == parameter.name().name())
                 .is_some_and(|arg| {
-                    matches!(arg.value.unparenthesized(), Expr::Ident(id)
-                        if id.name == parameter.name.name)
+                    matches!(arg.value().unparenthesized(), Expr::Ident(id)
+                        if id.name() == parameter.name().name())
                 })
         })
 }
 
 fn has_preceding_comment(offset: usize, ctx: &AnalyzeContext) -> bool {
-    let tokens = ctx.tokens();
-    let index = tokens.partition_point(|token| token.offset() < offset);
-    tokens[..index]
-        .iter()
+    ctx.tokens()
         .rev()
+        .skip_while(|token| token.offset() >= offset)
         .take_while(|token| token.is_trivia())
-        .any(|token| token.kind.is_comment())
+        .any(|token| token.kind().is_comment())
 }
 
-fn is_super(expr: &Expr, ctx: &AnalyzeContext) -> bool {
+fn is_super(expr: Expr<'_>, ctx: &AnalyzeContext) -> bool {
     let expr = expr.unparenthesized();
-    matches!(expr, Expr::Super { .. }) && !has_preceding_comment(expr.span().start, ctx)
+    matches!(expr, Expr::Super(_)) && !has_preceding_comment(expr.span().start, ctx)
 }
 
 /// The single expression a body forwards, if the body is exactly one
 /// forwarding statement (arrow, `return e;`, or a bare `e;`).
-fn single_expr<'a>(body: &'a Option<FunctionBody>, ctx: &AnalyzeContext) -> Option<&'a Expr> {
-    match body.as_ref()? {
-        FunctionBody::Arrow(e, _) => Some(e),
-        FunctionBody::Block(b) => match b.stmts.as_slice() {
-            [Stmt::Return(r)] if !has_preceding_comment(r.span.start, ctx) => r.value.as_ref(),
-            [Stmt::Expr(e)] => Some(&e.expr),
-            _ => None,
-        },
-        FunctionBody::Native(_, _) => None,
+fn single_expr<'a>(body: Option<FunctionBody<'a>>, ctx: &AnalyzeContext) -> Option<Expr<'a>> {
+    match body? {
+        FunctionBody::Arrow(body) => Some(body.expr()),
+        FunctionBody::Block(block) => {
+            let mut stmts = block.stmts();
+            let stmt = stmts.next()?;
+            if stmts.next().is_some() {
+                return None;
+            }
+            match stmt {
+                Stmt::Return(ret) if !has_preceding_comment(ret.span().start, ctx) => ret.value(),
+                Stmt::Expr(expr) => Some(expr.expr()),
+                _ => None,
+            }
+        }
+        FunctionBody::Native(_) => None,
     }
 }
 
-fn forwards(member: &ClassMember, expr: &Expr, ctx: &AnalyzeContext) -> bool {
+fn forwards(member: ClassMember<'_>, expr: Expr<'_>, ctx: &AnalyzeContext) -> bool {
     match (member, expr) {
-        (ClassMember::Method(method), Expr::Call { callee, args, .. }) => {
-            matches!(callee.unparenthesized(), Expr::Field { object, field, .. }
-                if is_super(object, ctx) && field.name == method.name.name)
-                && args_match_params(args, &method.params)
+        (ClassMember::Method(method), Expr::Call(call)) => {
+            matches!(call.callee().unparenthesized(), Expr::Field(field)
+                if is_super(field.object(), ctx) && field.field().name() == method.name().name())
+                && args_match_params(call.args(), method.params())
         }
-        (ClassMember::Getter(getter), Expr::Field { object, field, .. }) => {
-            is_super(object, ctx) && field.name == getter.name.name
+        (ClassMember::Getter(getter), Expr::Field(field)) => {
+            is_super(field.object(), ctx) && field.field().name() == getter.name().name()
         }
-        (
-            ClassMember::Setter(setter),
-            Expr::Assign {
-                target,
-                op: AssignOp::Eq,
-                value,
-                ..
-            },
-        ) => {
-            matches!(target.unparenthesized(), Expr::Field { object, field, .. }
-                if is_super(object, ctx) && field.name == setter.name.name)
-                && matches!(value.unparenthesized(), Expr::Ident(id) if id.name == setter.param.name)
+        (ClassMember::Setter(setter), Expr::Assign(assign)) if assign.op() == AssignOp::Eq => {
+            matches!(assign.target().unparenthesized(), Expr::Field(field)
+                if is_super(field.object(), ctx) && field.field().name() == setter.name().name())
+                && matches!(assign.value().unparenthesized(), Expr::Ident(id) if id.name() == setter.param().name())
         }
-        (
-            ClassMember::Operator(operator),
-            Expr::Binary {
-                left, op, right, ..
-            },
-        ) => {
-            *op != BinaryOp::NotEq
-                && op.method_name() == Some(operator.op.as_str())
-                && matches!(operator.params.params.as_slice(), [parameter]
-                    if matches!(right.unparenthesized(), Expr::Ident(id)
-                        if id.name == parameter.name.name))
-                && is_super(left, ctx)
+        (ClassMember::Operator(operator), Expr::Binary(binary)) => {
+            let mut params = operator.params().params();
+            let parameter = params.next();
+            binary.op() != BinaryOp::NotEq
+                && binary.op().method_name() == Some(operator.op())
+                && parameter.is_some_and(|parameter| {
+                    params.next().is_none()
+                        && matches!(binary.right().unparenthesized(), Expr::Ident(id)
+                            if id.name() == parameter.name().name())
+                })
+                && is_super(binary.left(), ctx)
         }
-        (ClassMember::Operator(operator), Expr::Unary { op, operand, .. }) => {
-            operator.params.params.is_empty()
+        (ClassMember::Operator(operator), Expr::Unary(unary)) => {
+            operator.params().params().is_empty()
                 && matches!(
-                    (op, operator.op.as_str()),
+                    (unary.op(), operator.op()),
                     (UnaryOp::Minus, "-") | (UnaryOp::Tilde, "~")
                 )
-                && is_super(operand, ctx)
+                && is_super(unary.operand(), ctx)
         }
         _ => false,
     }

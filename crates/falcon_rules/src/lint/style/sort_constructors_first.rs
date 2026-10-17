@@ -23,7 +23,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct SortConstructorsFirst;
@@ -31,7 +31,7 @@ pub struct SortConstructorsFirst;
 impl Rule for SortConstructorsFirst {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -47,10 +47,10 @@ struct Collector<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let Some(members) = constructor_container(node) {
             let mut other = false;
             for member in members {
@@ -71,7 +71,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                                 "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
                          declarations.",
-                                body.this_span,
+                                body.this_span(),
                             ));
                         }
                     }
@@ -86,12 +86,14 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 /// Members of the declarations the analyzer checks: classes (including mixin
 /// classes), enums, and extension types.
-pub(crate) fn constructor_container(declaration: &TopLevelDecl) -> Option<&[ClassMember]> {
+pub(crate) fn constructor_container(
+    declaration: TopLevelDecl<'_>,
+) -> Option<AstChildren<'_, ClassMember<'_>>> {
     match declaration {
-        TopLevelDecl::Class(node) => Some(&node.members),
-        TopLevelDecl::MixinClass(node) => Some(&node.members),
-        TopLevelDecl::Enum(node) => Some(&node.members),
-        TopLevelDecl::ExtensionType(node) => Some(&node.members),
+        TopLevelDecl::Class(node) => Some(node.members()),
+        TopLevelDecl::MixinClass(node) => Some(node.members()),
+        TopLevelDecl::Enum(node) => Some(node.members()),
+        TopLevelDecl::ExtensionType(node) => Some(node.members()),
         TopLevelDecl::ClassTypeAlias(_)
         | TopLevelDecl::Mixin(_)
         | TopLevelDecl::Extension(_)
@@ -103,12 +105,11 @@ pub(crate) fn constructor_container(declaration: &TopLevelDecl) -> Option<&[Clas
 }
 
 /// The analyzer's constructor error range: `Type` or `Type.name`.
-pub(crate) fn constructor_name_range(constructor: &ConstructorDecl) -> DiagSpan {
+pub(crate) fn constructor_name_range(constructor: ConstructorDecl<'_>) -> DiagSpan {
     DiagSpan {
-        start: constructor.name.span.start,
+        start: constructor.name().span().start,
         end: constructor
-            .constructor_name
-            .as_ref()
-            .map_or(constructor.name.span.end, |name| name.span.end),
+            .constructor_name()
+            .map_or(constructor.name().span().end, |name| name.span().end),
     }
 }

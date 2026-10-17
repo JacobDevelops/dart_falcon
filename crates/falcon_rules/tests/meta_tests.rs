@@ -432,10 +432,15 @@ void main() {
         let source = format!("{language_override}{source}");
         let parsed = parse(&source);
         assert!(parsed.errors.is_empty());
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into_boxed_str(),
+            tree: parsed.tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
-                program: &parsed.program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
@@ -444,16 +449,16 @@ void main() {
             [(
                 path.as_path(),
                 LibrarySource {
-                    program: &parsed.program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
             )],
             &identities,
         );
-        let model = SemanticModel::new(&path, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(&parsed.program, &model);
-        let context = AnalyzeContext::new(&path, &source, &config, &parsed.syntax)
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(program, &model);
+        let context = AnalyzeContext::new(&path, &config, &parsed)
             .with_types(&types)
             .with_identities(&identities)
             .with_signatures(&signatures);
@@ -461,7 +466,7 @@ void main() {
             let RuleKind::File { make, .. } = metadata.kind else {
                 continue;
             };
-            match make().prepare(&parsed.program, &context) {
+            match make().prepare(program, &context) {
                 RulePreparation::Structural(collector) => {
                     assert!(
                         collector.has_derived_interests(),

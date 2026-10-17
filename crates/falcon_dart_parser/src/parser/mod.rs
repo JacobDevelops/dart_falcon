@@ -7,7 +7,7 @@ mod pattern;
 mod stmt;
 mod types;
 
-pub use lexical::lex_syntax;
+pub use lexical::{lex_syntax, lex_tree};
 
 use falcon_syntax::LanguageVersion;
 use falcon_syntax::ast::*;

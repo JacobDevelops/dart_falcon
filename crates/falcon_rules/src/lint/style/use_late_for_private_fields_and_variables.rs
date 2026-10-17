@@ -35,11 +35,10 @@ use falcon_analyze::{
     TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
+use falcon_syntax::cst::visit::{
     Visitor, walk_expr, walk_field_decl, walk_local_var, walk_top_level_decl,
 };
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::declaration_key;
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
@@ -55,11 +54,11 @@ pub struct UseLateForPrivateFieldsAndVariables;
 impl Rule for UseLateForPrivateFieldsAndVariables {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let has_part_directives =
-            !program.part_directives.is_empty() || program.part_of_directive.is_some();
+            !program.part_directives().is_empty() || program.part_of_directive().is_some();
         match ctx.library {
             Some(library) if library.has_unresolved_parts() => {
                 return RulePreparation::Diagnostics(Vec::new());
@@ -76,13 +75,13 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
         }
         let names: HashSet<&str> = candidates.iter().map(|candidate| candidate.name).collect();
 
-        let mut scopes = DeclarationScopes::of(program);
+        let mut scopes = DeclarationScopes::of(program, 0);
         if let Some(library) = ctx.library {
-            for sibling in library.siblings() {
-                scopes.extend(DeclarationScopes::of(sibling));
+            for (file, sibling) in library.siblings().iter().enumerate() {
+                scopes.extend(DeclarationScopes::of(*sibling, file + 1));
             }
         }
-        let owners: HashMap<DeclarationIdentity, usize> = scopes
+        let owners: HashMap<DeclarationIdentity, OwnerKey> = scopes
             .types
             .iter()
             .filter_map(|(name, key)| {
@@ -95,11 +94,11 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
         let mut disqualified = HashSet::new();
         check_doc_uses(program, ctx, &state, &names, &owners, &mut disqualified);
         if let Some(library) = ctx.library {
-            for ((sibling, source), syntax) in library
+            for (file, (sibling, parsed)) in library
                 .siblings()
                 .iter()
-                .zip(library.sibling_sources())
-                .zip(library.sibling_syntax())
+                .zip(library.sibling_parsed())
+                .enumerate()
             {
                 let sibling_ctx = AnalyzeContext {
                     types: ctx.types,
@@ -108,11 +107,11 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
                     library: ctx.library,
                     environment: ctx.environment,
                     package_language_version: ctx.package_language_version,
-                    ..AnalyzeContext::new(ctx.file_path, source, ctx.config, syntax)
+                    ..AnalyzeContext::new(ctx.file_path, ctx.config, parsed)
                 };
-                if let Some(state) = SemanticState::new(sibling, &sibling_ctx) {
+                if let Some(state) = SemanticState::new(*sibling, &sibling_ctx) {
                     check_uses(
-                        sibling,
+                        file + 1,
                         &sibling_ctx,
                         state,
                         &names,
@@ -131,7 +130,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             scopes,
             disqualified,
             safe: SafeUses {
-                ctx,
+                types: ctx.types,
                 names: Cow::Owned(names),
                 owners: Cow::Owned(owners),
                 resolved_owners: HashMap::new(),
@@ -142,7 +141,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
 }
 
 struct LateCandidates<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     candidates: Vec<Candidate<'a>>,
     scopes: DeclarationScopes<'a>,
@@ -150,17 +149,17 @@ struct LateCandidates<'a> {
     safe: SafeUses<'a, 'a>,
 }
 
-impl SemanticRuleVisitor for LateCandidates<'_> {
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+impl<'a> SemanticRuleVisitor<'a> for LateCandidates<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         self.safe.visit_expr(node, state);
     }
 
     fn visit_cascade_operation(
         &mut self,
-        operation: &CascadeOp,
+        operation: CascadeOp<'a>,
         receiver: &ResolvedType,
         section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         self.safe
             .visit_cascade_operation(operation, receiver, section, state);
@@ -168,10 +167,10 @@ impl SemanticRuleVisitor for LateCandidates<'_> {
 
     fn visit_cascade_assignment(
         &mut self,
-        assignment: CascadeAssignment<'_>,
+        assignment: CascadeAssignment<'a>,
         receiver: &ResolvedType,
         section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         self.safe
             .visit_cascade_assignment(assignment, receiver, section, state);
@@ -180,6 +179,7 @@ impl SemanticRuleVisitor for LateCandidates<'_> {
     fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
         check_mentions(
             self.program,
+            0,
             &self.safe.names,
             &self.scopes,
             &self.safe,
@@ -206,49 +206,53 @@ impl SemanticRuleVisitor for LateCandidates<'_> {
     }
 }
 
+/// A tree-local declaration ID qualified by its file's position in the library.
+type OwnerKey = (usize, NodeId);
+
 /// A resolved declaration, or a name whose owner cannot be determined.
 #[derive(Hash, PartialEq, Eq)]
 enum NullableAccess<'a> {
     Unresolved(&'a str),
-    Resolved(&'a str, Option<usize>),
+    Resolved(&'a str, Option<OwnerKey>),
 }
 
-fn check_uses<'n>(
-    program: &Program,
-    ctx: &AnalyzeContext,
-    state: SemanticState<'_>,
+fn check_uses<'a, 'n>(
+    file: usize,
+    ctx: &'a AnalyzeContext<'a>,
+    state: SemanticState<'a>,
     names: &HashSet<&'n str>,
     scopes: &DeclarationScopes<'_>,
-    owners: &HashMap<DeclarationIdentity, usize>,
+    owners: &HashMap<DeclarationIdentity, OwnerKey>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
+    let program = ctx.parsed.program();
     check_doc_uses(program, ctx, &state, names, owners, disqualified);
     let mut safe = SafeUses {
-        ctx,
+        types: ctx.types,
         names: Cow::Borrowed(names),
         owners: Cow::Borrowed(owners),
         resolved_owners: HashMap::new(),
         spans: HashSet::new(),
     };
     visit_program(&mut safe, program, state);
-    check_mentions(program, names, scopes, &safe, disqualified);
+    check_mentions(program, file, names, scopes, &safe, disqualified);
 }
 
-fn check_doc_uses<'n>(
-    program: &Program,
-    ctx: &AnalyzeContext,
-    state: &SemanticState<'_>,
+fn check_doc_uses<'a, 'n>(
+    program: Program<'a>,
+    ctx: &AnalyzeContext<'_>,
+    state: &SemanticState<'a>,
     names: &HashSet<&'n str>,
-    owners: &HashMap<DeclarationIdentity, usize>,
+    owners: &HashMap<DeclarationIdentity, OwnerKey>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
     let doc_scopes = DocScopes::new(program, &state.model, ctx.source);
     let resolver = DocResolver::new(program, &state.model, &state.signatures, &doc_scopes, false);
-    for block in ctx.syntax.doc_blocks(ctx.source) {
+    for block in ctx.tree().doc_blocks(ctx.source) {
         let Some(scope) = doc_scopes.scope_for(&block) else {
             continue;
         };
-        for reference in references(ctx.source, &block).0 {
+        for reference in references(&block).0 {
             let Some(parsed) = reference.parse() else {
                 continue;
             };
@@ -273,7 +277,8 @@ fn check_doc_uses<'n>(
 }
 
 fn check_mentions<'n>(
-    program: &Program,
+    program: Program<'_>,
+    file: usize,
     names: &HashSet<&'n str>,
     scopes: &DeclarationScopes<'_>,
     safe: &SafeUses<'_, '_>,
@@ -282,6 +287,7 @@ fn check_mentions<'n>(
     let mut mentions = Mentions {
         names,
         types: &scopes.types,
+        file,
         enclosing: None,
         cascade_members: HashSet::new(),
         declarations: HashSet::new(),
@@ -312,27 +318,27 @@ struct Candidate<'a> {
     name: &'a str,
     span: Span,
     /// The declaring type ([`declaration_key`]); `None` for top-level variables.
-    owner: Option<usize>,
+    owner: Option<OwnerKey>,
 }
 
 fn collect_candidates<'a>(
-    program: &'a Program,
-    state: &SemanticState<'_>,
+    program: Program<'a>,
+    state: &SemanticState<'a>,
     ctx: &AnalyzeContext,
 ) -> Vec<Candidate<'a>> {
     let mut candidates = Vec::new();
-    for declaration in &program.declarations {
+    for declaration in program.declarations() {
         let (type_params, members, all_fields, static_only) = match declaration {
             TopLevelDecl::Variable(variable) => {
-                if !variable.is_late
-                    && !variable.is_external
-                    && variable.keyword != VarKeyword::Const
+                if !variable.is_late()
+                    && !variable.is_external()
+                    && variable.keyword() != VarKeyword::Const
                 {
                     let scope = TypeParameterScope::default();
-                    for declarator in &variable.declarators {
-                        if is_private(&declarator.name.name)
+                    for declarator in variable.declarators() {
+                        if is_private(declarator.name().name())
                             && potentially_nullable(
-                                variable.var_type.as_ref(),
+                                variable.var_type(),
                                 declarator,
                                 &scope,
                                 state,
@@ -346,27 +352,24 @@ fn collect_candidates<'a>(
                 continue;
             }
             TopLevelDecl::Class(class) => {
-                if has_const_constructor(&class.members) {
+                if has_const_constructor(class.members()) {
                     continue;
                 }
-                (&class.type_params, &class.members, false, false)
+                (class.type_params(), class.members(), false, false)
             }
             TopLevelDecl::MixinClass(class) => {
-                if has_const_constructor(&class.members) {
+                if has_const_constructor(class.members()) {
                     continue;
                 }
-                (&class.type_params, &class.members, false, false)
+                (class.type_params(), class.members(), false, false)
             }
-            TopLevelDecl::Mixin(mixin) => (&mixin.type_params, &mixin.members, false, false),
+            TopLevelDecl::Mixin(mixin) => (mixin.type_params(), mixin.members(), false, false),
             TopLevelDecl::Extension(extension) => {
-                let private = extension
-                    .name
-                    .as_ref()
-                    .is_none_or(|name| is_private(&name.name));
-                (&extension.type_params, &extension.members, private, false)
+                let private = extension.name().is_none_or(|name| is_private(name.name()));
+                (extension.type_params(), extension.members(), private, false)
             }
             TopLevelDecl::ExtensionType(extension) => {
-                (&extension.type_params, &extension.members, false, true)
+                (extension.type_params(), extension.members(), false, true)
             }
             _ => continue,
         };
@@ -376,25 +379,22 @@ fn collect_candidates<'a>(
             let ClassMember::Field(field) = member else {
                 continue;
             };
-            if field.is_late
-                || field.is_external
-                || field.is_abstract
-                || field.keyword == VarKeyword::Const
-                || (static_only && !field.is_static)
+            if field.is_late()
+                || field.is_external()
+                || field.is_abstract()
+                || field.keyword() == VarKeyword::Const
+                || (static_only && !field.is_static())
             {
                 continue;
             }
-            for declarator in &field.declarators {
-                if (all_fields || is_private(&declarator.name.name))
-                    && potentially_nullable(
-                        field.field_type.as_ref(),
-                        declarator,
-                        &scope,
-                        state,
-                        ctx,
-                    )
+            for declarator in field.declarators() {
+                if (all_fields || is_private(declarator.name().name()))
+                    && potentially_nullable(field.field_type(), declarator, &scope, state, ctx)
                 {
-                    candidates.push(candidate(declarator, Some(declaration_key(declaration))));
+                    candidates.push(candidate(
+                        declarator,
+                        Some((0, declaration_key(declaration))),
+                    ));
                 }
             }
         }
@@ -402,10 +402,10 @@ fn collect_candidates<'a>(
     candidates
 }
 
-fn candidate(declarator: &VarDeclarator, owner: Option<usize>) -> Candidate<'_> {
+fn candidate(declarator: VarDeclarator<'_>, owner: Option<OwnerKey>) -> Candidate<'_> {
     Candidate {
-        name: &declarator.name.name,
-        span: declarator.span,
+        name: declarator.name().name(),
+        span: declarator.span(),
         owner,
     }
 }
@@ -414,30 +414,30 @@ fn is_private(name: &str) -> bool {
     name.starts_with('_')
 }
 
-fn has_const_constructor(members: &[ClassMember]) -> bool {
-    members.iter().any(
-        |member| matches!(member, ClassMember::Constructor(constructor) if constructor.is_const),
+fn has_const_constructor<'a>(mut members: AstChildren<'a, ClassMember<'a>>) -> bool {
+    members.any(
+        |member| matches!(member, ClassMember::Constructor(constructor) if constructor.is_const()),
     )
 }
 
 /// Whether the declared type is proven not to be non-nullable (the analyzer's
 /// `!isNonNullable`), including `dynamic` and potentially nullable type
 /// parameters. An unresolved type is never a candidate.
-fn potentially_nullable(
-    declared: Option<&DartType>,
-    declarator: &VarDeclarator,
+fn potentially_nullable<'a>(
+    declared: Option<DartType<'a>>,
+    declarator: VarDeclarator<'a>,
     scope: &TypeParameterScope,
-    state: &SemanticState<'_>,
+    state: &SemanticState<'a>,
     ctx: &AnalyzeContext,
 ) -> bool {
     let ty = match (
         declared,
-        declarator.initializer.as_ref().map(Expr::unparenthesized),
+        declarator.initializer().map(Expr::unparenthesized),
     ) {
         (Some(ty), _) => state.model.resolve_type_in(ty, scope),
         // Without a type or initializer the variable is `dynamic`; a `null`
         // initializer also infers `dynamic`.
-        (None, None | Some(Expr::NullLit { .. })) => ResolvedType::Dynamic,
+        (None, None | Some(Expr::NullLit(_))) => ResolvedType::Dynamic,
         (None, Some(initializer)) => state.infer(initializer),
     };
     match &ty {
@@ -457,95 +457,98 @@ fn potentially_nullable(
 /// Records the identifier spans of uses that keep a candidate lateable: a `!`
 /// operand, or the target of a plain `=` of a proven non-nullable value.
 struct SafeUses<'s, 'a> {
-    ctx: &'a AnalyzeContext<'a>,
+    types: Option<&'s falcon_analyze::TypeIndex>,
     names: Cow<'s, HashSet<&'a str>>,
-    owners: Cow<'s, HashMap<DeclarationIdentity, usize>>,
-    resolved_owners: HashMap<usize, Option<usize>>,
+    owners: Cow<'s, HashMap<DeclarationIdentity, OwnerKey>>,
+    resolved_owners: HashMap<usize, Option<OwnerKey>>,
     spans: HashSet<usize>,
 }
 
 impl SafeUses<'_, '_> {
     fn record_owner(
         &mut self,
-        identifier: &Identifier,
+        identifier: Identifier<'_>,
         receiver: &ResolvedType,
         state: &SemanticState<'_>,
     ) {
-        if !self.names.contains(identifier.name.as_str()) {
+        if !self.names.contains(identifier.name()) {
             return;
         }
         let owner = state
             .signatures
-            .resolved_readable_member_owner(receiver, &identifier.name, &state.model)
+            .resolved_readable_member_owner(receiver, identifier.name(), &state.model)
             .or_else(|| {
                 state.signatures.resolved_writable_member_owner(
                     receiver,
-                    &identifier.name,
+                    identifier.name(),
                     &state.model,
                 )
             });
         if let Some(key) = owner.as_ref().and_then(|owner| self.owners.get(owner)) {
             self.resolved_owners
-                .insert(identifier.span.start, Some(*key));
+                .insert(identifier.span().start, Some(*key));
         }
     }
 
-    fn record(&mut self, expression: &Expr) {
+    fn record(&mut self, expression: Expr<'_>) {
         let identifier = match expression.unparenthesized() {
             Expr::Ident(identifier) => identifier,
-            Expr::Field { field, .. } => field,
+            Expr::Field(field) => field.field(),
             _ => return,
         };
-        if self.names.contains(identifier.name.as_str()) {
-            self.spans.insert(identifier.span.start);
+        if self.names.contains(identifier.name()) {
+            self.spans.insert(identifier.span().start);
         }
     }
 
     /// The analyzer requires the identifier itself to be the `!` operand,
     /// not a parenthesized expression or a property's name.
-    fn record_null_assert(&mut self, operand: &Expr) {
+    fn record_null_assert(&mut self, operand: Expr<'_>) {
         if let Expr::Ident(identifier) = operand
-            && self.names.contains(identifier.name.as_str())
+            && self.names.contains(identifier.name())
             && !is_parenthesized(operand)
         {
-            self.spans.insert(identifier.span.start);
+            self.spans.insert(identifier.span().start);
         }
     }
 
-    fn record_assignment(
+    fn record_assignment<'a>(
         &mut self,
-        target: &Expr,
+        target: Expr<'_>,
         op: AssignOp,
-        value: &Expr,
-        state: &SemanticState<'_>,
+        value: Expr<'a>,
+        state: &SemanticState<'a>,
     ) {
         if op == AssignOp::Eq
-            && nullability(&state.infer(value), &state.signatures, self.ctx.types) == Truth::No
+            && nullability(&state.infer(value), &state.signatures, self.types) == Truth::No
         {
             self.record(target);
         }
     }
 }
 
-impl SemanticRuleVisitor for SafeUses<'_, '_> {
+impl<'a> SemanticRuleVisitor<'a> for SafeUses<'_, '_> {
     fn visit_cascade_operation(
         &mut self,
-        operation: &CascadeOp,
+        operation: CascadeOp<'a>,
         receiver: &ResolvedType,
         _section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
-        if let CascadeOp::Field { name, .. } | CascadeOp::Call(name, ..) = operation {
-            self.record_owner(name, receiver, state);
-        }
+        let name = match operation {
+            CascadeOp::Field(field) => field.name(),
+            CascadeOp::Call(call) => call.name(),
+            _ => return,
+        };
+        self.record_owner(name, receiver, state);
     }
 
     fn visit_cascade_assignment(
         &mut self,
-        assignment: CascadeAssignment<'_>,
+        assignment: CascadeAssignment<'a>,
         receiver: &ResolvedType,
         _section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         if !assignment.indexed
             && let Expr::Ident(identifier) = assignment.target.unparenthesized()
@@ -554,30 +557,43 @@ impl SemanticRuleVisitor for SafeUses<'_, '_> {
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Expr::Field { object, field, .. } = node
-            && self.names.contains(field.name.as_str())
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Expr::Field(field) = node
+            && self.names.contains(field.field().name())
         {
-            self.record_owner(field, &state.infer(object), state);
+            self.record_owner(field.field(), &state.infer(field.object()), state);
         } else if let Expr::Ident(identifier) = node
-            && self.names.contains(identifier.name.as_str())
+            && self.names.contains(identifier.name())
             && state
                 .environment
-                .binding_depth(&identifier.name)
+                .binding_depth(identifier.name())
                 .is_some_and(|depth| depth > 0)
         {
             // A local binding is not the same element as a private field.
-            self.spans.insert(identifier.span.start);
+            self.spans.insert(identifier.span().start);
         }
         match node {
-            Expr::NullAssert { operand, .. } => self.record_null_assert(operand),
-            Expr::Assign {
-                target, op, value, ..
-            } => self.record_assignment(target, *op, value, state),
-            Expr::Cascade { sections, .. } => {
-                for section in sections {
-                    if let [CascadeOp::Assign(target, op, value)] = section.ops.as_slice() {
-                        self.record_assignment(target, *op, value, state);
+            Expr::NullAssert(assertion) => self.record_null_assert(assertion.operand()),
+            Expr::Assign(assignment) => {
+                self.record_assignment(
+                    assignment.target(),
+                    assignment.op(),
+                    assignment.value(),
+                    state,
+                );
+            }
+            Expr::Cascade(cascade) => {
+                for section in cascade.sections() {
+                    let mut ops = section.ops();
+                    if let Some(CascadeOp::Assign(assignment)) = ops.next()
+                        && ops.next().is_none()
+                    {
+                        self.record_assignment(
+                            assignment.target(),
+                            assignment.op(),
+                            assignment.value(),
+                            state,
+                        );
                     }
                 }
             }
@@ -592,93 +608,93 @@ impl SemanticRuleVisitor for SafeUses<'_, '_> {
 /// are matched by name) holds every declaration a mention can denote.
 struct DeclarationScopes<'p> {
     /// Type declarations by name.
-    types: HashMap<&'p str, usize>,
+    types: HashMap<&'p str, OwnerKey>,
     /// Names declared by each type declaration, by [`declaration_key`].
-    members: HashMap<usize, HashSet<&'p str>>,
+    members: HashMap<OwnerKey, HashSet<&'p str>>,
     top_level: HashSet<&'p str>,
 }
 
 impl<'p> DeclarationScopes<'p> {
-    fn of(program: &'p Program) -> Self {
+    fn of(program: Program<'p>, file: usize) -> Self {
         let mut scopes = Self {
             types: HashMap::new(),
             members: HashMap::new(),
             top_level: HashSet::new(),
         };
-        for declaration in &program.declarations {
-            let (name, members, extra): (Option<&Identifier>, &[ClassMember], Vec<&str>) =
-                match declaration {
-                    TopLevelDecl::Variable(variable) => {
-                        scopes.top_level.extend(
-                            variable
-                                .declarators
-                                .iter()
-                                .map(|declarator| declarator.name.name.as_str()),
-                        );
-                        continue;
-                    }
-                    TopLevelDecl::Function(function) => {
-                        scopes.top_level.insert(&function.name.name);
-                        continue;
-                    }
-                    TopLevelDecl::ClassTypeAlias(alias) => {
-                        scopes.top_level.insert(&alias.name.name);
-                        continue;
-                    }
-                    TopLevelDecl::TypeAlias(alias) => {
-                        scopes.top_level.insert(&alias.name.name);
-                        continue;
-                    }
-                    TopLevelDecl::Error(_) => continue,
-                    TopLevelDecl::Class(class) => (Some(&class.name), &class.members, Vec::new()),
-                    TopLevelDecl::MixinClass(class) => {
-                        (Some(&class.name), &class.members, Vec::new())
-                    }
-                    TopLevelDecl::Mixin(mixin) => (Some(&mixin.name), &mixin.members, Vec::new()),
-                    TopLevelDecl::Extension(extension) => {
-                        (extension.name.as_ref(), &extension.members, Vec::new())
-                    }
-                    TopLevelDecl::ExtensionType(extension) => (
-                        Some(&extension.name),
-                        &extension.members,
-                        extension
-                            .representation()
-                            .map(|representation| representation.name.name.as_str())
-                            .into_iter()
-                            .collect(),
-                    ),
-                    TopLevelDecl::Enum(enumeration) => (
-                        Some(&enumeration.name),
-                        &enumeration.members,
-                        enumeration
-                            .variants
-                            .iter()
-                            .map(|variant| variant.name.name.as_str())
-                            .collect(),
-                    ),
-                };
-            let key = declaration_key(declaration);
+        for declaration in program.declarations() {
+            let (name, members, extra): (
+                Option<Identifier<'p>>,
+                AstChildren<'p, ClassMember<'p>>,
+                Vec<&str>,
+            ) = match declaration {
+                TopLevelDecl::Variable(variable) => {
+                    scopes.top_level.extend(
+                        variable
+                            .declarators()
+                            .map(|declarator| declarator.name().name()),
+                    );
+                    continue;
+                }
+                TopLevelDecl::Function(function) => {
+                    scopes.top_level.insert(function.name().name());
+                    continue;
+                }
+                TopLevelDecl::ClassTypeAlias(alias) => {
+                    scopes.top_level.insert(alias.name().name());
+                    continue;
+                }
+                TopLevelDecl::TypeAlias(alias) => {
+                    scopes.top_level.insert(alias.name().name());
+                    continue;
+                }
+                TopLevelDecl::Error(_) => continue,
+                TopLevelDecl::Class(class) => (Some(class.name()), class.members(), Vec::new()),
+                TopLevelDecl::MixinClass(class) => {
+                    (Some(class.name()), class.members(), Vec::new())
+                }
+                TopLevelDecl::Mixin(mixin) => (Some(mixin.name()), mixin.members(), Vec::new()),
+                TopLevelDecl::Extension(extension) => {
+                    (extension.name(), extension.members(), Vec::new())
+                }
+                TopLevelDecl::ExtensionType(extension) => (
+                    Some(extension.name()),
+                    extension.members(),
+                    extension
+                        .representation()
+                        .map(|representation| representation.name().name())
+                        .into_iter()
+                        .collect(),
+                ),
+                TopLevelDecl::Enum(enumeration) => (
+                    Some(enumeration.name()),
+                    enumeration.members(),
+                    enumeration
+                        .variants()
+                        .map(|variant| variant.name().name())
+                        .collect(),
+                ),
+            };
+            let key = (file, declaration_key(declaration));
             if let Some(name) = name {
-                scopes.top_level.insert(&name.name);
-                scopes.types.insert(&name.name, key);
+                scopes.top_level.insert(name.name());
+                scopes.types.insert(name.name(), key);
             }
             let mut names: HashSet<&str> = extra.into_iter().collect();
             for member in members {
                 match member {
                     ClassMember::Field(field) => names.extend(
                         field
-                            .declarators
-                            .iter()
-                            .map(|declarator| declarator.name.name.as_str()),
+                            .declarators()
+                            .map(|declarator| declarator.name().name()),
                     ),
                     ClassMember::Method(method) => {
-                        names.insert(&method.name.name);
+                        names.insert(method.name().name());
                     }
                     ClassMember::Getter(getter) => {
-                        names.insert(&getter.name.name);
+                        names.insert(getter.name().name());
                     }
                     ClassMember::Setter(setter) => {
-                        names.insert(&setter.name.name);
+                        names.insert(setter.name().name());
                     }
                     ClassMember::Constructor(_)
                     | ClassMember::PrimaryConstructorBody(_)
@@ -699,8 +715,8 @@ impl<'p> DeclarationScopes<'p> {
     /// The declaring type (`Some(None)` for top level) that `mention` denotes,
     /// or `None` when it cannot be resolved here, which disqualifies every
     /// declaration of the name.
-    fn owner(&self, mention: &Mention<'_>) -> Option<Option<usize>> {
-        let declares = |key: usize| {
+    fn owner(&self, mention: &Mention<'_>) -> Option<Option<OwnerKey>> {
+        let declares = |key: OwnerKey| {
             self.members
                 .get(&key)
                 .is_some_and(|names| names.contains(mention.name))
@@ -730,7 +746,7 @@ enum Access {
     /// `this.name`.
     This,
     /// `Type.name` for a type declared in this file.
-    Type(usize),
+    Type(OwnerKey),
     /// Any other member access (`object.name`, `super.name`, cascade sections,
     /// dot shorthands): the receiver's declaring type is not resolved here.
     Member,
@@ -740,7 +756,7 @@ struct Mention<'a> {
     name: &'a str,
     start: usize,
     /// The enclosing type declaration ([`declaration_key`]).
-    enclosing: Option<usize>,
+    enclosing: Option<OwnerKey>,
     access: Access,
 }
 
@@ -749,8 +765,9 @@ struct Mention<'a> {
 /// not visited.
 struct Mentions<'a, 'n> {
     names: &'a HashSet<&'n str>,
-    types: &'a HashMap<&'a str, usize>,
-    enclosing: Option<usize>,
+    types: &'a HashMap<&'a str, OwnerKey>,
+    file: usize,
+    enclosing: Option<OwnerKey>,
     /// Starts of identifiers naming a member in a cascade section.
     cascade_members: HashSet<usize>,
     declarations: HashSet<usize>,
@@ -758,16 +775,16 @@ struct Mentions<'a, 'n> {
 }
 
 impl Mentions<'_, '_> {
-    fn record(&mut self, identifier: &Identifier, access: Access) {
-        if let Some(name) = self.names.get(identifier.name.as_str()) {
-            let access = if self.cascade_members.contains(&identifier.span.start) {
+    fn record(&mut self, identifier: Identifier<'_>, access: Access) {
+        if let Some(name) = self.names.get(identifier.name()) {
+            let access = if self.cascade_members.contains(&identifier.span().start) {
                 Access::Member
             } else {
                 access
             };
             self.found.push(Mention {
                 name,
-                start: identifier.span.start,
+                start: identifier.span().start,
                 enclosing: self.enclosing,
                 access,
             });
@@ -775,25 +792,24 @@ impl Mentions<'_, '_> {
     }
 }
 
-impl Visitor for Mentions<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for Mentions<'_, '_> {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if let TopLevelDecl::Variable(variable) = node {
             self.declarations.extend(
                 variable
-                    .declarators
-                    .iter()
-                    .map(|declarator| declarator.name.span.start),
+                    .declarators()
+                    .map(|declarator| declarator.name().span().start),
             );
         }
         let enclosing = match node {
             TopLevelDecl::Enum(_) => return,
-            TopLevelDecl::Class(class) if has_const_constructor(&class.members) => return,
-            TopLevelDecl::MixinClass(class) if has_const_constructor(&class.members) => return,
+            TopLevelDecl::Class(class) if has_const_constructor(class.members()) => return,
+            TopLevelDecl::MixinClass(class) if has_const_constructor(class.members()) => return,
             TopLevelDecl::Class(_)
             | TopLevelDecl::MixinClass(_)
             | TopLevelDecl::Mixin(_)
             | TopLevelDecl::Extension(_)
-            | TopLevelDecl::ExtensionType(_) => Some(declaration_key(node)),
+            | TopLevelDecl::ExtensionType(_) => Some((self.file, declaration_key(node))),
             TopLevelDecl::Variable(_)
             | TopLevelDecl::Function(_)
             | TopLevelDecl::ClassTypeAlias(_)
@@ -805,54 +821,53 @@ impl Visitor for Mentions<'_, '_> {
         self.enclosing = saved;
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
         self.declarations.extend(
-            node.declarators
-                .iter()
-                .map(|declarator| declarator.name.span.start),
+            node.declarators()
+                .map(|declarator| declarator.name().span().start),
         );
         walk_field_decl(self, node);
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
         self.declarations.extend(
-            node.declarators
-                .iter()
-                .map(|declarator| declarator.name.span.start),
+            node.declarators()
+                .map(|declarator| declarator.name().span().start),
         );
         walk_local_var(self, node);
     }
 
-    fn visit_identifier(&mut self, node: &Identifier) {
+    fn visit_identifier(&mut self, node: Identifier<'a>) {
         self.record(node, Access::Bare);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         match node {
-            Expr::Field { object, field, .. } => {
-                let access = match object.unparenthesized() {
-                    Expr::This { .. } => Access::This,
+            Expr::Field(field) => {
+                let access = match field.object().unparenthesized() {
+                    Expr::This(_) => Access::This,
                     Expr::Ident(owner) => self
                         .types
-                        .get(owner.name.as_str())
+                        .get(owner.name())
                         .map_or(Access::Member, |key| Access::Type(*key)),
                     _ => Access::Member,
                 };
-                self.record(field, access);
+                self.record(field.field(), access);
             }
-            Expr::DotShorthand { name, .. } => self.record(name, Access::Member),
-            Expr::Cascade { sections, .. } => {
-                for op in sections.iter().flat_map(|section| &section.ops) {
+            Expr::DotShorthand(shorthand) => self.record(shorthand.name(), Access::Member),
+            Expr::Cascade(cascade) => {
+                for op in cascade.sections().flat_map(|section| section.ops()) {
                     let member = match op {
-                        CascadeOp::Field { name, .. } | CascadeOp::Call(name, ..) => Some(name),
-                        CascadeOp::Assign(target, ..) => receiver_root(target),
-                        CascadeOp::Invoke(..)
-                        | CascadeOp::NullAssert { .. }
-                        | CascadeOp::Index { .. }
-                        | CascadeOp::IndexAssign(..) => None,
+                        CascadeOp::Field(field) => Some(field.name()),
+                        CascadeOp::Call(call) => Some(call.name()),
+                        CascadeOp::Assign(assignment) => receiver_root(assignment.target()),
+                        CascadeOp::Invoke(_)
+                        | CascadeOp::NullAssert(_)
+                        | CascadeOp::Index(_)
+                        | CascadeOp::IndexAssign(_) => None,
                     };
                     if let Some(member) = member {
-                        self.cascade_members.insert(member.span.start);
+                        self.cascade_members.insert(member.span().start);
                     }
                 }
             }
@@ -863,13 +878,53 @@ impl Visitor for Mentions<'_, '_> {
 }
 
 /// The identifier a selector chain starts from: `a` in `a.b[0].c()`.
-fn receiver_root(mut expression: &Expr) -> Option<&Identifier> {
+fn receiver_root(mut expression: Expr<'_>) -> Option<Identifier<'_>> {
     loop {
         match expression.unparenthesized() {
             Expr::Ident(identifier) => return Some(identifier),
-            Expr::Field { object, .. } | Expr::Index { object, .. } => expression = object,
-            Expr::Call { callee, .. } => expression = callee,
+            Expr::Field(field) => expression = field.object(),
+            Expr::Index(index) => expression = index.object(),
+            Expr::Call(call) => expression = call.callee(),
             _ => return None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::ParsedFile;
+    use falcon_dart_parser::parse;
+    use std::sync::Arc;
+
+    #[test]
+    fn declaration_scopes_distinguish_library_part_trees() {
+        let first_source = "class A { int? _x; }";
+        let second_source = "class B { int? _x; }";
+        let first = parse(first_source);
+        let second = parse(second_source);
+        assert!(first.errors.is_empty(), "{:?}", first.errors);
+        assert!(second.errors.is_empty(), "{:?}", second.errors);
+        let first = Arc::new(ParsedFile {
+            source: first_source.into(),
+            tree: first.tree,
+        });
+        let second = Arc::new(ParsedFile {
+            source: second_source.into(),
+            tree: second.tree,
+        });
+        let first_program = first.program();
+        let second_program = second.program();
+        let first_declaration = first_program.declarations().next().unwrap();
+        let second_declaration = second_program.declarations().next().unwrap();
+        let mut scopes = DeclarationScopes::of(first_program, 0);
+        scopes.extend(DeclarationScopes::of(second_program, 1));
+
+        assert_eq!(scopes.members.len(), 2);
+        assert_eq!(scopes.types["A"], (0, declaration_key(first_declaration)));
+        assert_eq!(scopes.types["B"], (1, declaration_key(second_declaration)));
+        for owner in scopes.types.values() {
+            assert!(scopes.members[owner].contains("_x"));
         }
     }
 }

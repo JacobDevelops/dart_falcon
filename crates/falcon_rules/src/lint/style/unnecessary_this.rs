@@ -10,7 +10,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryThis;
@@ -18,15 +18,15 @@ pub struct UnnecessaryThis;
 impl Rule for UnnecessaryThis {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             program,
-            model: ctx
-                .identities
-                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+            model: ctx.identities.map(|identities| {
+                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            }),
             diagnostics: Vec::new(),
             names: HashSet::new(),
             scopes: NameScopes::default(),
@@ -42,13 +42,15 @@ impl Rule for UnnecessaryThis {
     }
 }
 
-fn library_contains_name(program: &Program, model: Option<&SemanticModel<'_>>, name: &str) -> bool {
-    if program.imports.iter().any(|import| {
-        import
-            .as_name
-            .as_ref()
-            .is_some_and(|prefix| prefix.name == name)
-    }) {
+fn library_contains_name(
+    program: Program<'_>,
+    model: Option<&SemanticModel<'_>>,
+    name: &str,
+) -> bool {
+    if program
+        .imports()
+        .any(|import| import.as_name().is_some_and(|prefix| prefix.name() == name))
+    {
         return true;
     }
     if let Some(model) = model {
@@ -57,68 +59,64 @@ fn library_contains_name(program: &Program, model: Option<&SemanticModel<'_>>, n
             DocName::Declaration { .. } | DocName::Prefix | DocName::Extension
         );
     }
-    program
-        .declarations
-        .iter()
-        .any(|declaration| match declaration {
-            TopLevelDecl::Function(function) => function.name.name == name,
-            TopLevelDecl::Variable(variable) => variable
-                .declarators
-                .iter()
-                .any(|declarator| declarator.name.name == name),
-            _ => false,
-        })
+    program.declarations().any(|declaration| match declaration {
+        TopLevelDecl::Function(function) => function.name().name() == name,
+        TopLevelDecl::Variable(variable) => variable
+            .declarators()
+            .any(|declarator| declarator.name().name() == name),
+        _ => false,
+    })
 }
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    program: &'a Program,
+    program: Program<'a>,
     model: Option<SemanticModel<'a>>,
     diagnostics: Vec<Diagnostic>,
-    names: HashSet<String>,
+    names: HashSet<&'a str>,
     scopes: NameScopes,
     statement_scopes: Vec<usize>,
     block_scopes: Vec<bool>,
     scoped_statement: bool,
     scoped_block: bool,
-    for_inits: Vec<Option<*const ForInit>>,
-    if_conditions: Vec<*const IfCondition>,
-    binding_patterns: Vec<*const Pattern>,
+    for_inits: Vec<Option<NodeId>>,
+    if_conditions: Vec<NodeId>,
+    binding_patterns: Vec<NodeId>,
     pattern_declarations: Vec<(usize, usize)>,
 }
 
-impl Collector<'_> {
-    fn prebind(&mut self, statements: &[Stmt]) {
+impl<'a> Collector<'a> {
+    fn prebind(&mut self, statements: AstChildren<'a, Stmt<'a>>) {
         for statement in statements {
             match statement {
                 Stmt::LocalVar(declaration) => {
-                    for declarator in &declaration.declarators {
-                        self.scopes.declare(&declarator.name.name);
+                    for declarator in declaration.declarators() {
+                        self.scopes.declare(declarator.name().name());
                     }
                 }
-                Stmt::LocalFunc(function) => self.scopes.declare(&function.name.name),
-                Stmt::PatternDecl(declaration) => self.scopes.pattern(&declaration.pattern),
+                Stmt::LocalFunc(function) => self.scopes.declare(function.name().name()),
+                Stmt::PatternDecl(declaration) => self.scopes.pattern(declaration.pattern()),
                 _ => {}
             }
         }
     }
 
-    fn statement_for_init(&self, node: &ForInit) -> bool {
-        self.for_inits.last().copied().flatten() == Some(std::ptr::from_ref(node))
+    fn statement_for_init(&self, node: ForInit<'a>) -> bool {
+        self.for_inits.last().copied().flatten() == Some(node.syntax().id())
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         let Some(members) = crate::lint::declarations::members_of(node) else {
             return StructuralTraversal::SkipChildren;
         };
-        self.names = crate::lint::declarations::member_names(members);
+        self.names = crate::lint::declarations::member_names(members.clone());
         let effective = match node {
             TopLevelDecl::Class(node) => node.element_members(),
             TopLevelDecl::MixinClass(node) => node.element_members(),
@@ -127,18 +125,18 @@ impl StructuralRuleVisitor for Collector<'_> {
             _ => EffectiveMembers::declared(members),
         };
         self.names.extend(
-            effective.declaring_params().map(|param| param.name.name.clone()),
+            effective.declaring_params().map(|param| param.name().name()),
         );
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         let (params, setter_param) = match node {
-            ClassMember::Method(method) if !method.is_static => (Some(&method.params), None),
-            ClassMember::Getter(getter) if !getter.is_static => (None, None),
-            ClassMember::Setter(setter) if !setter.is_static => (None, Some(&setter.param.name)),
-            ClassMember::Operator(operator) => (Some(&operator.params), None),
-            ClassMember::Constructor(constructor) => (Some(&constructor.params), None),
+            ClassMember::Method(method) if !method.is_static() => (Some(method.params()), None),
+            ClassMember::Getter(getter) if !getter.is_static() => (None, None),
+            ClassMember::Setter(setter) if !setter.is_static() => (None, Some(setter.param().name())),
+            ClassMember::Operator(operator) => (Some(operator.params()), None),
+            ClassMember::Constructor(constructor) => (Some(constructor.params()), None),
             _ => return StructuralTraversal::SkipChildren,
         };
         self.scopes.push();
@@ -151,11 +149,11 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_class_member(&mut self, node: &ClassMember) {
+    fn exit_class_member(&mut self, node: ClassMember<'a>) {
         let scanned = match node {
-            ClassMember::Method(method) => !method.is_static,
-            ClassMember::Getter(getter) => !getter.is_static,
-            ClassMember::Setter(setter) => !setter.is_static,
+            ClassMember::Method(method) => !method.is_static(),
+            ClassMember::Getter(getter) => !getter.is_static(),
+            ClassMember::Setter(setter) => !setter.is_static(),
             ClassMember::Operator(_) | ClassMember::Constructor(_) => true,
             _ => false,
         };
@@ -164,7 +162,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+    fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
         match parent {
             StructuralNode::Program(_) => matches!(child, StructuralNode::TopLevelDecl(_)),
             StructuralNode::ClassDecl(_) | StructuralNode::MixinClass(_)
@@ -179,7 +177,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             | StructuralNode::ConstructorDecl(_) | StructuralNode::LocalFuncDecl(_) => {
                 matches!(child, StructuralNode::FunctionBody(_))
             }
-            StructuralNode::Expr(Expr::FuncExpr { .. }) => {
+            StructuralNode::Expr(Expr::FuncExpr(_)) => {
                 matches!(child, StructuralNode::FunctionBody(_))
             }
             StructuralNode::LocalVar(_) => matches!(child, StructuralNode::VarDeclarator(_)),
@@ -193,17 +191,17 @@ impl StructuralRuleVisitor for Collector<'_> {
             }
             StructuralNode::ForInit(init) if self.statement_for_init(init) => {
                 if let StructuralNode::Pattern(pattern) = child {
-                    self.binding_patterns.push(std::ptr::from_ref(pattern));
+                    self.binding_patterns.push(pattern.syntax().id());
                 }
                 matches!(child, StructuralNode::LocalVar(_) | StructuralNode::Pattern(_)
                     | StructuralNode::Expr(_))
             }
-            StructuralNode::IfCondition(condition @ IfCondition::Case(..))
-                if self.if_conditions.last().copied() == Some(std::ptr::from_ref(condition)) =>
+            StructuralNode::IfCondition(condition @ IfCondition::Case(_))
+                if self.if_conditions.last().copied() == Some(condition.syntax().id()) =>
             {
                 if let StructuralNode::Pattern(pattern) = child {
                     self.scopes.push();
-                    self.binding_patterns.push(std::ptr::from_ref(pattern));
+                    self.binding_patterns.push(pattern.syntax().id());
                 }
                 true
             }
@@ -211,8 +209,8 @@ impl StructuralRuleVisitor for Collector<'_> {
                 if let StructuralNode::Stmt(branch) = child {
                     // A case's pattern scope starts after its value and remains
                     // live through the guard and then branch, but not the else.
-                    if !std::ptr::eq(branch, statement.then_branch.as_ref())
-                        || !matches!(statement.condition, IfCondition::Case(..))
+                    if branch.syntax().id() != statement.then_branch().syntax().id()
+                        || !matches!(statement.condition(), IfCondition::Case(_))
                     {
                         self.scopes.push();
                     }
@@ -234,7 +232,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             StructuralNode::CatchClause(_) => matches!(child, StructuralNode::Block(_)),
             StructuralNode::SwitchCaseKind(SwitchCaseKind::Pattern(..)) => {
                 if let StructuralNode::Pattern(pattern) = child {
-                    self.binding_patterns.push(std::ptr::from_ref(pattern));
+                    self.binding_patterns.push(pattern.syntax().id());
                 }
                 true
             }
@@ -242,7 +240,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         let mut scopes = usize::from(std::mem::take(&mut self.scoped_statement));
         if matches!(node, Stmt::Block(_) | Stmt::For(_) | Stmt::DoWhile(_)) {
             self.scopes.push();
@@ -250,15 +248,15 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
         self.statement_scopes.push(scopes);
         if let Stmt::For(statement) = node {
-            self.for_inits.push(statement.header.init.as_ref().map(std::ptr::from_ref));
+            self.for_inits.push(statement.header().init().map(|init| init.syntax().id()));
         }
         if let Stmt::If(statement) = node {
-            self.if_conditions.push(std::ptr::from_ref(&statement.condition));
+            self.if_conditions.push(statement.condition().syntax().id());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, node: &Stmt) {
+    fn exit_stmt(&mut self, node: Stmt<'a>) {
         if matches!(node, Stmt::For(_)) {
             self.for_inits.pop();
         }
@@ -270,7 +268,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_block(&mut self, node: &Block) -> StructuralTraversal {
+    fn visit_block(&mut self, node: Block<'a>) -> StructuralTraversal {
         let scoped = std::mem::take(&mut self.scoped_block);
         if scoped {
             self.scopes.push();
@@ -278,111 +276,112 @@ impl StructuralRuleVisitor for Collector<'_> {
         self.block_scopes.push(scoped);
         // Dart prebinds all block declarations, including later declarations
         // and names referenced by their own initializers.
-        self.prebind(&node.stmts);
+        self.prebind(node.stmts());
         StructuralTraversal::Continue
     }
 
-    fn exit_block(&mut self, _node: &Block) {
+    fn exit_block(&mut self, _node: Block<'a>) {
         if self.block_scopes.pop().expect("block scope") {
             self.scopes.pop();
         }
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        for declarator in &node.declarators {
-            self.scopes.declare(&declarator.name.name);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        for declarator in node.declarators() {
+            self.scopes.declare(declarator.name().name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_local_func_decl(&mut self, node: &LocalFuncDecl) -> StructuralTraversal {
-        self.scopes.declare(&node.name.name);
+    fn visit_local_func_decl(&mut self, node: LocalFuncDecl<'a>) -> StructuralTraversal {
+        self.scopes.declare(node.name().name());
         self.scopes.push();
-        self.scopes.params(&node.params);
+        self.scopes.params(node.params());
         StructuralTraversal::Continue
     }
 
-    fn exit_local_func_decl(&mut self, _node: &LocalFuncDecl) {
+    fn exit_local_func_decl(&mut self, _node: LocalFuncDecl<'a>) {
         self.scopes.pop();
     }
 
-    fn visit_for_init(&mut self, node: &ForInit) -> StructuralTraversal {
+    fn visit_for_init(&mut self, node: ForInit<'a>) -> StructuralTraversal {
         if self.statement_for_init(node)
-            && let ForInit::ForIn { declares_variable: true, name, .. } = node
+            && let ForInit::ForIn(init) = node
+            && init.declares_variable()
         {
-            self.scopes.declare(&name.name);
+            self.scopes.declare(init.name().name());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_pattern(&mut self, node: &Pattern) {
-        if self.binding_patterns.last().copied() == Some(std::ptr::from_ref(node)) {
+    fn exit_pattern(&mut self, node: Pattern<'a>) {
+        if self.binding_patterns.last().copied() == Some(node.syntax().id()) {
             self.binding_patterns.pop();
             self.scopes.pattern(node);
         }
     }
 
-    fn visit_pattern_declaration(&mut self, node: &PatternDeclaration) -> StructuralTraversal {
-        self.scopes.pattern(&node.pattern);
+    fn visit_pattern_declaration(&mut self, node: PatternDeclaration<'a>) -> StructuralTraversal {
+        self.scopes.pattern(node.pattern());
         let start = self.diagnostics.len();
         self.pattern_declarations.push((start, start));
         StructuralTraversal::Continue
     }
 
-    fn exit_pattern_declaration(&mut self, _node: &PatternDeclaration) {
+    fn exit_pattern_declaration(&mut self, _node: PatternDeclaration<'a>) {
         let (start, split) = self.pattern_declarations.pop().expect("pattern declaration");
         // Report initializer diagnostics before pattern diagnostics, even though
         // the structural walk visits the pattern first.
         self.diagnostics[start..].rotate_left(split - start);
     }
 
-    fn visit_switch_case(&mut self, node: &SwitchCase) -> StructuralTraversal {
+    fn visit_switch_case(&mut self, node: SwitchCase<'a>) -> StructuralTraversal {
         self.scopes.push();
-        self.prebind(&node.body);
+        self.prebind(node.body());
         StructuralTraversal::Continue
     }
 
-    fn exit_switch_case(&mut self, _node: &SwitchCase) {
+    fn exit_switch_case(&mut self, _node: SwitchCase<'a>) {
         self.scopes.pop();
     }
 
-    fn visit_catch_clause(&mut self, node: &CatchClause) -> StructuralTraversal {
+    fn visit_catch_clause(&mut self, node: CatchClause<'a>) -> StructuralTraversal {
         self.scopes.push();
-        if let Some(name) = &node.exception_var {
-            self.scopes.declare(&name.name);
+        if let Some(name) = node.exception_var() {
+            self.scopes.declare(name.name());
         }
-        if let Some(name) = &node.stack_trace_var {
-            self.scopes.declare(&name.name);
+        if let Some(name) = node.stack_trace_var() {
+            self.scopes.declare(name.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_catch_clause(&mut self, _node: &CatchClause) {
+    fn exit_catch_clause(&mut self, _node: CatchClause<'a>) {
         self.scopes.pop();
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Field { object, field, .. } = node
-            && matches!(object.unparenthesized(), Expr::This { .. })
-            && !self.scopes.bound(&field.name)
-            && (self.names.contains(&field.name)
-                || !library_contains_name(self.program, self.model.as_ref(), &field.name))
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Field(field) = node
+            && matches!(field.object().unparenthesized(), Expr::This(_))
+            && !self.scopes.bound(field.field().name())
+            && (self.names.contains(field.field().name())
+                || !library_contains_name(self.program, self.model.as_ref(), field.field().name()))
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "unnecessary-this",
                 "Unnecessary 'this.' qualifier.",
-                *object.span(),
+                field.object().span(),
             ));
         }
-        if let Expr::FuncExpr { params, .. } = node {
+        if let Expr::FuncExpr(function) = node {
             self.scopes.push();
-            self.scopes.params(params);
+            self.scopes.params(function.params());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::FuncExpr { .. }) {
+    fn exit_expr(&mut self, node: Expr<'a>) {
+        if matches!(node, Expr::FuncExpr(_)) {
             self.scopes.pop();
         }
     }

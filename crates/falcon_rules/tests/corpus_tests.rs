@@ -25,10 +25,11 @@ use corpus::{Expectation, cross_file_project_roots, parse_expectations};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ProjectFile, Rule, RuleAnalysis,
-    SignatureIndex, TypeIndex,
+    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ParsedFile, ProjectFile, Rule,
+    RuleAnalysis, SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
@@ -63,16 +64,16 @@ fn run_rule(
     let diagnostics = if inference::requires_sdk(file) {
         inference::analyze(rule, file, source, config)
     } else {
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let resolver_dependent = rule_requires_resolution(rule_name);
         let identity_sources = [IdentitySource {
             path: file,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: !errors.is_empty(),
         }];
         let identities = resolver_dependent
@@ -82,7 +83,7 @@ fn run_rule(
                 [(
                     file,
                     LibrarySource {
-                        program: &program,
+                        program,
                         has_parse_errors: !errors.is_empty(),
                         has_unresolved_parts: false,
                     },
@@ -94,13 +95,14 @@ fn run_rule(
             .as_ref()
             .zip(types.as_ref())
             .map(|(identities, types)| {
-                let model = falcon_analyze::SemanticModel::new(file, identities, Some(types));
-                SignatureIndex::from_program(&program, &model)
+                let model =
+                    falcon_analyze::SemanticModel::new(file, &parsed, identities, Some(types));
+                SignatureIndex::from_program(program, &model)
             });
         let environment =
             falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([file], |_| None);
         let mut ctx =
-            AnalyzeContext::new(file, source, config, &syntax).with_environment(Some(&environment));
+            AnalyzeContext::new(file, config, &parsed).with_environment(Some(&environment));
         if let Some(types) = types.as_ref() {
             ctx = ctx.with_types(types);
         }
@@ -110,7 +112,7 @@ fn run_rule(
         if let Some(signatures) = signatures.as_ref() {
             ctx = ctx.with_signatures(signatures);
         }
-        rule.analyze(&program, &ctx)
+        rule.analyze(program, &ctx)
     };
     diagnostics
         .into_iter()
@@ -557,19 +559,19 @@ Widget build(BuildContext context) {
   return Container(child: Text('hi'));
 }
 "#;
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors: _errors,
-        syntax,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
+    let parsed = Arc::new(ParsedFile {
+        source: src.into(),
+        tree,
+    });
+    let program = parsed.program();
     let rule = UseDesignSystemItem;
 
     // Without configuration the rule is a no-op.
     let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
     assert!(
-        rule.analyze(&program, &ctx).is_empty(),
+        rule.analyze(program, &ctx).is_empty(),
         "rule must be a no-op without configuration"
     );
 
@@ -591,8 +593,8 @@ Widget build(BuildContext context) {
         }
     }))
     .expect("valid config");
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured, &syntax);
-    let diags = rule.analyze(&program, &ctx);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
+    let diags = rule.analyze(program, &ctx);
     assert_eq!(
         diags.len(),
         1,
@@ -607,15 +609,15 @@ Widget build(BuildContext context) {
 
     // Static calls are not constructions.
     let static_src = "Widget f(BuildContext c) => Container.of(c);";
-    let falcon_dart_parser::ParseResult {
-        program: static_program,
-        errors: _e,
-        syntax,
-        ..
-    } = parse(static_src);
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), static_src, &configured, &syntax);
+    let falcon_dart_parser::ParseResult { tree, .. } = parse(static_src);
+    let parsed = Arc::new(ParsedFile {
+        source: static_src.into(),
+        tree,
+    });
+    let static_program = parsed.program();
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
     assert!(
-        rule.analyze(&static_program, &ctx).is_empty(),
+        rule.analyze(static_program, &ctx).is_empty(),
         "static access `Container.of(...)` must not be flagged"
     );
 }
@@ -637,19 +639,19 @@ class Bar {
   void run() {}
 }
 "#;
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors: _errors,
-        syntax,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
+    let parsed = Arc::new(ParsedFile {
+        source: src.into(),
+        tree,
+    });
+    let program = parsed.program();
     let rule = ClassMembersOrdering;
 
     // Default config → built-in pyramid order (fields → constructors → methods).
     // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
     let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg, &syntax);
-    let default_diags = rule.analyze(&program, &ctx);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
+    let default_diags = rule.analyze(program, &ctx);
     assert!(
         !default_diags.is_empty(),
         "default order should flag Foo (method before field)"
@@ -678,8 +680,8 @@ class Bar {
         }
     }))
     .expect("valid config");
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured, &syntax);
-    let diags = rule.analyze(&program, &ctx);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
+    let diags = rule.analyze(program, &ctx);
     assert_eq!(
         diags.len(),
         1,
@@ -723,26 +725,17 @@ fn cross_file_corpus_matches_expectations() {
                     path.extension().and_then(|extension| extension.to_str()) == Some("dart")
                 })
                 .map(|(path, source)| {
-                    let falcon_dart_parser::ParseResult {
-                        program,
-                        errors,
-                        syntax,
-                        ..
-                    } = parse(source);
+                    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
                     ProjectFile {
                         path: path.clone(),
-                        source: source.clone(),
-                        program,
-                        syntax,
+                        parsed: Arc::new(ParsedFile {
+                            source: source.clone().into_boxed_str(),
+                            tree,
+                        }),
                         has_parse_errors: !errors.is_empty(),
                     }
                 })
                 .collect();
-            let falcon_dart_parser::ParseResult {
-                program: empty_program,
-                syntax: empty_syntax,
-                ..
-            } = parse("");
             files.extend(
                 fixture_sources
                     .iter()
@@ -751,9 +744,10 @@ fn cross_file_corpus_matches_expectations() {
                     })
                     .map(|(path, source)| ProjectFile {
                         path: path.clone(),
-                        source: source.clone(),
-                        program: empty_program.clone(),
-                        syntax: empty_syntax.clone(),
+                        parsed: Arc::new(ParsedFile {
+                            source: source.clone().into_boxed_str(),
+                            tree: falcon_dart_parser::lex_tree(source),
+                        }),
                         has_parse_errors: false,
                     }),
             );
@@ -825,7 +819,7 @@ fn cross_file_corpus_matches_expectations() {
 #[test]
 fn resolver_dependent_per_file_project_corpus() {
     use falcon_analyze::{LibrarySource, group_libraries, library_unit};
-    use falcon_syntax::ast::Program;
+    use falcon_syntax::cst::Program;
 
     let rules = all_rules();
     let corpus = corpus_dir();
@@ -861,10 +855,24 @@ fn resolver_dependent_per_file_project_corpus() {
             .iter()
             .map(|p| fs::read_to_string(p).unwrap())
             .collect();
-        let parsed: Vec<_> = sources.iter().map(|source| parse(source)).collect();
-        let programs: Vec<&Program> = parsed.iter().map(|result| &result.program).collect();
-        let syntax: Vec<_> = parsed.iter().map(|result| &result.syntax).collect();
-        let path_prog: Vec<(PathBuf, &Program)> = paths
+        let results: Vec<_> = sources.iter().map(|source| parse(source)).collect();
+        let has_parse_errors: Vec<_> = results
+            .iter()
+            .map(|result| !result.errors.is_empty())
+            .collect();
+        let parsed: Vec<_> = results
+            .into_iter()
+            .zip(&sources)
+            .map(|(result, source)| {
+                Arc::new(ParsedFile {
+                    source: source.clone().into_boxed_str(),
+                    tree: result.tree,
+                })
+            })
+            .collect();
+        let programs: Vec<Program<'_>> = parsed.iter().map(|parsed| parsed.program()).collect();
+        let parsed_refs: Vec<_> = parsed.iter().collect();
+        let path_prog: Vec<(PathBuf, Program<'_>)> = paths
             .iter()
             .cloned()
             .zip(programs.iter().copied())
@@ -872,11 +880,12 @@ fn resolver_dependent_per_file_project_corpus() {
         let grouping = group_libraries(&path_prog);
         let identity_sources: Vec<_> = paths
             .iter()
+            .zip(&has_parse_errors)
             .zip(&parsed)
-            .map(|(path, result)| IdentitySource {
+            .map(|((path, has_parse_errors), parsed)| IdentitySource {
                 path,
-                program: &result.program,
-                has_parse_errors: !result.errors.is_empty(),
+                parsed,
+                has_parse_errors: *has_parse_errors,
             })
             .collect();
         let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
@@ -907,25 +916,29 @@ fn resolver_dependent_per_file_project_corpus() {
             }),
         );
         let mut type_index = TypeIndex::from_resolved_files(
-            parsed.iter().enumerate().map(|(i, result)| {
-                (
-                    paths[i].as_path(),
-                    LibrarySource {
-                        program: &result.program,
-                        has_parse_errors: !result.errors.is_empty(),
-                        has_unresolved_parts: grouping.is_unresolved(i),
-                    },
-                )
-            }),
+            has_parse_errors
+                .iter()
+                .enumerate()
+                .map(|(i, has_parse_errors)| {
+                    (
+                        paths[i].as_path(),
+                        LibrarySource {
+                            program: programs[i],
+                            has_parse_errors: *has_parse_errors,
+                            has_unresolved_parts: grouping.is_unresolved(i),
+                        },
+                    )
+                }),
             &identities,
         );
         type_index.add_external(&externals, &identities);
+        let signature_files: Vec<_> = paths.iter().cloned().zip(parsed.iter().cloned()).collect();
         let signatures =
-            SignatureIndex::build(&path_prog, Some(&externals), &identities, &type_index);
+            SignatureIndex::build(&signature_files, Some(&externals), &identities, &type_index);
 
         for (i, path) in paths.iter().enumerate() {
-            let unit = library_unit(&grouping, &programs, &source_refs, &syntax, i);
-            let ctx = AnalyzeContext::new(path, &sources[i], &config, syntax[i])
+            let unit = library_unit(&grouping, &parsed_refs, i);
+            let ctx = AnalyzeContext::new(path, &config, &parsed[i])
                 .with_types(&type_index)
                 .with_identities(&identities)
                 .with_signatures(&signatures)

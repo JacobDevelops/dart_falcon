@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use regex::Regex;
 
 /// The analyzer's `isLowerCaseUnderScoreWithDots` (ASCII digits only).
@@ -31,19 +31,18 @@ pub struct LibraryNames;
 impl Rule for LibraryNames {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(lib) = &program.library_directive else {
+        let Some(lib) = program.library_directive() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let (Some(first), Some(last)) = (lib.name.first(), lib.name.last()) else {
+        let (Some(first), Some(last)) = (lib.name().next(), lib.name().last()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let name = lib
-            .name
-            .iter()
-            .map(|segment| segment.name.as_str())
+            .name()
+            .map(|segment| segment.name())
             .collect::<Vec<_>>()
             .join(".");
         if LOWER_CASE_WITH_DOTS.is_match(&name) {
@@ -53,8 +52,8 @@ impl Rule for LibraryNames {
             "library-names",
             format!("The library name '{name}' isn't a lower_case_with_underscores identifier."),
             DiagSpan {
-                start: first.span.start,
-                end: last.span.end,
+                start: first.span().start,
+                end: last.span().end,
             },
         )])
     }

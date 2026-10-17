@@ -935,23 +935,26 @@ mod tests {
               @override
               Future<void> onLoad() async {}
             }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } =
+            falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let path = Path::new("/project/future_or.dart");
         let identities = IdentityIndex::build(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
             &[],
             None,
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(parsed.program(), &model);
         let base = ResolvedType::interface_identity(model.resolve_name("Base").unwrap());
         let future_or_void = signatures
             .instantiated_override_return(&base, "onLoad", false, &model)

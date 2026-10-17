@@ -25,7 +25,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
 const RULE: &str = "prefer-final-parameters";
@@ -36,7 +36,7 @@ pub struct PreferFinalParameters;
 impl Rule for PreferFinalParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let version = ctx.language_version();
@@ -46,7 +46,7 @@ impl Rule for PreferFinalParameters {
         let mutated = ctx.mutated_declarations(program);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            docs: ctx.syntax.doc_blocks(ctx.source).collect(),
+            docs: ctx.tree().doc_blocks(ctx.source).collect(),
             mutated,
             wildcards: version.supports(Feature::WildcardVariables),
             diagnostics: Vec::new(),
@@ -56,15 +56,15 @@ impl Rule for PreferFinalParameters {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    docs: Vec<falcon_syntax::token::DocBlock<'ctx>>,
-    mutated: &'a HashSet<usize>,
+    docs: Vec<DocBlock<'ctx>>,
+    mutated: &'a HashSet<NodeId>,
     wildcards: bool,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl Collector<'_, '_> {
-    fn check_name(&mut self, name: &Identifier, span: Span) {
-        if (self.wildcards && name.name == "_") || self.mutated.contains(&name.span.start) {
+    fn check_name(&mut self, name: Identifier<'_>, span: Span) {
+        if (self.wildcards && name.name() == "_") || self.mutated.contains(&name.syntax().id()) {
             return;
         }
         let doc = self
@@ -78,79 +78,76 @@ impl Collector<'_, '_> {
         });
         self.diagnostics.push(self.ctx.diagnostic(
             RULE,
-            format!("The parameter '{}' should be final.", name.name),
+            format!("The parameter '{}' should be final.", name.name()),
             span,
         ));
     }
 
-    fn check(&mut self, params: &FormalParamList) {
-        for param in &params.params {
-            if param.is_final || param.initializing.is_some() {
+    fn check(&mut self, params: FormalParamList<'_>) {
+        for param in params.params() {
+            if param.is_final() || param.initializing().is_some() {
                 continue;
             }
-            self.check_name(&param.name, param.span);
+            self.check_name(param.name(), param.span());
         }
     }
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         if let Some(params) = node.params() {
             self.check(params);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.check(&node.params);
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.check(node.params());
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        let tokens = self.ctx.tokens();
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        let name = node.param();
         let anchor = node
-            .param_annotations
-            .first()
-            .map(|annotation| annotation.span.start)
-            .or_else(|| node.param_type.as_ref().map(|ty| ty.span().start))
-            .unwrap_or(node.param.span.start);
-        let before_anchor = tokens.partition_point(|token| token.offset() < anchor);
-        let before_name = tokens.partition_point(|token| token.offset() < node.param.span.start);
-        let open = tokens[..before_anchor]
-            .iter()
-            .rposition(|token| token.kind == TokenKind::LParen)
-            .map_or(before_anchor, |index| index + 1);
-        let parameter_tokens = &tokens[open..before_name];
-        if !parameter_tokens
-            .iter()
-            .any(|token| token.kind == TokenKind::Final)
+            .param_annotations()
+            .next()
+            .map(|annotation| annotation.span().start)
+            .or_else(|| node.param_type().map(|ty| ty.span().start))
+            .unwrap_or(name.span().start);
+        let open = self.ctx.tree()
+            .tokens_in(self.ctx.source, Span::new(0, anchor))
+            .rev()
+            .find(|token| token.kind() == TokenKind::LParen)
+            .map_or(anchor, |token| token.span().end);
+        let mut parameter_tokens = self.ctx.tree()
+            .tokens_in(self.ctx.source, Span::new(open, name.span().start));
+        if !parameter_tokens.clone().any(|token| token.kind() == TokenKind::Final)
         {
             let start = parameter_tokens
-                .iter()
                 .find(|token| !token.is_trivia())
-                .map_or(node.param.span.start, |token| token.offset());
+                .map_or(name.span().start, |token| token.offset());
             self.check_name(
-                &node.param,
+                name,
                 Span {
                     start,
-                    end: node.param.span.end,
+                    end: name.span().end,
                 },
             );
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            self.check(&operator.params);
+            self.check(operator.params());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         // Primary constructors in pre-3.13 libraries are extension-type
         // representation declarations: their parameters declare final fields.
         // In 3.13+ the lint is disabled for the whole library above.
@@ -160,16 +157,16 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
-            self.check(&function.params);
+            self.check(function.params());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::FuncExpr { params, .. } = node {
-            self.check(params);
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::FuncExpr(function) = node {
+            self.check(function.params());
         }
         StructuralTraversal::Continue
     }

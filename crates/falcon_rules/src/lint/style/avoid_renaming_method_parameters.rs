@@ -19,7 +19,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::{Token, ast::*};
+use falcon_syntax::cst::*;
 
 use crate::lint::inherited_members::{
     InheritanceSource, inherited_concrete_member, inheriting_declaration,
@@ -33,7 +33,7 @@ pub struct AvoidRenamingMethodParameters;
 impl Rule for AvoidRenamingMethodParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -44,9 +44,10 @@ impl Rule for AvoidRenamingMethodParameters {
         }
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            tokens: ctx.tokens().collect(),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
-            declarations: program.declarations.iter(),
+            declarations: program.declarations(),
             owner: None,
             wildcards: ctx.language_version().supports(Feature::WildcardVariables),
             diags: Vec::new(),
@@ -56,25 +57,26 @@ impl Rule for AvoidRenamingMethodParameters {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    tokens: Vec<SyntaxToken<'a>>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    declarations: AstChildren<'a, TopLevelDecl<'a>>,
     owner: Option<(DeclarationIdentity, InheritanceSource<'a>)>,
     wildcards: bool,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.owner = self.declarations.next()
-            .inspect(|declaration| debug_assert!(std::ptr::eq(*declaration, node)))
+            .inspect(|declaration| debug_assert_eq!(declaration.syntax().id(), node.syntax().id()))
             .and_then(inheriting_declaration)
-            .filter(|declaration| !declaration.name.name.starts_with('_'))
+            .filter(|declaration| !declaration.name.name().starts_with('_'))
             .and_then(|declaration| {
-                self.model.resolve_name(&*declaration.name.name)
+                self.model.resolve_name(declaration.name.name())
                     .map(|owner| (owner, declaration.source))
             });
         if self.owner.is_some() {
@@ -84,16 +86,16 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let Some((owner, source)) = &self.owner else {
             return StructuralTraversal::SkipChildren;
         };
         let (name, annotations, params, start) = match member {
-            ClassMember::Method(method) if !method.is_static => (
-                method.name.name.as_str(), &method.annotations, &method.params, method.span.start,
+            ClassMember::Method(method) if !method.is_static() => (
+                method.name().name(), method.annotations(), method.params(), method.span().start,
             ),
             ClassMember::Operator(operator) => (
-                operator.lookup_name(), &operator.annotations, &operator.params, operator.span.start,
+                operator.lookup_name(), operator.annotations(), operator.params(), operator.span().start,
             ),
             _ => return StructuralTraversal::SkipChildren,
         };
@@ -106,20 +108,20 @@ impl StructuralRuleVisitor for Collector<'_> {
         let mut renamed = params.positional()
             .zip(&parent.positional_parameter_names)
             .filter(|(param, parent_name)| {
-                param.name.name != **parent_name
-                    && !is_wildcard(&param.name.name)
+                param.name().name() != **parent_name
+                    && !is_wildcard(param.name().name())
                     && !is_wildcard(parent_name)
             })
             .peekable();
-        if renamed.peek().is_some() && !is_documented(self.ctx.tokens(), start, annotations) {
+        if renamed.peek().is_some() && !is_documented(&self.tokens, start, annotations) {
             self.diags.extend(renamed.map(|(param, parent_name)| {
                 self.ctx.diagnostic(
                     "avoid-renaming-method-parameters",
                     format!(
                         "Rename parameter '{}' to match the overridden declaration's '{}'.",
-                        param.name.name, parent_name
+                        param.name().name(), parent_name
                     ),
-                    param.name.span,
+                    param.name().span(),
                 )
             }));
         }
@@ -129,10 +131,14 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 /// Whether a doc comment precedes the member or follows its annotations.
-fn is_documented(tokens: &[Token], start: usize, annotations: &[Annotation]) -> bool {
+fn is_documented(
+    tokens: &[SyntaxToken<'_>],
+    start: usize,
+    annotations: AstChildren<'_, Annotation<'_>>,
+) -> bool {
     documented(tokens, start)
         || annotations.last().is_some_and(|annotation| {
-            let after = tokens.partition_point(|token| token.offset() < annotation.span.end);
+            let after = tokens.partition_point(|token| token.offset() < annotation.span().end);
             tokens[after..]
                 .iter()
                 .find(|token| !token.is_trivia())

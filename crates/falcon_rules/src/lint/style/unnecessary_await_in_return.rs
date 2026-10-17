@@ -20,8 +20,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -32,7 +31,7 @@ pub struct UnnecessaryAwaitInReturn;
 impl Rule for UnnecessaryAwaitInReturn {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -47,12 +46,12 @@ impl Rule for UnnecessaryAwaitInReturn {
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies,
+    bodies: FunctionBodies<'a>,
     closure_returns: Vec<(Span, Option<ResolvedType>)>,
 }
 
-impl Collector<'_> {
-    fn check(&mut self, awaited: &Expr, await_span: Span, state: &SemanticState<'_>) {
+impl<'a> Collector<'a> {
+    fn check(&mut self, awaited: Expr<'a>, await_span: Span, state: &SemanticState<'a>) {
         let Some(body) = self.bodies.enclosing(&await_span) else {
             return;
         };
@@ -63,7 +62,7 @@ impl Collector<'_> {
         if !is_future(&operand) || operand.nullable() {
             return;
         }
-        let unnecessary = match &body.return_type {
+        let unnecessary = match body.return_type {
             Some(return_type) => {
                 let declared = state
                     .model
@@ -116,22 +115,21 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         if let Stmt::Return(statement) = node
-            && let Some(Expr::Await { expr, span }) =
-                statement.value.as_ref().map(Expr::unparenthesized)
+            && let Some(Expr::Await(expression)) = statement.value().map(Expr::unparenthesized)
         {
-            self.check(expr, *span, state);
+            self.check(expression.expr(), expression.span(), state);
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Expr::FuncExpr { body, .. } = node {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Expr::FuncExpr(function) = node {
             let return_type = state.expected().map(|context| match context {
                 ResolvedType::Function { .. } => context
                     .function_return_type()
@@ -139,15 +137,16 @@ impl SemanticRuleVisitor for Collector<'_> {
                 ResolvedType::Dynamic | ResolvedType::Void => context.clone(),
                 _ => ResolvedType::Unknown,
             });
-            self.closure_returns.push((*body.span(), return_type));
+            self.closure_returns
+                .push((function.body().span(), return_type));
         }
-        if let Expr::Await { expr, span } = node
+        if let Expr::Await(expression) = node
             && self
                 .bodies
-                .enclosing(node.span())
-                .is_some_and(|body| body.arrow_expression == Some(*node.span()))
+                .enclosing(&node.span())
+                .is_some_and(|body| body.arrow_expression == Some(node.span()))
         {
-            self.check(expr, *span, state);
+            self.check(expression.expr(), expression.span(), state);
         }
     }
 }

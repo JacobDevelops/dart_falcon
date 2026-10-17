@@ -5,9 +5,10 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, evaluate_constant,
+    evaluate_pattern_constant,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoDuplicateCaseValues;
@@ -15,13 +16,13 @@ pub struct NoDuplicateCaseValues;
 impl Rule for NoDuplicateCaseValues {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let collector = Collector {
             model,
             signatures,
@@ -40,76 +41,73 @@ struct Collector<'a> {
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     owner: Option<DeclarationIdentity>,
-    fields: HashMap<String, Expr>,
+    fields: HashMap<&'a str, Expr<'a>>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
-    class_context: Vec<(Option<DeclarationIdentity>, HashMap<String, Expr>)>,
+    class_context: Vec<(Option<DeclarationIdentity>, HashMap<&'a str, Expr<'a>>)>,
     function_context: Vec<Option<DeclarationIdentity>>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_class_decl(&mut self, node: &ClassDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_class_decl(&mut self, node: ClassDecl<'a>) -> StructuralTraversal {
         self.class_context.push((self.owner.clone(), std::mem::take(&mut self.fields)));
-        let Some(owner) = self.model.resolve_name(&node.name.name) else {
+        let Some(owner) = self.model.resolve_name(node.name().name()) else {
             return StructuralTraversal::Continue;
         };
         self.owner = Some(owner);
         self.fields = node
-            .members
-            .iter()
+            .members()
             .filter_map(|member| match member {
                 ClassMember::Field(field)
-                    if field.keyword == falcon_syntax::ast::VarKeyword::Const =>
+                    if field.keyword() == VarKeyword::Const =>
                 {
                     Some(field)
                 }
                 _ => None,
             })
             .flat_map(|field| {
-                field.declarators.iter().filter_map(|declarator| {
+                field.declarators().filter_map(|declarator| {
                     declarator
-                        .initializer
-                        .as_ref()
-                        .map(|initializer| (declarator.name.name.clone(), initializer.clone()))
+                        .initializer()
+                        .map(|initializer| (declarator.name().name(), initializer))
                 })
             })
             .collect();
         StructuralTraversal::Continue
     }
 
-    fn exit_class_decl(&mut self, _node: &ClassDecl) {
+    fn exit_class_decl(&mut self, _node: ClassDecl<'a>) {
         let (owner, fields) = self.class_context.pop().unwrap();
         self.owner = owner;
         self.fields = fields;
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         self.function_context.push(self.owner.clone());
-        if let Some(owner) = self.model.resolve_value(&node.name.name) {
+        if let Some(owner) = self.model.resolve_value(node.name().name()) {
             self.owner = Some(owner);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+    fn exit_function_decl(&mut self, _node: FunctionDecl<'a>) {
         self.owner = self.function_context.pop().unwrap();
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::Switch(switch) = node {
             let patterns = switch
-                .cases
-                .iter()
-                .flat_map(|case| &case.cases)
+                .cases()
+                .flat_map(|case| case.cases())
                 .filter_map(|case| match case {
-                    SwitchCaseKind::Pattern(pattern, _) => Some(pattern.as_ref()),
-                    SwitchCaseKind::Expr(_) | SwitchCaseKind::Default => None,
+                    SwitchCaseKind::Pattern(pattern) => Some(pattern.pattern()),
+                    SwitchCaseKind::Expr(_) | SwitchCaseKind::Default(_) => None,
                 });
             self.check_patterns(patterns);
-            self.check_expressions(switch.cases.iter().flat_map(|case| &case.cases).filter_map(
+            self.check_expressions(switch.cases().flat_map(|case| case.cases()).filter_map(
                 |case| match case {
-                    SwitchCaseKind::Expr(expression) => Some(expression.as_ref()),
+                    SwitchCaseKind::Expr(expression) => Some(expression.expr()),
                     _ => None,
                 },
             ));
@@ -117,9 +115,9 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Switch { arms, .. } = node {
-            self.check_patterns(arms.iter().map(|arm| &arm.pattern));
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Switch(switch) = node {
+            self.check_patterns(switch.arms().map(|arm| arm.pattern()));
         }
         StructuralTraversal::Continue
     }
@@ -130,23 +128,18 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-impl Collector<'_> {
-    fn check_expressions<'a>(&mut self, expressions: impl Iterator<Item = &'a Expr>) {
+impl<'a> Collector<'a> {
+    fn check_expressions(&mut self, expressions: impl Iterator<Item = Expr<'a>>) {
         let mut expressions = expressions.peekable();
         if expressions.peek().is_none() {
             return;
         }
-        let fields = self
-            .fields
-            .iter()
-            .map(|(name, value)| (name.as_str(), value))
-            .collect::<HashMap<_, _>>();
         let mut seen = HashSet::new();
         for expression in expressions {
             if let Some(value) = evaluate_constant(
                 expression,
                 self.owner.as_ref(),
-                &fields,
+                &self.fields,
                 &self.model,
                 self.signatures,
             ) && !seen.insert(value)
@@ -154,24 +147,19 @@ impl Collector<'_> {
                 self.diags.push(self.ctx.diagnostic(
                     "no-duplicate-case-values",
                     "Duplicate case value in switch statement.",
-                    *expression.span(),
+                    expression.span(),
                 ));
             }
         }
     }
 
-    fn check_patterns<'a>(&mut self, patterns: impl Iterator<Item = &'a Pattern>) {
-        let field_refs = self
-            .fields
-            .iter()
-            .map(|(name, value)| (name.as_str(), value))
-            .collect::<HashMap<_, _>>();
+    fn check_patterns(&mut self, patterns: impl Iterator<Item = Pattern<'a>>) {
         let mut seen = HashSet::<ConstantValue>::new();
         for pattern in patterns {
             for (value, span) in pattern_constants(
                 pattern,
                 self.owner.as_ref(),
-                &field_refs,
+                &self.fields,
                 &self.model,
                 self.signatures,
             ) {
@@ -188,88 +176,32 @@ impl Collector<'_> {
 }
 
 fn pattern_constants(
-    pattern: &Pattern,
+    pattern: Pattern<'_>,
     owner: Option<&DeclarationIdentity>,
-    fields: &HashMap<&str, &Expr>,
+    fields: &HashMap<&str, Expr<'_>>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> Vec<(ConstantValue, Span)> {
     match pattern {
-        Pattern::Literal(literal) => literal_expression(literal)
-            .and_then(|expression| evaluate_constant(&expression, owner, fields, model, signatures))
-            .map(|value| vec![(value, literal.span)])
-            .unwrap_or_default(),
-        Pattern::Const(constant) => {
-            let evaluate =
-                |expression: &Expr| evaluate_constant(expression, owner, fields, model, signatures);
-            let value = match &constant.value {
-                ConstPatternValue::Expr(expression) => evaluate(expression),
-                ConstPatternValue::Name(name) => name_expression(name, &constant.span)
-                    .as_ref()
-                    .and_then(evaluate),
-            };
-            value
-                .map(|value| vec![(value, constant.span)])
+        Pattern::Literal(_) | Pattern::Const(_) => {
+            evaluate_pattern_constant(pattern, owner, fields, model, signatures)
+                .map(|value| vec![(value, pattern.span())])
                 .unwrap_or_default()
         }
-        Pattern::LogicalOr { left, right, .. } => {
-            let mut values = pattern_constants(left, owner, fields, model, signatures);
-            values.extend(pattern_constants(right, owner, fields, model, signatures));
+        Pattern::LogicalOr(logical) => {
+            let mut values = pattern_constants(logical.left(), owner, fields, model, signatures);
+            values.extend(pattern_constants(
+                logical.right(),
+                owner,
+                fields,
+                model,
+                signatures,
+            ));
             values
         }
-        Pattern::ParenPattern { inner, .. } => {
-            pattern_constants(inner, owner, fields, model, signatures)
+        Pattern::ParenPattern(paren) => {
+            pattern_constants(paren.inner(), owner, fields, model, signatures)
         }
         _ => Vec::new(),
     }
-}
-
-fn literal_expression(literal: &LiteralPattern) -> Option<Expr> {
-    let span = literal.span;
-    Some(match &literal.value {
-        LiteralPatternValue::Null => Expr::NullLit { span },
-        LiteralPatternValue::Bool(value) => Expr::BoolLit {
-            value: *value,
-            span,
-        },
-        LiteralPatternValue::Int(value) => Expr::IntLit {
-            value: value.clone(),
-            span,
-        },
-        LiteralPatternValue::Double(value) => Expr::DoubleLit {
-            value: value.clone(),
-            span,
-        },
-        LiteralPatternValue::String(value) => Expr::StringLit(value.clone()),
-        LiteralPatternValue::NegInt(value) => Expr::Unary {
-            op: UnaryOp::Minus,
-            operand: Box::new(Expr::IntLit {
-                value: value.clone(),
-                span,
-            }),
-            span,
-        },
-        LiteralPatternValue::NegDouble(value) => Expr::Unary {
-            op: UnaryOp::Minus,
-            operand: Box::new(Expr::DoubleLit {
-                value: value.clone(),
-                span,
-            }),
-            span,
-        },
-    })
-}
-
-fn name_expression(names: &[Identifier], span: &Span) -> Option<Expr> {
-    let (first, rest) = names.split_first()?;
-    let mut expression = Expr::Ident(first.clone());
-    for name in rest {
-        expression = Expr::Field {
-            object: Box::new(expression),
-            field: name.clone(),
-            is_null_safe: false,
-            span: *span,
-        };
-    }
-    Some(expression)
 }

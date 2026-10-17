@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 use falcon_syntax::token::TokenKind;
 use regex::Regex;
 
@@ -37,16 +37,16 @@ pub struct FlutterStyleTodos;
 impl Rule for FlutterStyleTodos {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(
             comment_tokens(ctx)
                 .filter(|token| {
-                    matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment)
+                    matches!(token.kind(), TokenKind::LineComment | TokenKind::DocComment)
                 })
                 .filter(|token| {
-                    let comment = token.text(ctx.source);
+                    let comment = token.text();
                     TODO.is_match(comment) && !EXPECTED_TODO.is_match(comment)
                 })
                 .map(|token| {

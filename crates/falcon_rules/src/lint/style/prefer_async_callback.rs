@@ -12,7 +12,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferAsyncCallback;
@@ -20,7 +20,7 @@ pub struct PreferAsyncCallback;
 impl Rule for PreferAsyncCallback {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -36,16 +36,16 @@ struct Collector<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if is_future_void_function(node) {
             let span = node.span();
             self.diags.push(self.ctx.diagnostic(
                 "prefer-async-callback",
                 "Use AsyncCallback instead of Future<void> Function().",
-                *span,
+                span,
             ));
         }
         StructuralTraversal::Continue
@@ -54,20 +54,17 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 /// True for the type `Future<void> Function()` with no parameters.
-fn is_future_void_function(t: &DartType) -> bool {
+fn is_future_void_function(t: DartType<'_>) -> bool {
     let DartType::Function(ft) = t else {
         return false;
     };
-    if !ft.params.is_empty() {
+    if !ft.params().is_empty() {
         return false;
     }
-    let Some(ret) = &ft.return_type else {
+    let Some(DartType::Named(nt)) = ft.return_type() else {
         return false;
     };
-    let DartType::Named(nt) = ret.as_ref() else {
-        return false;
-    };
-    nt.segments.last().map(|s| s.name.as_str()) == Some("Future")
-        && nt.type_args.len() == 1
-        && matches!(nt.type_args[0], DartType::Void { .. })
+    nt.segments().last().map(|s| s.name()) == Some("Future")
+        && nt.type_args().len() == 1
+        && matches!(nt.type_args().next(), Some(DartType::Void(_)))
 }

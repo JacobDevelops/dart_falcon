@@ -12,8 +12,7 @@ use falcon_analyze::{
     TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseKeyInWidgetConstructors;
@@ -21,13 +20,13 @@ pub struct UseKeyInWidgetConstructors;
 impl Rule for UseKeyInWidgetConstructors {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
@@ -46,17 +45,17 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check_class(&mut self, class: &ClassDecl) {
-        if class.name.name.starts_with('_')
+    fn check_class(&mut self, class: ClassDecl<'_>) {
+        if class.name().name().starts_with('_')
             || crate::lint::declarations::has_meta_annotation(
-                &class.annotations,
+                class.annotations(),
                 "visibleForTesting",
                 &self.model,
             )
         {
             return;
         }
-        let Some(identity) = self.model.resolve_name(&class.name.name) else {
+        let Some(identity) = self.model.resolve_name(class.name().name()) else {
             return;
         };
         let class_type = ResolvedType::interface_identity(identity.clone());
@@ -83,34 +82,32 @@ impl Collector<'_> {
             return;
         }
 
-        let primary_body = class.members.iter().find_map(|member| match member {
+        let primary_body = class.members().find_map(|member| match member {
             ClassMember::PrimaryConstructorBody(body) => Some(body),
             _ => None,
         });
-        let primary = class.primary_constructor.iter().map(|constructor| {
+        let primary = class.primary_constructor().into_iter().map(|constructor| {
             (
                 false,
-                primary_body.map_or(&[][..], |body| body.annotations.as_slice()),
-                constructor.constructor_name.as_ref(),
-                &constructor.params,
-                primary_body.map_or(&[][..], |body| body.initializers.as_slice()),
+                primary_body.map(|body| body.annotations()),
+                constructor.constructor_name(),
+                constructor.params(),
+                primary_body.map(|body| body.initializers()),
                 constructor
-                    .constructor_name
-                    .as_ref()
-                    .map_or(constructor.name_span, |name| name.span),
+                    .constructor_name()
+                    .map_or(constructor.name_span(), |name| name.span()),
             )
         });
-        let constructors = class.members.iter().filter_map(|member| match member {
+        let constructors = class.members().filter_map(|member| match member {
             ClassMember::Constructor(constructor) => Some((
-                constructor.is_factory,
-                constructor.annotations.as_slice(),
-                constructor.constructor_name.as_ref(),
-                &constructor.params,
-                constructor.initializers.as_slice(),
+                constructor.is_factory(),
+                Some(constructor.annotations()),
+                constructor.constructor_name(),
+                constructor.params(),
+                Some(constructor.initializers()),
                 constructor
-                    .constructor_name
-                    .as_ref()
-                    .map_or(constructor.name.span, |name| name.span),
+                    .constructor_name()
+                    .map_or(constructor.name().span(), |name| name.span()),
             )),
             _ => None,
         });
@@ -119,48 +116,45 @@ impl Collector<'_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 "use-key-in-widget-constructors",
                 "Public widgets should have a constructor with a named 'key' parameter.",
-                class.name.span,
+                class.name().span(),
             ));
             return;
         }
 
         let mut parameters = TypeParameterScope::default();
-        parameters.push(&class.type_params, &self.model);
+        parameters.push(class.type_params(), &self.model);
         let supertype = class
-            .extends
-            .as_ref()
+            .extends()
             .map(|ty| self.model.resolve_type_in(ty, &parameters));
         for (is_factory, annotations, name, params, initializers, span) in constructors {
             if is_factory
-                || crate::lint::declarations::has_meta_annotation(
-                    annotations,
-                    "visibleForTesting",
-                    &self.model,
-                )
-                || name.is_some_and(|name| name.name.starts_with('_'))
+                || annotations.is_some_and(|annotations| {
+                    crate::lint::declarations::has_meta_annotation(
+                        annotations,
+                        "visibleForTesting",
+                        &self.model,
+                    )
+                })
+                || name.is_some_and(|name| name.name().starts_with('_'))
             {
                 continue;
             }
-            if self.has_resolved_super_key(params, initializers, supertype.as_ref()) {
+            if self.has_resolved_super_key(params, initializers.clone(), supertype.as_ref()) {
                 continue;
             }
             let mut known_target = false;
             let mut accepted = false;
-            for initializer in initializers {
+            for initializer in initializers.clone().into_iter().flatten() {
                 let (target, name, args) = match initializer {
-                    ConstructorInitializer::SuperCall {
-                        call_name, args, ..
-                    } => (
+                    ConstructorInitializer::SuperCall(call) => (
                         supertype.as_ref(),
-                        call_name.as_ref().map_or("new", |name| name.name.as_str()),
-                        args,
+                        call.call_name().map_or("new", |name| name.name()),
+                        call.args(),
                     ),
-                    ConstructorInitializer::ThisCall {
-                        call_name, args, ..
-                    } => (
+                    ConstructorInitializer::ThisCall(call) => (
                         Some(&class_type),
-                        call_name.as_ref().map_or("new", |name| name.name.as_str()),
-                        args,
+                        call.call_name().map_or("new", |name| name.name()),
+                        call.args(),
                     ),
                     _ => continue,
                 };
@@ -181,7 +175,7 @@ impl Collector<'_> {
             if accepted {
                 continue;
             }
-            if initializers.is_empty() {
+            if initializers.as_ref().is_none_or(AstChildren::is_empty) {
                 let Some(supertype) = &supertype else {
                     continue;
                 };
@@ -209,29 +203,27 @@ impl Collector<'_> {
         &self,
         signature: &ResolvedSignature,
         substitutions: &HashMap<TypeParameterId, ResolvedType>,
-        args: &ArgList,
+        args: ArgList<'_>,
     ) -> bool {
         !target_defines_key(signature, substitutions, &self.model, self.signatures)
-            || args
-                .named
-                .iter()
-                .any(|argument| argument.name.name == "key")
+            || args.named().any(|argument| argument.name().name() == "key")
     }
 
     fn has_resolved_super_key(
         &self,
-        params: &FormalParamList,
-        initializers: &[ConstructorInitializer],
+        params: FormalParamList<'_>,
+        initializers: Option<AstChildren<'_, ConstructorInitializer<'_>>>,
         supertype: Option<&ResolvedType>,
     ) -> bool {
         let Some(supertype) = supertype else {
             return false;
         };
         let constructor_name = initializers
-            .iter()
+            .into_iter()
+            .flatten()
             .find_map(|initializer| match initializer {
-                ConstructorInitializer::SuperCall { call_name, .. } => {
-                    Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                ConstructorInitializer::SuperCall(call) => {
+                    Some(call.call_name().map_or("new", |name| name.name()))
                 }
                 _ => None,
             })
@@ -244,17 +236,17 @@ impl Collector<'_> {
         };
         target_defines_key(signature, &substitutions, &self.model, self.signatures)
             && params.named().any(|parameter| {
-                parameter.initializing == Some(InitializingFormal::Super)
-                    && parameter.name.name == "key"
+                parameter.initializing() == Some(InitializingFormal::Super)
+                    && parameter.name().name() == "key"
             })
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
-    fn visit_class_decl(&mut self, node: &ClassDecl) -> StructuralTraversal {
+    fn visit_class_decl(&mut self, node: ClassDecl<'a>) -> StructuralTraversal {
         self.check_class(node);
         StructuralTraversal::SkipChildren
     }
@@ -346,12 +338,12 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
         .unwrap();
         let path = app.join("lib/main.dart");
         std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let environment = AnalysisEnvironment::discover([path.as_path()]);
         assert_eq!(
@@ -360,13 +352,13 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
         );
         let external = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &program, source)],
+            &[(path.as_path(), program, source)],
             |candidate| candidate == path,
         );
         let identities = IdentityIndex::build(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
@@ -380,7 +372,7 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
             [(
                 path.as_path(),
                 LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -389,17 +381,17 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
         );
         types.add_external(&external, &identities);
         let signatures = SignatureIndex::build(
-            &[(path.clone(), &program)],
+            &[(path.clone(), std::sync::Arc::clone(&parsed))],
             Some(&external),
             &identities,
             &types,
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
+        let context = AnalyzeContext::new(&path, &config, &parsed)
             .with_types(&types)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        rule.analyze(&program, &context)
+        rule.analyze(program, &context)
     }
 
     #[test]

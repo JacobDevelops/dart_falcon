@@ -25,8 +25,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferAssertsInInitializerLists;
@@ -34,12 +33,12 @@ pub struct PreferAssertsInInitializerLists;
 impl Rule for PreferAssertsInInitializerLists {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(model) = ctx
             .identities
-            .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types))
+            .map(|identities| SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types))
         else {
             return RulePreparation::Diagnostics(Vec::new());
         };
@@ -68,7 +67,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    constructors: HashMap<DeclarationIdentity, HashMap<&'a str, &'a FormalParamList>>,
+    constructors: HashMap<DeclarationIdentity, HashMap<&'a str, FormalParamList<'a>>>,
     receiver: Option<ResolvedType>,
     cached_class: Option<ResolvedType>,
     scope: Option<ConstructorScope<'a>>,
@@ -82,8 +81,8 @@ struct Collector<'a> {
 impl<'a> Collector<'a> {
     fn constructor_scope(
         &self,
-        params: &FormalParamList,
-        initializers: &[ConstructorInitializer],
+        params: FormalParamList<'a>,
+        mut initializers: AstChildren<'a, ConstructorInitializer<'a>>,
     ) -> ConstructorScope<'a> {
         let super_params = self
             .receiver
@@ -98,10 +97,9 @@ impl<'a> Collector<'a> {
             })
             .and_then(|superclass| {
                 let invoked = initializers
-                    .iter()
                     .find_map(|initializer| match initializer {
-                        ConstructorInitializer::SuperCall { call_name, .. } => {
-                            Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                        ConstructorInitializer::SuperCall(call) => {
+                            Some(call.call_name().map_or("new", |name| name.name()))
                         }
                         _ => None,
                     })
@@ -112,26 +110,25 @@ impl<'a> Collector<'a> {
     }
 }
 
-fn leading_assert_end(body: Option<&FunctionBody>) -> usize {
+fn leading_assert_end(body: Option<FunctionBody<'_>>) -> usize {
     let Some(FunctionBody::Block(block)) = body else {
         return 0;
     };
     block
-        .stmts
-        .iter()
+        .stmts()
         .take_while(|statement| matches!(statement, Stmt::Assert(_)))
         .last()
         .map_or(0, |statement| statement.span().end)
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
         let name = match declaration {
-            TopLevelDecl::Class(class) => &class.name.name,
-            TopLevelDecl::MixinClass(class) => &class.name.name,
-            TopLevelDecl::Enum(class) => &class.name.name,
-            TopLevelDecl::ExtensionType(class) => &class.name.name,
+            TopLevelDecl::Class(class) => class.name().name(),
+            TopLevelDecl::MixinClass(class) => class.name().name(),
+            TopLevelDecl::Enum(class) => class.name().name(),
+            TopLevelDecl::ExtensionType(class) => class.name().name(),
             _ => return StructuralTraversal::SkipChildren,
         };
         let Some(identity) = self.model.resolve_name(name) else {
@@ -148,7 +145,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, constructor: ConstructorRef<'_>) -> StructuralTraversal {
+    fn visit_constructor(&mut self, constructor: ConstructorRef<'a>) -> StructuralTraversal {
         if constructor.is_primary {
             self.primary_end = leading_assert_end(constructor.body);
             self.primary_scope = (self.primary_end > 0).then(|| {
@@ -158,12 +155,12 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         match member {
-            ClassMember::Constructor(constructor) if !constructor.is_factory => {
-                self.leading_end = leading_assert_end(constructor.body.as_ref());
+            ClassMember::Constructor(constructor) if !constructor.is_factory() => {
+                self.leading_end = leading_assert_end(constructor.body());
                 self.scope = (self.leading_end > 0).then(|| {
-                    self.constructor_scope(&constructor.params, &constructor.initializers)
+                    self.constructor_scope(constructor.params(), constructor.initializers())
                 });
             }
             ClassMember::PrimaryConstructorBody(_) => {
@@ -184,15 +181,15 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn exit_class_member(&mut self, _member: &ClassMember) {
+    fn exit_class_member(&mut self, _member: ClassMember<'a>) {
         self.scope = None;
         self.leading_end = 0;
     }
 
-    fn visit_assert_stmt(&mut self, assertion: &AssertStmt) -> StructuralTraversal {
-        if self.pending.is_none() && self.scope.is_some() && assertion.span.end <= self.leading_end {
+    fn visit_assert_stmt(&mut self, assertion: AssertStmt<'a>) -> StructuralTraversal {
+        if self.pending.is_none() && self.scope.is_some() && assertion.span().end <= self.leading_end {
             self.pending = Some(AssertionFacts {
-                span: assertion.span,
+                span: assertion.span(),
                 closure_params: HashSet::new(),
                 identifiers: Vec::new(),
                 properties: Vec::new(),
@@ -202,7 +199,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, expression: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, expression: Expr<'a>) -> StructuralTraversal {
         let Some(facts) = &mut self.pending else {
             return StructuralTraversal::SkipChildren;
         };
@@ -210,8 +207,8 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_assert_stmt(&mut self, assertion: &AssertStmt) {
-        if self.pending.as_ref().is_none_or(|facts| facts.span != assertion.span) {
+    fn exit_assert_stmt(&mut self, assertion: AssertStmt<'a>) {
+        if self.pending.as_ref().is_none_or(|facts| facts.span != assertion.span()) {
             return;
         }
         let facts = self.pending.take().expect("active assertion");
@@ -226,7 +223,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 "prefer-asserts-in-initializer-lists",
                 "Assert should be in the initializer list.",
-                Span::new(assertion.span.start, assertion.span.start + "assert".len()),
+                Span::new(assertion.span().start, assertion.span().start + "assert".len()),
             ));
         }
     }
@@ -240,44 +237,38 @@ impl StructuralRuleVisitor for Collector<'_> {
 /// Keep syntax only for initializing formals, which resolved signatures do not
 /// distinguish from ordinary parameters. Member lookup uses declaration identities.
 fn constructor_parameters<'p>(
-    program: &'p Program,
+    program: Program<'p>,
     model: &SemanticModel<'_>,
-) -> HashMap<DeclarationIdentity, HashMap<&'p str, &'p FormalParamList>> {
+) -> HashMap<DeclarationIdentity, HashMap<&'p str, FormalParamList<'p>>> {
     program
-        .declarations
-        .iter()
+        .declarations()
         .filter_map(|declaration| {
             let (name, primary, members) = match declaration {
                 TopLevelDecl::Class(node) => {
-                    (&node.name, node.primary_constructor.as_ref(), &node.members)
+                    (node.name(), node.primary_constructor(), node.members())
                 }
                 TopLevelDecl::MixinClass(node) => {
-                    (&node.name, node.primary_constructor.as_ref(), &node.members)
+                    (node.name(), node.primary_constructor(), node.members())
                 }
                 TopLevelDecl::Enum(node) => {
-                    (&node.name, node.primary_constructor.as_ref(), &node.members)
+                    (node.name(), node.primary_constructor(), node.members())
                 }
                 _ => return None,
             };
-            let identity = model.resolve_name(&name.name)?;
+            let identity = model.resolve_name(name.name())?;
             let primary = primary.map(|primary| {
                 (
-                    primary
-                        .constructor_name
-                        .as_ref()
-                        .map_or("new", |name| name.name.as_str()),
-                    &primary.params,
+                    primary.constructor_name().map_or("new", |name| name.name()),
+                    primary.params(),
                 )
             });
             let constructors = members
-                .iter()
                 .filter_map(|member| match member {
-                    ClassMember::Constructor(constructor) if !constructor.is_factory => Some((
+                    ClassMember::Constructor(constructor) if !constructor.is_factory() => Some((
                         constructor
-                            .constructor_name
-                            .as_ref()
-                            .map_or("new", |name| name.name.as_str()),
-                        &constructor.params,
+                            .constructor_name()
+                            .map_or("new", |name| name.name()),
+                        constructor.params(),
                     )),
                     _ => None,
                 })
@@ -299,8 +290,8 @@ struct ConstructorScope<'p> {
 
 impl<'p> ConstructorScope<'p> {
     fn new(
-        params: &FormalParamList,
-        super_params: Option<&FormalParamList>,
+        params: FormalParamList<'p>,
+        super_params: Option<FormalParamList<'p>>,
         source: &'p str,
     ) -> Self {
         let mut scope = Self {
@@ -308,9 +299,9 @@ impl<'p> ConstructorScope<'p> {
             initialized_fields: HashSet::new(),
         };
         let mut super_positional = 0;
-        for param in &params.params {
-            let name = &source[param.name.span.start..param.name.span.end];
-            match param.initializing {
+        for param in params.params() {
+            let name = &source[param.name().span().start..param.name().span().end];
+            match param.initializing() {
                 None => {
                     scope.params.insert(name);
                 }
@@ -320,19 +311,18 @@ impl<'p> ConstructorScope<'p> {
                 Some(InitializingFormal::Super) => {
                     // The super constructor parameter this formal forwards to:
                     // by position, or by name for a named formal.
-                    let named = matches!(param.kind, ParamKind::Named { .. });
+                    let named = matches!(param.kind(), ParamKind::Named { .. });
                     let target = super_params.and_then(|super_params| {
                         if named {
-                            super_params.params.iter().find(|candidate| {
-                                matches!(candidate.kind, ParamKind::Named { .. })
-                                    && candidate.name.name == name
+                            super_params.params().find(|candidate| {
+                                matches!(candidate.kind(), ParamKind::Named { .. })
+                                    && candidate.name().name() == name
                             })
                         } else {
                             super_params
-                                .params
-                                .iter()
+                                .params()
                                 .filter(|candidate| {
-                                    !matches!(candidate.kind, ParamKind::Named { .. })
+                                    !matches!(candidate.kind(), ParamKind::Named { .. })
                                 })
                                 .nth(super_positional)
                         }
@@ -341,11 +331,11 @@ impl<'p> ConstructorScope<'p> {
                         super_positional += 1;
                     }
                     if let Some(target) = target
-                        && target.initializing == Some(InitializingFormal::This)
+                        && target.initializing() == Some(InitializingFormal::This)
                     {
                         scope
                             .initialized_fields
-                            .insert(&source[target.name.span.start..target.name.span.end]);
+                            .insert(&source[target.name().span().start..target.name().span().end]);
                     }
                 }
             }
@@ -363,7 +353,7 @@ struct AssertionFacts<'a> {
 }
 
 impl<'a> AssertionFacts<'a> {
-    fn record(&mut self, expression: &Expr, source: &'a str) {
+    fn record(&mut self, expression: Expr<'a>, source: &'a str) {
         let Self {
             closure_params,
             identifiers,
@@ -371,25 +361,25 @@ impl<'a> AssertionFacts<'a> {
             uses_receiver,
             ..
         } = self;
-        let name = |identifier: &Identifier| &source[identifier.span.start..identifier.span.end];
+        let name =
+            |identifier: Identifier<'a>| &source[identifier.span().start..identifier.span().end];
         match expression.unparenthesized() {
-            Expr::This { .. } | Expr::Super { .. } => *uses_receiver = true,
+            Expr::This(_) | Expr::Super(_) => *uses_receiver = true,
             Expr::Ident(identifier) => identifiers.push(name(identifier)),
-            Expr::Field { field, .. } => properties.push(name(field)),
-            Expr::FuncExpr { params, .. } => {
-                closure_params.extend(params.params.iter().map(|p| name(&p.name)));
+            Expr::Field(field) => properties.push(name(field.field())),
+            Expr::FuncExpr(function) => {
+                closure_params.extend(function.params().params().map(|param| name(param.name())));
             }
-            Expr::Cascade { sections, .. } => {
-                for op in sections.iter().flat_map(|section| &section.ops) {
+            Expr::Cascade(cascade) => {
+                for op in cascade.sections().flat_map(|section| section.ops()) {
                     match op {
-                        CascadeOp::Field { name: field, .. } | CascadeOp::Call(field, ..) => {
-                            properties.push(name(field));
-                        }
-                        CascadeOp::Invoke(..)
-                        | CascadeOp::NullAssert { .. }
-                        | CascadeOp::Index { .. }
-                        | CascadeOp::Assign(..)
-                        | CascadeOp::IndexAssign(..) => {}
+                        CascadeOp::Field(field) => properties.push(name(field.name())),
+                        CascadeOp::Call(call) => properties.push(name(call.name())),
+                        CascadeOp::Invoke(_)
+                        | CascadeOp::NullAssert(_)
+                        | CascadeOp::Index(_)
+                        | CascadeOp::Assign(_)
+                        | CascadeOp::IndexAssign(_) => {}
                     }
                 }
             }
@@ -449,9 +439,9 @@ fn needs_instance(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
 
-    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 
@@ -462,28 +452,28 @@ mod tests {
     fn reports_only_the_assert_keyword() {
         let source = "class Box { Box(int value) { assert /* gap */ (value > 0); assert(value < 10, 'limit'); } }";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = PreferAssertsInInitializerLists.analyze(&program, &ctx);
+        let diagnostics = PreferAssertsInInitializerLists.analyze(program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

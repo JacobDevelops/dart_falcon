@@ -1,8 +1,8 @@
-use falcon_syntax::ast::{Span, StringDelimiter, StringLitNode};
+use falcon_syntax::cst::{Span, StringDelimiter, StringLitNode};
 
-pub(crate) fn interpolated_literals(
-    node: &StringLitNode,
-) -> impl Iterator<Item = (StringDelimiter<'_>, Span)> {
+pub(crate) fn interpolated_literals<'a>(
+    node: StringLitNode<'a>,
+) -> impl Iterator<Item = (StringDelimiter<'a>, Span)> {
     node.segments()
         .filter(|(lit, _)| lit.terminated && !lit.is_raw)
 }

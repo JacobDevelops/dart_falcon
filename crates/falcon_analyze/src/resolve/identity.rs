@@ -18,7 +18,8 @@ use std::sync::Arc;
 // External IDs occupy a disjoint namespace, independent of project file count.
 const EXTERNAL_ID: usize = 1 << (usize::BITS - 1);
 
-use falcon_syntax::ast::{FunctionKind, Identifier, ImportCombinator, Program, Span, TopLevelDecl};
+use crate::{NodeRef, ParsedFile};
+use falcon_syntax::cst::*;
 
 use super::group_libraries;
 use super::library::canonical_or_lexical;
@@ -57,7 +58,7 @@ pub enum DocName {
 
 pub struct IdentitySource<'a> {
     pub path: &'a Path,
-    pub program: &'a Program,
+    pub parsed: &'a Arc<ParsedFile>,
     pub has_parse_errors: bool,
 }
 
@@ -99,12 +100,17 @@ impl<'a> QualifiedName<'a> {
         }
     }
 
-    pub fn from_identifiers(segments: &'a [Identifier]) -> Option<Self> {
-        match segments {
-            [name] => Some((&name.name).into()),
-            [prefix, name] => Some(Self::prefixed(&prefix.name, &name.name)),
-            _ => None,
+    pub fn from_identifiers(segments: impl IntoIterator<Item = Identifier<'a>>) -> Option<Self> {
+        let mut segments = segments.into_iter();
+        let first = segments.next()?.name();
+        let second = segments.next();
+        if segments.next().is_some() {
+            return None;
         }
+        Some(match second {
+            Some(name) => Self::prefixed(first, name.name()),
+            None => first.into(),
+        })
     }
 }
 
@@ -148,13 +154,13 @@ struct Library {
 struct Import {
     target: ImportTarget,
     prefix: Option<String>,
-    combinators: Vec<ImportCombinator>,
+    combinators: Vec<NodeRef>,
 }
 
 #[derive(Debug, Clone)]
 struct Export {
     target: ImportTarget,
-    combinators: Vec<ImportCombinator>,
+    combinators: Vec<NodeRef>,
 }
 
 /// SDK and package identities use static builtin or index-owned shared names.
@@ -304,7 +310,7 @@ impl<'a> From<MemberSelector<'a>> for SourceSelector<'a> {
     }
 }
 
-type AnnotationData = (FileId, Vec<falcon_syntax::ast::Annotation>);
+type AnnotationData = (FileId, Vec<NodeRef>);
 
 #[derive(Debug, Clone, Default)]
 struct MemberAnnotations {
@@ -326,6 +332,7 @@ pub struct IdentityIndex {
     external_file_offsets: Vec<usize>,
     /// Source paths indexed by [`FileId`], including non-primary instances.
     paths: Vec<Option<PathBuf>>,
+    parsed: Vec<Arc<ParsedFile>>,
     source_annotations: SourceAnnotations,
     /// The loaded `dart:core`, when external libraries are indexed.
     core: Option<LibraryId>,
@@ -372,9 +379,18 @@ struct LookupMemos {
 pub(crate) struct TypeAlias {
     pub(crate) file: FileId,
     pub(crate) library: LibraryId,
-    pub(crate) type_params: Vec<falcon_syntax::ast::TypeParam>,
-    pub(crate) aliased: falcon_syntax::ast::DartType,
+    node: NodeRef,
     pub(crate) templates: super::semantic::AliasTemplates,
+}
+
+impl TypeAlias {
+    pub(crate) fn type_params(&self) -> AstChildren<'_, TypeParam<'_>> {
+        self.node.cast::<TypeAliasDecl<'_>>().type_params()
+    }
+
+    pub(crate) fn aliased(&self) -> DartType<'_> {
+        self.node.cast::<TypeAliasDecl<'_>>().aliased()
+    }
 }
 
 /// Loaded SDK and dependency libraries to index next to the project files.
@@ -533,6 +549,19 @@ fn assign_package_copies(
 }
 
 impl IdentityIndex {
+    pub fn node_ref(&self, file: FileId, id: NodeId) -> NodeRef {
+        NodeRef::new(Arc::clone(self.parsed_file(file)), id)
+    }
+
+    pub(crate) fn parsed_file(&self, file: FileId) -> &Arc<ParsedFile> {
+        if file.0 & EXTERNAL_ID != 0
+            && let Some(external) = &self.external
+        {
+            return external.parsed_file(file);
+        }
+        &self.parsed[file.0 & !EXTERNAL_ID]
+    }
+
     pub fn from_project_files(files: &[IdentitySource<'_>], packages: &[PackageIdentity]) -> Self {
         Self::build(files, &[], packages, None)
     }
@@ -630,7 +659,7 @@ impl IdentityIndex {
         let owned_grouping = grouping.is_none().then(|| {
             let files: Vec<_> = files
                 .iter()
-                .map(|file| (file.path.to_path_buf(), file.program))
+                .map(|file| (file.path.to_path_buf(), file.parsed.program()))
                 .collect();
             group_libraries(&files)
         });
@@ -662,10 +691,11 @@ impl IdentityIndex {
             })
             .collect();
         // Every indexed file: its path, program and parse-error flag.
-        let mut all: Vec<(&Path, &Program, bool)> = files
+        let mut all: Vec<(&Path, Program<'_>, bool)> = files
             .iter()
-            .map(|file| (file.path, file.program, file.has_parse_errors))
+            .map(|file| (file.path, file.parsed.program(), file.has_parse_errors))
             .collect();
+        let mut parsed: Vec<_> = files.iter().map(|file| Arc::clone(file.parsed)).collect();
         let mut core = base.as_ref().and_then(|index| index.core);
         let mut package_copies = Vec::new();
         let external_library_start = libraries.len();
@@ -720,7 +750,8 @@ impl IdentityIndex {
             }
             for file in library.files.iter() {
                 file_library.push(id);
-                all.push((&file.path, &file.facts, file.has_parse_errors));
+                all.push((&file.path, file.program(), file.has_parse_errors));
+                parsed.push(Arc::clone(&file.parsed));
             }
         }
         if !external_file_offsets.is_empty() {
@@ -765,22 +796,21 @@ impl IdentityIndex {
             library.incomplete |= has_parse_errors;
             library.missing_parts_only &= !has_parse_errors;
             library.named |= program
-                .library_directive
-                .as_ref()
-                .is_some_and(|directive| !directive.name.is_empty());
-            if library.origin.is_none() && program.part_of_directive.is_none() {
+                .library_directive()
+                .is_some_and(|directive| directive.name().next().is_some());
+            if library.origin.is_none() && program.part_of_directive().is_none() {
                 library.uri = package_uri(path, packages);
             }
-            for declaration in &program.declarations {
+            for declaration in program.declarations() {
                 if let TopLevelDecl::Extension(extension) = declaration
-                    && let Some(name) = &extension.name
+                    && let Some(name) = extension.name()
                 {
-                    library.extensions.insert(interner.intern(&name.name));
+                    library.extensions.insert(interner.intern(name.name()));
                 }
                 declaration_identities(declaration, |name, identity| {
                     let name = interner.intern(name);
                     let accessor = match declaration {
-                        TopLevelDecl::Function(function) => match function.kind {
+                        TopLevelDecl::Function(function) => match function.kind() {
                             FunctionKind::Getter => 1u8,
                             FunctionKind::Setter(_) => 2u8,
                             _ => 0,
@@ -816,23 +846,31 @@ impl IdentityIndex {
             external_file_offsets: &external_file_offsets,
             project_library_count: external_library_start,
         };
-        for (&(path, program, _), &library) in all.iter().zip(&file_library) {
+        for (ordinal, (&(path, program, _), &library)) in all.iter().zip(&file_library).enumerate()
+        {
             let external_instance = library.0.checked_sub(external_library_start);
-            let mut imports = Vec::with_capacity(program.imports.len());
+            let mut imports = Vec::with_capacity(program.imports().len());
             let mut implicit_core = true;
-            for import in &program.imports {
-                if import.uri.value == "dart:core" {
+            let file = &parsed[ordinal];
+            for import in program.imports() {
+                if import.uri().value() == "dart:core" {
                     implicit_core = false;
                 }
                 imports.push(Import {
-                    target: resolver.resolve(path, external_instance, &import.uri.value),
-                    prefix: import.as_name.as_ref().map(|id| id.name.clone()),
-                    combinators: import.combinators.clone(),
+                    target: resolver.resolve(path, external_instance, &import.uri().value()),
+                    prefix: import.as_name().map(|id| id.name().to_owned()),
+                    combinators: import
+                        .combinators()
+                        .map(|node| NodeRef::new(Arc::clone(file), node.syntax().id()))
+                        .collect(),
                 });
             }
-            let exports = program.exports.iter().map(|export| Export {
-                target: resolver.resolve(path, external_instance, &export.uri.value),
-                combinators: export.combinators.clone(),
+            let exports = program.exports().map(|export| Export {
+                target: resolver.resolve(path, external_instance, &export.uri().value()),
+                combinators: export
+                    .combinators()
+                    .map(|node| NodeRef::new(Arc::clone(file), node.syntax().id()))
+                    .collect(),
             });
             let library = &mut libraries[library.0];
             library.implicit_core &= implicit_core;
@@ -841,7 +879,7 @@ impl IdentityIndex {
         }
         for ((file, source), &library) in files.iter().zip(sources).zip(&file_library) {
             // A doc import of a library that does not exist contributes nothing.
-            let targets = doc_imports(file.program, source)
+            let targets = doc_imports(file.parsed.program(), source)
                 .filter(|uri| {
                     !external
                         .is_some_and(|external| uri_missing(external.environment, file.path, uri))
@@ -873,10 +911,11 @@ impl IdentityIndex {
                 continue;
             }
             collect_source_annotations(
-                program,
+                *program,
                 file_library[index],
                 FileId(index),
                 &mut source_annotations,
+                &parsed[index],
             );
         }
         let mut declared_by = FxHashMap::default();
@@ -920,6 +959,7 @@ impl IdentityIndex {
             by_path,
             external_file_offsets,
             paths,
+            parsed,
             source_annotations,
             core,
             colliding,
@@ -961,26 +1001,22 @@ impl IdentityIndex {
         }
         for (file, (_, program, _)) in all.iter().enumerate() {
             let library = index.file_library[file];
-            for declaration in &program.declarations {
+            for declaration in program.declarations() {
                 let TopLevelDecl::TypeAlias(alias) = declaration else {
                     continue;
                 };
                 // A name declared twice in one library has no unique alias.
                 let unique = matches!(
-                    index
-                        .get(library)
-                        .declarations
-                        .get(alias.name.name.as_str()),
+                    index.get(library).declarations.get(alias.name().name()),
                     Some((NameIdentity::Type, _))
                 );
-                if unique && let Some(identity) = index.declared(library, &alias.name.name) {
+                if unique && let Some(identity) = index.declared(library, alias.name().name()) {
                     index.aliases.insert(
                         identity,
                         TypeAlias {
                             file: FileId(file),
                             library,
-                            type_params: alias.type_params.clone(),
-                            aliased: alias.aliased.clone(),
+                            node: index.node_ref(FileId(file), alias.syntax().id()),
                             templates: Default::default(),
                         },
                     );
@@ -1130,7 +1166,7 @@ impl IdentityIndex {
         &self,
         identity: &DeclarationIdentity,
         selector: SourceSelector<'_>,
-    ) -> Option<(&Path, &[falcon_syntax::ast::Annotation])> {
+    ) -> Option<(&Path, &[NodeRef])> {
         if self.declaration_library(identity)?.0 & EXTERNAL_ID != 0
             && let Some(external) = &self.external
         {
@@ -1184,10 +1220,7 @@ impl IdentityIndex {
     }
 
     /// A project library's metadata, addressed through its defining source.
-    pub fn library_source_annotations(
-        &self,
-        path: &Path,
-    ) -> Option<(&Path, &[falcon_syntax::ast::Annotation])> {
+    pub fn library_source_annotations(&self, path: &Path) -> Option<(&Path, &[NodeRef])> {
         let library = self.library(self.file(path)?);
         self.source_annotations(
             &DeclarationIdentity::Project {
@@ -2127,31 +2160,34 @@ impl IdentityIndex {
 }
 
 fn collect_source_annotations(
-    program: &Program,
+    program: Program<'_>,
     library: LibraryId,
     file: FileId,
     index: &mut SourceAnnotations,
+    parsed: &Arc<ParsedFile>,
 ) {
     use MemberSelectorKind as Kind;
-    use falcon_syntax::ast::*;
     let mut add = |owner: &str,
                    selector: MemberSelector<'_>,
-                   annotations: &[Annotation],
-                   params: Option<&FormalParamList>| {
-        let annotations = deprecation_annotations(annotations);
+                   annotations: AstChildren<'_, Annotation<'_>>,
+                   params: Option<FormalParamList<'_>>| {
+        let annotations = deprecation_annotations(annotations, parsed);
         let mut parameters = HashMap::new();
         if let Some(params) = params {
             let mut positional = 0;
-            for param in &params.params {
-                let position = if matches!(param.kind, ParamKind::Named { .. }) {
+            for param in params.params() {
+                let position = if matches!(param.kind(), ParamKind::Named { .. }) {
                     None
                 } else {
                     let position = positional;
                     positional += 1;
                     Some(position)
                 };
-                if let Some(annotations) = parameter_deprecation(param) {
-                    parameters.insert(param.name.name.clone(), (position, (file, annotations)));
+                if let Some(annotations) = parameter_deprecation(param, parsed) {
+                    parameters.insert(
+                        param.name().name().to_owned(),
+                        (position, (file, annotations)),
+                    );
                 }
             }
         }
@@ -2176,74 +2212,59 @@ fn collect_source_annotations(
         }
         entry.parameters.extend(parameters);
     };
-    if let Some(directive) = &program.library_directive {
+    if let Some(directive) = program.library_directive() {
         add(
             "",
             MemberSelector::DECLARATION,
-            &directive.annotations,
+            directive.annotations(),
             None,
         );
     }
-    for declaration in &program.declarations {
+    for declaration in program.declarations() {
         let (names, annotations, members, params) = match declaration {
             TopLevelDecl::Class(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                n.element_members(),
+                vec![n.name().name()],
+                n.annotations(),
+                Some(n.element_members()),
                 None,
             ),
             TopLevelDecl::Mixin(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                EffectiveMembers::declared(&n.members),
+                vec![n.name().name()],
+                n.annotations(),
+                Some(EffectiveMembers::declared(n.members())),
                 None,
             ),
             TopLevelDecl::MixinClass(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                n.element_members(),
+                vec![n.name().name()],
+                n.annotations(),
+                Some(n.element_members()),
                 None,
             ),
             TopLevelDecl::Enum(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                n.element_members(),
+                vec![n.name().name()],
+                n.annotations(),
+                Some(n.element_members()),
                 None,
             ),
             TopLevelDecl::ExtensionType(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                n.element_members(),
+                vec![n.name().name()],
+                n.annotations(),
+                Some(n.element_members()),
                 None,
             ),
-            TopLevelDecl::ClassTypeAlias(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                EffectiveMembers::declared(&[]),
-                None,
-            ),
-            TopLevelDecl::TypeAlias(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                EffectiveMembers::declared(&[]),
-                None,
-            ),
-            TopLevelDecl::Function(n) => (
-                vec![&n.name.name],
-                &n.annotations,
-                EffectiveMembers::declared(&[]),
-                n.params(),
-            ),
+            TopLevelDecl::ClassTypeAlias(n) => (vec![n.name().name()], n.annotations(), None, None),
+            TopLevelDecl::TypeAlias(n) => (vec![n.name().name()], n.annotations(), None, None),
+            TopLevelDecl::Function(n) => (vec![n.name().name()], n.annotations(), None, n.params()),
             TopLevelDecl::Variable(n) => (
-                n.declarators.iter().map(|d| &d.name.name).collect(),
-                &n.annotations,
-                EffectiveMembers::declared(&[]),
+                n.declarators().map(|d| d.name().name()).collect(),
+                n.annotations(),
+                None,
                 None,
             ),
             TopLevelDecl::Extension(n) => (
-                n.name.iter().map(|name| &name.name).collect(),
-                &n.annotations,
-                EffectiveMembers::declared(&n.members),
+                n.name().into_iter().map(|name| name.name()).collect(),
+                n.annotations(),
+                Some(EffectiveMembers::declared(n.members())),
                 None,
             ),
             TopLevelDecl::Error(_) => continue,
@@ -2251,57 +2272,64 @@ fn collect_source_annotations(
         for name in names {
             let selector = match declaration {
                 TopLevelDecl::Variable(_) => MemberSelector::new(Kind::Variable, false, ""),
-                TopLevelDecl::Function(n) if matches!(n.kind, FunctionKind::Setter(_)) => {
+                TopLevelDecl::Function(n) if matches!(n.kind(), FunctionKind::Setter(_)) => {
                     MemberSelector::new(Kind::Write, false, "")
                 }
                 _ => MemberSelector::DECLARATION,
             };
-            add(name, selector, annotations, params);
+            add(name, selector, annotations.clone(), params);
+            let Some(members) = &members else {
+                continue;
+            };
             if let TopLevelDecl::Enum(enumeration) = declaration {
-                for variant in &enumeration.variants {
+                for variant in enumeration.variants() {
                     add(
                         name,
-                        MemberSelector::new(Kind::Field, true, &variant.name.name),
-                        &variant.annotations,
+                        MemberSelector::new(Kind::Field, true, variant.name().name()),
+                        variant.annotations(),
                         None,
                     );
                 }
             }
-            for member in members.declared {
+            for member in members.declared.clone() {
                 let (selector, annotations, params) = match member {
                     ClassMember::Field(field) => {
-                        for variable in &field.declarators {
+                        for variable in field.declarators() {
                             add(
                                 name,
                                 MemberSelector::new(
                                     Kind::Field,
-                                    field.is_static,
-                                    &variable.name.name,
+                                    field.is_static(),
+                                    variable.name().name(),
                                 ),
-                                &field.annotations,
+                                field.annotations(),
                                 None,
                             );
                         }
                         continue;
                     }
                     ClassMember::Method(n) => (
-                        MemberSelector::new(Kind::Read, n.is_static, &n.name.name),
-                        &n.annotations,
-                        Some(&n.params),
+                        MemberSelector::new(Kind::Read, n.is_static(), n.name().name()),
+                        n.annotations(),
+                        Some(n.params()),
                     ),
                     ClassMember::Getter(n) => (
-                        MemberSelector::new(Kind::Read, n.is_static, &n.name.name),
-                        &n.annotations,
+                        MemberSelector::new(Kind::Read, n.is_static(), n.name().name()),
+                        n.annotations(),
                         None,
                     ),
                     ClassMember::Setter(n) => (
-                        MemberSelector::new(Kind::Write, n.is_static, &n.name.name),
-                        &n.annotations,
+                        MemberSelector::new(Kind::Write, n.is_static(), n.name().name()),
+                        n.annotations(),
                         None,
                     ),
                     ClassMember::Operator(n) => (
-                        MemberSelector::new(Kind::Operator(n.params.params.len()), false, &n.op),
-                        &n.annotations,
+                        MemberSelector::new(
+                            Kind::Operator(n.params().params().len()),
+                            false,
+                            n.op(),
+                        ),
+                        n.annotations(),
                         None,
                     ),
                     ClassMember::Constructor(_)
@@ -2313,8 +2341,8 @@ fn collect_source_annotations(
             for param in members.declaring_params() {
                 add(
                     name,
-                    MemberSelector::new(Kind::Field, false, &param.name.name),
-                    &param.annotations,
+                    MemberSelector::new(Kind::Field, false, param.name().name()),
+                    param.annotations(),
                     None,
                 );
             }
@@ -2326,7 +2354,7 @@ fn collect_source_annotations(
                         false,
                         constructor
                             .constructor_name
-                            .map_or("new", |name| name.name.as_str()),
+                            .map_or("new", |name| name.name()),
                     ),
                     constructor.annotations,
                     Some(constructor.params),
@@ -2340,65 +2368,65 @@ fn collect_source_annotations(
 /// `@Deprecated(...)`. Only these can resolve to the SDK deprecation metadata
 /// (a project typedef or constant resolves to a project identity), so the
 /// index skips every other annotation instead of cloning it.
-fn may_be_deprecation(annotation: &falcon_syntax::ast::Annotation) -> bool {
-    annotation.constructor_name.is_none()
-        && match annotation.name.last().map(|name| name.name.as_str()) {
-            Some("deprecated") => annotation.args.is_none(),
-            Some("Deprecated") => annotation.args.is_some(),
+fn may_be_deprecation(annotation: Annotation<'_>) -> bool {
+    annotation.constructor_name().is_none()
+        && match annotation.name().last().map(|name| name.name()) {
+            Some("deprecated") => annotation.args().is_none(),
+            Some("Deprecated") => annotation.args().is_some(),
             _ => false,
         }
 }
 
-fn might_deprecate(annotations: &[falcon_syntax::ast::Annotation]) -> bool {
-    annotations.iter().any(may_be_deprecation)
+fn might_deprecate<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
+    annotations.any(may_be_deprecation)
 }
 
 /// Deprecation does not apply to required parameters (the official
 /// `deprecated_member_use` verifier skips them), so they are never indexed.
-fn parameter_deprecation(
-    param: &falcon_syntax::ast::FormalParam,
-) -> Option<Vec<falcon_syntax::ast::Annotation>> {
+fn parameter_deprecation(param: FormalParam<'_>, parsed: &Arc<ParsedFile>) -> Option<Vec<NodeRef>> {
     if is_required_parameter(param) {
         return None;
     }
-    deprecation_annotations(&param.annotations)
+    deprecation_annotations(param.annotations(), parsed)
 }
 
-fn is_required_parameter(param: &falcon_syntax::ast::FormalParam) -> bool {
+fn is_required_parameter(param: FormalParam<'_>) -> bool {
     matches!(
-        param.kind,
-        falcon_syntax::ast::ParamKind::Positional
-            | falcon_syntax::ast::ParamKind::Named { required: true }
+        param.kind(),
+        ParamKind::Positional | ParamKind::Named { required: true }
     )
 }
 
 /// The possible deprecation annotations in `annotations`; `None` when there
 /// are none.
 fn deprecation_annotations(
-    annotations: &[falcon_syntax::ast::Annotation],
-) -> Option<Vec<falcon_syntax::ast::Annotation>> {
-    might_deprecate(annotations).then(|| {
+    annotations: AstChildren<'_, Annotation<'_>>,
+    parsed: &Arc<ParsedFile>,
+) -> Option<Vec<NodeRef>> {
+    might_deprecate(annotations.clone()).then(|| {
         annotations
-            .iter()
-            .filter(|annotation| may_be_deprecation(annotation))
-            .cloned()
+            .filter(|annotation| may_be_deprecation(*annotation))
+            .map(|annotation| NodeRef::new(Arc::clone(parsed), annotation.syntax().id()))
             .collect()
     })
 }
 
-fn declaration_identities(declaration: &TopLevelDecl, mut visit: impl FnMut(&str, NameIdentity)) {
+fn declaration_identities(
+    declaration: TopLevelDecl<'_>,
+    mut visit: impl FnMut(&str, NameIdentity),
+) {
     match declaration {
-        TopLevelDecl::Class(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::ClassTypeAlias(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::Mixin(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::MixinClass(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::Enum(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::ExtensionType(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::TypeAlias(x) => visit(&x.name.name, NameIdentity::Type),
-        TopLevelDecl::Function(x) => visit(&x.name.name, NameIdentity::Value),
+        TopLevelDecl::Class(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::ClassTypeAlias(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::Mixin(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::MixinClass(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::Enum(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::ExtensionType(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::TypeAlias(x) => visit(x.name().name(), NameIdentity::Type),
+        TopLevelDecl::Function(x) => visit(x.name().name(), NameIdentity::Value),
         TopLevelDecl::Variable(x) => {
-            for declarator in &x.declarators {
-                visit(&declarator.name.name, NameIdentity::Value);
+            for declarator in x.declarators() {
+                visit(declarator.name().name(), NameIdentity::Value);
             }
         }
         TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => {}
@@ -2454,11 +2482,10 @@ fn combine(result: &mut Option<NameIdentity>, identity: NameIdentity) {
 /// The borrowed URI bodies of simple `/// @docImport` header lines. This
 /// resolver contract is intentionally separate from the parsed ordering view.
 /// Prefixes and combinators do not affect documentation lookups.
-pub fn doc_imports<'s>(program: &Program, source: &'s str) -> impl Iterator<Item = &'s str> {
+pub fn doc_imports<'s>(program: Program<'_>, source: &'s str) -> impl Iterator<Item = &'s str> {
     let header = program
-        .library_directive
-        .as_ref()
-        .and_then(|directive| source.get(..directive.span.start))
+        .library_directive()
+        .and_then(|directive| source.get(..directive.span().start))
         .unwrap_or_default();
     header.lines().filter_map(|line| {
         let rest = line.trim_start().strip_prefix("///")?.trim_start();
@@ -2472,30 +2499,29 @@ pub fn doc_imports<'s>(program: &Program, source: &'s str) -> impl Iterator<Item
 #[derive(Debug, Clone)]
 pub struct DocImport<'s> {
     pub uri: &'s str,
-    pub literal: falcon_syntax::ast::StringLitNode,
+    pub literal: NodeRef,
     pub span: Span,
 }
 
 /// Documentation imports attached to the library directive, in source order.
 pub fn library_doc_imports<'s>(
-    program: &Program,
+    program: Program<'_>,
     source: &'s str,
-    syntax: &'s falcon_syntax::SyntaxStore,
+    syntax: &'s SyntaxTree,
 ) -> impl Iterator<Item = DocImport<'s>> {
     let end = program
-        .library_directive
-        .as_ref()
-        .map_or(0, |directive| directive.span.start);
+        .library_directive()
+        .map_or(0, |directive| directive.span().start);
     let start = syntax
         .documentation_start(Span::new(0, end), source)
         .unwrap_or(end);
     let mut import_source = String::new();
     syntax
-        .tokens_in(Span::new(start, end))
-        .filter(|token| token.kind == falcon_syntax::TokenKind::DocComment)
+        .tokens_in(source, Span::new(start, end))
+        .filter(|token| token.kind() == falcon_syntax::TokenKind::DocComment)
         .flat_map(move |token| {
             token
-                .text(source)
+                .text()
                 .split_inclusive('\n')
                 .scan(token.offset(), move |offset, line| {
                     let start = *offset;
@@ -2522,18 +2548,20 @@ pub fn library_doc_imports<'s>(
             import_source.clear();
             import_source.push_str("import ");
             import_source.push_str(rest);
-            let falcon_dart_parser::ParseResult {
-                program: parsed, ..
-            } = falcon_dart_parser::parse(&import_source);
-            let import = parsed.imports.into_iter().next()?;
-            let (first, first_span) = import.uri.segments().next()?;
+            let parsed = falcon_dart_parser::parse(&import_source);
+            let parsed = Arc::new(ParsedFile {
+                source: import_source.clone().into_boxed_str(),
+                tree: parsed.tree,
+            });
+            let import = parsed.program().imports().next()?;
+            let (first, first_span) = import.uri().segments().next()?;
             let content_start =
                 first_span.start.checked_sub("import ".len())? + first.content_offset;
             let uri = rest.get(content_start..content_start + first.content.len())?;
             Some(DocImport {
                 uri,
-                span: Span::new(directive_start, directive_start + import.span.end),
-                literal: import.uri,
+                span: Span::new(directive_start, directive_start + import.span().end),
+                literal: NodeRef::new(Arc::clone(&parsed), import.uri().syntax().id()),
             })
         })
 }
@@ -2583,11 +2611,13 @@ fn uri_missing(environment: &AnalysisEnvironment, from: &Path, uri: &str) -> boo
     !uri.contains(':') && from.parent().is_some_and(|dir| !dir.join(uri).exists())
 }
 
-fn allows(combinators: &[ImportCombinator], name: &str) -> bool {
-    combinators.iter().all(|combinator| match combinator {
-        ImportCombinator::Show(names, _) => names.iter().any(|id| id.name == name),
-        ImportCombinator::Hide(names, _) => names.iter().all(|id| id.name != name),
-    })
+fn allows(combinators: &[NodeRef], name: &str) -> bool {
+    combinators.iter().all(
+        |combinator| match combinator.cast::<ImportCombinator<'_>>() {
+            ImportCombinator::Show(names) => names.names().any(|id| id.name() == name),
+            ImportCombinator::Hide(names) => names.names().all(|id| id.name() != name),
+        },
+    )
 }
 
 fn resolve_uri(
@@ -2922,6 +2952,7 @@ fn package_member(package: &str, name: &str) -> Option<DeclarationIdentity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ParsedFile;
     use falcon_dart_parser::parse;
 
     #[test]
@@ -2983,17 +3014,19 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let project = paths
             .each_ref()
-            .map(|path| (path.as_path(), &program, source));
+            .map(|path| (path.as_path(), parsed.program(), source));
         let libraries = ExternalLibraries::load(&environment, &project, |_| false);
         let sources = paths.each_ref().map(|path| IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         });
         let external = ExternalSources {
@@ -3067,22 +3100,25 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let programs = sources.each_ref().map(|source| {
+        let parsed = sources.each_ref().map(|source| {
             let parsed = parse(source);
             assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-            parsed.program
+            Arc::new(ParsedFile {
+                source: source.as_str().into(),
+                tree: parsed.tree,
+            })
         });
         let project = std::array::from_fn::<_, 3, _>(|index| {
             (
                 paths[index].as_path(),
-                &programs[index],
+                parsed[index].program(),
                 sources[index].as_str(),
             )
         });
         let libraries = ExternalLibraries::load(&environment, &project, |_| false);
         let inputs = std::array::from_fn::<_, 3, _>(|index| IdentitySource {
             path: &paths[index],
-            program: &programs[index],
+            parsed: &parsed[index],
             has_parse_errors: false,
         });
         let external = ExternalSources {
@@ -3146,13 +3182,15 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let project: Vec<_> = paths
             .iter()
-            .map(|path| (path.as_path(), &program, source))
+            .map(|path| (path.as_path(), parsed.program(), source))
             .collect();
         let external = ExternalLibraries::load(&environment, &project, |_| false);
         assert_eq!(external.libraries().len(), 4);
@@ -3160,7 +3198,7 @@ mod tests {
             .iter()
             .map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             })
             .collect();
@@ -3207,25 +3245,25 @@ mod tests {
     }
 
     fn index(inputs: &[(&str, &str)], packages: &[PackageIdentity]) -> IdentityIndex {
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
+        let parsed: Vec<_> = inputs
+            .iter()
+            .map(|(_, source)| {
+                let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+                assert!(errors.is_empty(), "{errors:?}");
+                Arc::new(ParsedFile {
+                    source: (*source).into(),
+                    tree,
+                })
+            })
+            .collect();
         let sources: Vec<_> = inputs
             .iter()
             .zip(&parsed)
-            .map(
-                |(
-                    (path, _),
-                    falcon_dart_parser::ParseResult {
-                        program, errors, ..
-                    },
-                )| {
-                    assert!(errors.is_empty(), "{errors:?}");
-                    IdentitySource {
-                        path: Path::new(path),
-                        program,
-                        has_parse_errors: false,
-                    }
-                },
-            )
+            .map(|((path, _), parsed)| IdentitySource {
+                path: Path::new(path),
+                parsed,
+                has_parse_errors: false,
+            })
             .collect();
         IdentityIndex::from_project_files(&sources, packages)
     }
@@ -4031,21 +4069,23 @@ mod tests {
         let path = app.join("lib/main.dart");
         let source = "import 'package:dep/api.dart' as p; const _limit = 9;";
         std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
         let external = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &program, source)],
+            &[(path.as_path(), parsed.program(), source)],
             |candidate| candidate == path,
         );
         let index = IdentityIndex::build(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
@@ -4082,7 +4122,7 @@ mod tests {
             .iter()
             .map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             })
             .collect();

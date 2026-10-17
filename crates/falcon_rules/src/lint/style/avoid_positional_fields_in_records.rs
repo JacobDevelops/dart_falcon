@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidPositionalFieldsInRecords;
@@ -19,7 +19,7 @@ pub struct AvoidPositionalFieldsInRecords;
 impl Rule for AvoidPositionalFieldsInRecords {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let visitor = Collector {
@@ -32,58 +32,54 @@ impl Rule for AvoidPositionalFieldsInRecords {
 
 const MESSAGE: &str = "Avoid positional fields in records. Use named fields instead.";
 
-fn record_literal_has_positional(expr: &Expr) -> bool {
-    matches!(expr.unparenthesized(), Expr::Record { fields, .. } if fields.iter().any(|f| f.name.is_none()))
+fn record_literal_has_positional(expr: Expr<'_>) -> bool {
+    matches!(expr.unparenthesized(), Expr::Record(record) if record.fields().any(|f| f.name().is_none()))
 }
 
 // Explicit types are checked separately; do not also report their initializer.
 fn check_declarators(
-    declarators: &[VarDeclarator],
+    declarators: AstChildren<'_, VarDeclarator<'_>>,
     has_type: bool,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
     for d in declarators {
-        if let Some(init) = &d.initializer
+        if let Some(init) = d.initializer()
             && !has_type
             && record_literal_has_positional(init)
         {
-            diags.push(ctx.diagnostic(
-                "avoid-positional-fields-in-records",
-                MESSAGE,
-                *(init.span()),
-            ));
+            diags.push(ctx.diagnostic("avoid-positional-fields-in-records", MESSAGE, init.span()));
         }
     }
 }
 
-struct Collector<'a, 'ctx> {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'ctx>,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_dart_type(&mut self, ty: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, ty: DartType<'a>) -> StructuralTraversal {
         if let DartType::Record(rec) = ty
-            && !rec.positional.is_empty()
+            && !rec.positional().is_empty()
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-positional-fields-in-records",
                 MESSAGE,
-                rec.span,
+                rec.span(),
             ));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = decl {
             check_declarators(
-                &v.declarators,
-                v.var_type.is_some(),
+                v.declarators(),
+                v.var_type().is_some(),
                 &mut self.diags,
                 self.ctx,
             );
@@ -91,20 +87,20 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, field: &FieldDecl) -> StructuralTraversal {
+    fn visit_field_decl(&mut self, field: FieldDecl<'a>) -> StructuralTraversal {
         check_declarators(
-            &field.declarators,
-            field.field_type.is_some(),
+            field.declarators(),
+            field.field_type().is_some(),
             &mut self.diags,
             self.ctx,
         );
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
+    fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
         check_declarators(
-            &local.declarators,
-            local.var_type.is_some(),
+            local.declarators(),
+            local.var_type().is_some(),
             &mut self.diags,
             self.ctx,
         );

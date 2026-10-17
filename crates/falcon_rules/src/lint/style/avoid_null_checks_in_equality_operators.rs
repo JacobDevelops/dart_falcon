@@ -24,7 +24,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 const MESSAGE: &str = "Unnecessary null comparison in implementation of '=='.";
 
@@ -34,7 +34,7 @@ pub struct AvoidNullChecksInEqualityOperators;
 impl Rule for AvoidNullChecksInEqualityOperators {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -64,29 +64,33 @@ impl OperatorChecks<'_> {
         self.body.start <= span.start && span.end <= self.body.end
     }
 
-    fn check(&mut self, name: &Identifier) {
-        self.rebound |= name.name == self.name;
+    fn check(&mut self, name: Identifier<'_>) {
+        self.rebound |= name.name() == self.name;
     }
 
-    fn check_params(&mut self, params: &FormalParamList) {
-        for param in &params.params {
-            self.check(&param.name);
+    fn check_params(&mut self, params: FormalParamList<'_>) {
+        for param in params.params() {
+            self.check(param.name());
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_operator_decl(&mut self, node: &OperatorDecl) -> StructuralTraversal {
-        let (Some(body), [param]) = (&node.body, node.params.params.as_slice()) else {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_operator_decl(&mut self, node: OperatorDecl<'a>) -> StructuralTraversal {
+        let Some(body) = node.body() else {
             return StructuralTraversal::SkipChildren;
         };
-        if node.op != "==" || !param.param_type.as_ref().is_some_and(DartType::is_nullable) {
+        let mut params = node.params().params();
+        let Some(param) = params.next() else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if params.next().is_some() || node.op() != "==" || !param.param_type().is_some_and(DartType::is_nullable) {
             return StructuralTraversal::SkipChildren;
         }
         self.active = Some(OperatorChecks {
-            name: &self.ctx.source[param.name.span.start..param.name.span.end],
-            body: *body.span(),
+            name: param.name().name(),
+            body: body.span(),
             rebound: false,
             spans: Vec::new(),
             method_properties: Vec::new(),
@@ -94,7 +98,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_operator_decl(&mut self, _node: &OperatorDecl) {
+    fn exit_operator_decl(&mut self, _node: OperatorDecl<'a>) {
         if let Some(checks) = self.active.take()
             && !checks.rebound
         {
@@ -104,32 +108,32 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(*node.span())) else {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
+        let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(node.span())) else {
             return StructuralTraversal::Continue;
         };
         match node {
             Stmt::LocalVar(declaration) => {
-                for declarator in &declaration.declarators {
-                    checks.check(&declarator.name);
+                for declarator in declaration.declarators() {
+                    checks.check(declarator.name());
                 }
             }
             Stmt::LocalFunc(function) => {
-                checks.check(&function.name);
-                checks.check_params(&function.params);
+                checks.check(function.name());
+                checks.check_params(function.params());
             }
-            Stmt::For(ForStmt { header: ForHeader { init: Some(init), .. }, .. }) => match init {
-                ForInit::VarDecl(declaration) => {
-                    for declarator in &declaration.declarators {
-                        checks.check(&declarator.name);
+            Stmt::For(statement) => match statement.header().init() {
+                Some(ForInit::VarDecl(declaration)) => {
+                    for declarator in declaration.declarators() {
+                        checks.check(declarator.name());
                     }
                 }
-                ForInit::ForIn { name, .. } => checks.check(name),
-                ForInit::PatternForIn { .. } | ForInit::Exprs(_) => {}
+                Some(ForInit::ForIn(initializer)) => checks.check(initializer.name()),
+                Some(ForInit::PatternForIn(_) | ForInit::Exprs(_)) | None => {}
             },
             Stmt::TryCatch(statement) => {
-                for clause in &statement.catches {
-                    for variable in [&clause.exception_var, &clause.stack_trace_var].into_iter().flatten() {
+                for clause in statement.catches() {
+                    for variable in [clause.exception_var(), clause.stack_trace_var()].into_iter().flatten() {
                         checks.check(variable);
                     }
                 }
@@ -139,45 +143,46 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(*node.span())) else {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(node.span())) else {
             return StructuralTraversal::Continue;
         };
-        if let Expr::FuncExpr { params, .. } = node {
-            checks.check_params(params);
+        if let Expr::FuncExpr(function) = node {
+            checks.check_params(function.params());
         }
-        if let Expr::Call { callee, span, .. } = node
-            && let Expr::Field { object, is_null_safe: true, .. } = callee.as_ref()
-            && is_param(object, checks.name)
+        if let Expr::Call(call) = node
+            && let Expr::Field(field) = call.callee()
+            && field.is_null_safe()
+            && is_param(field.object(), checks.name)
         {
-            checks.spans.push(*span);
-            checks.method_properties.push(*callee.span());
+            checks.spans.push(call.span());
+            checks.method_properties.push(call.callee().span());
             return StructuralTraversal::Continue;
         }
-        if checks.method_properties.last() == Some(node.span()) {
+        if checks.method_properties.last() == Some(&node.span()) {
             checks.method_properties.pop();
             return StructuralTraversal::Continue;
         }
         let flagged = match node {
-            Expr::Binary { op: BinaryOp::EqEq | BinaryOp::NotEq, left, right, .. } => {
-                (matches!(left.unparenthesized(), Expr::NullLit { .. }) && is_param(right, checks.name))
-                    || (matches!(right.unparenthesized(), Expr::NullLit { .. }) && is_param(left, checks.name))
+            Expr::Binary(binary) if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) => {
+                (matches!(binary.left().unparenthesized(), Expr::NullLit(_)) && is_param(binary.right(), checks.name))
+                    || (matches!(binary.right().unparenthesized(), Expr::NullLit(_)) && is_param(binary.left(), checks.name))
             }
-            Expr::Binary { op: BinaryOp::NullCoalesce, left, .. } => is_param(left, checks.name),
-            Expr::Field { object, is_null_safe: true, .. } => is_param(object, checks.name),
+            Expr::Binary(binary) if binary.op() == BinaryOp::NullCoalesce => is_param(binary.left(), checks.name),
+            Expr::Field(field) if field.is_null_safe() => is_param(field.object(), checks.name),
             _ => false,
         };
         if flagged {
-            checks.spans.push(*node.span());
+            checks.spans.push(node.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
-        if let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(*node.span()))
-            && let Pattern::Variable { name, .. } = node
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
+        if let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(node.span()))
+            && let Pattern::Variable(variable) = node
         {
-            checks.check(name);
+            checks.check(variable.name());
         }
         StructuralTraversal::Continue
     }
@@ -188,8 +193,8 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn is_param(expr: &Expr, name: &str) -> bool {
-    matches!(expr.unparenthesized(), Expr::Ident(identifier) if identifier.name == name)
+fn is_param(expr: Expr<'_>, name: &str) -> bool {
+    matches!(expr.unparenthesized(), Expr::Ident(identifier) if identifier.name() == name)
 }
 
 #[cfg(test)]
@@ -205,16 +210,16 @@ mod tests {
     #[test]
     fn includes_method_arguments_without_extending_property_accesses() {
         let source = "class Box { bool operator ==(Object? other) => other?.toString() == other?.hashCode.toString(); }";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let program = parsed.tree.program(source);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
-        let diagnostics = AvoidNullChecksInEqualityOperators.analyze(&program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = AvoidNullChecksInEqualityOperators.analyze(program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

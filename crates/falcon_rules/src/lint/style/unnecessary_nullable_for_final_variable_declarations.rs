@@ -14,7 +14,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryNullableForFinalVariableDeclarations;
@@ -22,7 +22,7 @@ pub struct UnnecessaryNullableForFinalVariableDeclarations;
 impl Rule for UnnecessaryNullableForFinalVariableDeclarations {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -40,12 +40,12 @@ struct Collector<'a> {
 
 use crate::lint::expressions::is_provably_non_null;
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn check(
         &mut self,
         keyword: VarKeyword,
-        var_type: &Option<DartType>,
-        declarators: &[VarDeclarator],
+        var_type: Option<DartType<'a>>,
+        declarators: AstChildren<'a, VarDeclarator<'a>>,
     ) {
         if keyword == VarKeyword::Var {
             return;
@@ -56,10 +56,9 @@ impl Collector<'_> {
         }
         // The type is shared by every declarator, so it is only unnecessarily
         // nullable when *all* of them are provably non-null.
-        if !declarators.iter().all(|d| {
-            d.initializer.as_ref().is_some_and(|expr| {
-                is_provably_non_null(expr)
-                    || matches!(expr.unparenthesized(), Expr::FuncExpr { .. })
+        if !declarators.clone().all(|d| {
+            d.initializer().is_some_and(|expr| {
+                is_provably_non_null(expr) || matches!(expr.unparenthesized(), Expr::FuncExpr(_))
             })
         }) {
             return;
@@ -68,34 +67,34 @@ impl Collector<'_> {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-nullable-for-final-variable-declarations",
                 "Unnecessary nullable type for a final variable declaration.",
-                d.span,
+                d.span(),
             ));
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = node {
-            self.check(v.keyword, &v.var_type, &v.declarators);
+            self.check(v.keyword(), v.var_type(), v.declarators());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        if node.is_static {
-            self.check(node.keyword, &node.field_type, &node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        if node.is_static() {
+            self.check(node.keyword(), node.field_type(), node.declarators());
         }
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) -> StructuralTraversal {
-        self.check(lv.keyword, &lv.var_type, &lv.declarators);
+    fn visit_local_var(&mut self, lv: LocalVarDecl<'a>) -> StructuralTraversal {
+        self.check(lv.keyword(), lv.var_type(), lv.declarators());
         StructuralTraversal::Continue
     }
 }

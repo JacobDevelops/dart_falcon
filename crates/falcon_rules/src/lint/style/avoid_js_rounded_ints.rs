@@ -15,8 +15,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal, parse_int,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidJsRoundedInts;
@@ -24,7 +23,7 @@ pub struct AvoidJsRoundedInts;
 impl Rule for AvoidJsRoundedInts {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -41,19 +40,19 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::IntLit { value, span } = node
-            && literal_value(value).is_some_and(|value| (value as f64) as i64 != value)
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::IntLit(literal) = node
+            && literal_value(literal.value()).is_some_and(|value| (value as f64) as i64 != value)
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-js-rounded-ints",
                 "Integer literal can't be represented exactly when compiled to JavaScript.",
-                *span,
+                literal.span(),
             ));
         }
         StructuralTraversal::Continue

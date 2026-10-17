@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferInlinedAdds;
@@ -19,7 +19,7 @@ pub struct PreferInlinedAdds;
 impl Rule for PreferInlinedAdds {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,26 +35,24 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Cascade {
-            object, sections, ..
-        } = node.unparenthesized()
-            && matches!(object.unparenthesized(), Expr::List { .. })
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Cascade(cascade) = node.unparenthesized()
+            && matches!(cascade.object().unparenthesized(), Expr::List(_))
         {
-            for section in sections {
+            for section in cascade.sections() {
                 // Stop after one match because operations in a section share its span.
-                for op in &section.ops {
-                    if let CascadeOp::Call(ident, _, args) = op
-                        && ident.name == "add"
-                        && args.positional.len() == 1
-                        && args.named.is_empty()
+                for op in section.ops() {
+                    if let CascadeOp::Call(call) = op
+                        && call.name().name() == "add"
+                        && call.args().positional().len() == 1
+                        && call.args().named().is_empty()
                     {
-                        self.diags.push(self.ctx.diagnostic("prefer-inlined-adds", "Inline the added element into the collection literal instead of using 'add'.", section.span));
+                        self.diags.push(self.ctx.diagnostic("prefer-inlined-adds", "Inline the added element into the collection literal instead of using 'add'.", section.span()));
                         break;
                     }
                 }

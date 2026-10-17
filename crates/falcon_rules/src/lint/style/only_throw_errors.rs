@@ -19,8 +19,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -30,7 +29,7 @@ pub struct OnlyThrowErrors;
 impl Rule for OnlyThrowErrors {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -46,48 +45,48 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, thrown: &Expr, state: &SemanticState<'_>) {
+    fn check(&mut self, thrown: Expr<'_>, state: &SemanticState<'_>) {
         if is_literal(thrown) || not_throwable(&state.infer(thrown), state) {
             self.diagnostics.push(self.ctx.diagnostic(
                 "only-throw-errors",
                 "Don't create and throw instances of classes that don't extend 'Exception' or 'Error'.",
-                *thrown.span(),
+                thrown.span(),
             ));
         }
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Expr::Throw { expr, .. } = node {
-            self.check(expr, state);
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'_>) {
+        if let Expr::Throw(expr) = node {
+            self.check(expr.expr(), state);
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'_>) {
         if let Stmt::Throw(statement) = node {
-            self.check(&statement.value, state);
+            self.check(statement.value(), state);
         }
     }
 }
 
-fn is_literal(expr: &Expr) -> bool {
+fn is_literal(expr: Expr<'_>) -> bool {
     matches!(
         expr.unparenthesized(),
-        Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
+        Expr::IntLit(_)
+            | Expr::DoubleLit(_)
             | Expr::StringLit(_)
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::SymbolLit { .. }
-            | Expr::List { .. }
-            | Expr::Map { .. }
-            | Expr::Set { .. }
-            | Expr::Record { .. }
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
+            | Expr::SymbolLit(_)
+            | Expr::List(_)
+            | Expr::Map(_)
+            | Expr::Set(_)
+            | Expr::Record(_)
     )
 }
 

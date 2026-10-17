@@ -27,7 +27,7 @@ mod dcl {
         structural_visitor,
     };
     use falcon_diagnostics::Diagnostic;
-    use falcon_syntax::ast::*;
+    use falcon_syntax::cst::*;
 
     #[derive(Default)]
     pub struct NoMagicNumber;
@@ -50,7 +50,7 @@ mod dcl {
     impl Rule for NoMagicNumber {
         fn prepare<'a>(
             &self,
-            _program: &'a Program,
+            _program: Program<'a>,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
             RulePreparation::Structural(Box::new(Collector {
@@ -81,29 +81,40 @@ mod dcl {
         }
     }
 
-    fn root_name(expr: &Expr) -> Option<&str> {
+    fn root_name<'a>(expr: Expr<'a>) -> Option<&'a str> {
         match expr.unparenthesized() {
-            Expr::Ident(id) => Some(&id.name),
-            Expr::Field { object, .. } => root_name(object),
+            Expr::Ident(id) => Some(id.name()),
+            Expr::Field(field) => root_name(field.object()),
             _ => None,
         }
     }
 
-    fn type_base_name(dart_type: &DartType) -> Option<&str> {
+    fn type_base_name<'a>(dart_type: DartType<'a>) -> Option<&'a str> {
         match dart_type {
-            DartType::Named(n) => n.segments.last().map(|s| s.name.as_str()),
+            DartType::Named(n) => n.segments().last().map(|s| s.name()),
             _ => None,
         }
     }
 
-    fn direct_literal_span(expr: &Expr) -> Option<usize> {
+    fn direct_literal_span(expr: Expr<'_>) -> Option<usize> {
         let literal = match expr.unparenthesized() {
-            Expr::Unary { operand, .. } => operand.as_ref(),
+            Expr::Unary(unary) => unary.operand(),
             _ => expr,
         };
         match literal.unparenthesized() {
-            Expr::IntLit { span, .. } | Expr::DoubleLit { span, .. } => Some(span.start),
+            Expr::IntLit(literal) => Some(literal.span().start),
+            Expr::DoubleLit(literal) => Some(literal.span().start),
             _ => None,
+        }
+    }
+
+    fn explicit_const_context(expr: Expr<'_>) -> bool {
+        match expr {
+            Expr::New(expr) => expr.is_const(),
+            Expr::List(expr) => expr.is_const(),
+            Expr::Set(expr) => expr.is_const(),
+            Expr::Map(expr) => expr.is_const(),
+            _ => false,
         }
     }
 
@@ -116,6 +127,14 @@ mod dcl {
     }
 
     impl Collector<'_, '_> {
+        fn exempt_elements(&mut self, elements: AstChildren<'_, CollectionElement<'_>>) {
+            self.exempt_literals
+                .extend(elements.filter_map(|element| match element {
+                    CollectionElement::Expr(expr) => direct_literal_span(expr),
+                    _ => None,
+                }));
+        }
+
         fn flag(&mut self, value: &str, span: &Span) {
             if self.in_const != 0
                 || self.exempt_literals.contains(&span.start)
@@ -132,10 +151,10 @@ mod dcl {
     }
 
     structural_visitor! {
-    impl StructuralRuleVisitor for Collector<'_, '_> {
+    impl<'a, 'ctx> StructuralRuleVisitor<'ctx> for Collector<'a, 'ctx> {
         fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-        fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        fn visit_top_level_decl(&mut self, node: TopLevelDecl<'ctx>) -> StructuralTraversal {
             if matches!(node, TopLevelDecl::Variable(_)) {
                 StructuralTraversal::SkipChildren
             } else {
@@ -143,16 +162,16 @@ mod dcl {
             }
         }
 
-        fn visit_field_decl(&mut self, _node: &FieldDecl) -> StructuralTraversal {
+        fn visit_field_decl(&mut self, _node: FieldDecl<'ctx>) -> StructuralTraversal {
             StructuralTraversal::SkipChildren
         }
-        fn visit_formal_param(&mut self, _node: &FormalParam) -> StructuralTraversal {
+        fn visit_formal_param(&mut self, _node: FormalParam<'ctx>) -> StructuralTraversal {
             StructuralTraversal::SkipChildren
         }
-        fn visit_local_var(&mut self, _node: &LocalVarDecl) -> StructuralTraversal {
+        fn visit_local_var(&mut self, _node: LocalVarDecl<'ctx>) -> StructuralTraversal {
             StructuralTraversal::SkipChildren
         }
-        fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        fn visit_stmt(&mut self, node: Stmt<'ctx>) -> StructuralTraversal {
             if matches!(node, Stmt::PatternDecl(_)) {
                 StructuralTraversal::SkipChildren
             } else {
@@ -160,34 +179,29 @@ mod dcl {
             }
         }
 
-        fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-            if matches!(node, Expr::New { is_const: true, .. } | Expr::List { is_const: true, .. } | Expr::Set { is_const: true, .. } | Expr::Map { is_const: true, .. }) {
+        fn visit_expr(&mut self, node: Expr<'ctx>) -> StructuralTraversal {
+            if explicit_const_context(node) {
                 self.in_const += 1;
             }
             match node {
-                Expr::IntLit { value, span } | Expr::DoubleLit { value, span } => {
-                    self.flag(value, span);
-                }
-                Expr::Call { callee, .. } if root_name(callee) == Some("DateTime") => {
+                Expr::IntLit(literal) => self.flag(literal.value(), &literal.span()),
+                Expr::DoubleLit(literal) => self.flag(literal.value(), &literal.span()),
+                Expr::Call(call) if root_name(call.callee()) == Some("DateTime") => {
                     return StructuralTraversal::SkipChildren;
                 }
-                Expr::New { dart_type, .. } if type_base_name(dart_type) == Some("DateTime") => {
+                Expr::New(expr) if type_base_name(expr.dart_type()) == Some("DateTime") => {
                     return StructuralTraversal::SkipChildren;
                 }
-                Expr::List { elements, .. } | Expr::Set { elements, .. } => {
-                    self.exempt_literals.extend(elements.iter().filter_map(|element| match element {
-                        CollectionElement::Expr(expr) => direct_literal_span(expr),
-                        _ => None,
-                    }));
+                Expr::List(list) => self.exempt_elements(list.elements()),
+                Expr::Set(set) => self.exempt_elements(set.elements()),
+                Expr::Index(expr) => {
+                    self.exempt_literals.extend(direct_literal_span(expr.index()));
                 }
-                Expr::Index { index, .. } => {
-                    self.exempt_literals.extend(direct_literal_span(index));
-                }
-                Expr::Cascade { sections, .. } => {
-                    self.exempt_literals.extend(sections.iter().flat_map(|section| {
-                        section.ops.iter().filter_map(|op| match op {
-                            CascadeOp::Index { index, .. }
-                            | CascadeOp::IndexAssign(index, _, _) => direct_literal_span(index),
+                Expr::Cascade(cascade) => {
+                    self.exempt_literals.extend(cascade.sections().flat_map(|section| {
+                        section.ops().filter_map(|op| match op {
+                            CascadeOp::Index(index) => direct_literal_span(index.index()),
+                            CascadeOp::IndexAssign(assign) => direct_literal_span(assign.target()),
                             _ => None,
                         })
                     }));
@@ -197,8 +211,8 @@ mod dcl {
             StructuralTraversal::Continue
         }
 
-        fn exit_expr(&mut self, node: &Expr) {
-            if matches!(node, Expr::New { is_const: true, .. } | Expr::List { is_const: true, .. } | Expr::Set { is_const: true, .. } | Expr::Map { is_const: true, .. }) {
+        fn exit_expr(&mut self, node: Expr<'ctx>) {
+            if explicit_const_context(node) {
                 self.in_const -= 1;
             }
         }

@@ -16,7 +16,7 @@
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseDecoratedBox;
@@ -24,7 +24,7 @@ pub struct UseDecoratedBox;
 impl Rule for UseDecoratedBox {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -39,12 +39,12 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::scoped_constructor_invocation(node, state)
             && self.ctx.identities.is_some_and(|index| {
@@ -61,13 +61,9 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 }
 
-fn only_decorates_child(args: &ArgList) -> bool {
-    let names = || {
-        args.named
-            .iter()
-            .map(|argument| argument.name.name.as_str())
-    };
-    args.positional.is_empty()
+fn only_decorates_child(args: ArgList<'_>) -> bool {
+    let names = || args.named().map(|argument| argument.name().name());
+    args.positional().is_empty()
         && names().all(|name| matches!(name, "child" | "decoration" | "key"))
         && names().any(|name| name == "child")
         && names().any(|name| name == "decoration")

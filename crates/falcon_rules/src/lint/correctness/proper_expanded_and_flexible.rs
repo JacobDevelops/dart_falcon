@@ -12,7 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ProperExpandedAndFlexible;
@@ -20,7 +20,7 @@ pub struct ProperExpandedAndFlexible;
 impl Rule for ProperExpandedAndFlexible {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -37,12 +37,12 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         // Only flag when we can positively see an illegal parent context: an
         // Expanded/Flexible passed as the `child:` of a non-Flex widget. A Flex
         // widget (Row/Column/Flex) receives its children via `children:`, so an
@@ -50,16 +50,16 @@ impl StructuralRuleVisitor for Collector<'_> {
         if let Some((parent, args, _)) = crate::lint::flutter::widget_construction(node)
             && !matches!(parent, "Row" | "Column" | "Flex")
         {
-            for named in &args.named {
-                if named.name.name == "child"
+            for named in args.named() {
+                if named.name().name() == "child"
                     && let Some((child, _, child_span)) =
-                        crate::lint::flutter::widget_construction(&named.value)
+                        crate::lint::flutter::widget_construction(named.value())
                     && matches!(child, "Expanded" | "Flexible")
                 {
                     self.diags.push(self.ctx.diagnostic(
                         "proper-expanded-and-flexible",
                         "Expanded and Flexible must be direct children of a Row, Column, or Flex.",
-                        *child_span,
+                        child_span,
                     ));
                 }
             }

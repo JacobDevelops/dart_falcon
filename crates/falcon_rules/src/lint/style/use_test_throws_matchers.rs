@@ -26,8 +26,7 @@ use falcon_analyze::{
     AnalyzeContext, IdentityIndex, LibraryId, QualifiedName, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -37,7 +36,7 @@ pub struct UseTestThrowsMatchers;
 impl Rule for UseTestThrowsMatchers {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -55,27 +54,27 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let Stmt::TryCatch(statement) = node else {
             return;
         };
-        if statement.catches.len() != 1 || statement.finally.is_some() {
+        if statement.catches().len() != 1 || statement.finally().is_some() {
             return;
         }
-        if let Some(Stmt::Expr(last)) = statement.body.stmts.last()
+        if let Some(Stmt::Expr(last)) = statement.body().stmts().last()
             && let Some(library) = self.expect_library
             && let Some(identities) = self.ctx.identities
-            && is_test_fail(&last.expr, library, identities, state)
+            && is_test_fail(last.expr(), library, identities, state)
         {
             self.diags.push(self.ctx.diagnostic(
                 "use-test-throws-matchers",
                 "Use the 'throwsA' matcher instead of using 'fail' when there is no exception thrown.",
-                last.span,
+                last.span(),
             ));
         }
     }
@@ -97,37 +96,32 @@ fn expect_library(ctx: &AnalyzeContext<'_>) -> Option<LibraryId> {
 }
 
 /// Whether `expression` invokes the top-level `fail` declared in `library`.
-fn is_test_fail(
-    expression: &Expr,
+fn is_test_fail<'a>(
+    expression: Expr<'a>,
     library: LibraryId,
     identities: &IdentityIndex,
-    state: &SemanticState<'_>,
+    state: &SemanticState<'a>,
 ) -> bool {
-    let Expr::Call { callee, .. } = expression.unparenthesized() else {
+    let Expr::Call(call) = expression.unparenthesized() else {
         return false;
     };
-    let name = match callee.unparenthesized() {
+    let name = match call.callee().unparenthesized() {
         Expr::Ident(name) => {
-            let shadowed = state.environment.is_bound(&name.name)
+            let shadowed = state.environment.is_bound(name.name())
                 || state.enclosing_type.as_ref().is_some_and(|receiver| {
                     state
                         .signatures
-                        .resolved_member(receiver, &name.name, &state.model)
+                        .resolved_member(receiver, name.name(), &state.model)
                         .is_some()
                 });
             if shadowed {
                 return false;
             }
-            QualifiedName::from(&name.name)
+            QualifiedName::from(name.name())
         }
-        Expr::Field {
-            object,
-            field,
-            is_null_safe: false,
-            ..
-        } => match object.unparenthesized() {
-            Expr::Ident(prefix) if !state.environment.is_bound(&prefix.name) => {
-                QualifiedName::prefixed(&prefix.name, &field.name)
+        Expr::Field(field) if !field.is_null_safe() => match field.object().unparenthesized() {
+            Expr::Ident(prefix) if !state.environment.is_bound(prefix.name()) => {
+                QualifiedName::prefixed(prefix.name(), field.field().name())
             }
             _ => return false,
         },

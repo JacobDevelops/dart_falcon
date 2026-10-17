@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use super::{canonical_package_path, detect_package, is_under_lib, resolve_directive_uri};
 
@@ -27,8 +27,8 @@ pub struct UnusedCode;
 const NAME: &str = "unused-code";
 
 /// A public top-level declaration considered for the unused check.
-struct Candidate {
-    name: String,
+struct Candidate<'a> {
+    name: &'a str,
     span: Span,
     /// Full source span of the declaration (name, header, and body). Same-file
     /// occurrences inside this range are declaration-internal (the declared
@@ -52,9 +52,9 @@ impl CrossFileRule for UnusedCode {
         // type segments, `case` patterns, member access, combinators — and stays
         // correct even when a file's parse recovers partially. String-literal and
         // comment contents are excluded because the lexer tokenizes them apart.
-        let mut mentions: HashMap<String, HashSet<usize>> = HashMap::new();
+        let mut mentions: HashMap<&str, HashSet<usize>> = HashMap::new();
         for (idx, f) in files.iter().enumerate() {
-            for name in collect_used_names(&f.source, &f.syntax) {
+            for name in collect_used_names(f.source(), f.tree()) {
                 mentions.entry(name).or_default().insert(idx);
             }
         }
@@ -77,13 +77,13 @@ impl CrossFileRule for UnusedCode {
             if f.has_parse_errors {
                 continue;
             }
-            let cands = candidates(&f.program);
+            let cands = candidates(f.program());
             if cands.is_empty() {
                 continue;
             }
             // Identifier ranges in the declaring file, used to detect same-file
             // references (dcl counts these as usage).
-            let idents: Vec<_> = identifier_ranges(&f.syntax).collect();
+            let idents: Vec<_> = identifier_ranges(f.source(), f.tree()).collect();
             for cand in cands {
                 let used_elsewhere = mentions
                     .get(&cand.name)
@@ -94,7 +94,7 @@ impl CrossFileRule for UnusedCode {
                 // Referenced within its own file, outside its own declaration
                 // span → used (matches dcl, which records same-file references).
                 let used_same_file = idents.iter().any(|&(offset, len)| {
-                    f.source.get(offset..offset + len) == Some(cand.name.as_str())
+                    f.source().get(offset..offset + len) == Some(cand.name)
                         && !(offset >= cand.decl_span.start && offset < cand.decl_span.end)
                 });
                 if used_same_file {
@@ -124,39 +124,43 @@ fn is_public(name: &str) -> bool {
 
 /// The public top-level declarations of a program eligible for flagging.
 /// Exemptions applied here: `main`, anything annotated, and unnamed extensions.
-fn candidates(program: &Program) -> Vec<Candidate> {
+fn candidates<'a>(program: Program<'a>) -> Vec<Candidate<'a>> {
     let mut out = Vec::new();
-    let mut push =
-        |name: &Identifier, kind: &'static str, anns: &[Annotation], decl_span: &Span| {
-            if is_public(&name.name) && anns.is_empty() && name.name != "main" {
-                out.push(Candidate {
-                    name: name.name.clone(),
-                    span: name.span,
-                    decl_span: *decl_span,
-                    kind,
-                });
-            }
-        };
-    for decl in &program.declarations {
+    let mut push = |name: Identifier<'a>,
+                    kind: &'static str,
+                    anns: AstChildren<'a, Annotation<'a>>,
+                    decl_span: Span| {
+        if is_public(name.name()) && anns.is_empty() && name.name() != "main" {
+            out.push(Candidate {
+                name: name.name(),
+                span: name.span(),
+                decl_span,
+                kind,
+            });
+        }
+    };
+    for decl in program.declarations() {
         let decl_span = decl.span();
         match decl {
-            TopLevelDecl::Class(x) => push(&x.name, "class", &x.annotations, decl_span),
-            TopLevelDecl::ClassTypeAlias(x) => push(&x.name, "class", &x.annotations, decl_span),
-            TopLevelDecl::Mixin(x) => push(&x.name, "mixin", &x.annotations, decl_span),
-            TopLevelDecl::MixinClass(x) => push(&x.name, "mixin class", &x.annotations, decl_span),
-            TopLevelDecl::Enum(x) => push(&x.name, "enum", &x.annotations, decl_span),
-            TopLevelDecl::ExtensionType(x) => {
-                push(&x.name, "extension type", &x.annotations, decl_span)
+            TopLevelDecl::Class(x) => push(x.name(), "class", x.annotations(), decl_span),
+            TopLevelDecl::ClassTypeAlias(x) => push(x.name(), "class", x.annotations(), decl_span),
+            TopLevelDecl::Mixin(x) => push(x.name(), "mixin", x.annotations(), decl_span),
+            TopLevelDecl::MixinClass(x) => {
+                push(x.name(), "mixin class", x.annotations(), decl_span)
             }
-            TopLevelDecl::TypeAlias(x) => push(&x.name, "typedef", &x.annotations, decl_span),
-            TopLevelDecl::Function(x) => push(&x.name, "declaration", &x.annotations, decl_span),
+            TopLevelDecl::Enum(x) => push(x.name(), "enum", x.annotations(), decl_span),
+            TopLevelDecl::ExtensionType(x) => {
+                push(x.name(), "extension type", x.annotations(), decl_span)
+            }
+            TopLevelDecl::TypeAlias(x) => push(x.name(), "typedef", x.annotations(), decl_span),
+            TopLevelDecl::Function(x) => push(x.name(), "declaration", x.annotations(), decl_span),
             // Extensions are invoked through their member names, not the
             // extension name, so a never-referenced name does not mean unused.
             // Without member-usage tracking they stay unflagged (low-FP).
             TopLevelDecl::Extension(_) => {}
             TopLevelDecl::Variable(x) => {
-                for d in &x.declarators {
-                    push(&d.name, "declaration", &x.annotations, decl_span);
+                for d in x.declarators() {
+                    push(d.name(), "declaration", x.annotations(), decl_span);
                 }
             }
             TopLevelDecl::Error(_) => {}
@@ -173,8 +177,8 @@ fn collect_exported_files(
     let mut refs = super::ReferenceSet::default();
     for f in files {
         let from = canonical_package_path(&f.path);
-        for exp in &f.program.exports {
-            if let Some(r) = resolve_directive_uri(&from, exp.uri.value.as_str(), pkg) {
+        for exp in f.program().exports() {
+            if let Some(r) = resolve_directive_uri(&from, &exp.uri().value(), pkg) {
                 refs.insert(r);
             }
         }
@@ -190,18 +194,18 @@ fn collect_exported_files(
 ///
 /// Retained identifiers include both simple and braced string interpolations,
 /// but exclude plain string contents and comments.
-fn identifier_ranges(
-    syntax: &falcon_syntax::SyntaxStore,
-) -> impl Iterator<Item = (usize, usize)> + '_ {
-    syntax
-        .identifier_tokens()
+fn identifier_ranges<'a>(
+    source: &'a str,
+    tree: &'a SyntaxTree,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    tree.identifier_tokens(source)
         .map(|token| (token.offset(), token.len()))
 }
 
 /// The set of identifier names a file uses (see [`identifier_ranges`]).
-fn collect_used_names(source: &str, syntax: &falcon_syntax::SyntaxStore) -> HashSet<String> {
-    identifier_ranges(syntax)
-        .filter_map(|(offset, len)| source.get(offset..offset + len).map(str::to_string))
+fn collect_used_names<'a>(source: &'a str, tree: &'a SyntaxTree) -> HashSet<&'a str> {
+    identifier_ranges(source, tree)
+        .filter_map(|(offset, len)| source.get(offset..offset + len))
         .collect()
 }
 
@@ -230,9 +234,10 @@ mod tests {
             assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
             ProjectFile {
                 path,
-                source: source.to_owned(),
-                program: parsed.program,
-                syntax: parsed.syntax,
+                parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                    source: source.into(),
+                    tree: parsed.tree,
+                }),
                 has_parse_errors: false,
             }
         };
@@ -262,7 +267,7 @@ mod tests {
         let source = r#"final text = '$simple ${call(nested /* ghost */)} ${"literal"}';"#;
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let names = collect_used_names(source, &parsed.syntax);
+        let names = collect_used_names(source, &parsed.tree);
         for name in ["text", "simple", "call", "nested"] {
             assert!(names.contains(name), "{name}: {names:?}");
         }
@@ -276,7 +281,7 @@ mod tests {
         let source = r#"final text = '${type} ${show} ${get} ${set} ${on} ${hide}';"#;
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let names = collect_used_names(source, &parsed.syntax);
+        let names = collect_used_names(source, &parsed.tree);
         for name in ["type", "show", "get", "set", "on", "hide"] {
             assert!(names.contains(name), "{name}: {names:?}");
         }
@@ -287,7 +292,7 @@ mod tests {
         let source = "const required = 1; void unrelated({required int value}) {}";
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let names = collect_used_names(source, &parsed.syntax);
+        let names = collect_used_names(source, &parsed.tree);
         assert!(!names.contains("required"), "{names:?}");
     }
 
@@ -296,7 +301,7 @@ mod tests {
         let source = r#"const required = 1; final text = '${required}';"#;
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let names = collect_used_names(source, &parsed.syntax);
+        let names = collect_used_names(source, &parsed.tree);
         assert!(names.contains("required"), "{names:?}");
     }
 
@@ -305,7 +310,7 @@ mod tests {
         let source = r#"final raw = r'$ghost'; final escaped = '\$other';"#;
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let names = collect_used_names(source, &parsed.syntax);
+        let names = collect_used_names(source, &parsed.tree);
         assert!(!names.contains("ghost"));
         assert!(!names.contains("other"));
     }

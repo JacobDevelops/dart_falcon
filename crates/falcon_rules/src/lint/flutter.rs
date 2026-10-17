@@ -2,23 +2,21 @@ use falcon_analyze::{
     DeclarationIdentity, ResolvedType, SemanticModel, resolve_call_constructor,
     resolve_new_constructor,
 };
-use falcon_syntax::ast::{ArgList, DartType, Expr, Span};
+use falcon_syntax::cst::{ArgList, DartType, Expr, Span};
 
-pub(crate) fn widget_construction(expr: &Expr) -> Option<(&str, &ArgList, &Span)> {
+pub(crate) fn widget_construction<'a>(expr: Expr<'a>) -> Option<(&'a str, ArgList<'a>, Span)> {
     match expr.unparenthesized() {
-        Expr::New {
-            dart_type: DartType::Named(named),
-            args,
-            span,
-            ..
-        } => named
-            .segments
-            .last()
-            .map(|name| (name.name.as_str(), args, span)),
-        Expr::Call {
-            callee, args, span, ..
-        } => match callee.unparenthesized() {
-            Expr::Ident(name) => Some((name.name.as_str(), args, span)),
+        Expr::New(node) => {
+            let DartType::Named(named) = node.dart_type() else {
+                return None;
+            };
+            named
+                .segments()
+                .last()
+                .map(|name| (name.name(), node.args(), node.span()))
+        }
+        Expr::Call(node) => match node.callee().unparenthesized() {
+            Expr::Ident(name) => Some((name.name(), node.args(), node.span())),
             _ => None,
         },
         _ => None,
@@ -26,16 +24,17 @@ pub(crate) fn widget_construction(expr: &Expr) -> Option<(&str, &ArgList, &Span)
 }
 
 pub(crate) fn construction<'a>(
-    expression: &'a Expr,
+    expression: Expr<'a>,
     model: &SemanticModel<'_>,
-) -> Option<(ResolvedType, &'a ArgList)> {
+) -> Option<(ResolvedType, ArgList<'a>)> {
     match expression.unparenthesized() {
-        Expr::New {
-            dart_type, args, ..
-        } => Some((model.resolve_type(dart_type).with_nullable(false), args)),
-        Expr::Call { callee, args, .. } => {
-            let (identity, _) = resolve_call_constructor(callee, model, false)?;
-            Some((ResolvedType::interface_identity(identity), args))
+        Expr::New(node) => Some((
+            model.resolve_type(node.dart_type()).with_nullable(false),
+            node.args(),
+        )),
+        Expr::Call(node) => {
+            let (identity, _) = resolve_call_constructor(node.callee(), model, false)?;
+            Some((ResolvedType::interface_identity(identity), node.args()))
         }
         _ => None,
     }
@@ -44,23 +43,18 @@ pub(crate) fn construction<'a>(
 /// A constructor invocation resolved to its declaration and constructor name
 /// (`"new"` for the unnamed constructor). Unresolved callees yield `None`.
 pub(crate) fn constructor_invocation<'a>(
-    expression: &'a Expr,
+    expression: Expr<'a>,
     model: &SemanticModel<'_>,
-) -> Option<(DeclarationIdentity, &'a str, &'a ArgList)> {
+) -> Option<(DeclarationIdentity, &'a str, ArgList<'a>)> {
     match expression.unparenthesized() {
-        Expr::New {
-            dart_type,
-            constructor_name,
-            args,
-            ..
-        } => {
+        Expr::New(node) => {
             let (identity, constructor) =
-                resolve_new_constructor(dart_type, constructor_name.as_ref(), model)?;
-            Some((identity, constructor, args))
+                resolve_new_constructor(node.dart_type(), node.constructor_name(), model)?;
+            Some((identity, constructor, node.args()))
         }
-        Expr::Call { callee, args, .. } => {
-            let (identity, constructor) = resolve_call_constructor(callee, model, false)?;
-            Some((identity, constructor, args))
+        Expr::Call(node) => {
+            let (identity, constructor) = resolve_call_constructor(node.callee(), model, false)?;
+            Some((identity, constructor, node.args()))
         }
         _ => None,
     }
@@ -68,11 +62,11 @@ pub(crate) fn constructor_invocation<'a>(
 
 /// Constructor resolution through type aliases in its lexical value scope.
 pub(crate) fn scoped_constructor_invocation<'a>(
-    expression: &'a Expr,
+    expression: Expr<'a>,
     state: &falcon_analyze::semantic_scope::SemanticState<'_>,
-) -> Option<(DeclarationIdentity, &'a str, &'a ArgList)> {
-    if let Expr::Call { callee, .. } = expression.unparenthesized() {
-        let segments = falcon_analyze::expression_segments(callee, false)?;
+) -> Option<(DeclarationIdentity, &'a str, ArgList<'a>)> {
+    if let Expr::Call(node) = expression.unparenthesized() {
+        let segments = falcon_analyze::expression_segments(node.callee(), false)?;
         let head = *segments.first()?;
         if state.environment.is_bound(head) || state.type_parameters.contains(head) {
             return None;
@@ -83,19 +77,15 @@ pub(crate) fn scoped_constructor_invocation<'a>(
 }
 
 /// The constructor name range, excluding `new`/`const` and its arguments.
-pub(crate) fn constructor_span(expression: &Expr) -> Span {
+pub(crate) fn constructor_span(expression: Expr<'_>) -> Span {
     match expression.unparenthesized() {
-        Expr::New {
-            dart_type,
-            constructor_name,
-            ..
-        } => Span {
-            start: dart_type.span().start,
-            end: constructor_name
-                .as_ref()
-                .map_or(dart_type.span().end, |name| name.span.end),
+        Expr::New(node) => Span {
+            start: node.dart_type().span().start,
+            end: node
+                .constructor_name()
+                .map_or(node.dart_type().span().end, |name| name.span().end),
         },
-        Expr::Call { callee, .. } => *callee.span(),
-        _ => *expression.span(),
+        Expr::Call(node) => node.callee().span(),
+        _ => expression.span(),
     }
 }

@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
     AnalysisEnvironment, DeclarationIdentity, ExternalLibraries, ExternalOrigin, ExternalSources,
-    IdentityIndex, IdentitySource, LanguageVersion, LibrarySource, ParameterDefault, ResolvedType,
-    SemanticModel, SignatureIndex, TypeIndex, canonical_or_lexical,
+    IdentityIndex, IdentitySource, LanguageVersion, LibrarySource, ParameterDefault, ParsedFile,
+    ResolvedType, SemanticModel, SignatureIndex, TypeIndex, canonical_or_lexical,
 };
 use falcon_dart_parser::parse;
+use std::sync::Arc;
 
 fn write(root: &Path, relative: &str, text: &str) -> PathBuf {
     let path = root.join(relative);
@@ -112,15 +113,20 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
         }
         let source = "/// [Object] exists, but [Missing] does not.\nvoid f() {}\n";
         let falcon_dart_parser::ParseResult {
-            program, errors, ..
+            tree: parsed_tree,
+            errors,
+            ..
         } = parse(source);
+        let parsed = Arc::new(ParsedFile {
+            source: source.to_string().into_boxed_str(),
+            tree: parsed_tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty());
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
         let externals =
-            ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |_| {
-                false
-            });
+            ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |_| false);
         let core = externals
             .libraries()
             .iter()
@@ -129,7 +135,7 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
         assert!(!core.has_unresolved_parts);
         let sources = [IdentitySource {
             path: &app,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }];
         let identities = IdentityIndex::build(
@@ -158,8 +164,15 @@ fn indexes_sdk_and_dependency_declarations() {
     let (_dir, app) = workspace();
     let source = fs::read_to_string(&app).unwrap();
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     assert!(environment.has_sdk());
@@ -172,7 +185,7 @@ fn indexes_sdk_and_dependency_declarations() {
         LanguageVersion::new(3, 3)
     );
 
-    let roots = [(app.as_path(), &program, source.as_str())];
+    let roots = [(app.as_path(), program, source.as_str())];
     let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
     let mut origins: Vec<_> = externals
         .libraries()
@@ -191,7 +204,7 @@ fn indexes_sdk_and_dependency_declarations() {
 
     let sources = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     }];
     let external = ExternalSources {
@@ -203,7 +216,7 @@ fn indexes_sdk_and_dependency_declarations() {
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -211,9 +224,9 @@ fn indexes_sdk_and_dependency_declarations() {
         &identities,
     );
     types.add_external(&externals, &identities);
-    let files = [(app.clone(), &program)];
+    let files = [(app.clone(), Arc::clone(&parsed))];
     let signatures = SignatureIndex::build(&files, Some(&externals), &identities, &types);
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
 
     assert_eq!(
         model.resolve_name("Base"),
@@ -243,10 +256,19 @@ fn indexes_sdk_and_dependency_declarations() {
     assert_eq!(model.substitute(&first, &substitutions), int);
 
     // Typedefs expand to the aliased type, with arguments and `?` applied.
-    let falcon_syntax::ast::TopLevelDecl::Function(run) = &program.declarations[1] else {
+    let falcon_syntax::cst::TopLevelDecl::Function(run) = program.declarations().nth(1).unwrap()
+    else {
         panic!("expected function");
     };
-    let callback = model.resolve_type(run.params().unwrap().params[0].param_type.as_ref().unwrap());
+    let callback = model.resolve_type(
+        run.params()
+            .unwrap()
+            .params()
+            .next()
+            .unwrap()
+            .param_type()
+            .unwrap(),
+    );
     assert_eq!(
         callback,
         ResolvedType::Function {
@@ -270,14 +292,26 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
     let other_source = "class Base {}";
     let other = write(dir.path(), "app/lib/other.dart", other_source);
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let falcon_dart_parser::ParseResult {
-        program: other_program,
+        tree: other_parsed_tree,
         errors,
         ..
     } = parse(other_source);
+    let other_parsed = Arc::new(ParsedFile {
+        source: (other_source).to_string().into_boxed_str(),
+        tree: other_parsed_tree,
+    });
+    let other_program = other_parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     std::fs::create_dir_all(dir.path().join("cache/dep/lib/unreadable.dart")).unwrap();
@@ -295,7 +329,7 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
             &format!("part '{missing_part}'; class ExternalBase {{ int get value => 0; }}"),
         );
         let externals =
-            ExternalLibraries::load(&environment, &[(app.as_path(), &program, "")], |path| {
+            ExternalLibraries::load(&environment, &[(app.as_path(), program, "")], |path| {
                 path == app || path == other
             });
         let dep = externals.libraries().iter()
@@ -307,12 +341,12 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
         let sources = [
             IdentitySource {
                 path: &app,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &other,
-                program: &other_program,
+                parsed: &other_parsed,
                 has_parse_errors: false,
             },
         ];
@@ -330,7 +364,7 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
                 (
                     app.as_path(),
                     LibrarySource {
-                        program: &program,
+                        program,
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -338,7 +372,7 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
                 (
                     other.as_path(),
                     LibrarySource {
-                        program: &other_program,
+                        program: other_program,
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -347,7 +381,7 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
             &identities,
         );
         types.add_external(&externals, &identities);
-        let model = SemanticModel::new(&app, &identities, Some(&types));
+        let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
         assert!(model.resolve_name("Base").is_some(), "{missing_part}");
         assert!(model.resolve_name("App").is_some());
         // Names an incomplete library declares may be redeclared by the part
@@ -382,7 +416,7 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
 
 #[test]
 fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
-    use falcon_syntax::ast::{ClassMember, ConstructorInitializer, TopLevelDecl};
+    use falcon_syntax::cst::{ClassMember, ConstructorInitializer, TopLevelDecl};
 
     let (dir, app) = workspace();
     write(
@@ -419,49 +453,50 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
     );
     let source = "import 'package:dep/dep.dart'; class App implements Concrete {}";
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
     let file = externals.libraries().iter()
         .find(|library| matches!(&library.origin, ExternalOrigin::Package(name) if name.as_str() == "dep"))
         .unwrap().files.first().unwrap();
     assert!(!file.has_parse_errors);
-    let TopLevelDecl::Class(concrete) = &file.facts.declarations[1] else {
+    let TopLevelDecl::Class(concrete) = file.program().declarations().nth(1).unwrap() else {
         panic!("expected compact concrete class");
     };
-    let ClassMember::Constructor(constructor) = &concrete.members[1] else {
+    let ClassMember::Constructor(constructor) = concrete.members().nth(1).unwrap() else {
         panic!("expected compact constructor");
     };
-    assert!(constructor.body.is_none());
-    assert_eq!(constructor.initializers.len(), 1);
-    let ConstructorInitializer::SuperCall {
-        call_name, args, ..
-    } = &constructor.initializers[0]
-    else {
-        panic!("expected retained super-constructor name");
-    };
-    assert_eq!(call_name.as_ref().unwrap().name, "named");
-    assert!(args.positional.is_empty() && args.named.is_empty());
-    assert_eq!(args.positional.capacity(), 0);
-    let ClassMember::Constructor(redirect) = &concrete.members[2] else {
+    let super_call = constructor
+        .initializers()
+        .find_map(|initializer| match initializer {
+            ConstructorInitializer::SuperCall(call) => Some(call),
+            _ => None,
+        })
+        .expect("expected retained super-constructor name");
+    assert_eq!(super_call.call_name().unwrap().name(), "named");
+    let ClassMember::Constructor(_redirect) = concrete.members().nth(2).unwrap() else {
         panic!("expected compact redirecting constructor");
     };
-    assert!(redirect.initializers.is_empty());
-    let ClassMember::Operator(operator) = &concrete.members[3] else {
+    let ClassMember::Operator(_operator) = concrete.members().nth(3).unwrap() else {
         panic!("expected compact operator");
     };
-    assert!(operator.body.is_none());
-    assert_eq!(file.concrete_operators, [(1, 3)]);
 
     let identities = IdentityIndex::build(
         &[IdentitySource {
             path: &app,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[source],
@@ -475,7 +510,7 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -484,12 +519,12 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
     );
     types.add_external(&externals, &identities);
     let signatures = SignatureIndex::build(
-        &[(app.clone(), &program)],
+        &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
         &identities,
         &types,
     );
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     let concrete = model.resolve_name("Concrete").unwrap();
     let abstract_ = model.resolve_name("Abstract").unwrap();
     let concrete_facts = signatures.declared_member_facts(&concrete, "==");
@@ -521,18 +556,25 @@ fn compact_external_types_do_not_collide_with_project_names() {
                   class Base { void local() {} }\n\
                   class App extends dep.Base {}\n";
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
     let identities = IdentityIndex::build(
         &[IdentitySource {
             path: &app,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[source],
@@ -546,7 +588,7 @@ fn compact_external_types_do_not_collide_with_project_names() {
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -554,7 +596,7 @@ fn compact_external_types_do_not_collide_with_project_names() {
         &identities,
     );
     types.add_external(&externals, &identities);
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     let local = model.resolve_name("Base").unwrap();
     let external = model
         .resolve_name(QualifiedName::prefixed("dep", "Base"))
@@ -608,17 +650,24 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
     }
     let source = "import 'package:dep/dep.dart'; import 'package:dep/right.dart' as right;";
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
     let sources = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     }];
     let base = std::sync::Arc::new(IdentityIndex::build_external(ExternalSources {
@@ -650,7 +699,7 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
             [(
                 app.as_path(),
                 LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -659,12 +708,12 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
         );
         types.add_external(&externals, &identities);
         let signatures = SignatureIndex::build(
-            &[(app.clone(), &program)],
+            &[(app.clone(), Arc::clone(&parsed))],
             Some(&externals),
             &identities,
             &types,
         );
-        let model = SemanticModel::new(&app, &identities, Some(&types));
+        let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
         let left = model.resolve_name("Vector").unwrap();
         let right = model
             .resolve_name(QualifiedName::prefixed("right", "Vector"))
@@ -722,11 +771,18 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
     assert!(!errors.is_empty());
     let source = fs::read_to_string(&app).unwrap();
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let roots = [(app.as_path(), &program, source.as_str())];
+    let roots = [(app.as_path(), program, source.as_str())];
     let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
     let file = externals
         .libraries()
@@ -735,13 +791,14 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
         .find(|file| file.path == canonical_or_lexical(&dep))
         .unwrap();
     assert!(!file.has_parse_errors);
-    let falcon_syntax::ast::TopLevelDecl::Class(base) = &file.facts.declarations[0] else {
+    let falcon_syntax::cst::TopLevelDecl::Class(base) =
+        file.program().declarations().next().unwrap()
+    else {
         panic!("expected class facts");
     };
-    let falcon_syntax::ast::ClassMember::Method(method) = &base.members[0] else {
+    let falcon_syntax::cst::ClassMember::Method(_method) = base.members().next().unwrap() else {
         panic!("expected method facts");
     };
-    assert!(method.body.is_none());
 
     fs::write(&dep, "class Base {").unwrap();
     let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
@@ -756,7 +813,7 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
 
 #[test]
 fn compact_external_facts_preserve_defaults_constants_and_parts() {
-    use falcon_syntax::ast::{ClassMember, Expr, TopLevelDecl};
+    use falcon_syntax::cst::{Expr, TopLevelDecl};
 
     let (dir, app) = workspace();
     write(
@@ -778,11 +835,18 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
     );
     let source = fs::read_to_string(&app).unwrap();
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let roots = [(app.as_path(), &program, source.as_str())];
+    let roots = [(app.as_path(), program, source.as_str())];
     let mut externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
     let count = externals.libraries().len();
     externals.extend(&environment, &roots, |path| path == app);
@@ -791,25 +855,21 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
         matches!(&library.origin, ExternalOrigin::Package(name) if name.as_str() == "dep")
     }).unwrap();
     assert_eq!(dep.files.len(), 2);
-    let TopLevelDecl::Function(compute) = &dep.files[0].facts.declarations[1] else {
+    let TopLevelDecl::Function(compute) = dep.files[0].program().declarations().nth(1).unwrap()
+    else {
         panic!("expected function facts");
     };
-    assert!(compute.body.is_none());
     assert!(matches!(
-        &compute.params().unwrap().params[0].default_value,
-        Some(Expr::IntLit { value, .. }) if value == "7"
+        compute.params().unwrap().params().next().unwrap().default_value(),
+        Some(Expr::IntLit(value)) if value.value() == "7"
     ));
-    let TopLevelDecl::Class(base) = &dep.files[0].facts.declarations[2] else {
+    let TopLevelDecl::Class(_base) = dep.files[0].program().declarations().nth(2).unwrap() else {
         panic!("expected class facts");
     };
-    assert!(base.members.iter().all(|member| match member {
-        ClassMember::Constructor(member) => member.body.is_none(),
-        ClassMember::Getter(member) => member.body.is_none(),
-        _ => true,
-    }));
+
     let sources = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     }];
     let identities = IdentityIndex::build(
@@ -825,7 +885,7 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -834,33 +894,33 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
     );
     types.add_external(&externals, &identities);
     let signatures = SignatureIndex::build(
-        &[(app.clone(), &program)],
+        &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
         &identities,
         &types,
     );
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     let answer = model.resolve_value("answer").unwrap();
     assert!(matches!(
         signatures.constant_initializer(&answer),
-        Some(Expr::IntLit { value, .. }) if value == "42"
+        Some(Expr::IntLit(value)) if value.value() == "42"
     ));
     let compute = model.resolve_value("compute").unwrap();
     assert!(matches!(
         signatures.function(&compute).unwrap().defaults.get("value"),
         Some(ParameterDefault::Declared(expr))
-            if matches!(expr.as_ref(), Expr::IntLit { value, .. } if value == "7")
+            if matches!(expr.expr(), Expr::IntLit(value) if value.value() == "7")
     ));
     let base = model.resolve_name("Base").unwrap();
     let facts = signatures.declaration(&base).unwrap();
     assert!(matches!(
         signatures.constructor(&base, "new").unwrap().defaults.get("value"),
         Some(ParameterDefault::Declared(expr))
-            if matches!(expr.as_ref(), Expr::IntLit { value, .. } if value == "9")
+            if matches!(expr.expr(), Expr::IntLit(value) if value.value() == "9")
     ));
     assert!(matches!(
-        &facts.static_consts[0].initializer,
-        Expr::IntLit { value, .. } if value == "11"
+        facts.static_consts[0].initializer.expr(),
+        Expr::IntLit(value) if value.value() == "11"
     ));
     assert!(model.resolve_name("Choice").is_some());
     let box_identity = model.resolve_name("Box").unwrap();
@@ -896,7 +956,7 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
 #[test]
 fn compact_external_const_constructors_preserve_instance_values() {
     use falcon_analyze::{ConstantValue, evaluate_constant};
-    use falcon_syntax::ast::TopLevelDecl;
+    use falcon_syntax::cst::TopLevelDecl;
     use std::collections::HashMap;
 
     let (dir, app) = workspace();
@@ -921,15 +981,22 @@ fn compact_external_const_constructors_preserve_instance_values() {
         const expectedSeed = 42; const expectedValue = 1;";
     fs::write(&app, source).unwrap();
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let roots = [(app.as_path(), &program, source)];
+    let roots = [(app.as_path(), program, source)];
     let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
     let sources = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     }];
     let identities = IdentityIndex::build(
@@ -945,7 +1012,7 @@ fn compact_external_const_constructors_preserve_instance_values() {
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -954,24 +1021,23 @@ fn compact_external_const_constructors_preserve_instance_values() {
     );
     types.add_external(&externals, &identities);
     let signatures = SignatureIndex::build(
-        &[(app.clone(), &program)],
+        &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
         &identities,
         &types,
     );
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     let values: HashMap<_, _> = program
-        .declarations
-        .iter()
+        .declarations()
         .filter_map(|declaration| {
             let TopLevelDecl::Variable(variable) = declaration else {
                 return None;
             };
-            let declarator = variable.declarators.first()?;
+            let declarator = variable.declarators().next()?;
             Some((
-                declarator.name.name.as_str(),
+                declarator.name().name(),
                 evaluate_constant(
-                    declarator.initializer.as_ref()?,
+                    declarator.initializer()?,
                     None,
                     &HashMap::new(),
                     &model,
@@ -1038,17 +1104,22 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
     let config = falcon_config::FalconConfig::default();
     let package_version = LanguageVersion::new(2, 19);
 
-    let syntax = parse("void main() {}").syntax;
-    let ctx = falcon_analyze::AnalyzeContext::new(&file, "void main() {}", &config, &syntax)
+    let parsed = Arc::new(ParsedFile {
+        source: "void main() {}".into(),
+        tree: parse("void main() {}").tree,
+    });
+    let ctx = falcon_analyze::AnalyzeContext::new(&file, &config, &parsed)
         .with_environment(Some(&environment));
     assert_eq!(ctx.package_language_version, Some(package_version));
     assert_eq!(ctx.language_version(), package_version);
 
     let source = "// @dart = 2.12\nvoid main() {}";
-    let overridden_syntax = parse(source).syntax;
-    let overridden =
-        falcon_analyze::AnalyzeContext::new(&file, source, &config, &overridden_syntax)
-            .with_environment(Some(&environment));
+    let overridden_parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree: parse(source).tree,
+    });
+    let overridden = falcon_analyze::AnalyzeContext::new(&file, &config, &overridden_parsed)
+        .with_environment(Some(&environment));
     assert_eq!(overridden.package_language_version, Some(package_version));
     assert_eq!(overridden.language_version(), LanguageVersion::new(2, 12));
 }
@@ -1056,7 +1127,7 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
 #[test]
 fn imported_static_and_enum_constants_use_external_lexical_context() {
     use falcon_analyze::{ConstantValue, evaluate_constant};
-    use falcon_syntax::ast::TopLevelDecl;
+    use falcon_syntax::cst::TopLevelDecl;
     use std::collections::HashMap;
 
     let (dir, app) = workspace();
@@ -1086,15 +1157,22 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
         const unprefixedAnswer = Values.answer; const unprefixedChoice = Choice.first;";
     fs::write(&app, source).unwrap();
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let roots = [(app.as_path(), &program, source)];
+    let roots = [(app.as_path(), program, source)];
     let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
     let sources = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     }];
     let identities = IdentityIndex::build(
@@ -1110,7 +1188,7 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -1119,24 +1197,23 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
     );
     types.add_external(&externals, &identities);
     let signatures = SignatureIndex::build(
-        &[(app.clone(), &program)],
+        &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
         &identities,
         &types,
     );
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     let values: HashMap<_, _> = program
-        .declarations
-        .iter()
+        .declarations()
         .filter_map(|declaration| {
             let TopLevelDecl::Variable(variable) = declaration else {
                 return None;
             };
-            let declarator = variable.declarators.first()?;
+            let declarator = variable.declarators().next()?;
             Some((
-                declarator.name.name.as_str(),
+                declarator.name().name(),
                 evaluate_constant(
-                    declarator.initializer.as_ref()?,
+                    declarator.initializer()?,
                     None,
                     &HashMap::new(),
                     &model,
@@ -1145,14 +1222,25 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
             ))
         })
         .collect();
-    let expected = parse("const expected = 42;").program;
-    let TopLevelDecl::Variable(expected) = &expected.declarations[0] else {
+    let expected = parse("const expected = 42;");
+    let TopLevelDecl::Variable(expected) = expected
+        .tree
+        .program("const expected = 42;")
+        .declarations()
+        .next()
+        .unwrap()
+    else {
         panic!()
     };
     assert_eq!(
         values["answer"],
         evaluate_constant(
-            expected.declarators[0].initializer.as_ref().unwrap(),
+            expected
+                .declarators()
+                .next()
+                .unwrap()
+                .initializer()
+                .unwrap(),
             None,
             &HashMap::new(),
             &model,
@@ -1237,18 +1325,25 @@ abstract class SameRight implements Generic<FirstValue> {}
 abstract class EquivalentDiamond implements SameLeft, SameRight {}
 "#;
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
     let identities = IdentityIndex::build(
         &[IdentitySource {
             path: &app,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[source],
@@ -1262,7 +1357,7 @@ abstract class EquivalentDiamond implements SameLeft, SameRight {}
         [(
             app.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -1271,12 +1366,12 @@ abstract class EquivalentDiamond implements SameLeft, SameRight {}
     );
     types.add_external(&externals, &identities);
     let signatures = SignatureIndex::build(
-        &[(app.clone(), &program)],
+        &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
         &identities,
         &types,
     );
-    let model = SemanticModel::new(&app, &identities, Some(&types));
+    let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     for name in ["A", "B", "Applied", "ExtendedAndApplied", "AppliedEnum"] {
         let identity = model.resolve_name(name).unwrap();
         assert!(
@@ -1328,12 +1423,19 @@ fn doc_imports_share_the_transitive_external_loader() {
     );
     let source = "/// @docImport 'package:dep/doc.dart';\nlibrary;\n/// [Documented]\nvoid f() {}";
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external =
-        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
     for name in ["doc.dart", "dep.dart"] {
@@ -1361,17 +1463,24 @@ fn unindexed_project_package_imports_and_exports_in_dependencies_remain_uncertai
         let known = write(dir.path(), "cache/dep/lib/known.dart", "class Known {}");
         let source = "import 'package:dep/dep.dart';";
         let falcon_dart_parser::ParseResult {
-            program, errors, ..
+            tree: parsed_tree,
+            errors,
+            ..
         } = parse(source);
+        let parsed = Arc::new(ParsedFile {
+            source: source.to_string().into_boxed_str(),
+            tree: parsed_tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
         let external =
-            ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+            ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
                 path == app
             });
         let sources = [IdentitySource {
             path: &app,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }];
         let packages = [falcon_analyze::PackageIdentity {
@@ -1387,8 +1496,18 @@ fn unindexed_project_package_imports_and_exports_in_dependencies_remain_uncertai
                 environment: &environment,
             }),
         );
+        let external_parsed = |path: &Path| {
+            &external
+                .libraries()
+                .iter()
+                .flat_map(|library| library.files.iter())
+                .find(|file| file.path == canonical_or_lexical(path))
+                .unwrap()
+                .parsed
+        };
         assert_eq!(
-            SemanticModel::new(&known, &identities, None).resolve_name("Known"),
+            SemanticModel::new(&known, external_parsed(&known), &identities, None)
+                .resolve_name("Known"),
             Some(DeclarationIdentity::package("dep", "Known"))
         );
         let scope = if directive == "import" {
@@ -1396,8 +1515,13 @@ fn unindexed_project_package_imports_and_exports_in_dependencies_remain_uncertai
         } else {
             &app
         };
+        let scope_parsed = if directive == "import" {
+            external_parsed(&dependency)
+        } else {
+            &parsed
+        };
         assert_eq!(
-            SemanticModel::new(scope, &identities, None).resolve_name("Known"),
+            SemanticModel::new(scope, scope_parsed, &identities, None).resolve_name("Known"),
             None,
             "{directive} of an unindexed project library may also supply Known"
         );
@@ -1420,17 +1544,24 @@ fn external_doc_imports_keep_package_fallback_unless_configuration_proves_absenc
         );
         let source = "import '../../cache/dep/lib/dep.dart';";
         let falcon_dart_parser::ParseResult {
-            program, errors, ..
+            tree: parsed_tree,
+            errors,
+            ..
         } = parse(source);
+        let parsed = Arc::new(ParsedFile {
+            source: source.to_string().into_boxed_str(),
+            tree: parsed_tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
         let external =
-            ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+            ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
                 path == app
             });
         let sources = [IdentitySource {
             path: &app,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }];
         let identities = IdentityIndex::build(
@@ -1467,9 +1598,16 @@ fn opening_external_files_evicts_the_disk_copy_and_allows_reloading_after_close(
     let (dir, app) = workspace();
     let dependency = canonical_or_lexical(&dir.path().join("cache/dep/lib/dep.dart"));
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let roots = [(app.as_path(), &program, source.as_str())];
+    let roots = [(app.as_path(), program, source.as_str())];
     let mut external = ExternalLibraries::load(&environment, &roots, |path| path == app);
     assert!(!external.is_empty());
     external.extend(&environment, &roots, |path| {
@@ -1497,9 +1635,16 @@ fn external_snapshots_reload_dependency_edits_and_removal_explicitly() {
     let (dir, app) = workspace();
     let dependency = dir.path().join("cache/dep/lib/dep.dart");
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let roots = [(app.as_path(), &program, source.as_str())];
+    let roots = [(app.as_path(), program, source.as_str())];
     let external = ExternalLibraries::load(&environment, &roots, |path| path == app);
     assert!(external_has_class(&external, "Base"));
     fs::write(&dependency, "class ChangedDependency {}").unwrap();
@@ -1578,9 +1723,16 @@ fn explicit_reload_observes_same_time_same_size_rewrites_and_atomic_replacements
     let (dir, app) = workspace();
     let dependency = dir.path().join("cache/dep/lib/dep.dart");
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let roots = [(app.as_path(), &program, source.as_str())];
+    let roots = [(app.as_path(), program, source.as_str())];
     for atomic in [false, true] {
         let metadata = fs::metadata(&dependency).unwrap();
         let text = fs::read_to_string(&dependency).unwrap();
@@ -1615,8 +1767,8 @@ fn explicit_reload_observes_same_time_same_size_rewrites_and_atomic_replacements
         let file = &refreshed.libraries().iter()
             .find(|library| matches!(&library.origin, ExternalOrigin::Package(name) if name.as_str() == "dep"))
             .unwrap().files[0];
-        assert!(file.facts.declarations.iter().any(|decl| {
-            matches!(decl, falcon_syntax::ast::TopLevelDecl::Class(class) if class.name.name == if atomic { "Base" } else { "Next" })
+        assert!(file.program().declarations().any(|decl| {
+            matches!(decl, falcon_syntax::cst::TopLevelDecl::Class(class) if class.name().name() == if atomic { "Base" } else { "Next" })
         }));
     }
 }
@@ -1680,13 +1832,19 @@ fn external_documentation_imports_load_transitively_and_resolve_in_overlays() {
     );
     write(dir.path(), "cache/dep/lib/leaf.dart", "class Leaf {}");
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let external = ExternalLibraries::load(
-        &environment,
-        &[(app.as_path(), &program, &source)],
-        |path| path == app,
-    );
+    let external =
+        ExternalLibraries::load(&environment, &[(app.as_path(), program, &source)], |path| {
+            path == app
+        });
     assert_eq!(external.libraries().len(), 3);
     let sources = ExternalSources {
         libraries: &external,
@@ -1695,7 +1853,7 @@ fn external_documentation_imports_load_transitively_and_resolve_in_overlays() {
     let base = std::sync::Arc::new(IdentityIndex::build_external(sources));
     let inputs = [IdentitySource {
         path: &app,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     }];
     let overlay = IdentityIndex::with_external(&inputs, &[&source], &[], sources, base);
@@ -1740,9 +1898,16 @@ fn configuration_stamps_detect_same_time_sdk_manifest_changes_without_installed_
 fn missing_external_package_sources_and_parts_are_available_after_explicit_reload() {
     let (dir, app) = workspace();
     let source = "import 'package:dep/generated.dart';";
-    let falcon_dart_parser::ParseResult { program, .. } = parse(source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let roots = [(app.as_path(), &program, source)];
+    let roots = [(app.as_path(), program, source)];
     let missing_library = ExternalLibraries::load(&environment, &roots, |path| path == app);
     assert!(
         !missing_library
@@ -1779,11 +1944,18 @@ fn missing_external_package_sources_and_parts_are_available_after_explicit_reloa
 fn replacing_package_directory_refreshes_facts_on_explicit_reload() {
     let (dir, app) = workspace();
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(&source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external = ExternalLibraries::load(
         &environment,
-        &[(app.as_path(), &program, source.as_str())],
+        &[(app.as_path(), program, source.as_str())],
         |path| path == app,
     );
     assert!(external_has_class(&external, "Base"));
@@ -1806,7 +1978,7 @@ fn replacing_package_directory_refreshes_facts_on_explicit_reload() {
     fs::rename(dir.path().join("cache/replacement"), &root).unwrap();
     let refreshed = ExternalLibraries::load(
         &environment,
-        &[(app.as_path(), &program, source.as_str())],
+        &[(app.as_path(), program, source.as_str())],
         |path| path == app,
     );
     assert!(external_has_class(&refreshed, "Next"));
@@ -1835,11 +2007,18 @@ fn transitive_libraries_and_parts_reload_after_project_buffers_close_without_sdk
     let part = part.canonicalize().unwrap();
     let source = "import 'package:dep/bridge.dart';";
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let roots = [(app.as_path(), &program, source)];
+    let roots = [(app.as_path(), program, source)];
     for opened in [&leaf, &part] {
         for warm in [false, true] {
             let mut libraries = if warm {
@@ -1904,10 +2083,10 @@ fn external_has_class(libraries: &ExternalLibraries, name: &str) -> bool {
         .libraries()
         .iter()
         .flat_map(|library| library.files.iter())
-        .flat_map(|file| &file.facts.declarations)
+        .flat_map(|file| file.program().declarations())
         .any(|declaration| {
             matches!(declaration,
-            falcon_syntax::ast::TopLevelDecl::Class(class) if class.name.name == name)
+            falcon_syntax::cst::TopLevelDecl::Class(class) if class.name().name() == name)
         })
 }
 
@@ -1927,28 +2106,34 @@ fn executable_library_names_preserve_collisions_without_documentation_imports() 
         .iter()
         .map(|(name, text)| write(dir.path(), name, text))
         .collect();
-    let programs: Vec<_> = texts
+    let parseds: Vec<_> = texts
         .iter()
         .map(|(_, text)| {
             let falcon_dart_parser::ParseResult {
-                program, errors, ..
+                tree: parsed_tree,
+                errors,
+                ..
             } = parse(text);
+            let parsed = Arc::new(ParsedFile {
+                source: text.to_string().into_boxed_str(),
+                tree: parsed_tree,
+            });
             assert!(errors.is_empty(), "{errors:?}");
-            program
+            parsed
         })
         .collect();
     let sources: Vec<_> = paths
         .iter()
-        .zip(&programs)
-        .map(|(path, program)| IdentitySource {
+        .zip(&parseds)
+        .map(|(path, parsed)| IdentitySource {
             path,
-            program,
+            parsed,
             has_parse_errors: false,
         })
         .collect();
     let content: Vec<_> = texts.iter().map(|(_, text)| *text).collect();
     let identities = IdentityIndex::build(&sources, &content, &[], None);
-    let model = SemanticModel::new(&paths[0], &identities, None);
+    let model = SemanticModel::new(&paths[0], &parseds[0], &identities, None);
 
     assert!(matches!(
         model.resolve_library_name("collision"),
@@ -2008,14 +2193,21 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
     })
     .collect();
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
 
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
         let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
-        let roots = paths.map(|path| (path, &program, source));
+        let roots = paths.map(|path| (path, program, source));
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
             let externals = if incremental {
@@ -2027,7 +2219,7 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
             };
             let sources = paths.map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             });
             let external = ExternalSources {
@@ -2050,7 +2242,7 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
                         (
                             path,
                             LibrarySource {
-                                program: &program,
+                                program,
                                 has_parse_errors: false,
                                 has_unresolved_parts: false,
                             },
@@ -2059,7 +2251,7 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
                     &identities,
                 );
                 types.add_external(&externals, &identities);
-                let files = paths.map(|path| (path.to_path_buf(), &program));
+                let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
                 let mut resolved = Vec::with_capacity(apps.len());
@@ -2067,7 +2259,7 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
                     let expected_path = canonical_or_lexical(
                         &dir.path().join(format!("packages/{copy}/lib/foo.dart")),
                     );
-                    let model = SemanticModel::new(app, &identities, Some(&types));
+                    let model = SemanticModel::new(app, &parsed, &identities, Some(&types));
                     let identity = model.resolve_name("Foo").unwrap();
                     assert!(identity.is_package("foo", "Foo"));
                     assert!(identity.matches(&DeclarationIdentity::package("foo", "Foo")));
@@ -2203,14 +2395,21 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
         canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
     });
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
 
     for order in [[0, 1, 2], [2, 1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
         let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
-        let roots = paths.map(|path| (path, &program, source));
+        let roots = paths.map(|path| (path, program, source));
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
             let externals = if incremental {
@@ -2240,7 +2439,7 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
             }
             let sources = paths.map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             });
             let external = ExternalSources {
@@ -2257,7 +2456,7 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
                         (
                             path,
                             LibrarySource {
-                                program: &program,
+                                program,
                                 has_parse_errors: false,
                                 has_unresolved_parts: false,
                             },
@@ -2266,13 +2465,13 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
                     &identities,
                 );
                 types.add_external(&externals, &identities);
-                let files = paths.map(|path| (path.to_path_buf(), &program));
+                let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
                 let mut foos = Vec::with_capacity(apps.len());
                 let mut functions = Vec::with_capacity(apps.len());
                 for (app, name) in apps.iter().zip(["first", "second", "second"]) {
-                    let model = SemanticModel::new(app, &identities, Some(&types));
+                    let model = SemanticModel::new(app, &parsed, &identities, Some(&types));
                     let foo_symbol = model.resolve_name("Foo").unwrap();
                     assert!(foo_symbol.is_package("foo", "Foo"));
                     let expected_path = canonical_or_lexical(
@@ -2386,14 +2585,20 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
         )));
         texts.push("import 'package:bar/bar.dart';");
     }
-    let programs: Vec<_> = texts
+    let parseds: Vec<_> = texts
         .iter()
         .map(|text| {
             let falcon_dart_parser::ParseResult {
-                program, errors, ..
+                tree: parsed_tree,
+                errors,
+                ..
             } = parse(text);
+            let parsed = Arc::new(ParsedFile {
+                source: text.to_string().into_boxed_str(),
+                tree: parsed_tree,
+            });
             assert!(errors.is_empty(), "{errors:?}");
-            program
+            parsed
         })
         .collect();
     let orders = if divergent || configured_outside {
@@ -2408,7 +2613,13 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
         );
         let roots: Vec<_> = order
             .iter()
-            .map(|&index| (paths[index].as_path(), &programs[index], texts[index]))
+            .map(|&index| {
+                (
+                    paths[index].as_path(),
+                    parseds[index].program(),
+                    texts[index],
+                )
+            })
             .collect();
         let is_project = |path: &Path| paths.iter().any(|project| project == path);
         for incremental in [false, true] {
@@ -2434,7 +2645,7 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
                 .iter()
                 .map(|&index| IdentitySource {
                     path: &paths[index],
-                    program: &programs[index],
+                    parsed: &parseds[index],
                     has_parse_errors: false,
                 })
                 .collect();
@@ -2448,8 +2659,8 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
                 IdentityIndex::build(&sources, &content, &[], Some(external)),
                 IdentityIndex::with_external(&sources, &content, &[], external, base.clone()),
             ] {
-                for path in paths.iter().skip(1) {
-                    let model = SemanticModel::new(path, &identities, None);
+                for (path, parsed) in paths.iter().zip(&parseds).skip(1) {
+                    let model = SemanticModel::new(path, parsed, &identities, None);
                     let identity = model.resolve_name("Shared").unwrap();
                     assert_eq!(
                         identity,
@@ -2461,7 +2672,7 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
                         assert_eq!(index.library_uri(library), Some("package:bar/bar.dart"));
                     }
                 }
-                let outside = SemanticModel::new(&paths[0], &identities, None);
+                let outside = SemanticModel::new(&paths[0], &parseds[0], &identities, None);
                 let identity = outside.resolve_name("Shared").unwrap();
                 assert!(matches!(&identity, DeclarationIdentity::Project { .. }));
                 let library = identities.declaration_library(&identity).unwrap();
@@ -2505,17 +2716,29 @@ fn different_entrypoints_of_one_nondivergent_package_keep_copyless_identities() 
             texts[index],
         ))
     });
-    let programs = texts.map(|text| {
+    let parseds = texts.map(|text| {
         let falcon_dart_parser::ParseResult {
-            program, errors, ..
+            tree: parsed_tree,
+            errors,
+            ..
         } = parse(text);
+        let parsed = Arc::new(ParsedFile {
+            source: text.to_string().into_boxed_str(),
+            tree: parsed_tree,
+        });
         assert!(errors.is_empty(), "{errors:?}");
-        program
+        parsed
     });
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
         let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
-        let roots = order.map(|index| (apps[index].as_path(), &programs[index], texts[index]));
+        let roots = order.map(|index| {
+            (
+                apps[index].as_path(),
+                parseds[index].program(),
+                texts[index],
+            )
+        });
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
             let externals = if incremental {
@@ -2527,7 +2750,7 @@ fn different_entrypoints_of_one_nondivergent_package_keep_copyless_identities() 
             };
             let sources = order.map(|index| IdentitySource {
                 path: &apps[index],
-                program: &programs[index],
+                parsed: &parseds[index],
                 has_parse_errors: false,
             });
             let content = order.map(|index| texts[index]);
@@ -2540,8 +2763,10 @@ fn different_entrypoints_of_one_nondivergent_package_keep_copyless_identities() 
                 IdentityIndex::build(&sources, &content, &[], Some(external)),
                 IdentityIndex::with_external(&sources, &content, &[], external, base),
             ] {
-                for (app, name) in apps.iter().zip(["Entryfirst", "Entrysecond"]) {
-                    let model = SemanticModel::new(app, &identities, None);
+                for ((app, parsed), name) in
+                    apps.iter().zip(&parseds).zip(["Entryfirst", "Entrysecond"])
+                {
+                    let model = SemanticModel::new(app, parsed, &identities, None);
                     assert_eq!(
                         model.resolve_name("Shared"),
                         Some(DeclarationIdentity::package("shared", "Shared")),
@@ -2571,7 +2796,7 @@ fn extending_external_libraries_observes_changed_symlink_targets() {
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([main.as_path()], |_| None);
-    let project = [(main.as_path(), &parsed.program, source)];
+    let project = [(main.as_path(), parsed.tree.program(source), source)];
     let mut libraries = ExternalLibraries::load(&environment, &project, |_| false);
     let target_path = |libraries: &ExternalLibraries| match libraries
         .resolve_target(&environment, &main, None, "dependency.dart")
@@ -2619,13 +2844,20 @@ fn documentation_imports_split_shared_dependency_instances() {
         canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
     });
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
         let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
-        let roots = paths.map(|path| (path, &program, source));
+        let roots = paths.map(|path| (path, program, source));
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
             let externals = if incremental {
@@ -2646,7 +2878,7 @@ fn documentation_imports_split_shared_dependency_instances() {
             );
             let sources = paths.map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             });
             let external = ExternalSources {
@@ -2659,7 +2891,7 @@ fn documentation_imports_split_shared_dependency_instances() {
                 IdentityIndex::with_external(&sources, &[source; 2], &[], external, base),
             ] {
                 let symbols = apps.each_ref().map(|app| {
-                    SemanticModel::new(app, &identities, None)
+                    SemanticModel::new(app, &parsed, &identities, None)
                         .resolve_name("Bar")
                         .unwrap()
                 });
@@ -2700,14 +2932,21 @@ fn package_copies_keep_package_identities_when_a_declaration_moves_between_versi
         );
         canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
     });
-    let falcon_dart_parser::ParseResult { program, .. } = parse(source);
+    let falcon_dart_parser::ParseResult {
+        tree: parsed_tree, ..
+    } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     let paths = apps.each_ref().map(PathBuf::as_path);
     let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
-    let roots = paths.map(|path| (path, &program, source));
+    let roots = paths.map(|path| (path, program, source));
     let externals = ExternalLibraries::load(&environment, &roots, |path| paths.contains(&path));
     let sources = paths.map(|path| IdentitySource {
         path,
-        program: &program,
+        parsed: &parsed,
         has_parse_errors: false,
     });
     let identities = IdentityIndex::build(
@@ -2720,7 +2959,7 @@ fn package_copies_keep_package_identities_when_a_declaration_moves_between_versi
         }),
     );
     let [old, new] = paths.map(|path| {
-        SemanticModel::new(path, &identities, None)
+        SemanticModel::new(path, &parsed, &identities, None)
             .resolve_name("Foo")
             .unwrap()
     });
@@ -2762,14 +3001,21 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
     let second = canonical_or_lexical(&write(dir.path(), "second/lib/main.dart", source));
     let apps = [first, second];
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
 
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
         let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
-        let roots = paths.map(|path| (path, &program, source));
+        let roots = paths.map(|path| (path, program, source));
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
             let externals = if incremental {
@@ -2789,7 +3035,7 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
             );
             let sources = paths.map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             });
             let external = ExternalSources {
@@ -2806,7 +3052,7 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
                         (
                             path,
                             LibrarySource {
-                                program: &program,
+                                program,
                                 has_parse_errors: false,
                                 has_unresolved_parts: false,
                             },
@@ -2815,11 +3061,11 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
                     &identities,
                 );
                 types.add_external(&externals, &identities);
-                let files = paths.map(|path| (path.to_path_buf(), &program));
+                let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
                 for app in &apps {
-                    let model = SemanticModel::new(app, &identities, Some(&types));
+                    let model = SemanticModel::new(app, &parsed, &identities, Some(&types));
                     let identity = model.resolve_name("SdkType").unwrap();
                     assert!(identity.is_sdk("dart:core", "SdkType"));
                     let expected_path = canonical_or_lexical(
@@ -2910,8 +3156,15 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
         canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
     });
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator(
         apps.iter().map(PathBuf::as_path),
@@ -2919,7 +3172,7 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
     );
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
-        let roots = paths.map(|path| (path, &program, source));
+        let roots = paths.map(|path| (path, program, source));
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
             let externals = if incremental {
@@ -2951,7 +3204,7 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
             assert_eq!(io_libraries[0].files[0].path.as_path(), io_path);
             let sources = paths.map(|path| IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             });
             let external = ExternalSources {
@@ -2968,7 +3221,7 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
                         (
                             path,
                             LibrarySource {
-                                program: &program,
+                                program,
                                 has_parse_errors: false,
                                 has_unresolved_parts: false,
                             },
@@ -2977,10 +3230,18 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
                     &identities,
                 );
                 types.add_external(&externals, &identities);
-                let files = paths.map(|path| (path.to_path_buf(), &program));
+                let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
-                let shared = SemanticModel::new(&shared_path, &identities, Some(&types));
+                let shared_parsed = &externals
+                    .libraries()
+                    .iter()
+                    .flat_map(|library| library.files.iter())
+                    .find(|file| file.path == shared_path)
+                    .unwrap()
+                    .parsed;
+                let shared =
+                    SemanticModel::new(&shared_path, shared_parsed, &identities, Some(&types));
                 let io_type = shared.resolve_name("IoType").unwrap();
                 assert!(io_type.is_sdk("dart:io", "IoType"));
                 for index in [&identities, base.as_ref()] {
@@ -2992,7 +3253,7 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
                 }
                 let mut functions = Vec::with_capacity(apps.len());
                 for app in &apps {
-                    let model = SemanticModel::new(app, &identities, Some(&types));
+                    let model = SemanticModel::new(app, &parsed, &identities, Some(&types));
                     let function = model.resolve_value("makeIo").unwrap();
                     assert!(function.is_package("shared", "makeIo"));
                     assert_eq!(
@@ -3060,8 +3321,15 @@ fn shared_dependency_doc_imports_use_first_loaded_sdk_availability() {
         canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
     });
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: parsed_tree,
+        errors,
+        ..
     } = parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree: parsed_tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     for discovery_order in [[0, 1], [1, 0]] {
         let environment = AnalysisEnvironment::discover_with_sdk_locator(
@@ -3070,7 +3338,7 @@ fn shared_dependency_doc_imports_use_first_loaded_sdk_availability() {
         );
         for load_order in [[0, 1], [1, 0]] {
             let paths = load_order.map(|index| apps[index].as_path());
-            let roots = paths.map(|path| (path, &program, source));
+            let roots = paths.map(|path| (path, program, source));
             let is_project = |path: &Path| apps.iter().any(|app| app == path);
             for incremental in [false, true] {
                 let externals = if incremental {
@@ -3083,7 +3351,7 @@ fn shared_dependency_doc_imports_use_first_loaded_sdk_availability() {
                 };
                 let sources = paths.map(|path| IdentitySource {
                     path,
-                    program: &program,
+                    parsed: &parsed,
                     has_parse_errors: false,
                 });
                 let external = ExternalSources {

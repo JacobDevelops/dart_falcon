@@ -8,8 +8,7 @@ use falcon_analyze::{
     SignatureIndex, Truth, TypeParameterId,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct InvalidRuntimeCheckWithJsInteropTypes;
@@ -17,7 +16,7 @@ pub struct InvalidRuntimeCheckWithJsInteropTypes;
 impl Rule for InvalidRuntimeCheckWithJsInteropTypes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let visitor = RuntimeChecks {
@@ -42,14 +41,14 @@ enum Interop {
     Unknown,
 }
 
-struct Collector<'a> {
-    diagnostics: &'a mut Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-    model: &'a SemanticModel<'a>,
-    signatures: &'a SignatureIndex,
+struct Collector<'borrow, 'source> {
+    diagnostics: &'borrow mut Vec<Diagnostic>,
+    ctx: &'borrow AnalyzeContext<'source>,
+    model: &'borrow SemanticModel<'source>,
+    signatures: &'borrow SignatureIndex,
 }
 
-impl Collector<'_> {
+impl Collector<'_, '_> {
     fn normalize(&self, ty: &ResolvedType) -> Normalized {
         self.normalize_inner(ty, &mut HashSet::new())
     }
@@ -443,24 +442,15 @@ struct RuntimeChecks<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for RuntimeChecks<'_> {
+impl<'a> SemanticRuleVisitor<'a> for RuntimeChecks<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let (expr, target, span, is_check) = match node {
-            Expr::Is {
-                expr,
-                dart_type,
-                span,
-                ..
-            } => (expr, dart_type, span, true),
-            Expr::As {
-                expr,
-                dart_type,
-                span,
-            } => (expr, dart_type, span, false),
+            Expr::Is(node) => (node.expr(), node.dart_type(), node.span(), true),
+            Expr::As(node) => (node.expr(), node.dart_type(), node.span(), false),
             _ => return,
         };
         let mut checker = Collector {
@@ -472,12 +462,12 @@ impl SemanticRuleVisitor for RuntimeChecks<'_> {
         checker.check(
             &state.infer(expr),
             &state.model.resolve_type_in(target, &state.type_parameters),
-            span,
+            &span,
             is_check,
         );
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let Stmt::TryCatch(statement) = node else {
             return;
         };
@@ -487,8 +477,8 @@ impl SemanticRuleVisitor for RuntimeChecks<'_> {
             model: &state.model,
             signatures: &state.signatures,
         };
-        for catch in &statement.catches {
-            if let Some(exception_type) = &catch.exception_type {
+        for catch in statement.catches() {
+            if let Some(exception_type) = catch.exception_type() {
                 let ty = state
                     .model
                     .resolve_type_in(exception_type, &state.type_parameters);
@@ -496,7 +486,7 @@ impl SemanticRuleVisitor for RuntimeChecks<'_> {
                     checker.diagnostics.push(checker.ctx.diagnostic(
                         "invalid-runtime-check-with-js-interop-types",
                         "JS interop types cannot be used as catch types.",
-                        *exception_type.span(),
+                        exception_type.span(),
                     ));
                 }
             }
@@ -505,7 +495,7 @@ impl SemanticRuleVisitor for RuntimeChecks<'_> {
 }
 
 fn paired_invalid(
-    collector: &Collector<'_>,
+    collector: &Collector<'_, '_>,
     left: &[ResolvedType],
     right: &[ResolvedType],
     is_check: bool,
@@ -518,7 +508,7 @@ fn paired_invalid(
 }
 
 fn named_invalid(
-    collector: &Collector<'_>,
+    collector: &Collector<'_, '_>,
     left: &[(String, ResolvedType)],
     right: &[(String, ResolvedType)],
     is_check: bool,
@@ -610,7 +600,7 @@ fn js_subtype(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
 mod tests {
     use std::path::Path;
 
-    use falcon_analyze::{IdentityIndex, IdentitySource, RuleAnalysis};
+    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 
@@ -620,28 +610,28 @@ mod tests {
     fn catch_diagnostic_covers_only_the_exception_type() {
         let source = "import 'dart:js_interop'; void f() { try {} on JSAny catch (error) {} }";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let parsed = std::sync::Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = InvalidRuntimeCheckWithJsInteropTypes.analyze(&program, &ctx);
+        let diagnostics = InvalidRuntimeCheckWithJsInteropTypes.analyze(program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

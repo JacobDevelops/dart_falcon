@@ -30,7 +30,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct MatchingSuperParameters;
@@ -38,7 +38,7 @@ pub struct MatchingSuperParameters;
 impl Rule for MatchingSuperParameters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -46,7 +46,7 @@ impl Rule for MatchingSuperParameters {
         };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
             diags: Vec::new(),
         }))
@@ -61,12 +61,12 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
             let TopLevelDecl::Class(class) = decl else {
                 return StructuralTraversal::SkipChildren;
             };
-            let Some(superclass) = &class.extends else {
+            let Some(superclass) = class.extends() else {
                 return StructuralTraversal::SkipChildren;
             };
             let ResolvedType::Interface { identity, .. } = self.model.resolve_type(superclass) else {
@@ -75,23 +75,21 @@ impl StructuralRuleVisitor for Collector<'_> {
             let Some(facts) = self.signatures.declaration(&identity) else {
                 return StructuralTraversal::SkipChildren;
             };
-            for (params, initializers) in constructor_inputs(class) {
+            for (params, mut initializers) in constructor_inputs(class) {
                 let super_params = params
-                    .params
-                    .iter()
+                    .params()
                     .filter(|param| {
-                        param.initializing == Some(InitializingFormal::Super)
-                            && !matches!(param.kind, ParamKind::Named { .. })
+                        param.initializing() == Some(InitializingFormal::Super)
+                            && !matches!(param.kind(), ParamKind::Named { .. })
                     });
                 let count = super_params.clone().count();
                 if count == 0 {
                     continue;
                 }
                 let target = initializers
-                    .iter()
                     .find_map(|initializer| match initializer {
-                        ConstructorInitializer::SuperCall { call_name, .. } => {
-                            Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                        ConstructorInitializer::SuperCall(call) => {
+                            Some(call.call_name().map_or("new", |name| name.name()))
                         }
                         _ => None,
                     })
@@ -112,14 +110,14 @@ impl StructuralRuleVisitor for Collector<'_> {
                     continue;
                 }
                 for (param, expected) in super_params.zip(super_positional) {
-                    if param.name.name != expected {
+                    if param.name().name() != expected {
                         self.diags.push(self.ctx.diagnostic(
                     "matching-super-parameters",
                     format!(
                         "The super parameter named '{}' does not share the same name as the corresponding parameter in the super constructor, '{expected}'.",
-                        param.name.name
+                        param.name().name()
                     ),
-                    param.span,
+                    param.span(),
                 ));
                     }
                 }
@@ -133,25 +131,29 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn constructor_inputs(
-    class: &ClassDecl,
-) -> impl Iterator<Item = (&FormalParamList, &[ConstructorInitializer])> {
-    let constructors = class.members.iter().filter_map(|member| match member {
+fn constructor_inputs<'a>(
+    class: ClassDecl<'a>,
+) -> impl Iterator<
+    Item = (
+        FormalParamList<'a>,
+        AstChildren<'a, ConstructorInitializer<'a>>,
+    ),
+> {
+    let constructors = class.members().filter_map(|member| match member {
         ClassMember::Constructor(constructor) => {
-            Some((&constructor.params, constructor.initializers.as_slice()))
+            Some((constructor.params(), constructor.initializers()))
         }
         _ => None,
     });
-    let primary = class.primary_constructor.as_ref().map(|constructor| {
+    let primary = class.primary_constructor().map(|constructor| {
         let initializers = class
-            .members
-            .iter()
+            .members()
             .find_map(|member| match member {
-                ClassMember::PrimaryConstructorBody(body) => Some(body.initializers.as_slice()),
+                ClassMember::PrimaryConstructorBody(body) => Some(body.initializers()),
                 _ => None,
             })
-            .unwrap_or(&[]);
-        (&constructor.params, initializers)
+            .unwrap_or_else(AstChildren::empty);
+        (constructor.params(), initializers)
     });
     constructors.chain(primary)
 }

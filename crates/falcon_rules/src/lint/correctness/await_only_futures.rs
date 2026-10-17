@@ -5,8 +5,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -16,7 +15,7 @@ pub struct AwaitOnlyFutures;
 impl Rule for AwaitOnlyFutures {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -32,16 +31,18 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Await { expr, span } = node else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Await(await_expr) = node else {
             return;
         };
-        if matches!(expr.unparenthesized(), Expr::NullLit { .. }) {
+        let expr = await_expr.expr();
+        let span = await_expr.span();
+        if matches!(expr.unparenthesized(), Expr::NullLit(_)) {
             return;
         }
         let ty = state.infer(expr);

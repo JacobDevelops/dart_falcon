@@ -23,7 +23,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferMixin;
@@ -31,13 +31,13 @@ pub struct PreferMixin;
 impl Rule for PreferMixin {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -55,17 +55,17 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let model = &self.model;
         let signatures = self.signatures;
         let diags = &mut self.diags;
         let with_clause = match decl {
-            TopLevelDecl::Class(node) => &node.with_clause,
-            TopLevelDecl::ClassTypeAlias(node) => &node.with_clause,
-            TopLevelDecl::MixinClass(node) => &node.with_clause,
-            TopLevelDecl::Enum(node) => &node.with_clause,
+            TopLevelDecl::Class(node) => node.with_clause(),
+            TopLevelDecl::ClassTypeAlias(node) => node.with_clause(),
+            TopLevelDecl::MixinClass(node) => node.with_clause(),
+            TopLevelDecl::Enum(node) => node.with_clause(),
             _ => return StructuralTraversal::SkipChildren,
         };
         for mixin in with_clause {
@@ -79,7 +79,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                 diags.push(ctx.diagnostic(
                     "prefer-mixin",
                     "Only mixins should be mixed in.",
-                    *mixin.span(),
+                    mixin.span(),
                 ));
             }
         }
@@ -105,28 +105,28 @@ mod tests {
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult {
-            program: dependency,
-            errors,
-            ..
-        } = parse(imported);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(imported);
+        let dependency = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: imported.into(),
+            tree,
+        });
         assert!(errors.is_empty(), "{errors:?}");
         let sources = [
             IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &imported_path,
-                program: &dependency,
+                parsed: &dependency,
                 has_parse_errors: false,
             },
         ];
@@ -136,7 +136,7 @@ mod tests {
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -146,19 +146,19 @@ mod tests {
         );
         let signatures = falcon_analyze::SignatureIndex::from_project_files(
             &[
-                (path.clone(), &program),
-                (imported_path.clone(), &dependency),
+                (path.clone(), std::sync::Arc::clone(&parsed)),
+                (imported_path.clone(), std::sync::Arc::clone(&dependency)),
             ],
             &identities,
             &types,
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
+        let context = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
         PreferMixin
-            .analyze(&program, &context)
+            .analyze(program, &context)
             .into_iter()
             .map(|diagnostic| {
                 source[diagnostic.span.start..diagnostic.span.end]

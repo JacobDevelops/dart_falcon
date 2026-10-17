@@ -6,7 +6,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseFullHexValuesForFlutterColors;
@@ -14,14 +14,14 @@ pub struct UseFullHexValuesForFlutterColors;
 impl Rule for UseFullHexValuesForFlutterColors {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let collector = Collector {
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             ctx,
             diags: Vec::new(),
         };
@@ -36,22 +36,22 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if matches!(node, Expr::Paren { .. }) {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if matches!(node, Expr::Paren(_)) {
             return StructuralTraversal::Continue;
         }
         if let Some((identity, constructor, args)) = construction(node, &self.model)
             && constructor == "new"
             && is_color(&identity)
-            && let Some(Expr::IntLit { value, span }) =
-                args.positional.first().map(Expr::unparenthesized)
-            && !is_full_hex(value)
+            && let Some(Expr::IntLit(literal)) =
+                args.positional().next().map(Expr::unparenthesized)
+            && !is_full_hex(literal.value())
         {
             self.diags.push(self.ctx.diagnostic(
                 "use-full-hex-values-for-flutter-colors",
                 "Use the full 8-digit hexadecimal value (0xAARRGGBB) for a Color.",
-                *span,
+                literal.span(),
             ));
         }
         StructuralTraversal::Continue
@@ -64,32 +64,25 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 fn construction<'a>(
-    expression: &'a Expr,
+    expression: Expr<'a>,
     model: &SemanticModel<'_>,
-) -> Option<(DeclarationIdentity, &'a str, &'a ArgList)> {
+) -> Option<(DeclarationIdentity, &'a str, ArgList<'a>)> {
     match expression.unparenthesized() {
-        Expr::New {
-            dart_type,
-            constructor_name,
-            args,
-            ..
-        } => {
-            let DartType::Named(named) = dart_type else {
+        Expr::New(new) => {
+            let DartType::Named(named) = new.dart_type() else {
                 return None;
             };
-            let constructor = constructor_name
-                .as_ref()
-                .map_or("new", |name| name.name.as_str());
+            let constructor = new.constructor_name().map_or("new", |name| name.name());
             Some((
-                model.resolve_name(QualifiedName::from_identifiers(&named.segments)?)?,
+                model.resolve_name(QualifiedName::from_identifiers(named.segments())?)?,
                 constructor,
-                args,
+                new.args(),
             ))
         }
-        Expr::Call { callee, args, .. } => {
+        Expr::Call(call) => {
             let (identity, constructor) =
-                falcon_analyze::resolve_call_constructor(callee, model, false)?;
-            Some((identity, constructor, args))
+                falcon_analyze::resolve_call_constructor(call.callee(), model, false)?;
+            Some((identity, constructor, call.args()))
         }
         _ => None,
     }

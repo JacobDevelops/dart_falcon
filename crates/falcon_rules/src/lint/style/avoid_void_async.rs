@@ -19,8 +19,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::{self, AsyncMarker};
 
 #[derive(Default)]
 pub struct AvoidVoidAsync;
@@ -28,7 +27,7 @@ pub struct AvoidVoidAsync;
 impl Rule for AvoidVoidAsync {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -45,8 +44,13 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, async_marker: AsyncMarker, return_type: Option<&DartType>, name: Span) {
-        if async_marker == AsyncMarker::Async && matches!(return_type, Some(DartType::Void { .. }))
+    fn check(
+        &mut self,
+        async_marker: AsyncMarker,
+        return_type: Option<cst::DartType<'_>>,
+        name: cst::Span,
+    ) {
+        if async_marker == AsyncMarker::Async && matches!(return_type, Some(cst::DartType::Void(_)))
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-void-async",
@@ -58,65 +62,88 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
     fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
         if let StructuralNode::FunctionDecl(function) = parent
-            && function.name.name == "main"
+            && function.name().name() == "main"
         {
             return matches!(child, StructuralNode::FunctionBody(_));
         }
         true
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        if node.name.name != "main" {
-            self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
+    fn visit_function_decl(&mut self, node: cst::FunctionDecl<'_>) -> StructuralTraversal {
+        let name = node.name();
+        if name.name() != "main" {
+            self.check(node.async_marker(), node.return_type(), name.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
+    fn visit_method_decl(&mut self, node: cst::MethodDecl<'_>) -> StructuralTraversal {
+        self.check(node.async_marker(), node.return_type(), node.name().span());
         StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
+    fn visit_getter_decl(&mut self, node: cst::GetterDecl<'_>) -> StructuralTraversal {
+        self.check(node.async_marker(), node.return_type(), node.name().span());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
-        if let ClassMember::Operator(operator) = node {
-            // Report at the `operator` keyword, standing in for the name token.
-            let span = self
+    fn visit_class_member(&mut self, node: cst::ClassMember<'_>) -> StructuralTraversal {
+        if let cst::ClassMember::Operator(operator) = node {
+            let keyword_span = self
                 .ctx
-                .syntax
-                .keywords_in(
-                    Span::new(operator.span.start, operator.params.span.start),
-                    falcon_syntax::TokenKind::Operator,
-                )
-                .next()
-                .map_or(operator.span, |token| {
-                    Span::new(token.offset(), token.offset() + token.len())
-                });
-            self.check(operator.async_marker, operator.return_type.as_ref(), span);
-        }
-        StructuralTraversal::Continue
-    }
-
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::LocalFunc(function) = node {
+                .tree()
+                .tokens_in(self.ctx.source, operator.span())
+                .find(|token| token.kind() == falcon_syntax::TokenKind::Operator)
+                .map_or(operator.span(), |token| token.span());
             self.check(
-                function.async_marker,
-                function.return_type.as_ref(),
-                function.name.span,
+                operator.async_marker(),
+                operator.return_type(),
+                keyword_span,
             );
         }
         StructuralTraversal::Continue
     }
+
+    fn visit_stmt(&mut self, node: cst::Stmt<'_>) -> StructuralTraversal {
+        if let cst::Stmt::LocalFunc(function) = node {
+            self.check(function.async_marker(), function.return_type(), function.name().span());
+        }
+        StructuralTraversal::Continue
+    }
 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{ParsedFile, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    #[test]
+    fn operator_diagnostic_points_to_keyword() {
+        let source = "class C { void operator []=(int i, int v) async {} }";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let config = FalconConfig::default();
+        let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+
+        let diagnostics = AvoidVoidAsync.analyze(parsed.program(), &context);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        let span = diagnostics[0].span;
+        assert_eq!(&source[span.start..span.end], "operator");
+    }
 }

@@ -12,15 +12,14 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct TypeLiteralInConstantPattern;
 impl Rule for TypeLiteralInConstantPattern {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -34,24 +33,24 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
 }
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
     fn visit_pattern(
         &mut self,
-        pattern: &Pattern,
+        pattern: Pattern<'a>,
         matched: Option<&ResolvedType>,
         state: &SemanticState<'_>,
     ) {
         let Pattern::Const(constant) = pattern else {
             return;
         };
-        let ConstPatternValue::Name(name) = &constant.value else {
+        let ConstPatternValue::Name(name) = constant.value() else {
             return;
         };
-        let Some((first, rest)) = name.split_first() else {
+        let Some(first) = name.first() else {
             return;
         };
         // Raw type literals are fine when the matched value is a `Type`.
@@ -59,27 +58,20 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         }
         // `dynamic` is a type-literal keyword, not a resolvable declaration.
-        let is_dynamic = rest.is_empty() && first.name == "dynamic";
-        let expression = rest
-            .iter()
-            .fold(Expr::Ident(first.clone()), |object, field| {
-                let span = Span::new(object.span().start, field.span.end);
-                Expr::Field {
-                    object: Box::new(object),
-                    field: field.clone(),
-                    is_null_safe: false,
-                    span,
-                }
-            });
+        let is_dynamic = name.len() == 1 && first.name() == "dynamic";
+        let span = Span::new(
+            first.span().start,
+            PatternNames::last(&name).unwrap().span().end,
+        );
         if is_dynamic
-            || matches!(state.infer(&expression),
+            || matches!(state.infer_constant_name(name),
             ResolvedType::Interface { ref identity, .. }
                 if *identity == DeclarationIdentity::sdk("dart:core", "Type"))
         {
             self.diags.push(self.ctx.diagnostic(
                 "type-literal-in-constant-pattern",
                 "Use a type pattern or wrap the type literal in 'const (...)'.",
-                *expression.span(),
+                span,
             ));
         }
     }
@@ -127,28 +119,28 @@ mod tests {
     fn qualified_constant_patterns_report_the_complete_pattern_span() {
         let source = "class A { static const ty = String; }\nvoid f(Object o, Type type) {\n  if (o case A.ty) {}\n  if (o case const (String)) {}\n  if (type case A.ty) {}\n  if (o case int?) {}\n}";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { errors, tree, .. } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = TypeLiteralInConstantPattern.analyze(&program, &ctx);
+        let diagnostics = TypeLiteralInConstantPattern.analyze(program, &ctx);
         let start = source.find("A.ty").unwrap();
         let nullable_start = source.find("int?").unwrap();
         assert_eq!(

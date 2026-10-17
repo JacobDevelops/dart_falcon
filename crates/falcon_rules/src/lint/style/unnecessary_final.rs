@@ -29,7 +29,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
 const RULE: &str = "unnecessary-final";
@@ -41,7 +41,7 @@ pub struct UnnecessaryFinal;
 impl Rule for UnnecessaryFinal {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -71,8 +71,8 @@ impl Collector<'_, '_> {
     fn report_final_in(&mut self, start: usize, end: usize) {
         if let Some(token) = self
             .ctx
-            .syntax
-            .keywords_in(Span::new(start, end), TokenKind::Final)
+            .tree()
+            .keywords_in(self.ctx.source, Span::new(start, end), TokenKind::Final)
             .next()
         {
             self.report_final(Span::new(token.offset(), token.offset() + token.len()));
@@ -86,87 +86,76 @@ impl Collector<'_, '_> {
         }
     }
 
-    fn check_for_init(&mut self, init: &ForInit, start: usize) {
+    fn check_for_init(&mut self, init: ForInit<'_>, start: usize) {
         match init {
-            ForInit::ForIn {
-                keyword: VarKeyword::Final,
-                declares_variable: true,
-                var_type,
-                name,
-                ..
-            } => {
-                let anchor = var_type
-                    .as_ref()
-                    .map_or(name.span.start, |ty| ty.span().start);
+            ForInit::ForIn(init)
+                if init.keyword() == VarKeyword::Final && init.declares_variable() =>
+            {
+                let anchor = init
+                    .var_type()
+                    .map_or(init.name().span().start, |ty| ty.span().start);
                 self.report_final_in(start, anchor);
             }
-            ForInit::PatternForIn {
-                keyword: VarKeyword::Final,
-                pattern,
-                ..
-            } => {
-                self.report_final_in(start, pattern.span().start);
+            ForInit::PatternForIn(init) if init.keyword() == VarKeyword::Final => {
+                self.report_final_in(start, init.pattern().span().start);
             }
-            ForInit::ForIn { .. }
-            | ForInit::PatternForIn { .. }
-            | ForInit::VarDecl(_)
-            | ForInit::Exprs(_) => {}
+            _ => {}
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
-        if self.check_params && node.is_final {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        if self.check_params && node.is_final() {
             let start = node
-                .annotations
+                .annotations()
                 .last()
-                .map_or(node.span.start, |annotation| annotation.span.end);
-            self.report_final_in(start, node.name.span.start);
+                .map_or(node.span().start, |annotation| annotation.span().end);
+            self.report_final_in(start, node.name().span().start);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
         let start = node
-            .param_annotations
+            .param_annotations()
             .last()
-            .map_or(node.name.span.end, |annotation| annotation.span.end);
+            .map_or(node.name().span().end, |annotation| annotation.span().end);
         if self.check_params {
-            self.report_final_in(start, node.param.span.start);
+            self.report_final_in(start, node.param().span().start);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalVar(declaration) = node
-            && declaration.keyword == VarKeyword::Final
-            && let Some(keyword) = declaration.keyword_span
+            && declaration.keyword() == VarKeyword::Final
+            && let Some(keyword) = declaration.keyword_span()
         {
             self.report_final(keyword);
         } else if let Stmt::PatternDecl(declaration) = node
-            && declaration.keyword == VarKeyword::Final
+            && declaration.keyword() == VarKeyword::Final
         {
-            self.report_final(declaration.keyword_span);
+            self.report_final(declaration.keyword_span());
         } else if let Stmt::For(statement) = node
-            && let Some(init) = &statement.header.init
+            && let Some(init) = statement.header().init()
         {
-            self.check_for_init(init, statement.span.start);
+            self.check_for_init(init, statement.span().start);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
-        if let Pattern::Variable { name, span, .. } = node
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
+        if let Pattern::Variable(variable) = node
             && let Some(keyword) = self
                 .ctx
-                .syntax
-                .keywords_in(Span::new(span.start, name.span.start), TokenKind::Final)
+                .tree()
+                .keywords_in(self.ctx.source, Span::new(variable.span().start, variable.name().span().start), TokenKind::Final)
                 .next()
-            && keyword.offset() == span.start
+            && keyword.offset() == variable.span().start
         {
             self.report_final(Span::new(
                 keyword.offset(),
@@ -197,16 +186,16 @@ mod tests {
   final (first, second) = (value, 2);
   print(first + second);
 }"#;
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let program = parsed.program();
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
-        let diagnostics = UnnecessaryFinal.analyze(&program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = UnnecessaryFinal.analyze(program, &ctx);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
         let local = source.find("final value").unwrap();
         let pattern = source.find("final (first").unwrap();

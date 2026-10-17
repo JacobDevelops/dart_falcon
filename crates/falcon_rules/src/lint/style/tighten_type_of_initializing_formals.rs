@@ -30,9 +30,8 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_enum_decl, walk_top_level_decl};
+use falcon_syntax::cst::visit::{Visitor, walk_class_decl, walk_enum_decl, walk_top_level_decl};
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_type_operations::nullability;
@@ -44,7 +43,7 @@ pub struct TightenTypeOfInitializingFormals;
 impl Rule for TightenTypeOfInitializingFormals {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if ctx.identities.is_none() {
@@ -70,10 +69,10 @@ impl Rule for TightenTypeOfInitializingFormals {
 /// Assert-initializer conditions (keyed by span) that null-check an
 /// initializing formal, mapped to that formal's span and whether the formal's
 /// type is syntactically proven nullable.
-struct NonNullAsserts {
+struct NonNullAsserts<'a> {
     formals: HashMap<(usize, usize), (Span, bool)>,
     /// Field declarations of the enclosing class or enum.
-    fields: Vec<HashMap<String, FieldShape>>,
+    fields: Vec<HashMap<&'a str, FieldShape>>,
 }
 
 /// What the declaration of a field proves about its type's nullability.
@@ -84,22 +83,22 @@ enum FieldShape {
     Other,
 }
 
-impl NonNullAsserts {
-    fn push_fields(&mut self, members: &[ClassMember]) {
+impl<'a> NonNullAsserts<'a> {
+    fn push_fields(&mut self, members: AstChildren<'a, ClassMember<'a>>) {
         let mut fields = HashMap::new();
         for member in members {
             let ClassMember::Field(field) = member else {
                 continue;
             };
-            for declarator in &field.declarators {
-                let shape = match &field.field_type {
-                    Some(ty) if ty.is_nullable() || matches!(ty, DartType::Dynamic { .. }) => {
+            for declarator in field.declarators() {
+                let shape = match field.field_type() {
+                    Some(ty) if ty.is_nullable() || matches!(ty, DartType::Dynamic(_)) => {
                         FieldShape::Nullable
                     }
-                    None if declarator.initializer.is_none() => FieldShape::Nullable,
+                    None if declarator.initializer().is_none() => FieldShape::Nullable,
                     _ => FieldShape::Other,
                 };
-                fields.insert(declarator.name.name.clone(), shape);
+                fields.insert(declarator.name().name(), shape);
             }
         }
         self.fields.push(fields);
@@ -107,37 +106,37 @@ impl NonNullAsserts {
 
     /// Whether the formal's type is proven nullable from its own annotation or,
     /// for an untyped `this.x`, from the field declaration.
-    fn syntactically_nullable(&self, param: &FormalParam) -> bool {
-        match &param.param_type {
-            Some(ty) => ty.is_nullable() || matches!(ty, DartType::Dynamic { .. }),
+    fn syntactically_nullable(&self, param: FormalParam<'a>) -> bool {
+        match param.param_type() {
+            Some(ty) => ty.is_nullable() || matches!(ty, DartType::Dynamic(_)),
             None => {
-                matches!(param.initializing, Some(InitializingFormal::This))
-                    && param.function_params.is_none()
+                matches!(param.initializing(), Some(InitializingFormal::This))
+                    && param.function_params().is_none()
                     && self
                         .fields
                         .last()
-                        .and_then(|fields| fields.get(&param.name.name))
+                        .and_then(|fields| fields.get(param.name().name()))
                         .is_some_and(|shape| matches!(shape, FieldShape::Nullable))
             }
         }
     }
 }
 
-impl Visitor for NonNullAsserts {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for NonNullAsserts<'a> {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if let TopLevelDecl::ExtensionType(extension) = node {
-            self.push_fields(&extension.members);
+            self.push_fields(extension.members());
             if let Some(representation) = extension.representation() {
-                let shape =
-                    if representation.param_type.as_ref().is_some_and(|ty| {
-                        ty.is_nullable() || matches!(ty, DartType::Dynamic { .. })
-                    }) {
-                        FieldShape::Nullable
-                    } else {
-                        FieldShape::Other
-                    };
+                let shape = if representation
+                    .param_type()
+                    .is_some_and(|ty| ty.is_nullable() || matches!(ty, DartType::Dynamic(_)))
+                {
+                    FieldShape::Nullable
+                } else {
+                    FieldShape::Other
+                };
                 if let Some(fields) = self.fields.last_mut() {
-                    fields.insert(representation.name.name.clone(), shape);
+                    fields.insert(representation.name().name(), shape);
                 }
             }
             walk_top_level_decl(self, node);
@@ -146,23 +145,24 @@ impl Visitor for NonNullAsserts {
             walk_top_level_decl(self, node);
         }
     }
-    fn visit_class_decl(&mut self, node: &ClassDecl) {
-        self.push_fields(&node.members);
+    fn visit_class_decl(&mut self, node: ClassDecl<'a>) {
+        self.push_fields(node.members());
         walk_class_decl(self, node);
         self.fields.pop();
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
-        self.push_fields(&node.members);
+    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) {
+        self.push_fields(node.members());
         walk_enum_decl(self, node);
         self.fields.pop();
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) {
         for initializer in node.initializers {
-            let ConstructorInitializer::Assert { condition, .. } = initializer else {
+            let ConstructorInitializer::Assert(assertion) = initializer else {
                 continue;
             };
+            let condition = assertion.condition();
             if is_parenthesized(condition) {
                 continue;
             }
@@ -171,14 +171,13 @@ impl Visitor for NonNullAsserts {
             };
             if let Some(param) = node
                 .params
-                .params
-                .iter()
-                .find(|param| param.initializing.is_some() && param.name.name == name.name)
+                .params()
+                .find(|param| param.initializing().is_some() && param.name().name() == name.name())
             {
                 let span = condition.span();
                 self.formals.insert(
                     (span.start, span.end),
-                    (param.span, self.syntactically_nullable(param)),
+                    (param.span(), self.syntactically_nullable(param)),
                 );
             }
         }
@@ -186,22 +185,21 @@ impl Visitor for NonNullAsserts {
 }
 
 /// Only bare identifier/null operands match the official rule.
-fn null_checked_identifier(condition: &Expr) -> Option<&Identifier> {
-    let Expr::Binary {
-        op: BinaryOp::NotEq,
-        left,
-        right,
-        ..
-    } = condition
-    else {
+fn null_checked_identifier(condition: Expr<'_>) -> Option<Identifier<'_>> {
+    let Expr::Binary(binary) = condition else {
         return None;
     };
+    if binary.op() != BinaryOp::NotEq {
+        return None;
+    }
+    let left = binary.left();
+    let right = binary.right();
     if is_parenthesized(left) || is_parenthesized(right) {
         return None;
     }
-    match (left.as_ref(), right.as_ref()) {
-        (Expr::Ident(identifier), Expr::NullLit { .. })
-        | (Expr::NullLit { .. }, Expr::Ident(identifier)) => Some(identifier),
+    match (left, right) {
+        (Expr::Ident(identifier), Expr::NullLit(_))
+        | (Expr::NullLit(_), Expr::Ident(identifier)) => Some(identifier),
         _ => None,
     }
 }
@@ -214,12 +212,12 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let span = node.span();
         let Some(&(param, syntactically_nullable)) = self.formals.get(&(span.start, span.end))
         else {
@@ -228,7 +226,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Some(identifier) = null_checked_identifier(node) else {
             return;
         };
-        let ty = state.environment.lookup(&identifier.name);
+        let ty = state.environment.lookup(identifier.name());
         let nullable = syntactically_nullable
             || matches!(ty, ResolvedType::Dynamic)
             || nullability(&ty, &state.signatures, self.ctx.types) == Truth::Yes;

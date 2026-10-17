@@ -14,8 +14,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseFunctionTypeSyntaxForParameters;
@@ -23,7 +22,7 @@ pub struct UseFunctionTypeSyntaxForParameters;
 impl Rule for UseFunctionTypeSyntaxForParameters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -40,13 +39,13 @@ struct Collector<'a, 'c> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
-        if node.function_params.is_some() {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        if node.function_params().is_some() {
             self.diags.push(self.ctx.diagnostic(
                 "use-function-type-syntax-for-parameters",
                 "Use the generic function type syntax for parameters.".to_string(),
-                node.span,
+                node.span(),
             ));
         }
         StructuralTraversal::Continue
@@ -72,9 +71,13 @@ mod tests {
             "void f(int callback(String s), void other<T>(T x), {required int named(int x)}) {}";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = UseFunctionTypeSyntaxForParameters.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = UseFunctionTypeSyntaxForParameters.analyze(parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

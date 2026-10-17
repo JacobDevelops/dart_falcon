@@ -5,7 +5,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::resolve::lexical_usage::used_parameters;
 
@@ -15,7 +15,7 @@ pub struct PreferUnderscoreForUnusedCallbackParameters;
 impl Rule for PreferUnderscoreForUnusedCallbackParameters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -31,25 +31,23 @@ struct Collector<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-            if let Expr::FuncExpr {
-                params, body, span, ..
-            } = node.unparenthesized()
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+            if let Expr::FuncExpr(function) = node.unparenthesized()
             {
-                let used = used_parameters(params, body);
-                if params.params.iter().any(|param| {
-                    let name = &param.name.name;
+                let used = used_parameters(function.params(), function.body());
+                if function.params().params().any(|param| {
+                    let name = param.name().name();
                     !(name.is_empty()
                         || name.bytes().all(|byte| byte == b'_')
-                        || used.contains(&param.name.span.start))
+                        || used.contains(&param.name().span().start))
                 }) {
                     self.diagnostics.push(self.ctx.diagnostic(
                         "prefer-underscore-for-unused-callback-parameters",
                         "Unused callback parameter should be named '_'.",
-                        *span,
+                        function.span(),
                     ));
                 }
             }

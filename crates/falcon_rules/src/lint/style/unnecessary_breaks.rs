@@ -26,8 +26,7 @@ use falcon_analyze::{
     AnalyzeContext, Feature, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryBreaks;
@@ -35,7 +34,7 @@ pub struct UnnecessaryBreaks;
 impl Rule for UnnecessaryBreaks {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if !ctx.language_version().supports(Feature::Patterns) {
@@ -55,13 +54,17 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
-    fn visit_switch_case(&mut self, case: &SwitchCase) -> StructuralTraversal {
-        if let [_, .., Stmt::Break(BreakStmt { label: None, span })] = case.body.as_slice() {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
+    fn visit_switch_case(&mut self, case: SwitchCase<'a>) -> StructuralTraversal {
+        let mut body = case.body();
+        if let Some(Stmt::Break(statement)) = body.next_back()
+            && statement.label().is_none()
+            && body.next().is_some()
+        {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-breaks",
                 "Unnecessary 'break' statement.",
-                *span,
+                statement.span(),
             ));
         }
         StructuralTraversal::Continue

@@ -2,7 +2,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -12,7 +12,7 @@ pub struct AvoidPassingAsyncWhenSyncExpected;
 impl Rule for AvoidPassingAsyncWhenSyncExpected {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -27,20 +27,21 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::FuncExpr {
-            async_marker: AsyncMarker::Async | AsyncMarker::AsyncStar,
-            span,
-            ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::FuncExpr(function) = node else {
             return;
         };
+        if !matches!(
+            function.async_marker(),
+            AsyncMarker::Async | AsyncMarker::AsyncStar
+        ) {
+            return;
+        }
         let Some(ResolvedType::Function { return_type, .. }) = state.expected() else {
             return;
         };
@@ -48,7 +49,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-passing-async-when-sync-expected",
                 "Avoid passing an async function where a synchronous callback is expected",
-                *span,
+                function.span(),
             ));
         }
     }

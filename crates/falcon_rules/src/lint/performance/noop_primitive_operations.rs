@@ -16,7 +16,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -27,7 +27,7 @@ pub struct NoopPrimitiveOperations;
 impl Rule for NoopPrimitiveOperations {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -54,20 +54,20 @@ impl Collector<'_> {
     }
 
     /// Reports `<target>.toString()` (with no arguments and a non-`super` target).
-    fn check_to_string(&mut self, expr: &Expr) {
-        if let Expr::Call { callee, args, .. } = expr
-            && args.positional.is_empty()
-            && args.named.is_empty()
-            && let Expr::Field { object, field, .. } = callee.as_ref()
-            && field.name == "toString"
-            && !matches!(object.as_ref(), Expr::Super { .. })
+    fn check_to_string(&mut self, expr: Expr<'_>) {
+        if let Expr::Call(call) = expr
+            && call.args().positional().is_empty()
+            && call.args().named().is_empty()
+            && let Expr::Field(field) = call.callee()
+            && field.field().name() == "toString"
+            && !matches!(field.object(), Expr::Super(_))
         {
-            self.report(field.span);
+            self.report(field.field().span());
         }
     }
 
-    fn check_adjacent(&mut self, literal: &StringLitNode) {
-        if !literal.is_adjacent || literal.segment_spans.len() < 3 {
+    fn check_adjacent(&mut self, literal: StringLitNode<'_>) {
+        if !literal.is_adjacent() || literal.segment_spans().count() < 3 {
             return;
         }
         let segments: Vec<_> = literal.segments().collect();
@@ -81,79 +81,76 @@ impl Collector<'_> {
 
     /// Whether `callee` names `dart:core`'s `print`, possibly through an
     /// import prefix (`core.print`).
-    fn is_core_print(callee: &Expr, state: &SemanticState<'_>) -> bool {
+    fn is_core_print(callee: Expr<'_>, state: &SemanticState<'_>) -> bool {
         let (first, name) = match callee {
-            Expr::Ident(identifier) => (identifier, QualifiedName::from(identifier.name.as_str())),
-            Expr::Field {
-                object,
-                field,
-                is_null_safe: false,
-                ..
-            } => match object.as_ref() {
-                Expr::Ident(prefix) => (prefix, QualifiedName::prefixed(&prefix.name, &field.name)),
+            Expr::Ident(identifier) => (identifier, QualifiedName::from(identifier.name())),
+            Expr::Field(field) if !field.is_null_safe() => match field.object() {
+                Expr::Ident(prefix) => (
+                    prefix,
+                    QualifiedName::prefixed(prefix.name(), field.field().name()),
+                ),
                 _ => return false,
             },
             _ => return false,
         };
-        !state.environment.is_bound(&first.name)
+        !state.environment.is_bound(first.name())
             && state.model.resolve_sdk_member(name)
                 == Some(DeclarationIdentity::sdk("dart:core", "print"))
     }
 
     /// Reports `name` invoked on a receiver of type `receiver` when it
     /// returns the receiver unchanged.
-    fn check_invocation(&mut self, receiver: &ResolvedType, name: &Identifier) {
+    fn check_invocation(&mut self, receiver: &ResolvedType, name: Identifier<'_>) {
         let ResolvedType::Interface {
             identity, nullable, ..
         } = receiver
         else {
             return;
         };
-        let method = name.name.as_str();
+        let method = name.name();
         let noop = (identity.is_sdk("dart:core", "String") && method == "toString" && !nullable)
             || (identity.is_sdk("dart:core", "int") && INT_INVARIANTS.contains(&method))
             || (identity.is_sdk("dart:core", "double") && method == "toDouble");
         if noop {
-            self.report(name.span);
+            self.report(name.span());
         }
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
             Expr::StringLit(literal) => {
-                for interpolation in &literal.interpolations {
-                    if !is_parenthesized(&interpolation.expr) {
-                        self.check_to_string(&interpolation.expr);
+                for interpolation in literal.interpolations() {
+                    if !is_parenthesized(interpolation.expr()) {
+                        self.check_to_string(interpolation.expr());
                     }
                 }
                 self.check_adjacent(literal);
             }
-            Expr::Call { callee, args, .. } => {
-                if Self::is_core_print(callee, state) {
-                    if args.positional.len() == 1
-                        && args.named.is_empty()
-                        && !is_parenthesized(&args.positional[0])
+            Expr::Call(call) => {
+                if Self::is_core_print(call.callee(), state) {
+                    if call.args().positional().len() == 1
+                        && call.args().named().is_empty()
+                        && let Some(argument) = call.args().positional().next()
+                        && !is_parenthesized(argument)
                     {
-                        self.check_to_string(&args.positional[0]);
+                        self.check_to_string(argument);
                     }
-                } else if let Expr::Field { object, field, .. } = callee.as_ref() {
-                    self.check_invocation(&state.infer(object), field);
+                } else if let Expr::Field(field) = call.callee() {
+                    self.check_invocation(&state.infer(field.object()), field.field());
                 }
             }
             // A cascade section's leading invocation targets the cascade object.
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                let receiver = state.infer(object);
-                for section in sections {
-                    if let [CascadeOp::Call(name, _, _), ..] = section.ops.as_slice() {
-                        self.check_invocation(&receiver, name);
+            Expr::Cascade(cascade) => {
+                let receiver = state.infer(cascade.object());
+                for section in cascade.sections() {
+                    if let Some(CascadeOp::Call(call)) = section.ops().next() {
+                        self.check_invocation(&receiver, call.name());
                     }
                 }
             }

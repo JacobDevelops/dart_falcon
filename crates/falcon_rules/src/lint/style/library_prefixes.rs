@@ -7,7 +7,7 @@
 //! and underscores.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::language_version::Feature;
 
 #[derive(Default)]
@@ -16,17 +16,17 @@ pub struct LibraryPrefixes;
 impl Rule for LibraryPrefixes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        for import in &program.imports {
-            if let Some(prefix) = &import.as_name
-                && !(prefix.name == "_"
+        for import in program.imports() {
+            if let Some(prefix) = import.as_name()
+                && !(prefix.name() == "_"
                     && ctx.language_version().supports(Feature::WildcardVariables))
-                && !is_valid_library_prefix(&prefix.name)
+                && !is_valid_library_prefix(prefix.name())
             {
-                diags.push(ctx.diagnostic("library-prefixes", MESSAGE, prefix.span));
+                diags.push(ctx.diagnostic("library-prefixes", MESSAGE, prefix.span()));
             }
         }
         RulePreparation::Diagnostics(diags)

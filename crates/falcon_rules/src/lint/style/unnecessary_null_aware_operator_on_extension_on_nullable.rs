@@ -28,7 +28,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::TokenKind;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -38,7 +38,7 @@ pub struct UnnecessaryNullAwareOperatorOnExtensionOnNullable;
 impl Rule for UnnecessaryNullAwareOperatorOnExtensionOnNullable {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -79,18 +79,18 @@ fn extended_type_nullable(ty: &ResolvedType) -> bool {
     explicitly_nullable(ty) || matches!(ty, ResolvedType::Dynamic | ResolvedType::Void)
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     /// Whether the extension supplying `member` to `target` is on a nullable type.
     fn extension_on_nullable(
         &self,
-        target: &Expr,
+        target: Expr<'a>,
         member: &str,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) -> bool {
-        if let Expr::Call { callee, args, .. } = target.unparenthesized()
-            && args.positional.len() == 1
-            && args.named.is_empty()
-            && let Some(identity) = state.named_extension(callee)
+        if let Expr::Call(call) = target.unparenthesized()
+            && call.args().positional().len() == 1
+            && call.args().named().is_empty()
+            && let Some(identity) = state.named_extension(call.callee())
             && let Some(on_type) = state.signatures.extension_on_type(&identity)
         {
             return extended_type_nullable(on_type);
@@ -151,9 +151,9 @@ impl Collector<'_> {
     fn report(&mut self, from: usize, to: usize, kind: TokenKind, len: usize) {
         let Some(token) = self
             .ctx
-            .syntax
-            .tokens_in(Span::new(from, to))
-            .find(|token| token.kind == kind)
+            .tree()
+            .tokens_in(self.ctx.source, Span::new(from, to))
+            .find(|token| token.kind() == kind)
         else {
             return;
         };
@@ -171,10 +171,13 @@ impl Collector<'_> {
     fn report_cascade_operator(&mut self, start: usize) {
         let Some(token) = self
             .ctx
-            .syntax
-            .tokens_in(Span::new(start.saturating_sub(1), start + 3))
+            .tree()
+            .tokens_in(
+                self.ctx.source,
+                Span::new(start.saturating_sub(1), start + 3),
+            )
             .find(|token| {
-                matches!(token.kind, TokenKind::DotDot | TokenKind::DotDotQmark)
+                matches!(token.kind(), TokenKind::DotDot | TokenKind::DotDotQmark)
                     && token.offset() <= start
                     && start < token.offset() + token.len()
             })
@@ -196,63 +199,67 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
-            Expr::Assign { target, .. } => self.assigned.push(*target.span()),
-            Expr::Field {
-                object,
-                field,
-                is_null_safe: true,
-                span,
-            } => {
-                let member = if self.is_assigned(span) {
-                    format!("{}=", field.name)
+            Expr::Assign(assignment) => self.assigned.push(assignment.target().span()),
+            Expr::Field(access) if access.is_null_safe() => {
+                let member = if self.is_assigned(&access.span()) {
+                    format!("{}=", access.field().name())
                 } else {
-                    field.name.clone()
+                    access.field().name().to_owned()
                 };
-                if self.extension_on_nullable(object, &member, state) {
-                    self.report(object.span().end, field.span.start, TokenKind::QmarkDot, 2);
+                if self.extension_on_nullable(access.object(), &member, state) {
+                    self.report(
+                        access.object().span().end,
+                        access.field().span().start,
+                        TokenKind::QmarkDot,
+                        2,
+                    );
                 }
             }
-            Expr::Cascade {
-                object,
-                sections,
-                is_null_aware: true,
-                ..
-            } => {
-                for section in sections {
-                    let member = match section.ops.as_slice() {
-                        [CascadeOp::Field { name, .. }, CascadeOp::Assign(..)] => {
-                            format!("{}=", name.name)
+            Expr::Cascade(cascade) if cascade.is_null_aware() => {
+                let mut setter = String::new();
+                for section in cascade.sections() {
+                    let mut ops = section.ops();
+                    let member = match ops.next() {
+                        Some(CascadeOp::Field(field)) => {
+                            if matches!(ops.next(), Some(CascadeOp::Assign(_)))
+                                && ops.next().is_none()
+                            {
+                                setter.clear();
+                                setter.reserve(field.name().name().len() + 1);
+                                setter.push_str(field.name().name());
+                                setter.push('=');
+                                setter.as_str()
+                            } else {
+                                field.name().name()
+                            }
                         }
-                        [CascadeOp::Field { name, .. }, ..] | [CascadeOp::Call(name, ..), ..] => {
-                            name.name.clone()
-                        }
-                        [CascadeOp::IndexAssign(..), ..] => "[]=".to_string(),
-                        [CascadeOp::Index { .. }, ..] => "[]".to_string(),
+                        Some(CascadeOp::Call(call)) => call.name().name(),
+                        Some(CascadeOp::IndexAssign(_)) => "[]=",
+                        Some(CascadeOp::Index(_)) => "[]",
                         _ => continue,
                     };
-                    if self.extension_on_nullable(object, &member, state) {
-                        self.report_cascade_operator(section.span.start);
+                    if self.extension_on_nullable(cascade.object(), member, state) {
+                        self.report_cascade_operator(section.span().start);
                     }
                 }
             }
-            Expr::Index {
-                object,
-                index,
-                is_null_safe: true,
-                span,
-            } => {
-                let member = if self.is_assigned(span) { "[]=" } else { "[]" };
-                if self.extension_on_nullable(object, member, state) {
+            Expr::Index(access) if access.is_null_safe() => {
+                let member = if self.is_assigned(&access.span()) {
+                    "[]="
+                } else {
+                    "[]"
+                };
+                if self.extension_on_nullable(access.object(), member, state) {
                     self.report(
-                        object.span().end,
-                        index.span().start,
+                        access.object().span().end,
+                        access.index().span().start,
                         TokenKind::QmarkLBracket,
                         1,
                     );

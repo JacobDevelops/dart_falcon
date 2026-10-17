@@ -22,12 +22,12 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
+use falcon_syntax::cst::visit::{
     Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_field_decl,
     walk_function_decl, walk_getter_decl, walk_local_var, walk_method_decl, walk_stmt,
     walk_top_level_decl,
 };
+use falcon_syntax::cst::*;
 use std::collections::HashMap;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -41,13 +41,13 @@ pub struct PreferIntLiterals;
 impl Rule for PreferIntLiterals {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let diagnostics = {
             let mut declared = DeclaredContexts {
                 diagnostics: Vec::new(),
@@ -64,15 +64,11 @@ impl Rule for PreferIntLiterals {
 
 /// The span of the double literal in `expr` (`1.0` or `-1.0`) when it holds a
 /// whole number an int literal can spell.
-fn replaceable_literal(expr: &Expr) -> Option<Span> {
+fn replaceable_literal(expr: Expr<'_>) -> Option<Span> {
     let (value, span) = match expr {
-        Expr::DoubleLit { value, span } => (value, *span),
-        Expr::Unary {
-            op: UnaryOp::Minus,
-            operand,
-            ..
-        } => match operand.as_ref() {
-            Expr::DoubleLit { value, span } => (value, *span),
+        Expr::DoubleLit(literal) => (literal.value(), literal.span()),
+        Expr::Unary(unary) if unary.op() == UnaryOp::Minus => match unary.operand() {
+            Expr::DoubleLit(literal) => (literal.value(), literal.span()),
             _ => return None,
         },
         _ => return None,
@@ -97,23 +93,27 @@ struct DeclaredContexts<'a, 'm> {
     returns_double: Vec<bool>,
 }
 
-impl DeclaredContexts<'_, '_> {
-    fn declares_double(&self, ty: Option<&DartType>) -> bool {
+impl<'a> DeclaredContexts<'a, '_> {
+    fn declares_double(&self, ty: Option<DartType<'a>>) -> bool {
         ty.is_some_and(|ty| is_double(&self.model.resolve_type(ty)))
     }
 
-    fn check(&mut self, expr: &Expr) {
+    fn check(&mut self, expr: Expr<'a>) {
         if let Some(span) = replaceable_literal(expr) {
             self.diagnostics
                 .push(self.ctx.diagnostic(RULE, MESSAGE, span));
         }
     }
 
-    fn check_declarators(&mut self, ty: Option<&DartType>, declarators: &[VarDeclarator]) {
+    fn check_declarators(
+        &mut self,
+        ty: Option<DartType<'a>>,
+        declarators: AstChildren<'a, VarDeclarator<'a>>,
+    ) {
         if !self.declares_double(ty) {
             return;
         }
-        for initializer in declarators.iter().filter_map(|d| d.initializer.as_ref()) {
+        for initializer in declarators.filter_map(|d| d.initializer()) {
             self.check(initializer);
         }
     }
@@ -121,13 +121,13 @@ impl DeclaredContexts<'_, '_> {
     /// Walks a function with `return_type`, checking an arrow body directly.
     fn in_function(
         &mut self,
-        return_type: Option<&DartType>,
-        body: Option<&FunctionBody>,
+        return_type: Option<DartType<'a>>,
+        body: Option<FunctionBody<'a>>,
         walk: impl FnOnce(&mut Self),
     ) {
         let returns_double = self.declares_double(return_type);
-        if returns_double && let Some(FunctionBody::Arrow(expr, _)) = body {
-            self.check(expr);
+        if returns_double && let Some(FunctionBody::Arrow(body)) = body {
+            self.check(body.expr());
         }
         self.returns_double.push(returns_double);
         walk(self);
@@ -135,88 +135,82 @@ impl DeclaredContexts<'_, '_> {
     }
 }
 
-impl Visitor for DeclaredContexts<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for DeclaredContexts<'a, '_> {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if let TopLevelDecl::Variable(variable) = node {
-            self.check_declarators(variable.var_type.as_ref(), &variable.declarators);
+            self.check_declarators(variable.var_type(), variable.declarators());
         }
         walk_top_level_decl(self, node);
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.check_declarators(node.field_type.as_ref(), &node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
+        self.check_declarators(node.field_type(), node.declarators());
         walk_field_decl(self, node);
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        self.check_declarators(node.var_type.as_ref(), &node.declarators);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
+        self.check_declarators(node.var_type(), node.declarators());
         walk_local_var(self, node);
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.in_function(node.return_type.as_ref(), node.body.as_ref(), |this| {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
+        self.in_function(node.return_type(), node.body(), |this| {
             walk_function_decl(this, node)
         });
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.in_function(node.return_type.as_ref(), node.body.as_ref(), |this| {
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) {
+        self.in_function(node.return_type(), node.body(), |this| {
             walk_method_decl(this, node)
         });
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        self.in_function(node.return_type.as_ref(), node.body.as_ref(), |this| {
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) {
+        self.in_function(node.return_type(), node.body(), |this| {
             walk_getter_decl(this, node)
         });
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+    fn visit_constructor_decl(&mut self, node: ConstructorDecl<'a>) {
         self.in_function(None, None, |this| walk_constructor_decl(this, node));
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) {
         if let ClassMember::Operator(operator) = node {
-            self.in_function(
-                operator.return_type.as_ref(),
-                operator.body.as_ref(),
-                |this| walk_class_member(this, node),
-            );
+            self.in_function(operator.return_type(), operator.body(), |this| {
+                walk_class_member(this, node)
+            });
         } else {
             walk_class_member(self, node);
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
             Stmt::LocalFunc(function) => {
-                self.in_function(
-                    function.return_type.as_ref(),
-                    Some(&function.body),
-                    |this| walk_stmt(this, node),
-                );
+                self.in_function(function.return_type(), Some(function.body()), |this| {
+                    walk_stmt(this, node)
+                });
                 return;
             }
-            Stmt::Return(ReturnStmt {
-                value: Some(value), ..
-            }) if self.returns_double.last() == Some(&true) => self.check(value),
+            Stmt::Return(statement) if self.returns_double.last() == Some(&true) => {
+                if let Some(value) = statement.value() {
+                    self.check(value);
+                }
+            }
             _ => {}
         }
         walk_stmt(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         match node {
-            Expr::FuncExpr { .. } => {
+            Expr::FuncExpr(_) => {
                 self.in_function(None, None, |this| walk_expr(this, node));
                 return;
             }
-            Expr::List {
-                type_arg: Some(element_type),
-                elements,
-                ..
-            } if self.declares_double(Some(element_type)) => {
-                for element in elements {
+            Expr::List(list) if self.declares_double(list.type_arg()) => {
+                for element in list.elements() {
                     if let CollectionElement::Expr(expr) = element {
                         self.check(expr);
                     }
@@ -235,8 +229,8 @@ struct ArgumentContexts<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl ArgumentContexts<'_> {
-    fn check(&mut self, parameter: &ResolvedType, argument: &Expr) {
+impl<'a> ArgumentContexts<'a> {
+    fn check(&mut self, parameter: &ResolvedType, argument: Expr<'a>) {
         if !is_double(parameter) {
             return;
         }
@@ -248,31 +242,31 @@ impl ArgumentContexts<'_> {
 
     fn check_arguments(
         &mut self,
-        args: &ArgList,
+        args: ArgList<'a>,
         positional: &[ResolvedType],
         named: &HashMap<String, ResolvedType>,
     ) {
-        for (argument, parameter) in args.positional.iter().zip(positional) {
+        for (argument, parameter) in args.positional().zip(positional) {
             self.check(parameter, argument);
         }
-        for argument in &args.named {
-            if let Some(parameter) = named.get(&argument.name.name) {
-                self.check(parameter, &argument.value);
+        for argument in args.named() {
+            if let Some(parameter) = named.get(argument.name().name()) {
+                self.check(parameter, argument.value());
             }
         }
     }
 }
 
-impl SemanticRuleVisitor for ArgumentContexts<'_> {
+impl<'a> SemanticRuleVisitor<'a> for ArgumentContexts<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
     fn visit_call_arguments(
         &mut self,
-        args: &ArgList,
+        args: ArgList<'a>,
         positional: &[ResolvedType],
         named: &HashMap<String, ResolvedType>,
-        _state: &SemanticState<'_>,
+        _state: &SemanticState<'a>,
     ) {
         self.check_arguments(args, positional, named);
     }

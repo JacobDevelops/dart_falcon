@@ -16,24 +16,24 @@ pub(super) struct OverrideShape {
 }
 
 impl OverrideShape {
-    pub(super) fn new(
-        params: &FormalParamList,
-        type_params: &[TypeParam],
+    pub(super) fn new<'a>(
+        params: FormalParamList<'a>,
+        type_params: impl IntoIterator<Item = TypeParam<'a>>,
         scope: &TypeParameterScope,
     ) -> Self {
         Self {
             required_positional: params
                 .positional()
-                .filter(|param| !matches!(param.kind, ParamKind::OptionalPositional))
+                .filter(|param| !matches!(param.kind(), ParamKind::OptionalPositional))
                 .count(),
             required_named: params
                 .named()
-                .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
-                .map(|param| param.name.name.clone())
+                .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
+                .map(|param| param.name().name().to_owned())
                 .collect(),
             bounds: type_params
-                .iter()
-                .map(|param| match scope.lookup(&param.name.name) {
+                .into_iter()
+                .map(|param| match scope.lookup(param.name().name()) {
                     Some(ResolvedType::TypeParameter { bound, .. }) => bound.as_ref().clone(),
                     _ => ResolvedType::Unknown,
                 })
@@ -996,31 +996,40 @@ mod tests {
     use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
+    fn parsed(source: &str) -> Arc<crate::ParsedFile> {
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        })
+    }
+
     #[test]
     fn extension_type_inheritance_uses_only_explicit_superinterfaces() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(
+        let parsed = parsed(
             "extension type Nullable(Object? value) {}
              extension type Described(Object? value) implements Nullable {
                String describe() => '';
              }
              extension type Child(Object? value) implements Described {}",
         );
-        assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let types = TypeIndex::from_program(&program);
-        let index =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let model = SemanticModel::new(&path, &identities, Some(&types));
+        let types = TypeIndex::from_program(parsed.program());
+        let index = SignatureIndex::from_project_files(
+            &[(path.clone(), Arc::clone(&parsed))],
+            &identities,
+            &types,
+        );
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
         let nullable = model.resolve_name("Nullable").unwrap();
         assert!(index.supertypes[&nullable].1.is_empty());
         assert!(!index.has_combined_inherited_member(
@@ -1041,50 +1050,46 @@ mod tests {
     fn override_headers_settle_across_files_before_initializers() {
         let early_path = PathBuf::from("/project/lib/early.dart");
         let base_path = PathBuf::from("/project/lib/base.dart");
-        let falcon_dart_parser::ParseResult {
-            program: early,
-            errors,
-            ..
-        } = parse(
+        let early = parsed(
             "import 'base.dart'; final top = Early().measured;
              class Early extends Middle {
                late final measured = measure(''); measure(text) => 0;
              }
              class FieldSetter extends FieldBase { set value(next) {} }",
         );
-        assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult {
-            program: base,
-            errors,
-            ..
-        } = parse(
+        let base = parsed(
             "abstract class Middle extends Base { measure(text); }
              abstract class Base { int measure(String text); }
              class FieldBase { var value = 0; }",
         );
-        assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[
                 IdentitySource {
                     path: &early_path,
-                    program: &early,
+                    parsed: &early,
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: &base_path,
-                    program: &base,
+                    parsed: &base,
                     has_parse_errors: false,
                 },
             ],
             &[],
         );
-        let types = TypeIndex::from_program(&early);
+        let types = TypeIndex::from_program(early.program());
         for files in [
-            vec![(early_path.clone(), &early), (base_path.clone(), &base)],
-            vec![(base_path.clone(), &base), (early_path.clone(), &early)],
+            vec![
+                (early_path.clone(), Arc::clone(&early)),
+                (base_path.clone(), Arc::clone(&base)),
+            ],
+            vec![
+                (base_path.clone(), Arc::clone(&base)),
+                (early_path.clone(), Arc::clone(&early)),
+            ],
         ] {
             let index = SignatureIndex::from_project_files(&files, &identities, &types);
-            let model = SemanticModel::new(&early_path, &identities, Some(&types));
+            let model = SemanticModel::new(&early_path, &early, &identities, Some(&types));
             let owner = model.resolve_name("Early").unwrap();
             assert_eq!(
                 index.field(&owner, "measured").unwrap().1,
@@ -1142,22 +1147,22 @@ mod tests {
               final int major; Version(this.major);
               compareTo(other) => major - other.major;
             }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = parsed(source);
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let types = TypeIndex::from_program(&program);
-        let mut index =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let model = SemanticModel::new(&path, &identities, Some(&types));
+        let types = TypeIndex::from_program(parsed.program());
+        let mut index = SignatureIndex::from_project_files(
+            &[(path.clone(), Arc::clone(&parsed))],
+            &identities,
+            &types,
+        );
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
         let c = model.resolve_name("C").unwrap();
         assert_eq!(
             index
@@ -1297,7 +1302,7 @@ mod tests {
                 }],
             ),
         );
-        index.infer_override_types(&program, &model);
+        index.infer_override_types(parsed.program(), &model);
         assert_eq!(
             index.member(&sdk_child, "helper").unwrap().positional[0],
             ResolvedType::Unknown
@@ -1319,25 +1324,22 @@ mod tests {
                  abstract class KnownConflict implements Cmp, Q {{}}
                  abstract class KindConflict implements P, Getter {{}}"
             );
-            let falcon_dart_parser::ParseResult {
-                program, errors, ..
-            } = parse(&source);
-            assert!(errors.is_empty(), "{errors:?}");
+            let parsed = parsed(&source);
             let identities = IdentityIndex::from_project_files(
                 &[IdentitySource {
                     path: &path,
-                    program: &program,
+                    parsed: &parsed,
                     has_parse_errors: false,
                 }],
                 &[],
             );
-            let types = TypeIndex::from_program(&program);
+            let types = TypeIndex::from_program(parsed.program());
             let mut index = SignatureIndex::from_project_files(
-                &[(path.clone(), &program)],
+                &[(path.clone(), Arc::clone(&parsed))],
                 &identities,
                 &types,
             );
-            let model = SemanticModel::new(&path, &identities, Some(&types));
+            let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
             // Model a declaration whose member exists but whose complete
             // signature metadata is unavailable, without relying on SDK facts.
             index
@@ -1389,9 +1391,7 @@ mod tests {
     #[test]
     fn repeated_diamonds_cache_one_unsubstituted_interface_signature() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(
+        let parsed = parsed(
             "abstract class Base<T> { T make(); }
              abstract class L1<T> implements Base<T> {}
              abstract class R1<T> implements Base<T> {}
@@ -1401,19 +1401,21 @@ mod tests {
              abstract class R3<T> implements L2<T>, R2<T> {}
              abstract class Leaf<T> implements L3<T>, R3<T> {}",
         );
-        assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let types = TypeIndex::from_program(&program);
-        let index =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let model = SemanticModel::new(&path, &identities, Some(&types));
+        let types = TypeIndex::from_program(parsed.program());
+        let index = SignatureIndex::from_project_files(
+            &[(path.clone(), Arc::clone(&parsed))],
+            &identities,
+            &types,
+        );
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
         let leaf = ResolvedType::Interface {
             identity: model.resolve_name("Leaf").unwrap(),
             arguments: vec![model.core_type("int", false)].into(),

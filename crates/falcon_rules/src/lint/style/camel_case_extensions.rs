@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct CamelCaseExtensions;
@@ -19,7 +19,7 @@ pub struct CamelCaseExtensions;
 impl Rule for CamelCaseExtensions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,13 +35,13 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Extension(ext) = decl
-            && let Some(name) = &ext.name
-            && !is_upper_camel_case(&name.name)
+            && let Some(name) = ext.name()
+            && !is_upper_camel_case(name.name())
         {
-            self.diags.push(self.ctx.diagnostic("camel-case-extensions", MESSAGE, name.span));
+            self.diags.push(self.ctx.diagnostic("camel-case-extensions", MESSAGE, name.span()));
         }
         StructuralTraversal::SkipChildren
     }

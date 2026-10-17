@@ -13,7 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoLeadingUnderscoresForLocalIdentifiers;
@@ -21,7 +21,7 @@ pub struct NoLeadingUnderscoresForLocalIdentifiers;
 impl Rule for NoLeadingUnderscoresForLocalIdentifiers {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -48,62 +48,62 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, name: &Identifier) {
-        if has_leading_underscore(&name.name) {
+    fn check(&mut self, name: Identifier<'_>) {
+        if has_leading_underscore(name.name()) {
             self.diags.push(self.ctx.diagnostic(
                 "no-leading-underscores-for-local-identifiers",
                 MESSAGE,
-                name.span,
+                name.span(),
             ));
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.representation_params = match node {
             TopLevelDecl::ExtensionType(extension) => {
-                Some(extension.primary_constructor.params.span.start)
+                Some(extension.primary_constructor().params().span().start)
             }
             _ => None,
         };
         StructuralTraversal::Continue
     }
 
-    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) -> StructuralTraversal {
-        self.primary_params = Some(node.params.span.start);
+    fn visit_primary_constructor(&mut self, node: PrimaryConstructor<'a>) -> StructuralTraversal {
+        self.primary_params = Some(node.params().span().start);
         StructuralTraversal::Continue
     }
 
-    fn exit_primary_constructor(&mut self, _node: &PrimaryConstructor) {
+    fn exit_primary_constructor(&mut self, _node: PrimaryConstructor<'a>) {
         self.primary_params = None;
     }
 
-    fn visit_formal_param_list(&mut self, node: &FormalParamList) -> StructuralTraversal {
-        if self.representation_params != Some(node.span.start) {
-            for parameter in &node.params {
-                if parameter.initializing.is_some()
-                    || (self.primary_params == Some(node.span.start)
-                        && (parameter.is_var || parameter.is_final))
+    fn visit_formal_param_list(&mut self, node: FormalParamList<'a>) -> StructuralTraversal {
+        if self.representation_params != Some(node.span().start) {
+            for parameter in node.params() {
+                if parameter.initializing().is_some()
+                    || (self.primary_params == Some(node.span().start)
+                        && (parameter.is_var() || parameter.is_final()))
                 {
                     break;
                 }
-                if !matches!(parameter.kind, ParamKind::Named { .. }) {
-                    self.check(&parameter.name);
+                if !matches!(parameter.kind(), ParamKind::Named { .. }) {
+                    self.check(parameter.name());
                 }
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node {
-            for parameter in &function.params {
-                if !parameter.is_named
-                    && let Some(name) = &parameter.name
+            for parameter in function.params() {
+                if !parameter.is_named()
+                    && let Some(name) = parameter.name()
                 {
                     self.check(name);
                 }
@@ -114,38 +114,35 @@ impl StructuralRuleVisitor for Collector<'_> {
 
     /// A class setter's value parameter is not part of a `FormalParamList`, so
     /// it needs its own check.
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        self.check(&node.param);
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        self.check(node.param());
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        for declarator in &node.declarators {
-            self.check(&declarator.name);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        for declarator in node.declarators() {
+            self.check(declarator.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         match node {
             // Local declarations and pattern bindings use their dedicated hooks.
-            Stmt::LocalFunc(function) => self.check(&function.name),
+            Stmt::LocalFunc(function) => self.check(function.name()),
             Stmt::For(f) => {
-                if let Some(ForInit::ForIn {
-                    declares_variable: true,
-                    name,
-                    ..
-                }) = &f.header.init
+                if let Some(ForInit::ForIn(init)) = f.header().init()
+                    && init.declares_variable()
                 {
-                    self.check(name);
+                    self.check(init.name());
                 }
             }
             Stmt::TryCatch(tc) => {
-                for catch in &tc.catches {
-                    if let Some(v) = &catch.exception_var {
+                for catch in tc.catches() {
+                    if let Some(v) = catch.exception_var() {
                         self.check(v);
                     }
-                    if let Some(v) = &catch.stack_trace_var {
+                    if let Some(v) = catch.stack_trace_var() {
                         self.check(v);
                     }
                 }
@@ -157,24 +154,24 @@ impl StructuralRuleVisitor for Collector<'_> {
 
     /// Declared variable patterns bind locals: `final (_a, _b) = pair`,
     /// `case final _x`, `for (final (_a, _b) in xs)`.
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
         self.shortcut_lengths.push(self.field_shortcuts.len());
         if let Pattern::Object(object) = node {
-            for field in &object.fields {
-                if self.ctx.source.as_bytes().get(field.span.start) == Some(&b':') {
-                    self.field_shortcuts.push(field.name.span.start);
+            for field in object.fields() {
+                if self.ctx.source.as_bytes().get(field.span().start) == Some(&b':') {
+                    self.field_shortcuts.push(field.name().span().start);
                 }
             }
         }
-        if let Pattern::Variable { name, .. } = node
-            && !self.field_shortcuts.contains(&name.span.start)
+        if let Pattern::Variable(variable) = node
+            && !self.field_shortcuts.contains(&variable.name().span().start)
         {
-            self.check(name);
+            self.check(variable.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_pattern(&mut self, _node: &Pattern) {
+    fn exit_pattern(&mut self, _node: Pattern<'a>) {
         self.field_shortcuts.truncate(self.shortcut_lengths.pop().unwrap());
     }
 }
@@ -189,14 +186,17 @@ mod tests {
     use std::path::PathBuf;
 
     fn run(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
         NoLeadingUnderscoresForLocalIdentifiers
-            .analyze(&program, &ctx)
+            .analyze(program, &ctx)
             .len()
     }
 

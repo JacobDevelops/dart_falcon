@@ -74,17 +74,17 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
     use std::path::Path;
 
     let path = Path::new("/unloaded_project/main.dart");
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = falcon_dart_parser::parse(source);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::build(
         &[IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[source],
@@ -95,23 +95,23 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
         [(
             path,
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
         )],
         &identities,
     );
-    let model = SemanticModel::new(path, &identities, Some(&types));
-    let signatures = SignatureIndex::from_program(&program, &model);
+    let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
+    let signatures = SignatureIndex::from_program(program, &model);
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config, &syntax)
+    let context = AnalyzeContext::new(path, &config, &parsed)
         .with_types(&types)
         .with_identities(&identities)
         .with_signatures(&signatures);
     let rules = all_rules();
     let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
-    inference::assert_diagnostics(source, rule_name, &rule.analyze(&program, &context), 0);
+    inference::assert_diagnostics(source, rule_name, &rule.analyze(program, &context), 0);
 }
 
 #[test]

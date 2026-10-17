@@ -12,8 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferTypingUninitializedVariables;
@@ -21,7 +20,7 @@ pub struct PreferTypingUninitializedVariables;
 impl Rule for PreferTypingUninitializedVariables {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -32,22 +31,22 @@ impl Rule for PreferTypingUninitializedVariables {
     }
 }
 
-struct Collector<'a, 'c> {
-    ctx: &'a AnalyzeContext<'c>,
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl Collector<'_, '_> {
-    fn check(&mut self, has_type: bool, declarators: &[VarDeclarator]) {
+impl<'a> Collector<'a> {
+    fn check(&mut self, has_type: bool, declarators: AstChildren<'a, VarDeclarator<'a>>) {
         if has_type {
             return;
         }
         for decl in declarators {
-            if decl.initializer.is_none() {
+            if decl.initializer().is_none() {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-typing-uninitialized-variables",
                     "Prefer typing uninitialized variables and fields.".to_string(),
-                    decl.name.span,
+                    decl.name().span(),
                 ));
             }
         }
@@ -55,27 +54,27 @@ impl Collector<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_program(&mut self, node: &Program) -> StructuralTraversal {
-        for decl in &node.declarations {
+    fn visit_program(&mut self, node: Program<'a>) -> StructuralTraversal {
+        for decl in node.declarations() {
             if let TopLevelDecl::Variable(var) = decl {
-                self.check(var.var_type.is_some(), &var.declarators);
+                self.check(var.var_type().is_some(), var.declarators());
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        self.check(node.field_type.is_some(), &node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        self.check(node.field_type().is_some(), node.declarators());
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
-        self.check(local.var_type.is_some(), &local.declarators);
+    fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
+        self.check(local.var_type().is_some(), local.declarators());
         StructuralTraversal::Continue
     }
 }

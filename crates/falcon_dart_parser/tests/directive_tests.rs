@@ -4,7 +4,7 @@
 //! expected AST/token shape; role-keeping cases guard against regressions.
 
 use falcon_dart_parser::parser::parse;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[path = "common/only_class.rs"]
 mod common_class;
@@ -15,110 +15,142 @@ use common_errs::errs;
 
 #[test]
 fn test_metadata_before_export() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("@Deprecated('x') export 'p.dart' show B;");
+    let source = "@Deprecated('x') export 'p.dart' show B;";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_eq!(prog.exports.len(), 1);
-    let e = &prog.exports[0];
-    assert_eq!(e.annotations.len(), 1, "annotation not attached to export");
-    assert_eq!(e.annotations[0].name.last().unwrap().name, "Deprecated");
-    assert_eq!(e.uri.value, "p.dart");
-    match &e.combinators[0] {
-        ImportCombinator::Show(names, _) => assert_eq!(names[0].name, "B"),
+    assert_eq!(prog.exports().len(), 1);
+    let e = prog.exports().next().unwrap();
+    assert_eq!(
+        e.annotations().len(),
+        1,
+        "annotation not attached to export"
+    );
+    assert_eq!(
+        e.annotations()
+            .next()
+            .unwrap()
+            .name()
+            .last()
+            .unwrap()
+            .name(),
+        "Deprecated"
+    );
+    assert_eq!(e.uri().value(), "p.dart");
+    match e.combinators().next().unwrap() {
+        ImportCombinator::Show(names) => assert_eq!(names.names().next().unwrap().name(), "B"),
         other => panic!("expected show combinator, got {other:?}"),
     }
     // No stray top-level error node from the leading `@`.
     assert!(
-        prog.declarations.is_empty(),
+        prog.declarations().is_empty(),
         "unexpected decls: {:?}",
-        prog.declarations
+        prog.declarations()
     );
 }
 
 #[test]
 fn test_metadata_before_import() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("@A import 'a.dart';");
+    let source = "@A import 'a.dart';";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_eq!(prog.imports.len(), 1);
-    let i = &prog.imports[0];
-    assert_eq!(i.annotations.len(), 1, "annotation not attached to import");
-    assert_eq!(i.annotations[0].name.last().unwrap().name, "A");
-    assert_eq!(i.uri.value, "a.dart");
-    assert!(prog.declarations.is_empty());
+    assert_eq!(prog.imports().len(), 1);
+    let i = prog.imports().next().unwrap();
+    assert_eq!(
+        i.annotations().len(),
+        1,
+        "annotation not attached to import"
+    );
+    assert_eq!(
+        i.annotations()
+            .next()
+            .unwrap()
+            .name()
+            .last()
+            .unwrap()
+            .name(),
+        "A"
+    );
+    assert_eq!(i.uri().value(), "a.dart");
+    assert!(prog.declarations().is_empty());
 }
 
 #[test]
 fn test_metadata_before_part() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("@A part 'p.dart';");
+    let source = "@A part 'p.dart';";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_eq!(prog.part_directives.len(), 1);
-    let p = &prog.part_directives[0];
-    assert_eq!(p.annotations.len(), 1, "annotation not attached to part");
-    assert_eq!(p.annotations[0].name.last().unwrap().name, "A");
-    assert_eq!(p.uri.value, "p.dart");
+    assert_eq!(prog.part_directives().len(), 1);
+    let p = prog.part_directives().next().unwrap();
+    assert_eq!(p.annotations().len(), 1, "annotation not attached to part");
+    assert_eq!(
+        p.annotations()
+            .next()
+            .unwrap()
+            .name()
+            .last()
+            .unwrap()
+            .name(),
+        "A"
+    );
+    assert_eq!(p.uri().value(), "p.dart");
 }
 
 #[test]
 fn test_metadata_before_library_dotted_name() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("@A library a.b.c;");
+    let source = "@A library a.b.c;";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let lib = prog.library_directive.as_ref().expect("library directive");
+    let lib = prog.library_directive().expect("library directive");
     assert_eq!(
-        lib.annotations.len(),
+        lib.annotations().len(),
         1,
         "annotation not attached to library"
     );
-    assert_eq!(lib.annotations[0].name.last().unwrap().name, "A");
-    let dotted: Vec<_> = lib.name.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        lib.annotations()
+            .next()
+            .unwrap()
+            .name()
+            .last()
+            .unwrap()
+            .name(),
+        "A"
+    );
+    let dotted: Vec<_> = lib.name().map(|s| s.name()).collect();
     assert_eq!(dotted, vec!["a", "b", "c"], "dotted library name lost");
 }
 
 #[test]
 fn test_metadata_with_args_before_part_of() {
     // Annotation carrying an argument list must be skipped when routing `part of`.
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("@A('x') part of foo.bar;");
+    let source = "@A('x') part of foo.bar;";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let po = prog.part_of_directive.as_ref().expect("part-of directive");
+    let po = prog.part_of_directive().expect("part-of directive");
     assert_eq!(
-        po.annotations.len(),
+        po.annotations().len(),
         1,
         "annotation not attached to part-of"
     );
-    let dotted: Vec<_> = po.name.iter().map(|s| s.name.as_str()).collect();
+    let dotted: Vec<_> = po.name().map(|s| s.name()).collect();
     assert_eq!(dotted, vec!["foo", "bar"]);
 }
 
 #[test]
 fn test_getter_named_on() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { Reference? get on; }");
+    let source = "class C { Reference? get on; }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &only_class(&prog).members[0] {
+    match only_class(prog).members().next().unwrap() {
         ClassMember::Getter(g) => {
-            assert_eq!(g.name.name, "on");
-            assert!(g.return_type.is_some(), "getter return type lost");
+            assert_eq!(g.name().name(), "on");
+            assert!(g.return_type().is_some(), "getter return type lost");
         }
         other => panic!("expected getter, got {other:?}"),
     }
@@ -126,45 +158,39 @@ fn test_getter_named_on() {
 
 #[test]
 fn test_method_named_show() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { void show() {} }");
+    let source = "class C { void show() {} }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &only_class(&prog).members[0] {
-        ClassMember::Method(m) => assert_eq!(m.name.name, "show"),
+    match only_class(prog).members().next().unwrap() {
+        ClassMember::Method(m) => assert_eq!(m.name().name(), "show"),
         other => panic!("expected method, got {other:?}"),
     }
 }
 
 #[test]
 fn test_field_named_hide() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { int hide = 0; }");
+    let source = "class C { int hide = 0; }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &only_class(&prog).members[0] {
-        ClassMember::Field(f) => assert_eq!(f.declarators[0].name.name, "hide"),
+    match only_class(prog).members().next().unwrap() {
+        ClassMember::Field(f) => assert_eq!(f.declarators().next().unwrap().name().name(), "hide"),
         other => panic!("expected field, got {other:?}"),
     }
 }
 
 #[test]
 fn test_param_named_when() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("void f(int when) {}");
+    let source = "void f(int when) {}";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &prog.declarations[0] {
+    match prog.declarations().next().unwrap() {
         TopLevelDecl::Function(fun) => {
-            let param = &fun.params().unwrap().params[0];
-            assert_eq!(param.kind, ParamKind::Positional);
-            assert_eq!(param.name.name, "when");
+            let param = fun.params().unwrap().params().next().unwrap();
+            assert_eq!(param.kind(), ParamKind::Positional);
+            assert_eq!(param.name().name(), "when");
         }
         other => panic!("expected function, got {other:?}"),
     }
@@ -172,13 +198,11 @@ fn test_param_named_when() {
 
 #[test]
 fn test_local_var_named_of() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("void g() { var of = 1; }");
+    let source = "void g() { var of = 1; }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &prog.declarations[0] {
+    match prog.declarations().next().unwrap() {
         TopLevelDecl::Function(_) => {}
         other => panic!("expected function, got {other:?}"),
     }
@@ -187,29 +211,25 @@ fn test_local_var_named_of() {
 #[test]
 fn test_getter_named_override() {
     // `override` is a builtin identifier; it must be usable as a getter name too.
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { bool get override => true; }");
+    let source = "class C { bool get override => true; }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &only_class(&prog).members[0] {
-        ClassMember::Getter(g) => assert_eq!(g.name.name, "override"),
+    match only_class(prog).members().next().unwrap() {
+        ClassMember::Getter(g) => assert_eq!(g.name().name(), "override"),
         other => panic!("expected getter, got {other:?}"),
     }
 }
 
 #[test]
 fn test_mixin_on_clause_still_parses() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("mixin M on A {}");
+    let source = "mixin M on A {}";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &prog.declarations[0] {
+    match prog.declarations().next().unwrap() {
         TopLevelDecl::Mixin(m) => {
-            assert_eq!(m.on_clause.len(), 1, "on-clause lost");
+            assert_eq!(m.on_clause().len(), 1, "on-clause lost");
         }
         other => panic!("expected mixin, got {other:?}"),
     }
@@ -217,42 +237,42 @@ fn test_mixin_on_clause_still_parses() {
 
 #[test]
 fn test_import_show_hide_still_parses() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("import 'a.dart' show A hide B;");
+    let source = "import 'a.dart' show A hide B;";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let combos = &prog.imports[0].combinators;
-    assert!(matches!(combos[0], ImportCombinator::Show(..)));
-    assert!(matches!(combos[1], ImportCombinator::Hide(..)));
+    let combos = prog.imports().next().unwrap().combinators();
+    assert!(matches!(
+        combos.clone().next().unwrap(),
+        ImportCombinator::Show(..)
+    ));
+    assert!(matches!(
+        combos.clone().nth(1).unwrap(),
+        ImportCombinator::Hide(..)
+    ));
 }
 
 #[test]
 fn test_part_of_still_parses() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("part of foo.bar;");
+    let source = "part of foo.bar;";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let po = prog.part_of_directive.as_ref().expect("part-of directive");
-    let dotted: Vec<_> = po.name.iter().map(|s| s.name.as_str()).collect();
+    let po = prog.part_of_directive().expect("part-of directive");
+    let dotted: Vec<_> = po.name().map(|s| s.name()).collect();
     assert_eq!(dotted, vec!["foo", "bar"]);
 }
 
 #[test]
 fn test_async_body_marker_still_parses() {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { foo() async {} }");
+    let source = "class C { foo() async {} }";
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    match &only_class(&prog).members[0] {
+    match only_class(prog).members().next().unwrap() {
         ClassMember::Method(m) => {
-            assert_eq!(m.name.name, "foo");
-            assert_eq!(m.async_marker, AsyncMarker::Async, "async marker lost");
+            assert_eq!(m.name().name(), "foo");
+            assert_eq!(m.async_marker(), AsyncMarker::Async, "async marker lost");
         }
         other => panic!("expected method, got {other:?}"),
     }

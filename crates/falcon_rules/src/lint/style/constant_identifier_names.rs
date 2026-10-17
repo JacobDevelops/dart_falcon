@@ -12,7 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ConstantIdentifierNames;
@@ -20,7 +20,7 @@ pub struct ConstantIdentifierNames;
 impl Rule for ConstantIdentifierNames {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -39,54 +39,54 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, name: &Identifier) {
-        if !is_lower_camel_case(&name.name) {
+    fn check(&mut self, name: Identifier<'_>) {
+        if !is_lower_camel_case(name.name()) {
             self.diags.push(
                 self.ctx
-                    .diagnostic("constant-identifier-names", MESSAGE, name.span),
+                    .diagnostic("constant-identifier-names", MESSAGE, name.span()),
             );
         }
     }
 
-    fn check_declarators(&mut self, declarators: &[VarDeclarator]) {
+    fn check_declarators(&mut self, declarators: AstChildren<'_, VarDeclarator<'_>>) {
         for d in declarators {
-            self.check(&d.name);
+            self.check(d.name());
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = node
-            && v.keyword == falcon_syntax::ast::VarKeyword::Const
+            && v.keyword() == VarKeyword::Const
         {
-            self.check_declarators(&v.declarators);
+            self.check_declarators(v.declarators());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        if node.keyword == falcon_syntax::ast::VarKeyword::Const {
-            self.check_declarators(&node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        if node.keyword() == VarKeyword::Const {
+            self.check_declarators(node.declarators());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
-        for variant in &node.variants {
-            self.check(&variant.name);
+    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) -> StructuralTraversal {
+        for variant in node.variants() {
+            self.check(variant.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        if node.keyword == falcon_syntax::ast::VarKeyword::Const {
-            self.check_declarators(&node.declarators);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        if node.keyword() == VarKeyword::Const {
+            self.check_declarators(node.declarators());
         }
         StructuralTraversal::Continue
     }
@@ -102,13 +102,16 @@ mod tests {
     use std::path::PathBuf;
 
     fn run(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let parsed = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let program = parsed.tree.program(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
-        ConstantIdentifierNames.analyze(&program, &ctx).len()
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
+        ConstantIdentifierNames.analyze(program, &ctx).len()
     }
 
     #[test]

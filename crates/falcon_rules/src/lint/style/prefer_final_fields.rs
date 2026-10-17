@@ -26,9 +26,8 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{self, Visitor};
+use falcon_syntax::cst::visit::{self as visitor, Visitor};
+use falcon_syntax::cst::*;
 use std::collections::HashSet;
 
 #[derive(Default)]
@@ -37,14 +36,14 @@ pub struct PreferFinalFields;
 impl Rule for PreferFinalFields {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         // Suppress-only: if this file participates in a library whose writes we
         // cannot fully see, stay silent. That is an unresolved part in the known
         // library, or part/part-of directives with no library context at all.
         let has_part_directives =
-            !program.part_directives.is_empty() || program.part_of_directive.is_some();
+            !program.part_directives().is_empty() || program.part_of_directive().is_some();
         match ctx.library {
             Some(lib) if lib.has_unresolved_parts() => {
                 return RulePreparation::Diagnostics(Vec::new());
@@ -60,7 +59,7 @@ impl Rule for PreferFinalFields {
         };
         if let Some(lib) = ctx.library {
             for sibling in lib.siblings() {
-                written.visit_program(sibling);
+                written.visit_program(*sibling);
             }
         }
 
@@ -74,13 +73,13 @@ impl Rule for PreferFinalFields {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    written: Written,
+    written: Written<'a>,
     candidates: Vec<(&'a str, Span)>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if !matches!(decl, TopLevelDecl::Enum(_))
             && let Some(members) = crate::lint::declarations::members_of(decl)
         {
@@ -91,7 +90,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.written.record_expr(node);
         StructuralTraversal::Continue
     }
@@ -113,14 +112,14 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 fn check_class<'a>(
-    members: &[ClassMember],
+    members: AstChildren<'a, ClassMember<'a>>,
     source: &'a str,
     candidates: &mut Vec<(&'a str, Span)>,
 ) {
     // The analyzer requires every declared constructor to initialize a field
     // when any constructor does, including redirecting and factory constructors.
-    let constructors: Vec<&ConstructorDecl> = members
-        .iter()
+    let constructors: Vec<ConstructorDecl<'a>> = members
+        .clone()
         .filter_map(|m| match m {
             ClassMember::Constructor(c) => Some(c),
             _ => None,
@@ -131,83 +130,80 @@ fn check_class<'a>(
         let ClassMember::Field(field) = member else {
             continue;
         };
-        if field.keyword != falcon_syntax::ast::VarKeyword::Var
-            || field.is_late
-            || field.is_external
-            || field.is_abstract
+        if field.keyword() != VarKeyword::Var
+            || field.is_late()
+            || field.is_external()
+            || field.is_abstract()
         {
             continue;
         }
-        for d in &field.declarators {
-            let name = d.name.name.as_str();
+        for d in field.declarators() {
+            let name = d.name().name();
             if !name.starts_with('_') {
                 continue;
             }
-            let has_decl_init = d.initializer.is_some();
-            let touched_by_ctor = constructors.iter().any(|c| inits_field(c, name));
+            let has_decl_init = d.initializer().is_some();
+            let touched_by_ctor = constructors.iter().any(|c| inits_field(*c, name));
 
             let ok = if touched_by_ctor {
-                constructors.iter().all(|c| inits_field(c, name))
+                constructors.iter().all(|c| inits_field(*c, name))
             } else {
                 has_decl_init
             };
 
             if ok {
-                let span = d.name.span;
+                let span = d.name().span();
                 candidates.push((&source[span.start..span.end], span));
             }
         }
     }
 }
 
-fn inits_field(c: &ConstructorDecl, name: &str) -> bool {
-    let via_list = c.initializers.iter().any(
-        |i| matches!(i, ConstructorInitializer::FieldInit { field, .. } if field.name == name),
+fn inits_field(c: ConstructorDecl<'_>, name: &str) -> bool {
+    let via_list = c.initializers().any(
+        |i| matches!(i, ConstructorInitializer::FieldInit(field) if field.field().name() == name),
     );
     let via_formal = c
-        .params
-        .params
-        .iter()
-        .any(|p| p.initializing == Some(InitializingFormal::This) && p.name.name == name);
+        .params()
+        .params()
+        .any(|p| p.initializing() == Some(InitializingFormal::This) && p.name().name() == name);
     via_list || via_formal
 }
 
 // Collects every field/variable name that is written (assigned, compound
 // assigned, or incremented) in each visited program; the caller unions one or
 // more programs (a file plus its library siblings) into one name set.
-struct Written {
-    names: HashSet<String>,
+struct Written<'a> {
+    names: HashSet<&'a str>,
 }
 
-impl Written {
-    fn record_target(&mut self, target: &Expr) {
+impl<'a> Written<'a> {
+    fn record_target(&mut self, target: Expr<'a>) {
         match target.unparenthesized() {
             Expr::Ident(id) => {
-                self.names.insert(id.name.clone());
+                self.names.insert(id.name());
             }
-            Expr::Field { field, .. } => {
-                self.names.insert(field.name.clone());
+            Expr::Field(field) => {
+                self.names.insert(field.field().name());
             }
             _ => {}
         }
     }
 }
 
-impl Written {
-    fn record_expr(&mut self, node: &Expr) {
+impl<'a> Written<'a> {
+    fn record_expr(&mut self, node: Expr<'a>) {
         match node {
-            Expr::Assign { target, .. } => self.record_target(target),
-            Expr::PostfixIncDec { operand, .. } => self.record_target(operand),
-            Expr::Unary {
-                op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
-                operand,
-                ..
-            } => self.record_target(operand),
-            Expr::Cascade { sections, .. } => {
-                for s in sections {
-                    for op in &s.ops {
-                        if let CascadeOp::Assign(target, _, _) = op {
-                            self.record_target(target);
+            Expr::Assign(assignment) => self.record_target(assignment.target()),
+            Expr::PostfixIncDec(postfix) => self.record_target(postfix.operand()),
+            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                self.record_target(unary.operand());
+            }
+            Expr::Cascade(cascade) => {
+                for s in cascade.sections() {
+                    for op in s.ops() {
+                        if let CascadeOp::Assign(assignment) = op {
+                            self.record_target(assignment.target());
                         }
                     }
                 }
@@ -217,8 +213,8 @@ impl Written {
     }
 }
 
-impl Visitor for Written {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> Visitor<'a> for Written<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         self.record_expr(node);
         visitor::walk_expr(self, node);
     }
@@ -236,33 +232,40 @@ mod tests {
     /// Run the rule over file `target`, building the real library grouping so
     /// `ctx.library` mirrors production (owner + part siblings, unresolved flag).
     fn run_in_library(files: &[(&str, &str)], target: usize) -> usize {
-        let parsed: Vec<_> = files.iter().map(|(_, source)| parse(source)).collect();
-        let programs: Vec<&Program> = parsed.iter().map(|result| &result.program).collect();
-        let syntax: Vec<_> = parsed.iter().map(|result| &result.syntax).collect();
-        let path_prog: Vec<(PathBuf, &Program)> = files
+        let parsed: Vec<_> = files
+            .iter()
+            .map(|(_, source)| {
+                std::sync::Arc::new(falcon_analyze::ParsedFile {
+                    source: (*source).into(),
+                    tree: parse(source).tree,
+                })
+            })
+            .collect();
+        let programs: Vec<Program<'_>> = parsed.iter().map(|file| file.program()).collect();
+        let path_prog: Vec<(PathBuf, Program<'_>)> = files
             .iter()
             .zip(&programs)
             .map(|((p, _), prog)| (PathBuf::from(p), *prog))
             .collect();
         let grouping = group_libraries(&path_prog);
-        let sources: Vec<&str> = files.iter().map(|(_, source)| *source).collect();
-        let unit = library_unit(&grouping, &programs, &sources, &syntax, target);
+        let parsed_refs: Vec<_> = parsed.iter().collect();
+        let unit = library_unit(&grouping, &parsed_refs, target);
         let config = FalconConfig::default();
         let path = PathBuf::from(files[target].0);
-        let ctx = AnalyzeContext::new(&path, files[target].1, &config, syntax[target])
-            .with_library(&unit);
+        let ctx = AnalyzeContext::new(&path, &config, &parsed[target]).with_library(&unit);
         PreferFinalFields.analyze(programs[target], &ctx).len()
     }
 
     /// Run with no library context at all (standalone / degraded single-file).
     fn run_standalone(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parse(source).tree,
+        });
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
-        PreferFinalFields.analyze(&program, &ctx).len()
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
+        PreferFinalFields.analyze(parsed.program(), &ctx).len()
     }
 
     #[test]

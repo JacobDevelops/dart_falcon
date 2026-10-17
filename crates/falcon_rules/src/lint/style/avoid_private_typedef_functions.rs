@@ -21,8 +21,8 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_dart_type};
+use falcon_syntax::cst::visit::{Visitor, walk_dart_type};
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidPrivateTypedefFunctions;
@@ -30,14 +30,13 @@ pub struct AvoidPrivateTypedefFunctions;
 impl Rule for AvoidPrivateTypedefFunctions {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut candidates: Vec<(&Identifier, usize)> = program
-            .declarations
-            .iter()
+        let mut candidates: Vec<(Identifier<'a>, usize)> = program
+            .declarations()
             .filter_map(|declaration| match declaration {
-                TopLevelDecl::TypeAlias(alias) if is_candidate(alias) => Some((&alias.name, 0)),
+                TopLevelDecl::TypeAlias(alias) if is_candidate(alias) => Some((alias.name(), 0)),
                 _ => None,
             })
             .collect();
@@ -45,8 +44,9 @@ impl Rule for AvoidPrivateTypedefFunctions {
             return RulePreparation::Diagnostics(Vec::new());
         }
 
-        let has_parts = !program.part_directives.is_empty() || program.part_of_directive.is_some();
-        let siblings: &[&Program] = match ctx.library {
+        let has_parts =
+            !program.part_directives().is_empty() || program.part_of_directive().is_some();
+        let siblings: &[Program<'a>] = match ctx.library {
             Some(library) if !library.has_unresolved_parts() => library.siblings(),
             _ if has_parts => return RulePreparation::Diagnostics(Vec::new()),
             _ => &[],
@@ -56,7 +56,7 @@ impl Rule for AvoidPrivateTypedefFunctions {
             candidates: &mut candidates,
         };
         for sibling in siblings {
-            counter.visit_program(sibling);
+            counter.visit_program(*sibling);
         }
         RulePreparation::Structural(Box::new(Collector { ctx, candidates }))
     }
@@ -64,25 +64,25 @@ impl Rule for AvoidPrivateTypedefFunctions {
 
 /// A private typedef the analyzer considers: every legacy function typedef,
 /// and non-generic `typedef _F = <function type>;` aliases.
-fn is_candidate(alias: &TypeAliasDecl) -> bool {
-    if !alias.name.name.starts_with('_') {
+fn is_candidate(alias: TypeAliasDecl<'_>) -> bool {
+    if !alias.name().name().starts_with('_') {
         return false;
     }
-    let DartType::Function(function) = &alias.aliased else {
+    let DartType::Function(function) = alias.aliased() else {
         return false;
     };
-    let legacy = function.span.start <= alias.name.span.start;
-    legacy || alias.type_params.is_empty()
+    let legacy = function.span().start <= alias.name().span().start;
+    legacy || alias.type_params().is_empty()
 }
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    candidates: Vec<(&'a Identifier, usize)>,
+    candidates: Vec<(Identifier<'a>, usize)>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         UseCounter::count_type(&mut self.candidates, node);
         StructuralTraversal::Continue
     }
@@ -92,7 +92,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             self.ctx.diagnostic(
                 "avoid-private-typedef-functions",
                 "The typedef is unnecessary because it is only used in one place.",
-                name.span,
+                name.span(),
             )
         }).collect()
     }
@@ -101,16 +101,16 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 /// Counts type annotations naming the candidate typedefs.
 struct UseCounter<'a, 'p> {
-    candidates: &'a mut [(&'p Identifier, usize)],
+    candidates: &'a mut [(Identifier<'p>, usize)],
 }
 
 impl UseCounter<'_, '_> {
-    fn count_type(candidates: &mut [(&Identifier, usize)], node: &DartType) {
+    fn count_type(candidates: &mut [(Identifier<'_>, usize)], node: DartType<'_>) {
         if let DartType::Named(named) = node
-            && let Some(segment) = named.segments.last()
+            && let Some(segment) = named.segments().next_back()
         {
             for (name, count) in candidates {
-                if segment.name == name.name {
+                if segment.name() == name.name() {
                     *count += 1;
                 }
             }
@@ -118,8 +118,8 @@ impl UseCounter<'_, '_> {
     }
 }
 
-impl Visitor for UseCounter<'_, '_> {
-    fn visit_dart_type(&mut self, node: &DartType) {
+impl<'a> Visitor<'a> for UseCounter<'_, '_> {
+    fn visit_dart_type(&mut self, node: DartType<'a>) {
         Self::count_type(self.candidates, node);
         walk_dart_type(self, node);
     }

@@ -1,6 +1,6 @@
 use falcon_analyze::resolve::TypeKind;
 use falcon_analyze::{DeclarationIdentity, ResolvedType, SignatureIndex, Truth, TypeIndex};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
@@ -22,7 +22,7 @@ pub(crate) struct TypeOperations<F> {
     pub(crate) diagnostics: Vec<Diagnostic>,
 }
 
-impl<F> SemanticRuleVisitor for TypeOperations<F>
+impl<'a, F> SemanticRuleVisitor<'a> for TypeOperations<F>
 where
     F: FnMut(TypeOperation, &SemanticState<'_>) -> Option<Diagnostic>,
 {
@@ -30,24 +30,22 @@ where
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let (kind, expr, dart_type, span) = match node {
-            Expr::Is {
-                expr,
-                dart_type,
-                negated,
-                span,
-            } => (
-                TypeOperationKind::Is { negated: *negated },
-                expr,
-                dart_type,
-                span,
+            Expr::Is(test) => (
+                TypeOperationKind::Is {
+                    negated: test.negated(),
+                },
+                test.expr(),
+                test.dart_type(),
+                test.span(),
             ),
-            Expr::As {
-                expr,
-                dart_type,
-                span,
-            } => (TypeOperationKind::As, expr, dart_type, span),
+            Expr::As(cast) => (
+                TypeOperationKind::As,
+                cast.expr(),
+                cast.dart_type(),
+                cast.span(),
+            ),
             _ => return,
         };
         let operation = TypeOperation {
@@ -56,7 +54,7 @@ where
             target: state
                 .model
                 .resolve_type_in(dart_type, &state.type_parameters),
-            span: *span,
+            span,
         };
         if let Some(diagnostic) = (self.report)(operation, state) {
             self.diagnostics.push(diagnostic);

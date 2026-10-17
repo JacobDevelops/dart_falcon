@@ -17,8 +17,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -28,7 +27,7 @@ pub struct UseColoredBox;
 impl Rule for UseColoredBox {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -43,12 +42,12 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::constructor_invocation(node, &state.model)
             && self.ctx.identities.is_some_and(|index| {
@@ -65,23 +64,23 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 }
 
-fn only_colors_child(args: &ArgList, state: &SemanticState<'_>) -> bool {
+fn only_colors_child<'a>(args: ArgList<'a>, state: &SemanticState<'a>) -> bool {
     let mut has_child = false;
     let mut has_color = false;
-    for argument in &args.named {
-        match argument.name.name.as_str() {
+    for argument in args.named() {
+        match argument.name().name() {
             "child" => has_child = true,
-            "color" if non_nullable_color(&argument.value, state) => has_color = true,
+            "color" if non_nullable_color(argument.value(), state) => has_color = true,
             "key" => {}
             _ => return false,
         }
     }
-    args.positional.is_empty() && has_child && has_color
+    args.positional().is_empty() && has_child && has_color
 }
 
 /// The analyzer's `staticType.nullabilitySuffix != question`: `dynamic` and
 /// `Null` (as for a `null` literal) carry no `?` suffix.
-fn non_nullable_color(color: &Expr, state: &SemanticState<'_>) -> bool {
+fn non_nullable_color<'a>(color: Expr<'a>, state: &SemanticState<'a>) -> bool {
     match state.infer(color) {
         ResolvedType::Unknown => {}
         ty => {
@@ -94,10 +93,10 @@ fn non_nullable_color(color: &Expr, state: &SemanticState<'_>) -> bool {
     // Every static member of Flutter's `Colors` is a non-nullable color.
     matches!(
         color.unparenthesized(),
-        Expr::Field { object, is_null_safe: false, .. }
-            if matches!(object.as_ref(), Expr::Ident(prefix)
-                if !state.environment.is_bound(&prefix.name)
-                    && state.model.resolve_name(&prefix.name)
+        Expr::Field(field) if !field.is_null_safe()
+            && matches!(field.object(), Expr::Ident(prefix)
+                if !state.environment.is_bound(prefix.name())
+                    && state.model.resolve_name(prefix.name())
                         .is_some_and(|identity| identity.is_package("flutter", "Colors")))
     )
 }

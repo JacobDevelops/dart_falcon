@@ -22,7 +22,7 @@ use falcon_analyze::{
     evaluate_construction,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::ConstructorConstContexts as ConstContexts;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -33,7 +33,7 @@ pub struct UseNamedConstants;
 impl Rule for UseNamedConstants {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -47,22 +47,23 @@ impl Rule for UseNamedConstants {
 }
 
 /// Field-initializer ranges of each class declared in this file.
-fn own_field_initializers(program: &Program) -> Vec<(String, Span)> {
+fn own_field_initializers(program: Program<'_>) -> Vec<(&str, Span)> {
     let mut ranges = Vec::new();
-    for declaration in &program.declarations {
+    for declaration in program.declarations() {
         let (name, members) = match declaration {
-            TopLevelDecl::Class(class) => (&class.name.name, &class.members),
-            TopLevelDecl::ExtensionType(extension) => (&extension.name.name, &extension.members),
+            TopLevelDecl::Class(class) => (class.name().name(), class.members()),
+            TopLevelDecl::ExtensionType(extension) => {
+                (extension.name().name(), extension.members())
+            }
             _ => continue,
         };
         for member in members {
             if let ClassMember::Field(field) = member {
                 ranges.extend(
                     field
-                        .declarators
-                        .iter()
-                        .filter_map(|declarator| declarator.initializer.as_ref())
-                        .map(|initializer| (name.clone(), *initializer.span())),
+                        .declarators()
+                        .filter_map(|declarator| declarator.initializer())
+                        .map(|initializer| (name, initializer.span())),
                 );
             }
         }
@@ -70,13 +71,12 @@ fn own_field_initializers(program: &Program) -> Vec<(String, Span)> {
     ranges
 }
 
-fn local_classes(program: &Program) -> Vec<String> {
+fn local_classes(program: Program<'_>) -> Vec<&str> {
     program
-        .declarations
-        .iter()
+        .declarations()
         .filter_map(|declaration| match declaration {
-            TopLevelDecl::Class(class) => Some(class.name.name.clone()),
-            TopLevelDecl::ExtensionType(extension) => Some(extension.name.name.clone()),
+            TopLevelDecl::Class(class) => Some(class.name().name()),
+            TopLevelDecl::ExtensionType(extension) => Some(extension.name().name()),
             _ => None,
         })
         .collect()
@@ -86,23 +86,23 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     contexts: ConstContexts,
-    own_field_initializers: Vec<(String, Span)>,
-    local_classes: Vec<String>,
+    own_field_initializers: Vec<(&'a str, Span)>,
+    local_classes: Vec<&'a str>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn constructed_class(
         &self,
-        node: &Expr,
-        state: &SemanticState<'_>,
+        node: Expr<'a>,
+        state: &SemanticState<'a>,
     ) -> Option<DeclarationIdentity> {
-        if !matches!(node.unparenthesized(), Expr::New { is_const: true, .. })
-            && !self.contexts.contains(node.span())
+        if !matches!(node.unparenthesized(), Expr::New(new) if new.is_const())
+            && !self.contexts.contains(&node.span())
         {
             return None;
         }
-        if let Expr::Call { callee, .. } = node.unparenthesized()
-            && let Expr::DotShorthand { name, .. } = callee.unparenthesized()
+        if let Expr::Call(call) = node.unparenthesized()
+            && let Expr::DotShorthand(dot) = call.callee().unparenthesized()
         {
             if state.expected_unknown() {
                 return None;
@@ -110,7 +110,7 @@ impl Collector<'_> {
             let Some(ResolvedType::Interface { identity, .. }) = state.expected() else {
                 return None;
             };
-            state.signatures.constructor(identity, &name.name)?;
+            state.signatures.constructor(identity, dot.name().name())?;
             return Some(identity.clone());
         }
         crate::lint::flutter::constructor_invocation(node, &state.model)
@@ -119,17 +119,17 @@ impl Collector<'_> {
 
     fn matching_constant(
         &self,
-        node: &Expr,
+        node: Expr<'a>,
         identity: &DeclarationIdentity,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) -> Option<String> {
         let facts = state.signatures.declaration(identity)?;
         if facts.static_consts.is_empty() {
             return None;
         }
         let empty = HashMap::new();
-        let value = if let Expr::Call { callee, args, .. } = node.unparenthesized()
-            && let Expr::DotShorthand { name, .. } = callee.unparenthesized()
+        let value = if let Expr::Call(call) = node.unparenthesized()
+            && let Expr::DotShorthand(dot) = call.callee().unparenthesized()
             && let Some(ResolvedType::Interface {
                 arguments: type_args,
                 ..
@@ -137,9 +137,9 @@ impl Collector<'_> {
         {
             evaluate_construction(
                 identity,
-                &name.name,
+                dot.name().name(),
                 type_args,
-                args,
+                call.args(),
                 &empty,
                 &state.model,
                 &state.signatures,
@@ -164,22 +164,22 @@ impl Collector<'_> {
             )
             .value
         }?;
-        let fields: HashMap<&str, &Expr> = facts
+        let fields: HashMap<&str, Expr<'_>> = facts
             .static_consts
             .iter()
-            .map(|field| (field.name.as_str(), &field.initializer))
+            .map(|field| (field.name.as_str(), field.initializer.expr()))
             .collect();
         let declared_here = self
             .local_classes
             .iter()
-            .any(|name| name == identity.name());
+            .any(|name| *name == identity.name());
         facts
             .static_consts
             .iter()
             .filter(|field| declared_here || !field.name.starts_with('_'))
             .find(|field| {
                 evaluate_constant(
-                    &field.initializer,
+                    field.initializer.expr(),
                     Some(identity),
                     &fields,
                     &state.model,
@@ -192,13 +192,13 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if matches!(node, Expr::Paren { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if matches!(node, Expr::Paren(_)) {
             return;
         }
         let Some(identity) = self.constructed_class(node, state) else {
@@ -206,7 +206,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         };
         let span = node.span();
         let in_own_field = self.own_field_initializers.iter().any(|(class, range)| {
-            class == identity.name() && range.start <= span.start && span.end <= range.end
+            *class == identity.name() && range.start <= span.start && span.end <= range.end
         });
         if in_own_field {
             return;
@@ -217,7 +217,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                 format!(
                     "Use the constant '{constant}' rather than a constructor returning the same object."
                 ),
-                *span,
+                span,
             ));
         }
     }

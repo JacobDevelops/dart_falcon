@@ -92,6 +92,16 @@ impl SyntaxTree {
         super::Program::cast(self.root(source)).expect("syntax tree root must be Program")
     }
 
+    pub fn node<'a>(&'a self, source: &'a str, id: NodeId) -> Option<SyntaxNode<'a>> {
+        debug_assert_eq!(source.len(), self.source_len);
+        self.nodes.get(id.0 as usize)?;
+        Some(SyntaxNode {
+            tree: self,
+            source,
+            id,
+        })
+    }
+
     pub fn is_lossless(&self, source: &str) -> bool {
         if source.len() != self.source_len {
             return false;
@@ -344,6 +354,25 @@ mod tests {
             offset,
             forward_parent: None,
         }
+    }
+
+    #[test]
+    fn node_lookup_preserves_arena_identity() {
+        let source = "";
+        let tree = SyntaxTree::build(
+            source,
+            &[Token::new(TokenKind::Eof, 0, 0)],
+            vec![
+                start(NodeKind::Program, 0),
+                start(NodeKind::Identifier, 0),
+                Event::Finish,
+                Event::Finish,
+            ],
+        );
+        let child = tree.root(source).children().next().unwrap();
+        assert_eq!(tree.node(source, child.id()), Some(child));
+        assert_eq!(tree.node(source, NodeId(0)), Some(tree.root(source)));
+        assert_eq!(tree.node(source, NodeId(2)), None);
     }
 
     #[test]

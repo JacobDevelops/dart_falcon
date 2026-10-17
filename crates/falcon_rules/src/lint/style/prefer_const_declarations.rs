@@ -23,11 +23,11 @@ use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, resolve_call_constructor};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
-use falcon_syntax::visitor::{
+use falcon_syntax::cst::visit::{
     Visitor, for_each_expr, walk_field_decl, walk_stmt, walk_top_level_decl,
 };
+use falcon_syntax::cst::*;
+use falcon_syntax::token::TokenKind;
 
 use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -38,7 +38,7 @@ pub struct PreferConstDeclarations;
 impl Rule for PreferConstDeclarations {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if ctx.identities.is_none() {
@@ -74,63 +74,60 @@ impl Declarations {
     fn collect(
         &mut self,
         keyword: VarKeyword,
-        declarators: &[VarDeclarator],
+        declarators: AstChildren<'_, VarDeclarator<'_>>,
         span: Span,
         is_local: bool,
     ) {
         if keyword != VarKeyword::Final {
             return;
         }
-        let Some(last) = declarators.last() else {
+        let Some(last) = declarators.clone().last() else {
             return;
         };
         let index = self.groups.len();
         self.groups.push(Group {
             span: Span {
                 start: span.start,
-                end: last.span.end,
+                end: last.span().end,
             },
-            first_name: declarators[0].name.span.start,
+            first_name: declarators.clone().next().unwrap().name().span().start,
             is_local,
             remaining: declarators.len(),
             valid: declarators
-                .iter()
-                .all(|declarator| declarator.initializer.is_some()),
+                .clone()
+                .all(|declarator| declarator.initializer().is_some()),
         });
-        for initializer in declarators
-            .iter()
-            .filter_map(|declarator| declarator.initializer.as_ref())
-        {
+        for initializer in declarators.filter_map(|declarator| declarator.initializer()) {
             self.initializers.insert(initializer.span().start, index);
         }
     }
 }
 
-impl Visitor for Declarations {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for Declarations {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if let TopLevelDecl::Variable(variable) = node {
             self.collect(
-                variable.keyword,
-                &variable.declarators,
-                variable.span,
+                variable.keyword(),
+                variable.declarators(),
+                variable.span(),
                 false,
             );
         }
         walk_top_level_decl(self, node);
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        if node.is_static {
-            self.collect(node.keyword, &node.declarators, node.span, false);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
+        if node.is_static() {
+            self.collect(node.keyword(), node.declarators(), node.span(), false);
         }
         walk_field_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         if let Stmt::LocalVar(variable) = node {
             self.collect(
-                variable.keyword,
-                &variable.declarators,
+                variable.keyword(),
+                variable.declarators(),
                 variable.full_range(),
                 true,
             );
@@ -146,7 +143,7 @@ struct Checker<'a> {
     deferred: Vec<&'a str>,
 }
 
-impl SemanticRuleVisitor for Checker<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Checker<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         let checker = *self;
         let ctx = checker.ctx;
@@ -164,14 +161,15 @@ impl SemanticRuleVisitor for Checker<'_> {
                     let mut start = group.span.start;
                     let mut preceding_late = None;
                     for token in ctx
-                        .syntax
-                        .tokens_in(Span::new(group.span.start, group.first_name))
+                        .tree()
+                        .tokens_in(ctx.source, Span::new(group.span.start, group.first_name))
                         .filter(|token| !token.is_trivia())
                     {
-                        if token.kind == TokenKind::Final {
+                        if token.kind() == TokenKind::Final {
                             start = preceding_late.unwrap_or(token.offset());
                         }
-                        preceding_late = (token.kind == TokenKind::Late).then_some(token.offset());
+                        preceding_late =
+                            (token.kind() == TokenKind::Late).then_some(token.offset());
                     }
                     start
                 };
@@ -186,7 +184,7 @@ impl SemanticRuleVisitor for Checker<'_> {
             })
             .collect()
     }
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let Some(index) = self.declarations.initializers.remove(&node.span().start) else {
             return;
         };
@@ -195,27 +193,20 @@ impl SemanticRuleVisitor for Checker<'_> {
         // already constant expression, not a fresh collection or instance.
         let mut already_constant = true;
         for_each_expr(node, &mut |expression| {
-            if self.contexts.contains(expression.span()) {
+            if self.contexts.contains(&expression.span()) {
                 return;
             }
             match expression {
-                Expr::List {
-                    is_const: false, ..
-                }
-                | Expr::Map {
-                    is_const: false, ..
-                }
-                | Expr::Set {
-                    is_const: false, ..
-                }
-                | Expr::New {
-                    is_const: false, ..
-                } => already_constant = false,
-                Expr::Call { callee, .. }
+                Expr::List(list) if !list.is_const() => already_constant = false,
+                Expr::Map(map) if !map.is_const() => already_constant = false,
+                Expr::Set(set) if !set.is_const() => already_constant = false,
+                Expr::New(new) if !new.is_const() => already_constant = false,
+                Expr::Call(call)
                     if !matches!(
-                        callee.unparenthesized(),
-                        Expr::DotShorthand { is_const: true, .. }
-                    ) && resolve_call_constructor(callee, &state.model, true).is_some() =>
+                        call.callee().unparenthesized(),
+                        Expr::DotShorthand(shorthand) if shorthand.is_const()
+                    ) && resolve_call_constructor(call.callee(), &state.model, true)
+                        .is_some() =>
                 {
                     already_constant = false;
                 }
@@ -256,28 +247,28 @@ void f() {
 }
 "#;
         let path = PathBuf::from("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            tree: parsed.tree,
+            source: source.into(),
+        });
+        let program = parsed.tree.program(source);
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let files = [(path.clone(), &program)];
+        let files = [(path.clone(), std::sync::Arc::clone(&parsed))];
         let types = TypeIndex::from_resolved_files(
-            files.iter().map(|(path, program)| {
+            files.iter().map(|(path, parsed)| {
                 (
                     path.as_path(),
                     falcon_analyze::LibrarySource {
-                        program,
+                        program: parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -287,11 +278,11 @@ void f() {
         );
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = PreferConstDeclarations.analyze(&program, &ctx);
+        let diagnostics = PreferConstDeclarations.analyze(program, &ctx);
         let spans: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

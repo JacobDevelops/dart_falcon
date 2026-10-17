@@ -9,7 +9,7 @@ use falcon_analyze::{
     Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ProperControllerDispose;
@@ -17,7 +17,7 @@ pub struct ProperControllerDispose;
 impl Rule for ProperControllerDispose {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -25,7 +25,7 @@ impl Rule for ProperControllerDispose {
         };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
             diagnostics: Vec::new(),
             fields: HashSet::new(),
@@ -63,25 +63,25 @@ struct Collector<'a> {
     in_dispose: bool,
     active_owner: bool,
     case_patterns: Vec<Span>,
-    if_conditions: Vec<*const IfCondition>,
+    if_conditions: Vec<NodeId>,
     statement_header: bool,
     headers: Vec<bool>,
 }
 
 impl Collector<'_> {
-    fn field_target<'b>(&self, expression: &'b Expr) -> Option<&'b str> {
+    fn field_target<'b>(&self, expression: Expr<'b>) -> Option<&'b str> {
         match expression.unparenthesized() {
-            Expr::Field { object, field, .. }
-                if matches!(object.unparenthesized(), Expr::This { .. })
-                    && self.fields.contains(&field.name) =>
+            Expr::Field(field)
+                if matches!(field.object().unparenthesized(), Expr::This(_))
+                    && self.fields.contains(field.field().name()) =>
             {
-                Some(&field.name)
+                Some(field.field().name())
             }
             Expr::Ident(identifier)
-                if self.fields.contains(&identifier.name)
-                    && !self.scopes.bound(&identifier.name) =>
+                if self.fields.contains(identifier.name())
+                    && !self.scopes.bound(identifier.name()) =>
             {
-                Some(&identifier.name)
+                Some(identifier.name())
             }
             _ => None,
         }
@@ -89,16 +89,16 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.active_owner = false;
         let (name, members) = match node {
-            TopLevelDecl::Class(class) => (&class.name.name, &class.members),
-            TopLevelDecl::MixinClass(class) => (&class.name.name, &class.members),
+            TopLevelDecl::Class(class) => (class.name().name(), class.members()),
+            TopLevelDecl::MixinClass(class) => (class.name().name(), class.members()),
             _ => return StructuralTraversal::SkipChildren,
         };
         if !is_flutter_state(name, self.signatures, &self.model) {
@@ -111,14 +111,14 @@ impl StructuralRuleVisitor for Collector<'_> {
         // Member names and initial ownership must be available before any body.
         for member in members {
             if let ClassMember::Field(field) = member {
-                for declarator in &field.declarators {
-                    if !field.is_static {
-                        self.fields.insert(declarator.name.name.clone());
+                for declarator in field.declarators() {
+                    if !field.is_static() {
+                        self.fields.insert(declarator.name().name().to_owned());
                     }
-                    if declarator.initializer.as_ref().is_some_and(|initializer| {
+                    if declarator.initializer().is_some_and(|initializer| {
                         constructs_controller(initializer, &self.model)
                     }) {
-                        self.owned.insert(declarator.name.name.clone());
+                        self.owned.insert(declarator.name().name().to_owned());
                     }
                 }
             }
@@ -126,10 +126,10 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, node: &TopLevelDecl) {
+    fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         let members = match node {
-            TopLevelDecl::Class(class) => &class.members,
-            TopLevelDecl::MixinClass(class) => &class.members,
+            TopLevelDecl::Class(class) => class.members(),
+            TopLevelDecl::MixinClass(class) => class.members(),
             _ => return,
         };
         if !self.active_owner {
@@ -137,24 +137,24 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
         for member in members {
             if let ClassMember::Field(field) = member {
-                for declarator in &field.declarators {
-                    if self.owned.contains(&declarator.name.name)
-                        && !self.disposed.contains(&declarator.name.name)
+                for declarator in field.declarators() {
+                    if self.owned.contains(declarator.name().name())
+                        && !self.disposed.contains(declarator.name().name())
                     {
-                        self.diagnostics.push(self.ctx.diagnostic("proper-controller-dispose", "This controller is never disposed; dispose it in the State's dispose() method.", declarator.name.span));
+                        self.diagnostics.push(self.ctx.diagnostic("proper-controller-dispose", "This controller is never disposed; dispose it in the State's dispose() method.", declarator.name().span()));
                     }
                 }
             }
         }
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         let body = match node {
-            ClassMember::Method(method) => method.body.as_ref(),
-            ClassMember::Constructor(constructor) => constructor.body.as_ref(),
-            ClassMember::Getter(getter) => getter.body.as_ref(),
-            ClassMember::Setter(setter) => setter.body.as_ref(),
-            ClassMember::Operator(operator) => operator.body.as_ref(),
+            ClassMember::Method(method) => method.body(),
+            ClassMember::Constructor(constructor) => constructor.body(),
+            ClassMember::Getter(getter) => getter.body(),
+            ClassMember::Setter(setter) => setter.body(),
+            ClassMember::Operator(operator) => operator.body(),
             _ => None,
         };
         if body.is_none() {
@@ -164,13 +164,13 @@ impl StructuralRuleVisitor for Collector<'_> {
         self.in_dispose = false;
         let params = match node {
             ClassMember::Method(method) => {
-                self.in_dispose = method.name.name == "dispose";
-                Some(&method.params)
+                self.in_dispose = method.name().name() == "dispose";
+                Some(method.params())
             }
-            ClassMember::Constructor(constructor) => Some(&constructor.params),
-            ClassMember::Operator(operator) => Some(&operator.params),
+            ClassMember::Constructor(constructor) => Some(constructor.params()),
+            ClassMember::Operator(operator) => Some(operator.params()),
             ClassMember::Setter(setter) => {
-                self.scopes.declare(&setter.param.name);
+                self.scopes.declare(setter.param().name());
                 None
             }
             ClassMember::Getter(_) => None,
@@ -182,13 +182,13 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_class_member(&mut self, node: &ClassMember) {
+    fn exit_class_member(&mut self, node: ClassMember<'a>) {
         let has_body = match node {
-            ClassMember::Method(method) => method.body.is_some(),
-            ClassMember::Constructor(constructor) => constructor.body.is_some(),
-            ClassMember::Getter(getter) => getter.body.is_some(),
-            ClassMember::Setter(setter) => setter.body.is_some(),
-            ClassMember::Operator(operator) => operator.body.is_some(),
+            ClassMember::Method(method) => method.body().is_some(),
+            ClassMember::Constructor(constructor) => constructor.body().is_some(),
+            ClassMember::Getter(getter) => getter.body().is_some(),
+            ClassMember::Setter(setter) => setter.body().is_some(),
+            ClassMember::Operator(operator) => operator.body().is_some(),
             _ => false,
         };
         if has_body {
@@ -208,7 +208,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             | StructuralNode::SetterDecl(_)
             | StructuralNode::OperatorDecl(_)
             | StructuralNode::LocalFuncDecl(_)
-            | StructuralNode::Expr(Expr::FuncExpr { .. }) => {
+            | StructuralNode::Expr(Expr::FuncExpr(_)) => {
                 matches!(child, StructuralNode::FunctionBody(_))
             }
             StructuralNode::CatchClause(_) => matches!(child, StructuralNode::Block(_)),
@@ -226,19 +226,19 @@ impl StructuralRuleVisitor for Collector<'_> {
                 !matches!(child, StructuralNode::Annotation(_))
             }
             StructuralNode::IfCondition(condition @ IfCondition::Case(..))
-                if self.if_conditions.last().copied() == Some(std::ptr::from_ref(condition)) =>
+                if self.if_conditions.last().copied() == Some(condition.syntax().id()) =>
             {
                 if let StructuralNode::Pattern(pattern) = child {
                     self.scopes.push();
-                    self.case_patterns.push(*pattern.span());
+                    self.case_patterns.push(pattern.span());
                 }
                 true
             }
             StructuralNode::IfStmt(statement) => {
                 if let StructuralNode::Stmt(branch) = child
-                    && matches!(&statement.condition, IfCondition::Case(..))
-                    && statement.else_branch.as_deref().is_some_and(|otherwise| {
-                        std::ptr::eq(otherwise, branch)
+                    && matches!(statement.condition(), IfCondition::Case(..))
+                    && statement.else_branch().is_some_and(|otherwise| {
+                        otherwise.syntax().id() == branch.syntax().id()
                     })
                 {
                     self.scopes.pop();
@@ -249,23 +249,23 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::If(statement) = node {
-            self.if_conditions.push(std::ptr::from_ref(&statement.condition));
+            self.if_conditions.push(statement.condition().syntax().id());
         }
         match node {
             Stmt::Block(_) | Stmt::For(_) => self.scopes.push(),
             Stmt::LocalFunc(function) => {
-                self.scopes.declare(&function.name.name);
+                self.scopes.declare(function.name().name());
                 self.scopes.push();
-                self.scopes.params(&function.params);
+                self.scopes.params(function.params());
             }
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, node: &Stmt) {
+    fn exit_stmt(&mut self, node: Stmt<'a>) {
         if matches!(node, Stmt::If(_)) {
             self.if_conditions.pop();
         }
@@ -274,122 +274,125 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
     }
 
-    fn exit_if_stmt(&mut self, node: &IfStmt) {
-        if matches!(&node.condition, IfCondition::Case(..)) && node.else_branch.is_none() {
+    fn exit_if_stmt(&mut self, node: IfStmt<'a>) {
+        if matches!(node.condition(), IfCondition::Case(..)) && node.else_branch().is_none() {
             self.scopes.pop();
         }
     }
 
-    fn visit_catch_clause(&mut self, node: &CatchClause) -> StructuralTraversal {
+    fn visit_catch_clause(&mut self, node: CatchClause<'a>) -> StructuralTraversal {
         self.scopes.push();
-        if let Some(name) = &node.exception_var {
-            self.scopes.declare(&name.name);
+        if let Some(name) = node.exception_var() {
+            self.scopes.declare(name.name());
         }
-        if let Some(name) = &node.stack_trace_var {
-            self.scopes.declare(&name.name);
+        if let Some(name) = node.stack_trace_var() {
+            self.scopes.declare(name.name());
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_catch_clause(&mut self, _node: &CatchClause) {
+    fn exit_catch_clause(&mut self, _node: CatchClause<'a>) {
         self.scopes.pop();
     }
 
-    fn exit_var_declarator(&mut self, node: &VarDeclarator) {
-        self.scopes.declare(&node.name.name);
+    fn exit_var_declarator(&mut self, node: VarDeclarator<'a>) {
+        self.scopes.declare(node.name().name());
     }
 
-    fn exit_pattern(&mut self, node: &Pattern) {
-        if self.case_patterns.last() == Some(node.span()) {
+    fn exit_pattern(&mut self, node: Pattern<'a>) {
+        if self.case_patterns.last() == Some(&node.span()) {
             self.case_patterns.pop();
             self.scopes.pattern(node);
         }
     }
 
-    fn exit_pattern_declaration(&mut self, node: &PatternDeclaration) {
-        self.scopes.pattern(&node.pattern);
+    fn exit_pattern_declaration(&mut self, node: PatternDeclaration<'a>) {
+        self.scopes.pattern(node.pattern());
     }
 
-    fn visit_for_header(&mut self, _node: &ForHeader) -> StructuralTraversal {
+    fn visit_for_header(&mut self, _node: ForHeader<'a>) -> StructuralTraversal {
         self.headers.push(std::mem::take(&mut self.statement_header));
         StructuralTraversal::Continue
     }
 
-    fn exit_for_header(&mut self, _node: &ForHeader) {
+    fn exit_for_header(&mut self, _node: ForHeader<'a>) {
         self.headers.pop();
     }
 
-    fn exit_for_init(&mut self, node: &ForInit) {
+    fn exit_for_init(&mut self, node: ForInit<'a>) {
         if self.headers.last() != Some(&true) {
             return;
         }
         match node {
-            ForInit::ForIn { declares_variable: true, name, .. } => {
-                self.scopes.declare(&name.name);
+            ForInit::ForIn(initializer) if initializer.declares_variable() => {
+                self.scopes.declare(initializer.name().name());
             }
-            ForInit::PatternForIn { pattern, .. } => self.scopes.pattern(pattern),
+            ForInit::PatternForIn(initializer) => self.scopes.pattern(initializer.pattern()),
             _ => {}
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::Assign { target, value, .. }
-                if constructs_controller(value, &self.model) =>
+            Expr::Assign(assignment)
+                if constructs_controller(assignment.value(), &self.model) =>
             {
-                if let Some(field) = self.field_target(target) {
+                if let Some(field) = self.field_target(assignment.target()) {
                     self.owned.insert(field.to_string());
                 }
             }
-            Expr::Call { callee, .. } if self.in_dispose => {
-                if let Expr::Field { object, field, .. } = callee.unparenthesized()
-                    && field.name == "dispose"
-                    && let Some(controller) = self.field_target(object)
+            Expr::Call(call) if self.in_dispose => {
+                if let Expr::Field(field) = call.callee().unparenthesized()
+                    && field.field().name() == "dispose"
+                    && let Some(controller) = self.field_target(field.object())
                 {
                     self.disposed.insert(controller.to_string());
                 }
             }
-            Expr::Cascade { object, sections, .. }
-                if self.in_dispose && sections.iter().any(|section| {
-                    matches!(section.ops.first(), Some(CascadeOp::Call(name, _, _)) if name.name == "dispose")
+            Expr::Cascade(cascade)
+                if self.in_dispose && cascade.sections().any(|section| {
+                    matches!(section.ops().first(), Some(CascadeOp::Call(call)) if call.name().name() == "dispose")
                 }) =>
             {
-                if let Some(controller) = self.field_target(object) {
+                if let Some(controller) = self.field_target(cascade.object()) {
                     self.disposed.insert(controller.to_string());
                 }
             }
-            Expr::FuncExpr { params, .. } => {
+            Expr::FuncExpr(function) => {
                 self.scopes.push();
-                self.scopes.params(params);
+                self.scopes.params(function.params());
             }
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::FuncExpr { .. }) {
+    fn exit_expr(&mut self, node: Expr<'a>) {
+        if matches!(node, Expr::FuncExpr(_)) {
             self.scopes.pop();
         }
     }
 }
 }
 
-fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<DeclarationIdentity> {
+fn constructor_identity(
+    callee: Expr<'_>,
+    model: &SemanticModel<'_>,
+) -> Option<DeclarationIdentity> {
     match callee.unparenthesized() {
-        Expr::Ident(identifier) => model.resolve_name(&identifier.name),
-        Expr::Field { object, field, .. } => match object.unparenthesized() {
+        Expr::Ident(identifier) => model.resolve_name(identifier.name()),
+        Expr::Field(field) => match field.object().unparenthesized() {
             Expr::Ident(identifier) => model
-                .resolve_name(QualifiedName::prefixed(&identifier.name, &field.name))
-                .or_else(|| model.resolve_name(&identifier.name)),
-            Expr::Field {
-                object: prefix,
-                field: type_name,
-                ..
-            } => match prefix.unparenthesized() {
-                Expr::Ident(prefix) => {
-                    model.resolve_name(QualifiedName::prefixed(&prefix.name, &type_name.name))
-                }
+                .resolve_name(QualifiedName::prefixed(
+                    identifier.name(),
+                    field.field().name(),
+                ))
+                .or_else(|| model.resolve_name(identifier.name())),
+            Expr::Field(type_name) => match type_name.object().unparenthesized() {
+                Expr::Ident(prefix) => model.resolve_name(QualifiedName::prefixed(
+                    prefix.name(),
+                    type_name.field().name(),
+                )),
                 _ => None,
             },
             _ => None,
@@ -398,13 +401,13 @@ fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<Decl
     }
 }
 
-fn constructs_controller(expression: &Expr, model: &SemanticModel<'_>) -> bool {
+fn constructs_controller(expression: Expr<'_>, model: &SemanticModel<'_>) -> bool {
     let identity = match expression.unparenthesized() {
-        Expr::New { dart_type, .. } => match model.resolve_type(dart_type) {
+        Expr::New(construction) => match model.resolve_type(construction.dart_type()) {
             ResolvedType::Interface { identity, .. } => Some(identity),
             _ => None,
         },
-        Expr::Call { callee, .. } => constructor_identity(callee, model),
+        Expr::Call(call) => constructor_identity(call.callee(), model),
         _ => None,
     };
     matches!(

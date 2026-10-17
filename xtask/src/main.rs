@@ -151,13 +151,13 @@ fn rule_stub(struct_name: &str) -> String {
     format!(
         r#"use falcon_analyze::{{AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal}};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::{{ast::Expr, Program}};
+use falcon_syntax::cst::{{Expr, Program}};
 
 #[derive(Default)]
 pub struct {struct_name};
 
 impl Rule for {struct_name} {{
-    fn prepare<'a>(&self, program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {{
+    fn prepare<'a>(&self, program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {{
         let _ = (program, ctx);
         RulePreparation::Structural(Box::new(Collector {{ diagnostics: Vec::new() }}))
     }}
@@ -168,8 +168,8 @@ struct Collector {{
 }}
 
 falcon_analyze::structural_visitor! {{
-impl StructuralRuleVisitor for Collector {{
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {{
+impl<'a> StructuralRuleVisitor<'a> for Collector {{
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {{
         let _ = node;
         StructuralTraversal::Continue
     }}

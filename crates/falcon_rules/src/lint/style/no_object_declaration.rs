@@ -13,7 +13,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoObjectDeclaration;
@@ -21,7 +21,7 @@ pub struct NoObjectDeclaration;
 impl Rule for NoObjectDeclaration {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -34,22 +34,22 @@ impl Rule for NoObjectDeclaration {
 const MESSAGE: &str = "Avoid using the Object type. Use a specific type or dynamic instead.";
 
 /// Returns true when the type is exactly `Object` (or `Object?`).
-fn is_object_type(ty: &DartType) -> bool {
+fn is_object_type(ty: DartType<'_>) -> bool {
     match ty {
         DartType::Named(named) => named
-            .segments
+            .segments()
             .last()
-            .map(|s| s.name == "Object")
+            .map(|s| s.name() == "Object")
             .unwrap_or(false),
         _ => false,
     }
 }
 
-fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn check_type(ty: Option<DartType<'_>>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let Some(ty) = ty
         && is_object_type(ty)
     {
-        diags.push(ctx.diagnostic("no-object-declaration", MESSAGE, *(ty.span())));
+        diags.push(ctx.diagnostic("no-object-declaration", MESSAGE, ty.span()));
     }
 }
 
@@ -59,10 +59,10 @@ struct Collector<'a, 'ctx> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a, 'ctx> StructuralRuleVisitor<'ctx> for Collector<'a, 'ctx> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'ctx>) -> StructuralTraversal {
         if matches!(
             decl,
             TopLevelDecl::Class(_)
@@ -78,12 +78,12 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'ctx>) -> StructuralTraversal {
         let ty = match member {
-            ClassMember::Field(f) => f.field_type.as_ref(),
-            ClassMember::Method(m) => m.return_type.as_ref(),
-            ClassMember::Getter(g) => g.return_type.as_ref(),
-            ClassMember::Operator(o) => o.return_type.as_ref(),
+            ClassMember::Field(f) => f.field_type(),
+            ClassMember::Method(m) => m.return_type(),
+            ClassMember::Getter(g) => g.return_type(),
+            ClassMember::Operator(o) => o.return_type(),
             _ => None,
         };
         check_type(ty, &mut self.diags, self.ctx);

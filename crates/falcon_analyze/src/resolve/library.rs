@@ -14,35 +14,38 @@
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
-use falcon_syntax::ast::Program;
-use falcon_syntax::token::SyntaxStore;
+use falcon_syntax::cst::{Identifier, Program};
 
-/// A file's library context: the sibling programs that complete its library,
-/// the source text each was parsed from, and whether that library has an
-/// unresolved part.
+use crate::ParsedFile;
+
+/// A file's library context: sibling programs, paths, and retained parsed files,
+/// and whether that library has an unresolved part.
 pub struct LibraryUnit<'a> {
-    siblings: Vec<&'a Program>,
-    sibling_sources: Vec<&'a str>,
-    sibling_syntax: Vec<&'a SyntaxStore>,
+    siblings: Vec<Program<'a>>,
+    sibling_parsed: Vec<&'a Arc<ParsedFile>>,
+    sibling_paths: Vec<&'a Path>,
     has_unresolved_parts: bool,
 }
 
 impl<'a> LibraryUnit<'a> {
     /// The other programs in the same library (the owner's parts, or the owner
     /// for a part file). Empty for a standalone single-file library.
-    pub fn siblings(&self) -> &[&'a Program] {
+    pub fn siblings(&self) -> &[Program<'a>] {
         &self.siblings
     }
 
-    /// The in-memory source text of each [`Self::siblings`] program, index for
-    /// index — the exact text its spans refer to.
-    pub fn sibling_sources(&self) -> &[&'a str] {
-        &self.sibling_sources
+    /// The retained parsed files of each [`Self::siblings`] program, index for
+    /// index — the exact source and tree its views refer to.
+    pub fn sibling_parsed(&self) -> &[&'a Arc<ParsedFile>] {
+        &self.sibling_parsed
     }
 
-    pub fn sibling_syntax(&self) -> &[&'a SyntaxStore] {
-        &self.sibling_syntax
+    /// Canonical or lexically normalized paths of [`Self::siblings`], index for
+    /// index, for resolving each sibling in its own file context.
+    pub fn sibling_paths(&self) -> &[&'a Path] {
+        &self.sibling_paths
     }
 
     /// Whether the library has a `part`/`part of` link that could not be resolved
@@ -56,6 +59,7 @@ impl<'a> LibraryUnit<'a> {
 ///
 /// Indices are positions in the input file slice.
 pub struct LibraryGrouping {
+    paths: Vec<PathBuf>,
     /// Per file: sibling file indices in the same library (excluding self).
     siblings: Vec<Vec<usize>>,
     /// Per file: whether its library has an unresolved part.
@@ -82,23 +86,27 @@ impl LibraryGrouping {
     }
 }
 
-/// Group `files` (each a `(path, program)`) into libraries. `path` is only used
-/// for `part`-URI resolution; it need not exist on disk (grouping falls back to
-/// lexical path normalization when it does not).
-pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
+/// Group `files` (each a `(path, program)`) into libraries. Paths identify each
+/// file and resolve `part` URIs; they need not exist on disk (grouping falls
+/// back to lexical path normalization when they do not).
+pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
     let n = files.len();
     let mut uf = UnionFind::new(n);
     let mut unresolved = vec![false; n];
+    let canonical_paths: Vec<_> = files
+        .iter()
+        .map(|(path, _)| canonical_or_lexical(path))
+        .collect();
 
     // Index files by canonical path and by declared `library <name>;`. A name
     // declared by more than one file is ambiguous (`None`) — links using it stay
     // unresolved rather than silently binding to the first declarer.
-    let mut by_path: HashMap<PathBuf, usize> = HashMap::with_capacity(n);
+    let mut by_path: HashMap<&Path, usize> = HashMap::with_capacity(n);
     let mut by_lib_name: HashMap<String, Option<usize>> = HashMap::new();
-    for (i, (path, program)) in files.iter().enumerate() {
-        by_path.insert(canonical_or_lexical(path), i);
-        if let Some(lib) = &program.library_directive {
-            let name = dotted(&lib.name);
+    for (i, (_, program)) in files.iter().enumerate() {
+        by_path.insert(canonical_paths[i].as_path(), i);
+        if let Some(lib) = program.library_directive() {
+            let name = dotted(lib.name());
             if !name.is_empty() {
                 by_lib_name
                     .entry(name)
@@ -112,19 +120,21 @@ pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
         let dir = path.parent().unwrap_or_else(|| Path::new(""));
 
         // Owner → part links (`part 'uri';`).
-        for part in &program.part_directives {
-            match resolve_relative(dir, &part.uri.value).and_then(|p| by_path.get(&p).copied()) {
+        for part in program.part_directives() {
+            match resolve_relative(dir, &part.uri().value())
+                .and_then(|p| by_path.get(p.as_path()).copied())
+            {
                 Some(j) => uf.union(i, j),
                 None => unresolved[i] = true,
             }
         }
 
         // Part → owner link (`part of 'uri';` or `part of a.b;`).
-        if let Some(po) = &program.part_of_directive {
-            let owner = if let Some(uri) = &po.uri {
-                resolve_relative(dir, &uri.value).and_then(|p| by_path.get(&p).copied())
-            } else if !po.name.is_empty() {
-                by_lib_name.get(&dotted(&po.name)).copied().flatten()
+        if let Some(po) = program.part_of_directive() {
+            let owner = if let Some(uri) = po.uri() {
+                resolve_relative(dir, &uri.value()).and_then(|p| by_path.get(p.as_path()).copied())
+            } else if po.name().next().is_some() {
+                by_lib_name.get(&dotted(po.name())).copied().flatten()
             } else {
                 None
             };
@@ -134,6 +144,7 @@ pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
             }
         }
     }
+    drop(by_path);
 
     // Collect group membership and propagate the unresolved flag to every member.
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -151,36 +162,34 @@ pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
     }
 
     LibraryGrouping {
+        paths: canonical_paths,
         siblings,
         unresolved: final_unresolved,
     }
 }
 
-/// Build the [`LibraryUnit`] for file `i` from a grouping, the parsed programs,
-/// and the source text each program was parsed from (same indices).
+/// Build the [`LibraryUnit`] for file `i` from a grouping and the retained
+/// parsed files used by that grouping (same indices).
 pub fn library_unit<'a>(
-    grouping: &LibraryGrouping,
-    programs: &[&'a Program],
-    sources: &[&'a str],
-    syntax: &[&'a SyntaxStore],
+    grouping: &'a LibraryGrouping,
+    parsed: &[&'a Arc<ParsedFile>],
     i: usize,
 ) -> LibraryUnit<'a> {
     let siblings = grouping.siblings(i);
     LibraryUnit {
-        siblings: siblings.iter().map(|&j| programs[j]).collect(),
-        sibling_sources: siblings.iter().map(|&j| sources[j]).collect(),
-        sibling_syntax: siblings.iter().map(|&j| syntax[j]).collect(),
+        siblings: siblings.iter().map(|&j| parsed[j].program()).collect(),
+        sibling_parsed: siblings.iter().map(|&j| parsed[j]).collect(),
+        sibling_paths: siblings
+            .iter()
+            .map(|&j| grouping.paths[j].as_path())
+            .collect(),
         has_unresolved_parts: grouping.is_unresolved(i),
     }
 }
 
 /// Join dotted identifier segments into `a.b.c`.
-fn dotted(segments: &[falcon_syntax::ast::Identifier]) -> String {
-    segments
-        .iter()
-        .map(|id| id.name.as_str())
-        .collect::<Vec<_>>()
-        .join(".")
+fn dotted<'a>(segments: impl Iterator<Item = Identifier<'a>>) -> String {
+    segments.map(|id| id.name()).collect::<Vec<_>>().join(".")
 }
 
 /// Resolve a *relative* directive URI against a directory. `dart:` and
@@ -261,12 +270,13 @@ mod tests {
     use super::*;
     use falcon_dart_parser::parse;
 
-    fn prog(src: &str) -> Program {
-        let falcon_dart_parser::ParseResult {
-            program: p, errors, ..
-        } = parse(src);
+    fn prog(src: &str) -> Arc<ParsedFile> {
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
-        p
+        Arc::new(ParsedFile {
+            source: src.into(),
+            tree,
+        })
     }
 
     #[test]
@@ -274,8 +284,8 @@ mod tests {
         let a = prog("class A {}");
         let b = prog("class B {}");
         let files = vec![
-            (PathBuf::from("/proj/a.dart"), &a),
-            (PathBuf::from("/proj/b.dart"), &b),
+            (PathBuf::from("/proj/a.dart"), a.program()),
+            (PathBuf::from("/proj/b.dart"), b.program()),
         ];
         let g = group_libraries(&files);
         assert!(g.siblings(0).is_empty());
@@ -289,8 +299,8 @@ mod tests {
         let owner = prog("part 'part.dart'; class Owner {}");
         let part = prog("part of 'owner.dart'; class Extra {}");
         let files = vec![
-            (PathBuf::from("/proj/owner.dart"), &owner),
-            (PathBuf::from("/proj/part.dart"), &part),
+            (PathBuf::from("/proj/owner.dart"), owner.program()),
+            (PathBuf::from("/proj/part.dart"), part.program()),
         ];
         let g = group_libraries(&files);
         assert_eq!(g.siblings(0), &[1]);
@@ -304,8 +314,8 @@ mod tests {
         let owner = prog("library my.lib; part 'p.dart';");
         let part = prog("part of my.lib; class Extra {}");
         let files = vec![
-            (PathBuf::from("/proj/owner.dart"), &owner),
-            (PathBuf::from("/proj/p.dart"), &part),
+            (PathBuf::from("/proj/owner.dart"), owner.program()),
+            (PathBuf::from("/proj/p.dart"), part.program()),
         ];
         let g = group_libraries(&files);
         assert_eq!(g.siblings(0), &[1]);
@@ -321,9 +331,9 @@ mod tests {
         let owner_b = prog("library my.lib; class B {}");
         let part = prog("part of my.lib; class Extra {}");
         let files = vec![
-            (PathBuf::from("/proj/a.dart"), &owner_a),
-            (PathBuf::from("/proj/b.dart"), &owner_b),
-            (PathBuf::from("/proj/p.dart"), &part),
+            (PathBuf::from("/proj/a.dart"), owner_a.program()),
+            (PathBuf::from("/proj/b.dart"), owner_b.program()),
+            (PathBuf::from("/proj/p.dart"), part.program()),
         ];
         let g = group_libraries(&files);
         assert!(g.siblings(2).is_empty());
@@ -352,7 +362,7 @@ mod tests {
     #[test]
     fn unresolved_part_uri_flags_the_library() {
         let owner = prog("part 'missing.dart'; class Owner {}");
-        let files = vec![(PathBuf::from("/proj/owner.dart"), &owner)];
+        let files = vec![(PathBuf::from("/proj/owner.dart"), owner.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
         assert!(g.siblings(0).is_empty());
@@ -361,7 +371,7 @@ mod tests {
     #[test]
     fn unresolved_part_of_name_flags_the_part() {
         let part = prog("part of nonexistent.lib; class Extra {}");
-        let files = vec![(PathBuf::from("/proj/p.dart"), &part)];
+        let files = vec![(PathBuf::from("/proj/p.dart"), part.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
     }
@@ -374,8 +384,8 @@ mod tests {
         let owner = prog("part 'p.dart'; part 'missing.dart'; class Owner {}");
         let part = prog("part of 'owner.dart'; class Extra {}");
         let files = vec![
-            (PathBuf::from("/proj/owner.dart"), &owner),
-            (PathBuf::from("/proj/p.dart"), &part),
+            (PathBuf::from("/proj/owner.dart"), owner.program()),
+            (PathBuf::from("/proj/p.dart"), part.program()),
         ];
         let g = group_libraries(&files);
         assert_eq!(g.siblings(0), &[1]);
@@ -386,7 +396,7 @@ mod tests {
     #[test]
     fn package_uri_part_is_unresolved() {
         let owner = prog("part 'package:foo/bar.dart'; class Owner {}");
-        let files = vec![(PathBuf::from("/proj/owner.dart"), &owner)];
+        let files = vec![(PathBuf::from("/proj/owner.dart"), owner.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
     }
@@ -397,19 +407,21 @@ mod tests {
             "part 'part.dart'; class Owner {}",
             "part of 'owner.dart'; class Extra {}",
         ];
-        let owner = falcon_dart_parser::parse(sources[0]);
-        let part = falcon_dart_parser::parse(sources[1]);
+        let owner = prog(sources[0]);
+        let part = prog(sources[1]);
         let files = vec![
-            (PathBuf::from("/proj/owner.dart"), &owner.program),
-            (PathBuf::from("/proj/part.dart"), &part.program),
+            (PathBuf::from("/proj/owner.dart"), owner.program()),
+            (PathBuf::from("/proj/part.dart"), part.program()),
         ];
         let g = group_libraries(&files);
-        let programs = vec![&owner.program, &part.program];
-        let syntax = [&owner.syntax, &part.syntax];
-        let unit = library_unit(&g, &programs, &sources, &syntax, 0);
+        let parsed = [&owner, &part];
+        let unit = library_unit(&g, &parsed, 0);
         assert_eq!(unit.siblings().len(), 1);
-        assert_eq!(unit.sibling_sources(), [sources[1]]);
-        assert!(std::ptr::eq(unit.sibling_syntax()[0], &part.syntax));
+        assert_eq!(unit.sibling_parsed()[0].source.as_ref(), sources[1]);
+        assert!(Arc::ptr_eq(unit.sibling_parsed()[0], &part));
+        assert_eq!(unit.sibling_paths(), [Path::new("/proj/part.dart")]);
+        let part_unit = library_unit(&g, &parsed, 1);
+        assert_eq!(part_unit.sibling_paths(), [Path::new("/proj/owner.dart")]);
         assert!(!unit.has_unresolved_parts());
     }
 }

@@ -13,7 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidGlobalState;
@@ -21,7 +21,7 @@ pub struct AvoidGlobalState;
 impl Rule for AvoidGlobalState {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -37,29 +37,29 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(var) = decl
-            && is_mutable(var.keyword, var.is_late)
+            && is_mutable(var.keyword(), var.is_late())
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-global-state",
                 "Avoid mutable global state — use const or final declarations instead",
-                var.span,
+                var.span(),
             ));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Field(field) = member
-            && field.is_static
-            && is_mutable(field.keyword, field.is_late)
+            && field.is_static()
+            && is_mutable(field.keyword(), field.is_late())
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-global-state",
                 "Avoid mutable global state — use const or final declarations instead",
-                field.span,
+                field.span(),
             ));
         }
         StructuralTraversal::SkipChildren

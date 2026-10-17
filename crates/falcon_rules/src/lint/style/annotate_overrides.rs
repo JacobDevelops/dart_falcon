@@ -18,7 +18,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::annotation;
 use crate::lint::declarations::operator_token_span;
@@ -30,13 +30,13 @@ pub struct AnnotateOverrides;
 impl Rule for AnnotateOverrides {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -54,8 +54,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let Some(declaration) = inheriting_declaration(decl) else {
             return StructuralTraversal::SkipChildren;
         };
@@ -73,61 +73,61 @@ impl StructuralRuleVisitor for Collector<'_> {
                 ));
             }
         };
-        let Some(owner) = model.resolve_name(&*declaration.name.name) else {
+        let Some(owner) = model.resolve_name(declaration.name.name()) else {
             return StructuralTraversal::SkipChildren;
         };
-        for member in declaration.members {
+        for member in declaration.members.clone() {
             match member {
                 ClassMember::Field(field)
-                    if !field.is_static && !annotation(&field.annotations, "override") =>
+                    if !field.is_static() && !annotation(field.annotations(), "override") =>
                 {
-                    for declarator in &field.declarators {
+                    for declarator in field.declarators() {
                         report(
                             &owner,
-                            &declarator.name.name,
+                            declarator.name().name(),
                             MemberKind::field(field, declarator),
-                            declarator.name.span,
+                            declarator.name().span(),
                         );
                     }
                 }
                 ClassMember::Method(method)
-                    if !method.is_static && !annotation(&method.annotations, "override") =>
+                    if !method.is_static() && !annotation(method.annotations(), "override") =>
                 {
                     report(
                         &owner,
-                        &method.name.name,
+                        method.name().name(),
                         MemberKind::Method,
-                        method.name.span,
+                        method.name().span(),
                     );
                 }
                 ClassMember::Getter(getter)
-                    if !getter.is_static && !annotation(&getter.annotations, "override") =>
+                    if !getter.is_static() && !annotation(getter.annotations(), "override") =>
                 {
                     report(
                         &owner,
-                        &getter.name.name,
+                        getter.name().name(),
                         MemberKind::Getter,
-                        getter.name.span,
+                        getter.name().span(),
                     );
                 }
                 ClassMember::Setter(setter)
-                    if !setter.is_static && !annotation(&setter.annotations, "override") =>
+                    if !setter.is_static() && !annotation(setter.annotations(), "override") =>
                 {
                     report(
                         &owner,
-                        &setter.name.name,
+                        setter.name().name(),
                         MemberKind::Setter,
-                        setter.name.span,
+                        setter.name().span(),
                     );
                 }
                 ClassMember::Operator(operator)
-                    if !annotation(&operator.annotations, "override") =>
+                    if !annotation(operator.annotations(), "override") =>
                 {
                     report(
                         &owner,
                         operator.lookup_name(),
                         MemberKind::Operator,
-                        operator_token_span(operator, ctx.syntax),
+                        operator_token_span(operator),
                     );
                 }
                 ClassMember::Field(_)
@@ -147,16 +147,16 @@ impl StructuralRuleVisitor for Collector<'_> {
             representation: false,
         }
         .declaring_params()
-        .filter(|param| !annotation(&param.annotations, "override")))
+        .filter(|param| !annotation(param.annotations(), "override")))
         {
             report(
                 &owner,
-                &param.name.name,
+                param.name().name(),
                 MemberKind::Field {
-                    writable: param.is_var,
-                    covariant: param.is_covariant,
+                    writable: param.is_var(),
+                    covariant: param.is_covariant(),
                 },
-                param.name.span,
+                param.name().span(),
             );
         }
         StructuralTraversal::SkipChildren

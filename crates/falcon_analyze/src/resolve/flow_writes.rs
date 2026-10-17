@@ -3,11 +3,7 @@
 //! control may re-enter the region (a loop's back edge, a `catch`).
 use std::collections::{HashMap, HashSet};
 
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_collection_element, walk_expr, walk_function_decl,
-    walk_map_element, walk_pattern, walk_stmt,
-};
+use falcon_syntax::cst::*;
 
 #[derive(Debug, Default)]
 pub struct FlowWrites {
@@ -36,7 +32,7 @@ pub struct FlowWrites {
 }
 
 impl FlowWrites {
-    pub fn program(program: &Program) -> Self {
+    pub fn program(program: Program<'_>) -> Self {
         let mut visitor = Self {
             scopes: vec![HashMap::new()],
             ..Self::default()
@@ -73,15 +69,15 @@ impl FlowWrites {
             .collect()
     }
 
-    fn bind(&mut self, identifier: &Identifier) {
+    fn bind(&mut self, identifier: Identifier<'_>) {
         self.scopes
             .last_mut()
             .expect("lexical scope")
-            .insert(identifier.name.clone(), identifier.span.start);
+            .insert(identifier.name().to_owned(), identifier.span().start);
     }
 
-    fn record(&mut self, identifier: &Identifier) {
-        let name = &identifier.name;
+    fn record(&mut self, identifier: Identifier<'_>) {
+        let name = identifier.name();
         let binding = self
             .scopes
             .iter()
@@ -116,7 +112,7 @@ impl FlowWrites {
                 {
                     let names = self.captured_region_writes.entry(region).or_default();
                     if !names.contains(name) {
-                        names.insert(name.clone());
+                        names.insert(name.to_owned());
                     }
                 }
             }
@@ -128,12 +124,12 @@ impl FlowWrites {
                 self.region_writes
                     .entry(region)
                     .or_default()
-                    .insert(name.clone());
+                    .insert(name.to_owned());
             }
         }
     }
 
-    fn pattern_variable(&mut self, identifier: &Identifier) {
+    fn pattern_variable(&mut self, identifier: Identifier<'_>) {
         if self.assigning_pattern {
             self.record(identifier);
         } else {
@@ -162,17 +158,17 @@ impl FlowWrites {
         visit(self);
         self.regions.pop();
     }
-    fn conditional(&mut self, condition: &IfCondition, then: impl FnOnce(&mut Self)) {
+    fn conditional(&mut self, condition: IfCondition<'_>, then: impl FnOnce(&mut Self)) {
         match condition {
             IfCondition::Expr(value) => {
                 self.visit_expr(value);
                 self.scoped(then);
             }
-            IfCondition::Case(value, pattern, guard) => {
-                self.visit_expr(value);
+            IfCondition::Case(case) => {
+                self.visit_expr(case.expr());
                 self.scoped(|visitor| {
-                    visitor.visit_pattern(pattern);
-                    if let Some(guard) = guard {
+                    visitor.visit_pattern(case.pattern());
+                    if let Some(guard) = case.guard() {
                         visitor.visit_expr(guard);
                     }
                     then(visitor);
@@ -181,46 +177,36 @@ impl FlowWrites {
         }
     }
 
-    fn loop_header(&mut self, header: &ForHeader) {
-        if let Some(ForInit::ForIn {
-            declares_variable: false,
-            name,
-            ..
-        }) = &header.init
+    fn loop_header(&mut self, header: ForHeader<'_>) {
+        if let Some(ForInit::ForIn(init)) = header.init()
+            && !init.declares_variable()
         {
-            self.record(name);
+            self.record(init.name());
         }
-        if let Some(condition) = &header.condition {
+        if let Some(condition) = header.condition() {
             self.visit_expr(condition);
         }
-        for update in &header.updates {
+        for update in header.updates() {
             self.visit_expr(update);
         }
     }
 
-    fn loop_init(&mut self, header: &ForHeader) {
-        if let Some(init) = &header.init {
+    fn loop_init(&mut self, header: ForHeader<'_>) {
+        if let Some(init) = header.init() {
             match init {
                 ForInit::VarDecl(declaration) => self.visit_local_var(declaration),
-                ForInit::ForIn {
-                    declares_variable,
-                    name,
-                    iterable,
-                    ..
-                } => {
-                    self.visit_expr(iterable);
-                    if *declares_variable {
-                        self.bind(name);
+                ForInit::ForIn(init) => {
+                    self.visit_expr(init.iterable());
+                    if init.declares_variable() {
+                        self.bind(init.name());
                     }
                 }
-                ForInit::PatternForIn {
-                    pattern, iterable, ..
-                } => {
-                    self.visit_expr(iterable);
-                    self.visit_pattern(pattern);
+                ForInit::PatternForIn(init) => {
+                    self.visit_expr(init.iterable());
+                    self.visit_pattern(init.pattern());
                 }
                 ForInit::Exprs(expressions) => {
-                    for expression in expressions {
+                    for expression in expressions.exprs() {
                         self.visit_expr(expression);
                     }
                 }
@@ -251,138 +237,125 @@ fn callable_names(
         .collect()
 }
 
-impl Visitor for FlowWrites {
-    fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
-        for declarator in &declaration.declarators {
-            if let Some(initializer) = &declarator.initializer {
+impl<'a> Visitor<'a> for FlowWrites {
+    fn visit_local_var(&mut self, declaration: LocalVarDecl<'a>) {
+        for declarator in declaration.declarators() {
+            if let Some(initializer) = declarator.initializer() {
                 self.visit_expr(initializer);
             }
-            self.bind(&declarator.name);
+            self.bind(declarator.name());
         }
     }
 
-    fn visit_formal_param(&mut self, parameter: &FormalParam) {
-        self.bind(&parameter.name);
-        if let Some(default) = &parameter.default_value {
+    fn visit_formal_param(&mut self, parameter: FormalParam<'a>) {
+        self.bind(parameter.name());
+        if let Some(default) = parameter.default_value() {
             self.visit_expr(default);
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) {
         match member {
             ClassMember::Field(_) | ClassMember::Error(_) => walk_class_member(self, member),
             _ => self.callable(None, |visitor| walk_class_member(visitor, member)),
         }
     }
 
-    fn visit_function_decl(&mut self, declaration: &FunctionDecl) {
-        self.bind(&declaration.name);
+    fn visit_function_decl(&mut self, declaration: FunctionDecl<'a>) {
+        self.bind(declaration.name());
         self.callable(None, |visitor| walk_function_decl(visitor, declaration));
     }
 
-    fn visit_stmt(&mut self, statement: &Stmt) {
+    fn visit_stmt(&mut self, statement: Stmt<'a>) {
         match statement {
             Stmt::Block(_) => self.scoped(|visitor| walk_stmt(visitor, statement)),
             Stmt::If(statement) => {
-                match &statement.condition {
-                    IfCondition::Expr(condition) => {
-                        self.visit_expr(condition);
-                        self.scoped(|visitor| visitor.visit_stmt(&statement.then_branch));
-                    }
-                    IfCondition::Case(value, pattern, guard) => {
-                        self.visit_expr(value);
-                        self.scoped(|visitor| {
-                            visitor.visit_pattern(pattern);
-                            if let Some(guard) = guard {
-                                visitor.visit_expr(guard);
-                            }
-                            visitor.visit_stmt(&statement.then_branch);
-                        });
-                    }
-                }
-                if let Some(branch) = &statement.else_branch {
+                self.conditional(statement.condition(), |visitor| {
+                    visitor.visit_stmt(statement.then_branch());
+                });
+                if let Some(branch) = statement.else_branch() {
                     self.scoped(|visitor| visitor.visit_stmt(branch));
                 }
             }
             Stmt::For(statement) => self.scoped(|visitor| {
-                visitor.loop_init(&statement.header);
-                visitor.region(statement.span.start, |visitor| {
-                    visitor.loop_header(&statement.header);
-                    visitor.scoped(|visitor| visitor.visit_stmt(&statement.body));
+                visitor.loop_init(statement.header());
+                visitor.region(statement.span().start, |visitor| {
+                    visitor.loop_header(statement.header());
+                    visitor.scoped(|visitor| visitor.visit_stmt(statement.body()));
                 });
             }),
-            Stmt::While(statement) => self.region(statement.span.start, |visitor| {
-                visitor.visit_expr(&statement.condition);
-                visitor.scoped(|visitor| visitor.visit_stmt(&statement.body));
+            Stmt::While(statement) => self.region(statement.span().start, |visitor| {
+                visitor.visit_expr(statement.condition());
+                visitor.scoped(|visitor| visitor.visit_stmt(statement.body()));
             }),
-            Stmt::DoWhile(statement) => self.region(statement.span.start, |visitor| {
-                visitor.scoped(|visitor| visitor.visit_stmt(&statement.body));
-                visitor.visit_expr(&statement.condition);
+            Stmt::DoWhile(statement) => self.region(statement.span().start, |visitor| {
+                visitor.scoped(|visitor| visitor.visit_stmt(statement.body()));
+                visitor.visit_expr(statement.condition());
             }),
             Stmt::TryCatch(statement) => {
-                self.region(statement.span.start, |visitor| {
+                self.region(statement.span().start, |visitor| {
                     visitor.scoped(|visitor| {
-                        for statement in &statement.body.stmts {
+                        for statement in statement.body().stmts() {
                             visitor.visit_stmt(statement);
                         }
                     })
                 });
-                for catch in &statement.catches {
+                for catch in statement.catches() {
                     self.scoped(|visitor| {
-                        visitor.region(catch.body.span.start, |visitor| {
-                            if let Some(name) = &catch.exception_var {
+                        visitor.region(catch.body().span().start, |visitor| {
+                            if let Some(name) = catch.exception_var() {
                                 visitor.bind(name);
                             }
-                            if let Some(name) = &catch.stack_trace_var {
+                            if let Some(name) = catch.stack_trace_var() {
                                 visitor.bind(name);
                             }
-                            for statement in &catch.body.stmts {
+                            for statement in catch.body().stmts() {
                                 visitor.visit_stmt(statement);
                             }
                         });
                     });
                 }
-                if let Some(finally) = &statement.finally {
+                if let Some(finally) = statement.finally() {
                     self.scoped(|visitor| {
-                        for statement in &finally.stmts {
+                        for statement in finally.stmts() {
                             visitor.visit_stmt(statement);
                         }
                     });
                 }
             }
-            Stmt::Switch(statement) => self.region(statement.span.start, |visitor| {
-                visitor.visit_expr(&statement.subject);
-                for case in &statement.cases {
+            Stmt::Switch(statement) => self.region(statement.span().start, |visitor| {
+                visitor.visit_expr(statement.subject());
+                for case in statement.cases() {
                     visitor.scoped(|visitor| {
-                        for label in &case.cases {
-                            if let SwitchCaseKind::Pattern(pattern, guard) = label {
-                                visitor.visit_pattern(pattern);
-                                if let Some(guard) = guard {
+                        for label in case.cases() {
+                            if let SwitchCaseKind::Pattern(label) = label {
+                                visitor.visit_pattern(label.pattern());
+                                if let Some(guard) = label.guard() {
                                     visitor.visit_expr(guard);
                                 }
                             }
                         }
-                        for statement in &case.body {
+                        for statement in case.body() {
                             visitor.visit_stmt(statement);
                         }
                     });
                 }
             }),
             Stmt::PatternDecl(declaration) => {
-                self.visit_expr(&declaration.init);
-                self.visit_pattern(&declaration.pattern);
+                self.visit_expr(declaration.init());
+                self.visit_pattern(declaration.pattern());
             }
             Stmt::PatternAssign(assignment) => {
-                self.visit_expr(&assignment.value);
+                self.visit_expr(assignment.value());
                 self.assigning_pattern = true;
-                self.visit_pattern(&assignment.pattern);
+                self.visit_pattern(assignment.pattern());
                 self.assigning_pattern = false;
             }
             Stmt::LocalFunc(function) => {
-                self.bind(&function.name);
+                self.bind(function.name());
                 self.callable_bindings
-                    .insert(function.span.start, self.bindings());
-                self.callable(Some(function.span.start), |visitor| {
+                    .insert(function.span().start, self.bindings());
+                self.callable(Some(function.span().start), |visitor| {
                     walk_stmt(visitor, statement)
                 });
             }
@@ -390,34 +363,22 @@ impl Visitor for FlowWrites {
         }
     }
 
-    fn visit_collection_element(&mut self, element: &CollectionElement) {
-        if let CollectionElement::If {
-            condition,
-            then_elem,
-            else_elem,
-            ..
-        } = element
-        {
-            self.conditional(condition, |visitor| {
-                visitor.visit_collection_element(then_elem)
+    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
+        if let CollectionElement::If(condition) = element {
+            self.conditional(condition.condition(), |visitor| {
+                visitor.visit_collection_element(condition.then_elem())
             });
-            if let Some(element) = else_elem {
+            if let Some(element) = condition.else_elem() {
                 self.scoped(|visitor| visitor.visit_collection_element(element));
             }
             return;
         }
-        if let CollectionElement::For {
-            header,
-            element: body,
-            span,
-            ..
-        } = element
-        {
+        if let CollectionElement::For(loop_element) = element {
             self.scoped(|visitor| {
-                visitor.loop_init(header);
-                visitor.region(span.start, |visitor| {
-                    visitor.loop_header(header);
-                    visitor.visit_collection_element(body);
+                visitor.loop_init(loop_element.header());
+                visitor.region(loop_element.span().start, |visitor| {
+                    visitor.loop_header(loop_element.header());
+                    visitor.visit_collection_element(loop_element.element());
                 });
             });
         } else {
@@ -425,32 +386,22 @@ impl Visitor for FlowWrites {
         }
     }
 
-    fn visit_map_element(&mut self, element: &MapElement) {
-        if let MapElement::If {
-            condition,
-            then_entry,
-            else_entry,
-            ..
-        } = element
-        {
-            self.conditional(condition, |visitor| visitor.visit_map_element(then_entry));
-            if let Some(entry) = else_entry {
+    fn visit_map_element(&mut self, element: MapElement<'a>) {
+        if let MapElement::If(condition) = element {
+            self.conditional(condition.condition(), |visitor| {
+                visitor.visit_map_element(condition.then_entry())
+            });
+            if let Some(entry) = condition.else_entry() {
                 self.scoped(|visitor| visitor.visit_map_element(entry));
             }
             return;
         }
-        if let MapElement::For {
-            header,
-            entry,
-            span,
-            ..
-        } = element
-        {
+        if let MapElement::For(loop_element) = element {
             self.scoped(|visitor| {
-                visitor.loop_init(header);
-                visitor.region(span.start, |visitor| {
-                    visitor.loop_header(header);
-                    visitor.visit_map_element(entry);
+                visitor.loop_init(loop_element.header());
+                visitor.region(loop_element.span().start, |visitor| {
+                    visitor.loop_header(loop_element.header());
+                    visitor.visit_map_element(loop_element.entry());
                 });
             });
         } else {
@@ -458,38 +409,42 @@ impl Visitor for FlowWrites {
         }
     }
 
-    fn visit_expr(&mut self, expression: &Expr) {
+    fn visit_expr(&mut self, expression: Expr<'a>) {
         match expression {
-            Expr::Assign { target, .. } => {
-                if let Expr::Ident(name) = target.unparenthesized() {
+            Expr::Assign(assignment) => {
+                if let Expr::Ident(name) = assignment.target().unparenthesized() {
                     self.record(name);
                 }
                 walk_expr(self, expression);
             }
-            Expr::Unary {
-                op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
-                operand,
-                ..
-            }
-            | Expr::PostfixIncDec { operand, .. } => {
-                if let Expr::Ident(name) = operand.unparenthesized() {
+            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                if let Expr::Ident(name) = unary.operand().unparenthesized() {
                     self.record(name);
                 }
                 walk_expr(self, expression);
             }
-            Expr::FuncExpr { span, .. } => {
-                self.callable_bindings.insert(span.start, self.bindings());
-                self.callable(Some(span.start), |visitor| walk_expr(visitor, expression));
+            Expr::PostfixIncDec(postfix) => {
+                if let Expr::Ident(name) = postfix.operand().unparenthesized() {
+                    self.record(name);
+                }
+                walk_expr(self, expression);
             }
-            Expr::Switch { subject, arms, .. } => {
-                self.visit_expr(subject);
-                for arm in arms {
+            Expr::FuncExpr(function) => {
+                self.callable_bindings
+                    .insert(function.span().start, self.bindings());
+                self.callable(Some(function.span().start), |visitor| {
+                    walk_expr(visitor, expression)
+                });
+            }
+            Expr::Switch(switch) => {
+                self.visit_expr(switch.subject());
+                for arm in switch.arms() {
                     self.scoped(|visitor| {
-                        visitor.visit_pattern(&arm.pattern);
-                        if let Some(guard) = &arm.guard {
+                        visitor.visit_pattern(arm.pattern());
+                        if let Some(guard) = arm.guard() {
                             visitor.visit_expr(guard);
                         }
-                        visitor.visit_expr(&arm.body);
+                        visitor.visit_expr(arm.body());
                     });
                 }
             }
@@ -497,13 +452,13 @@ impl Visitor for FlowWrites {
         }
     }
 
-    fn visit_pattern(&mut self, pattern: &Pattern) {
+    fn visit_pattern(&mut self, pattern: Pattern<'a>) {
         match pattern {
-            Pattern::Variable { name, .. } => self.pattern_variable(name),
+            Pattern::Variable(variable) => self.pattern_variable(variable.name()),
             // `Type(:name)` binds the getter's name.
             Pattern::Object(object) => {
-                for field in object.fields.iter().filter(|field| field.pattern.is_none()) {
-                    self.pattern_variable(&field.name);
+                for field in object.fields().filter(|field| field.pattern().is_none()) {
+                    self.pattern_variable(field.name());
                 }
             }
             _ => {}
@@ -525,11 +480,9 @@ mod tests {
         let source = "void f(int? a, int? b, int c) { while (a != null) { a = b; var d = 0; d = 1; \
             void g() { c = 1; } } for (var i = 0; i < 1; i++) { (b, _) = (null, 0); } \
             try { c = 2; } catch (e) {} do { c++; } while (c < 3); }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let writes = FlowWrites::program(&program);
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let writes = FlowWrites::program(parsed.tree.program(source));
         let region = |text: &str| source.find(text).expect(text);
         assert_eq!(
             writes.region_writes,
@@ -551,11 +504,9 @@ mod tests {
             while (true) { void h() { x = null; } } for (x in xs) {} try {} catch (e) {} \
             cbs.add(() => x = null); for (var x in xs) { x = null; } \
             var g = () { do { x = null; } while (true); }; }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let writes = FlowWrites::program(&program);
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let writes = FlowWrites::program(parsed.tree.program(source));
         let at = |text: &str| source.find(text).expect(text);
         let x = HashSet::from(["x".to_owned()]);
         assert_eq!(
@@ -585,24 +536,20 @@ mod tests {
         let source = "void f(int? x) { while (true) { \
             { int? x; void inner() { x = null; } } \
             while (true) { void outer() { x = null; } } } }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let writes = FlowWrites::program(&program);
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let writes = FlowWrites::program(parsed.tree.program(source));
         let x = HashSet::from(["x".to_owned()]);
         for (start, _) in source.match_indices("while") {
             assert_eq!(writes.captured_region_writes[&start], x);
         }
         assert_eq!(writes.captured_region_writes.len(), 2);
-        let falcon_dart_parser::ParseResult {
-            program: shadowed,
-            errors,
-            ..
-        } = parse("void f(int? x) { while (true) { int? x; void inner() { x = null; } } }");
-        assert!(errors.is_empty(), "{errors:?}");
+        let shadowed_source =
+            "void f(int? x) { while (true) { int? x; void inner() { x = null; } } }";
+        let shadowed = parse(shadowed_source);
+        assert!(shadowed.errors.is_empty(), "{:?}", shadowed.errors);
         assert!(
-            FlowWrites::program(&shadowed)
+            FlowWrites::program(shadowed.tree.program(shadowed_source))
                 .captured_region_writes
                 .is_empty()
         );
@@ -613,11 +560,9 @@ mod tests {
         let source = "void f(int? x, Object value) { while (true) { \
             var list = [if (value case int x) x else (x = null), (x = null)]; \
             var map = {if (value case int x) x: x else 0: (x = null)}; } }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let writes = FlowWrites::program(&program);
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let writes = FlowWrites::program(parsed.tree.program(source));
         assert_eq!(
             writes.region_writes[&source.find("while").unwrap()],
             HashSet::from(["x".to_owned()])
@@ -627,11 +572,9 @@ mod tests {
     #[test]
     fn cached_results_drop_traversal_only_bindings() {
         let source = "void f(int x) { void g() { x = 1; } while (true) { g(); } }";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let writes = FlowWrites::program(&program);
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let writes = FlowWrites::program(parsed.tree.program(source));
         assert!(!writes.anywhere_writes.is_empty());
         assert!(!writes.anywhere_captured.is_empty());
         assert!(!writes.callable_captured_writes.is_empty());

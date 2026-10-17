@@ -35,8 +35,8 @@ pub struct Span {
     pub end: usize,
 }
 
-impl From<falcon_syntax::ast::Span> for Span {
-    fn from(span: falcon_syntax::ast::Span) -> Self {
+impl From<falcon_syntax::cst::Span> for Span {
+    fn from(span: falcon_syntax::cst::Span) -> Self {
         Self {
             start: span.start,
             end: span.end,

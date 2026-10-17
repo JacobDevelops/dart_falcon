@@ -15,7 +15,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct MaxLinesForFunction;
@@ -23,7 +23,7 @@ pub struct MaxLinesForFunction;
 impl Rule for MaxLinesForFunction {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -39,20 +39,20 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        if node.body.is_some() {
-            check_function_lines(&node.span, &mut self.diags, self.ctx);
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        if node.body().is_some() {
+            check_function_lines(&node.span(), &mut self.diags, self.ctx);
         }
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
-        if let Some((_, span)) = falcon_syntax::visitor::declared_member_body(node) {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
+        if let Some((_, span)) = falcon_syntax::cst::visit::declared_member_body(node) {
             check_function_lines(&span, &mut self.diags, self.ctx);
         }
         StructuralTraversal::SkipChildren

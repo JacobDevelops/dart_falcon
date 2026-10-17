@@ -27,8 +27,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -38,23 +37,23 @@ pub struct AvoidTypeToString;
 impl Rule for AvoidTypeToString {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model =
+            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let stale_this = program
-            .declarations
-            .iter()
+            .declarations()
             .filter_map(|declaration| {
                 let ty = match declaration {
-                    TopLevelDecl::Class(class) => this_type(&class.name, &model),
-                    TopLevelDecl::MixinClass(class) => this_type(&class.name, &model),
-                    TopLevelDecl::Mixin(mixin) => this_type(&mixin.name, &model),
+                    TopLevelDecl::Class(class) => this_type(class.name(), &model),
+                    TopLevelDecl::MixinClass(class) => this_type(class.name(), &model),
+                    TopLevelDecl::Mixin(mixin) => this_type(mixin.name(), &model),
                     TopLevelDecl::Extension(extension) => {
-                        Some(model.resolve_type(&extension.on_type))
+                        Some(model.resolve_type(extension.on_type()))
                             .filter(|ty| matches!(ty, ResolvedType::Interface { .. }))
                     }
                     _ => return None,
@@ -71,9 +70,12 @@ impl Rule for AvoidTypeToString {
     }
 }
 
-fn this_type(name: &Identifier, model: &falcon_analyze::SemanticModel<'_>) -> Option<ResolvedType> {
+fn this_type(
+    name: Identifier<'_>,
+    model: &falcon_analyze::SemanticModel<'_>,
+) -> Option<ResolvedType> {
     model
-        .resolve_name(&*name.name)
+        .resolve_name(name.name())
         .map(|identity| ResolvedType::Interface {
             occurrence: Default::default(),
             identity,
@@ -100,7 +102,7 @@ struct Collector<'a> {
     stale_this: Vec<(usize, Option<ResolvedType>)>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn stale_this(&self, offset: usize) -> Option<&ResolvedType> {
         let after = self
             .stale_this
@@ -112,12 +114,12 @@ impl Collector<'_> {
 
     fn check(
         &mut self,
-        name: &Identifier,
+        name: Identifier<'a>,
         lookup: Lookup<'_>,
         target: Option<&ResolvedType>,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
-        if name.name != "toString"
+        if name.name() != "toString"
             || !target.is_some_and(|target| is_type_subtype(target, state))
             || !resolves_to_object_to_string(lookup, state)
         {
@@ -126,7 +128,7 @@ impl Collector<'_> {
         self.diagnostics.push(self.ctx.diagnostic(
             "avoid-type-to-string",
             "Using 'toString' on a 'Type' is not safe in production code.",
-            name.span,
+            name.span(),
         ));
     }
 
@@ -134,14 +136,14 @@ impl Collector<'_> {
     /// simple identifier prefix.
     fn check_receiver(
         &mut self,
-        receiver: &Expr,
-        name: &Identifier,
+        receiver: Expr<'a>,
+        name: Identifier<'a>,
         prefixed_only: bool,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
-        let is_super = matches!(receiver.unparenthesized(), Expr::Super { .. });
+        let is_super = matches!(receiver.unparenthesized(), Expr::Super(_));
         let receiver_type = match receiver.unparenthesized() {
-            Expr::This { .. } | Expr::Super { .. } => state
+            Expr::This(_) | Expr::Super(_) => state
                 .enclosing_type
                 .clone()
                 .unwrap_or(ResolvedType::Unknown),
@@ -155,7 +157,7 @@ impl Collector<'_> {
         } else if prefixed_only {
             return;
         } else {
-            self.stale_this(name.span.start)
+            self.stale_this(name.span().start)
         }
         .cloned();
         let lookup = if is_super {
@@ -167,33 +169,27 @@ impl Collector<'_> {
     }
 
     /// An unqualified `toString`, resolved against implicit `this`.
-    fn check_implicit_this(&mut self, name: &Identifier, state: &SemanticState<'_>) {
-        if state.environment.is_bound(&name.name) {
+    fn check_implicit_this(&mut self, name: Identifier<'a>, state: &SemanticState<'a>) {
+        if state.environment.is_bound(name.name()) {
             return;
         }
         let Some(enclosing) = state.enclosing_type.as_ref() else {
             return;
         };
-        let target = self.stale_this(name.span.start).cloned();
+        let target = self.stale_this(name.span().start).cloned();
         self.check(name, Lookup::Member(enclosing), target.as_ref(), state);
     }
 
-    fn check_arguments(&mut self, args: &ArgList, state: &SemanticState<'_>) {
+    fn check_arguments(&mut self, args: ArgList<'a>, state: &SemanticState<'a>) {
         for argument in args
-            .positional
-            .iter()
-            .chain(args.named.iter().map(|argument| &argument.value))
+            .positional()
+            .chain(args.named().map(|argument| argument.value()))
         {
             match argument.unparenthesized() {
-                Expr::Field {
-                    object,
-                    field,
-                    is_null_safe,
-                    ..
-                } => {
-                    let prefixed =
-                        !is_null_safe && matches!(object.unparenthesized(), Expr::Ident(_));
-                    self.check_receiver(object, field, prefixed, state);
+                Expr::Field(field) => {
+                    let prefixed = !field.is_null_safe()
+                        && matches!(field.object().unparenthesized(), Expr::Ident(_));
+                    self.check_receiver(field.object(), field.field(), prefixed, state);
                 }
                 Expr::Ident(identifier) => self.check_implicit_this(identifier, state),
                 _ => {}
@@ -202,38 +198,41 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
-            Expr::Call { callee, args, .. } => {
-                self.check_arguments(args, state);
-                match callee.unparenthesized() {
-                    Expr::Field { object, field, .. } => {
-                        self.check_receiver(object, field, false, state);
+            Expr::Call(call) => {
+                self.check_arguments(call.args(), state);
+                match call.callee().unparenthesized() {
+                    Expr::Field(field) => {
+                        self.check_receiver(field.object(), field.field(), false, state);
                     }
                     Expr::Ident(identifier) => self.check_implicit_this(identifier, state),
                     _ => {}
                 }
             }
-            Expr::New { args, .. } => self.check_arguments(args, state),
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                for section in sections {
-                    for (index, op) in section.ops.iter().enumerate() {
+            Expr::New(new) => self.check_arguments(new.args(), state),
+            Expr::Cascade(cascade) => {
+                for section in cascade.sections() {
+                    for (index, op) in section.ops().enumerate() {
                         match op {
-                            CascadeOp::Call(name, _, args) => {
-                                self.check_arguments(args, state);
+                            CascadeOp::Call(call) => {
+                                self.check_arguments(call.args(), state);
                                 // Later links target the previous link's result.
                                 if index == 0 {
-                                    self.check_receiver(object, name, false, state);
+                                    self.check_receiver(
+                                        cascade.object(),
+                                        call.name(),
+                                        false,
+                                        state,
+                                    );
                                 }
                             }
-                            CascadeOp::Invoke(_, args) => self.check_arguments(args, state),
+                            CascadeOp::Invoke(invoke) => self.check_arguments(invoke.args(), state),
                             _ => {}
                         }
                     }

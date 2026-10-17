@@ -24,7 +24,7 @@
 //! Adopted from the official `cancel_subscriptions` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 use crate::lint::resource_leaks::{LeakRule, Release};
 
@@ -44,7 +44,7 @@ const RULE: LeakRule = LeakRule {
 impl Rule for CancelSubscriptions {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         match RULE.semantic_visitor(program, ctx) {

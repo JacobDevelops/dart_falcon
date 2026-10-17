@@ -53,8 +53,7 @@ use falcon_analyze::{
     resolve_call_constructor, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_local_var, walk_program, walk_stmt};
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{declaration_initializers, members_of};
 use crate::lint::lexical_usage::collection_for_inits;
@@ -67,7 +66,7 @@ pub struct UnnecessaryLambdas;
 impl Rule for UnnecessaryLambdas {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut stable = StableLocals::default();
@@ -96,73 +95,74 @@ enum Callee {
     Variable,
 }
 
-/// Declarations (declaring name's span start) of the `final`, non-`late`
+/// Declaration IDs of the `final`, non-`late`
 /// local variables and parameters and of the local functions in a file. The
 /// analyzer does not count a `const` variable as final.
 #[derive(Default)]
 struct StableLocals(
-    HashMap<usize, Callee>,
-    HashMap<usize, Vec<(Span, ParamKind)>>,
+    HashMap<NodeId, Callee>,
+    HashMap<NodeId, Vec<(Span, ParamKind)>>,
 );
 
 impl StableLocals {
-    fn record_optional(&mut self, declaration: Span, params: &FormalParamList) {
-        if params.params.iter().any(|param| {
+    fn record_optional(&mut self, declaration: Identifier<'_>, params: FormalParamList<'_>) {
+        if params.params().any(|param| {
             matches!(
-                param.kind,
+                param.kind(),
                 ParamKind::OptionalPositional | ParamKind::Named { required: false }
             )
         }) {
             self.1.insert(
-                declaration.start,
+                declaration.syntax().id(),
                 params
-                    .params
-                    .iter()
-                    .map(|param| (param.name.span, param.kind))
+                    .params()
+                    .map(|param| (param.name().span(), param.kind()))
                     .collect(),
             );
         }
     }
 
-    fn record_for_init(&mut self, init: &ForInit) {
-        if let ForInit::ForIn { keyword, name, .. } = init
-            && *keyword == VarKeyword::Final
+    fn record_for_init(&mut self, init: ForInit<'_>) {
+        if let ForInit::ForIn(node) = init
+            && node.keyword() == VarKeyword::Final
         {
-            self.0.insert(name.span.start, Callee::Variable);
+            self.0.insert(node.name().syntax().id(), Callee::Variable);
         }
     }
 }
 
-impl Visitor for StableLocals {
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        if node.keyword == VarKeyword::Final && !node.is_late {
-            for declarator in &node.declarators {
-                self.0.insert(declarator.name.span.start, Callee::Variable);
-                if let Some(Expr::FuncExpr { params, .. }) =
-                    declarator.initializer.as_ref().map(Expr::unparenthesized)
+impl<'a> Visitor<'a> for StableLocals {
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
+        if node.keyword() == VarKeyword::Final && !node.is_late() {
+            for declarator in node.declarators() {
+                self.0
+                    .insert(declarator.name().syntax().id(), Callee::Variable);
+                if let Some(Expr::FuncExpr(function)) =
+                    declarator.initializer().map(Expr::unparenthesized)
                 {
-                    self.record_optional(declarator.name.span, params);
+                    self.record_optional(declarator.name(), function.params());
                 }
             }
         }
         walk_local_var(self, node);
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
-        if node.is_final {
-            self.0.insert(node.name.span.start, Callee::Variable);
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) {
+        if node.is_final() {
+            self.0.insert(node.name().syntax().id(), Callee::Variable);
         }
-        falcon_syntax::visitor::walk_formal_param(self, node);
+        walk_formal_param(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
             Stmt::LocalFunc(function) => {
-                self.0.insert(function.name.span.start, Callee::Function);
-                self.record_optional(function.name.span, &function.params);
+                self.0
+                    .insert(function.name().syntax().id(), Callee::Function);
+                self.record_optional(function.name(), function.params());
             }
             Stmt::For(statement) => {
-                if let Some(init) = &statement.header.init {
+                if let Some(init) = statement.header().init() {
                     self.record_for_init(init);
                 }
             }
@@ -171,95 +171,93 @@ impl Visitor for StableLocals {
         walk_stmt(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         for init in collection_for_inits(node) {
             self.record_for_init(init);
         }
         walk_expr(self, node);
     }
 
-    fn visit_program(&mut self, node: &Program) {
+    fn visit_program(&mut self, node: Program<'a>) {
         walk_program(self, node);
     }
 }
 
-fn late_fields(program: &Program) -> HashSet<String> {
+fn late_fields<'a>(program: Program<'a>) -> HashSet<&'a str> {
     program
-        .declarations
-        .iter()
-        .flat_map(|declaration| members_of(declaration).unwrap_or_default())
+        .declarations()
+        .flat_map(|declaration| members_of(declaration).into_iter().flatten())
         .filter_map(|member| match member {
-            ClassMember::Field(field) if field.is_late => Some(&field.declarators),
+            ClassMember::Field(field) if field.is_late() => Some(field.declarators()),
             _ => None,
         })
         .flatten()
-        .map(|declarator| declarator.name.name.clone())
+        .map(|declarator| declarator.name().name())
         .collect()
 }
 
-fn initializer_spans(declarators: &[VarDeclarator]) -> impl Iterator<Item = (usize, usize)> + '_ {
+fn initializer_spans<'a>(
+    declarators: AstChildren<'a, VarDeclarator<'a>>,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
     declarators
-        .iter()
-        .filter_map(|declarator| declarator.initializer.as_ref())
+        .filter_map(|declarator| declarator.initializer())
         .map(|initializer| (initializer.span().start, initializer.span().end))
 }
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    program: &'a Program,
+    program: Program<'a>,
     /// The local declaration each identifier expression resolves to.
-    locals: HashMap<usize, usize>,
-    stable_locals: HashMap<usize, Callee>,
+    locals: HashMap<usize, NodeId>,
+    stable_locals: HashMap<NodeId, Callee>,
     /// Parameter shape of local callables, before function-type inference erases it.
-    optional_locals: HashMap<usize, Vec<(Span, ParamKind)>>,
+    optional_locals: HashMap<NodeId, Vec<(Span, ParamKind)>>,
     /// Names of the `late` fields declared in this file.
-    late_fields: HashSet<String>,
+    late_fields: HashSet<&'a str>,
     /// Closures that are named arguments or variable initializers; a method
     /// tear-off must be a subtype of their type.
     typed_contexts: HashSet<(usize, usize)>,
 }
 
 /// The single invocation a closure body consists of.
-fn forwarded_invocation(body: &FunctionBody) -> Option<&Expr> {
+fn forwarded_invocation(body: FunctionBody<'_>) -> Option<Expr<'_>> {
     match body {
-        FunctionBody::Arrow(expression, _) => Some(expression),
-        FunctionBody::Block(block) => match block.stmts.as_slice() {
-            [Stmt::Expr(statement)]
-                if matches!(statement.expr.unparenthesized(), Expr::Call { .. }) =>
-            {
-                Some(&statement.expr)
+        FunctionBody::Arrow(node) => Some(node.expr()),
+        FunctionBody::Block(block) => {
+            let mut stmts = block.stmts();
+            let first = stmts.next()?;
+            if stmts.next().is_some() {
+                return None;
             }
-            [
-                Stmt::Return(ReturnStmt {
-                    value: Some(value), ..
-                }),
-            ] if matches!(value.unparenthesized(), Expr::Call { .. }) => Some(value),
-            _ => None,
-        },
-        FunctionBody::Native(..) => None,
+            let value = match first {
+                Stmt::Expr(statement) => statement.expr(),
+                Stmt::Return(statement) => statement.value()?,
+                _ => return None,
+            };
+            matches!(value.unparenthesized(), Expr::Call(_)).then_some(value)
+        }
+        FunctionBody::Native(_) => None,
     }
 }
 
 /// Whether `args` forward every parameter once, preserving positional order
 /// and named parameter names.
-fn forwards_parameters(args: &ArgList, params: &[FormalParam]) -> bool {
+fn forwards_parameters<'a>(args: ArgList<'a>, params: AstChildren<'a, FormalParam<'a>>) -> bool {
     let positional = params
-        .iter()
-        .filter(|param| !matches!(param.kind, ParamKind::Named { .. }));
-    let mut named = params
-        .iter()
-        .filter(|param| matches!(param.kind, ParamKind::Named { .. }));
-    args.positional.len() == positional.clone().count()
-        && args.named.len() == named.clone().count()
-        && args.positional.iter().zip(positional).all(|(argument, param)| {
-            matches!(argument.unparenthesized(), Expr::Ident(name) if name.name == param.name.name)
+        .clone()
+        .filter(|param| !matches!(param.kind(), ParamKind::Named { .. }));
+    let mut named = params.filter(|param| matches!(param.kind(), ParamKind::Named { .. }));
+    args.positional().len() == positional.clone().count()
+        && args.named().len() == named.clone().count()
+        && args.positional().zip(positional).all(|(argument, param)| {
+            matches!(argument.unparenthesized(), Expr::Ident(name) if name.name() == param.name().name())
         })
         && named.all(|param| {
-            args.named.iter().any(|argument| {
-                argument.name.name == param.name.name
-                    && matches!(argument.value.unparenthesized(), Expr::Ident(name)
-                        if name.name == param.name.name)
+            args.named().any(|argument| {
+                argument.name().name() == param.name().name()
+                    && matches!(argument.value().unparenthesized(), Expr::Ident(name)
+                        if name.name() == param.name().name())
             })
         })
 }
@@ -274,7 +272,7 @@ enum Creation {
     Unknown,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     /// How a member named `name` with these facts is invoked: a method directly,
     /// a `final` field through its value.
     fn member_callee(
@@ -321,37 +319,34 @@ impl Collector<'_> {
 
     /// For an identifier naming a local, whether that local is a stable
     /// `final` variable or local function; `None` when it is not a local.
-    fn local(&self, name: &Identifier) -> Option<Option<Callee>> {
+    fn local(&self, name: Identifier<'_>) -> Option<Option<Callee>> {
         self.locals
-            .get(&name.span.start)
+            .get(&name.span().start)
             .map(|declaration| self.stable_locals.get(declaration).copied())
     }
 
     fn top_level_function(&self, name: &str) -> bool {
-        self.program.declarations.iter().any(|declaration| {
+        self.program.declarations().any(|declaration| {
             matches!(declaration, TopLevelDecl::Function(function)
-                if function.name.name == name && matches!(function.kind, FunctionKind::Function(_)))
+                if function.name().name() == name && matches!(function.kind(), FunctionKind::Function(_)))
         })
     }
 
     /// A `final`, non-`late` top-level variable; the analyzer does not count a
     /// `const` one as final.
     fn final_top_level_variable(&self, name: &str) -> bool {
-        self.program.declarations.iter().any(|declaration| {
+        self.program.declarations().any(|declaration| {
             matches!(declaration, TopLevelDecl::Variable(variable)
-                if variable.keyword == VarKeyword::Final
-                    && !variable.is_late
-                    && variable.declarators.iter().any(|declarator| declarator.name.name == name))
+                if variable.keyword() == VarKeyword::Final
+                    && !variable.is_late()
+                    && variable.declarators().any(|declarator| declarator.name().name() == name))
         })
     }
 
-    fn import_prefix(&self, name: &str) -> Option<&ImportDirective> {
-        self.program.imports.iter().find(|import| {
-            import
-                .as_name
-                .as_ref()
-                .is_some_and(|prefix| prefix.name == name)
-        })
+    fn import_prefix(&self, name: &str) -> Option<ImportDirective<'a>> {
+        self.program
+            .imports()
+            .find(|import| import.as_name().is_some_and(|prefix| prefix.name() == name))
     }
 
     /// Facts for `name` as a member of the enclosing type, through `this`.
@@ -368,11 +363,11 @@ impl Collector<'_> {
 
     /// How the unqualified `name` invoked as `name(...)` is called, when it is
     /// a function or method, or a `final` variable or field holding one.
-    fn stable_function(&self, name: &Identifier, state: &SemanticState<'_>) -> Option<Callee> {
+    fn stable_function(&self, name: Identifier<'_>, state: &SemanticState<'_>) -> Option<Callee> {
         if let Some(local) = self.local(name) {
             return local;
         }
-        let name = name.name.as_str();
+        let name = name.name();
         let signatures = state.signatures.as_ref();
         if let Some(facts) = self.enclosing_member(name, state) {
             return self
@@ -401,33 +396,30 @@ impl Collector<'_> {
     }
 
     /// A callable declaration, not merely an imported value of callable type.
-    fn function_or_method(&self, name: &Identifier, state: &SemanticState<'_>) -> bool {
-        self.top_level_function(&name.name)
+    fn function_or_method(&self, name: Identifier<'_>, state: &SemanticState<'_>) -> bool {
+        self.top_level_function(name.name())
             || self
-                .enclosing_member(&name.name, state)
+                .enclosing_member(name.name(), state)
                 .is_some_and(|facts| facts.iter().any(|fact| fact.kind == MemberKind::Method))
             || state
                 .model
-                .resolve_value(name.name.as_str())
-                .or_else(|| state.model.resolve_sdk_member(name.name.as_str()))
+                .resolve_value(name.name())
+                .or_else(|| state.model.resolve_sdk_member(name.name()))
                 .is_some_and(|identity| state.signatures.function(&identity).is_some())
     }
 
     /// Whether `receiver` denotes the same object on every evaluation: a class
     /// name, a non-deferred import prefix, or a chain of `final` variables and
     /// fields.
-    fn stable_receiver(&self, receiver: &Expr, state: &SemanticState<'_>) -> bool {
+    fn stable_receiver(&self, receiver: Expr<'a>, state: &SemanticState<'_>) -> bool {
         let mut fields = Vec::new();
         let mut root = receiver;
-        while let Expr::Field {
-            object,
-            field,
-            is_null_safe: false,
-            ..
-        } = root.unparenthesized()
-        {
-            fields.push((object.as_ref(), field));
-            root = object;
+        while let Expr::Field(node) = root.unparenthesized() {
+            if node.is_null_safe() {
+                break;
+            }
+            fields.push((node.object(), node.field()));
+            root = node.object();
         }
         let Expr::Ident(name) = root.unparenthesized() else {
             return false;
@@ -437,44 +429,44 @@ impl Collector<'_> {
             if local.is_none() {
                 return false;
             }
-        } else if self.import_prefix(&name.name).is_some() {
+        } else if self.import_prefix(name.name()).is_some() {
             // Members of other libraries reached through a prefix are not
             // resolved here.
             return fields.is_empty();
-        } else if !(state.model.resolve_name(name.name.as_str()).is_some()
+        } else if !(state.model.resolve_name(name.name()).is_some()
             || self
-                .enclosing_member(&name.name, state)
-                .is_some_and(|facts| self.final_field(facts, &name.name, signatures))
-            || self.final_top_level_variable(&name.name)
+                .enclosing_member(name.name(), state)
+                .is_some_and(|facts| self.final_field(facts, name.name(), signatures))
+            || self.final_top_level_variable(name.name())
             || self.function_or_method(name, state))
         {
             return false;
         }
         fields.iter().rev().all(|(object, field)| {
             // Record fields are immutable even though they have no member facts.
-            let receiver_type = state.infer(object);
-            if receiver_type.record_field(&field.name).is_some() {
+            let receiver_type = state.infer(*object);
+            if receiver_type.record_field(field.name()).is_some() {
                 return true;
             }
-            let facts = match self.type_name(object, state) {
-                Some(identity) => signatures.declared_member_facts(&identity, &field.name),
+            let facts = match self.type_name(*object, state) {
+                Some(identity) => signatures.declared_member_facts(&identity, field.name()),
                 None => signatures
-                    .resolved_member_facts(&receiver_type, &field.name, &state.model)
+                    .resolved_member_facts(&receiver_type, field.name(), &state.model)
                     .unwrap_or_default(),
             };
-            self.final_field(facts, &field.name, signatures)
+            self.final_field(facts, field.name(), signatures)
         })
     }
 
     /// The type an identifier expression names, when it is not a local.
     fn type_name(
         &self,
-        expression: &Expr,
+        expression: Expr<'a>,
         state: &SemanticState<'_>,
     ) -> Option<DeclarationIdentity> {
         match expression.unparenthesized() {
             Expr::Ident(name) if self.local(name).is_none() => {
-                state.model.resolve_name(name.name.as_str())
+                state.model.resolve_name(name.name())
             }
             _ => None,
         }
@@ -484,13 +476,13 @@ impl Collector<'_> {
     /// does not index is taken to be a method.
     fn stable_member(
         &self,
-        receiver: &Expr,
+        receiver: Expr<'a>,
         name: &str,
         state: &SemanticState<'_>,
     ) -> Option<Callee> {
         if let Expr::Ident(prefix) = receiver.unparenthesized()
             && self.local(prefix).is_none()
-            && self.import_prefix(&prefix.name).is_some()
+            && self.import_prefix(prefix.name()).is_some()
         {
             return Some(Callee::Function);
         }
@@ -513,14 +505,18 @@ impl Collector<'_> {
         }
     }
 
-    fn deferred(&self, receiver: &Expr) -> bool {
+    fn deferred(&self, receiver: Expr<'a>) -> bool {
         matches!(receiver.unparenthesized(), Expr::Ident(name)
-            if self.import_prefix(&name.name).is_some_and(|import| import.is_deferred))
+            if self.import_prefix(name.name()).is_some_and(|import| import.is_deferred()))
     }
 
     /// Whether every closure parameter's type is known: written, or supplied
     /// by the context.
-    fn parameter_types_known(&self, params: &[FormalParam], state: &SemanticState<'_>) -> bool {
+    fn parameter_types_known(
+        &self,
+        mut params: AstChildren<'a, FormalParam<'a>>,
+        state: &SemanticState<'_>,
+    ) -> bool {
         let (contextual, named) = match state.expected() {
             Some(ResolvedType::Function {
                 positional, named, ..
@@ -528,12 +524,12 @@ impl Collector<'_> {
             _ => (&[][..], None),
         };
         let mut positional_index = 0;
-        params.iter().all(|param| {
-            let contextual_type = if matches!(param.kind, ParamKind::Named { .. }) {
+        params.all(|param| {
+            let contextual_type = if matches!(param.kind(), ParamKind::Named { .. }) {
                 named.and_then(|named| {
                     named
                         .iter()
-                        .find(|(name, _)| name == &param.name.name)
+                        .find(|(name, _)| name == param.name().name())
                         .map(|(_, ty)| ty)
                 })
             } else {
@@ -542,9 +538,8 @@ impl Collector<'_> {
                 ty
             };
             param
-                .param_type
-                .as_ref()
-                .is_some_and(|ty| !matches!(ty, DartType::Dynamic { .. }))
+                .param_type()
+                .is_some_and(|ty| !matches!(ty, DartType::Dynamic(_)))
                 || contextual_type
                     .is_some_and(|ty| !matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic))
         })
@@ -554,9 +549,9 @@ impl Collector<'_> {
     /// closure is a named argument or a variable initializer.
     fn fits_typed_context(
         &self,
-        node: &Expr,
-        params: &[FormalParam],
-        body: &FunctionBody,
+        node: Expr<'a>,
+        params: AstChildren<'a, FormalParam<'a>>,
+        body: FunctionBody<'a>,
         state: &SemanticState<'_>,
     ) -> bool {
         if !self
@@ -571,15 +566,20 @@ impl Collector<'_> {
         // A block body that discards the call returns `void` only under a
         // `void`-returning context; otherwise it returns `Null`, which no
         // forwarded method's return type is a subtype of.
-        let discards = matches!(body, FunctionBody::Block(block)
-            if matches!(block.stmts.as_slice(), [Stmt::Expr(_)]));
+        let discards = match body {
+            FunctionBody::Block(block) => {
+                let mut stmts = block.stmts();
+                matches!(stmts.next(), Some(Stmt::Expr(_))) && stmts.next().is_none()
+            }
+            _ => false,
+        };
         !discards
             || matches!(state.expected(), Some(ResolvedType::Function { return_type, .. })
                 if **return_type == ResolvedType::Void)
     }
 
     /// Whether `callee(...)` invokes a constructor.
-    fn creation(&self, callee: &Expr, state: &SemanticState<'_>) -> Creation {
+    fn creation(&self, callee: Expr<'a>, state: &SemanticState<'_>) -> Creation {
         if let Expr::Ident(name) = callee_root(callee).unparenthesized()
             && self.local(name).is_some()
         {
@@ -618,34 +618,33 @@ impl Collector<'_> {
     /// A tear-off cannot make one of the wrapper's optional parameters required.
     fn optional_parameters_fit(
         &self,
-        invocation: &Expr,
-        params: &[FormalParam],
+        invocation: Expr<'a>,
+        params: AstChildren<'a, FormalParam<'a>>,
         state: &SemanticState<'_>,
     ) -> bool {
-        if params.iter().all(|param| {
+        if params.clone().all(|param| {
             matches!(
-                param.kind,
+                param.kind(),
                 ParamKind::Positional | ParamKind::Named { required: true }
             )
         }) {
             return true;
         }
-        if let Expr::Call { callee, .. } = invocation.unparenthesized()
-            && let Expr::Ident(name) = callee.unparenthesized()
+        if let Expr::Call(call) = invocation.unparenthesized()
+            && let Expr::Ident(name) = call.callee().unparenthesized()
             && let Some(shape) = self
                 .locals
-                .get(&name.span.start)
+                .get(&name.span().start)
                 .and_then(|declaration| self.optional_locals.get(declaration))
         {
             let mut positional = shape
                 .iter()
                 .filter(|(_, kind)| !matches!(kind, ParamKind::Named { .. }));
-            return params.iter().all(|param| match param.kind {
+            return params.clone().all(|param| match param.kind() {
                 ParamKind::Named { required: true } => true,
                 ParamKind::Named { required: false } => shape.iter().any(|(span, kind)| {
                     matches!(kind, ParamKind::Named { required: false })
-                        && self.ctx.source.get(span.start..span.end)
-                            == Some(param.name.name.as_str())
+                        && self.ctx.source.get(span.start..span.end) == Some(param.name().name())
                 }),
                 kind => {
                     let target = positional.next();
@@ -655,22 +654,15 @@ impl Collector<'_> {
             });
         }
         let signature = match invocation.unparenthesized() {
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => state
-                .call_signature(callee, type_args, args, None)
+            Expr::Call(call) => state
+                .call_signature(call.callee(), call.type_args(), call.args(), None)
                 .map(Cow::Owned),
-            Expr::New {
-                dart_type,
-                constructor_name,
-                ..
-            } => {
-                let Some((identity, constructor)) =
-                    resolve_new_constructor(dart_type, constructor_name.as_ref(), &state.model)
-                else {
+            Expr::New(node) => {
+                let Some((identity, constructor)) = resolve_new_constructor(
+                    node.dart_type(),
+                    node.constructor_name(),
+                    &state.model,
+                ) else {
                     return false;
                 };
                 state
@@ -684,10 +676,10 @@ impl Collector<'_> {
             return false;
         };
         let mut positional = 0;
-        params.iter().all(|param| {
-            let name = match param.kind {
+        params.clone().all(|param| {
+            let name = match param.kind() {
                 ParamKind::Named { required: true } => return true,
-                ParamKind::Named { required: false } => Some(param.name.name.as_str()),
+                ParamKind::Named { required: false } => Some(param.name().name()),
                 ParamKind::Positional => {
                     positional += 1;
                     return true;
@@ -707,32 +699,29 @@ impl Collector<'_> {
         })
     }
 
-    fn is_unnecessary(&self, node: &Expr, state: &SemanticState<'_>) -> bool {
-        let Expr::FuncExpr {
-            type_params,
-            params,
-            async_marker: AsyncMarker::Sync,
-            body,
-            ..
-        } = node.unparenthesized()
-        else {
+    fn is_unnecessary(&self, node: Expr<'a>, state: &SemanticState<'_>) -> bool {
+        let Expr::FuncExpr(function) = node.unparenthesized() else {
             return false;
         };
-        let params = params.params.as_slice();
-        if !type_params.is_empty()
+        if function.async_marker() != AsyncMarker::Sync {
+            return false;
+        }
+        let params = function.params().params();
+        let body = function.body();
+        if !function.type_params().is_empty()
             || params
-                .iter()
-                .any(|param| param.initializing.is_some() || param.function_params.is_some())
+                .clone()
+                .any(|param| param.initializing().is_some() || param.function_params().is_some())
         {
             return false;
         }
         let Some(invocation) = forwarded_invocation(body) else {
             return false;
         };
-        if !self.optional_parameters_fit(invocation, params, state) {
+        if !self.optional_parameters_fit(invocation, params.clone(), state) {
             return false;
         }
-        let arrow = matches!(body.as_ref(), FunctionBody::Arrow(..));
+        let arrow = matches!(body, FunctionBody::Arrow(_));
         // A constructor tear-off must exist in the file's language version and
         // fit the closure's type.
         let creation_fits = || {
@@ -741,38 +730,31 @@ impl Collector<'_> {
                     .ctx
                     .language_version()
                     .supports(Feature::ConstructorTearoffs)
-                && self.parameter_types_known(params, state)
+                && self.parameter_types_known(params.clone(), state)
         };
         match invocation.unparenthesized() {
-            Expr::New {
-                is_const: false,
-                dart_type,
-                constructor_name,
-                args,
-                ..
-            } => {
-                forwards_parameters(args, params)
-                    && args.named.is_empty()
-                    && !matches!(dart_type, DartType::Named(named) if named.segments.len() > 1
-                    && named.segments.first().is_some_and(|prefix| {
-                        self.import_prefix(&prefix.name).is_some_and(|import| import.is_deferred)
+            Expr::New(creation) if !creation.is_const() => {
+                let args = creation.args();
+                let dart_type = creation.dart_type();
+                forwards_parameters(args, params.clone())
+                    && args.named().is_empty()
+                    && !matches!(dart_type, DartType::Named(named) if named.segments().count() > 1
+                    && named.segments().next().is_some_and(|prefix| {
+                        self.import_prefix(prefix.name()).is_some_and(|import| import.is_deferred())
                     }))
-                    && resolve_new_constructor(dart_type, constructor_name.as_ref(), &state.model)
+                    && resolve_new_constructor(dart_type, creation.constructor_name(), &state.model)
                         .is_some()
                     && creation_fits()
             }
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => {
-                if !forwards_parameters(args, params) {
+            Expr::Call(call) => {
+                let callee = call.callee();
+                let args = call.args();
+                if !forwards_parameters(args, params.clone()) {
                     return false;
                 }
                 match self.creation(callee, state) {
                     Creation::Yes | Creation::Unknown => {
-                        return args.named.is_empty()
+                        return args.named().is_empty()
                             && !self.deferred(callee_root(callee))
                             && creation_fits();
                     }
@@ -780,21 +762,21 @@ impl Collector<'_> {
                 }
                 let callee_kind = match callee.unparenthesized() {
                     Expr::Ident(name) => self.stable_function(name, state),
-                    Expr::FuncExpr { .. } => Some(Callee::Function),
-                    Expr::Field {
-                        object,
-                        field,
-                        is_null_safe: false,
-                        ..
-                    } if !self.deferred(object) && self.stable_receiver(object, state) => {
-                        self.stable_member(object, &field.name, state)
+                    Expr::FuncExpr(_) => Some(Callee::Function),
+                    Expr::Field(field)
+                        if !field.is_null_safe()
+                            && !self.deferred(field.object())
+                            && self.stable_receiver(field.object(), state) =>
+                    {
+                        self.stable_member(field.object(), field.field().name(), state)
                     }
                     _ => None,
                 };
                 match callee_kind {
                     Some(Callee::Variable) => true,
                     Some(Callee::Function) => {
-                        type_args.is_empty() && self.fits_typed_context(node, params, body, state)
+                        call.type_args().is_empty()
+                            && self.fits_typed_context(node, params, body, state)
                     }
                     None => false,
                 }
@@ -805,44 +787,50 @@ impl Collector<'_> {
 }
 
 /// The leftmost identifier of a dotted callee.
-fn callee_root(callee: &Expr) -> &Expr {
+fn callee_root(callee: Expr<'_>) -> Expr<'_> {
     let mut root = callee;
-    while let Expr::Field { object, .. } | Expr::GenericInstantiation { target: object, .. } =
-        root.unparenthesized()
-    {
-        root = object;
+    loop {
+        root = match root.unparenthesized() {
+            Expr::Field(node) => node.object(),
+            Expr::GenericInstantiation(node) => node.target(),
+            _ => break,
+        };
     }
     root
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, _state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, _state: &SemanticState<'_>) {
         if let Stmt::LocalVar(declaration) = node {
             self.typed_contexts
-                .extend(initializer_spans(&declaration.declarators));
+                .extend(initializer_spans(declaration.declarators()));
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if matches!(node, Expr::Paren { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'_>) {
+        if matches!(node, Expr::Paren(_)) {
             return;
         }
-        if let Expr::Call { args, .. } | Expr::New { args, .. } = node {
+        let args = match node {
+            Expr::Call(call) => Some(call.args()),
+            Expr::New(creation) => Some(creation.args()),
+            _ => None,
+        };
+        if let Some(args) = args {
             self.typed_contexts.extend(
-                args.named
-                    .iter()
-                    .map(|argument| (argument.value.span().start, argument.value.span().end)),
+                args.named()
+                    .map(|argument| (argument.value().span().start, argument.value().span().end)),
             );
         }
         if self.is_unnecessary(node, state) {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-lambdas",
                 "Closure should be a tearoff.",
-                *node.span(),
+                node.span(),
             ));
         }
     }

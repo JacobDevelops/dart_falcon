@@ -10,7 +10,7 @@
 //! instead.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidRelativeLibImports;
@@ -18,16 +18,16 @@ pub struct AvoidRelativeLibImports;
 impl Rule for AvoidRelativeLibImports {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        for import in &program.imports {
-            if reaches_into_lib(&import.uri.value) {
+        for import in program.imports() {
+            if reaches_into_lib(&import.uri().value()) {
                 diags.push(ctx.diagnostic(
                     "avoid-relative-lib-imports",
                     "Avoid relative imports for files in 'lib'.",
-                    import.uri.span,
+                    import.uri().span(),
                 ));
             }
         }

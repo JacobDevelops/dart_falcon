@@ -1,13 +1,12 @@
 //! Positive regression coverage for the visitor traversal gaps fixed in
-//! `visitor.rs`. Each test plants a unique sentinel (an int literal, a named
+//! `cst::visit`. Each test plants a unique sentinel (an int literal, a named
 //! type, an identifier, or a string) in a position that the default walk chain
 //! only reaches through a newly-added walk edge, then asserts the recording
 //! visitor observed it exactly once. Missing and duplicated walk edges both
 //! fail the corresponding sentinel assertion.
 
 use falcon_dart_parser::parser::parse;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::*;
+use falcon_syntax::cst::*;
 
 #[path = "support/cst_visitor_parity.rs"]
 mod cst_visitor_parity;
@@ -39,36 +38,36 @@ impl Recorder {
     }
 }
 
-impl Visitor for Recorder {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::IntLit { value, .. } = node {
-            self.ints.push(value.clone());
+impl<'a> Visitor<'a> for Recorder {
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        if let Expr::IntLit(value) = node {
+            self.ints.push(value.value().to_owned());
         }
         walk_expr(self, node);
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
-        self.strings.push(node.value.clone());
+    fn visit_string_lit(&mut self, node: StringLitNode<'a>) {
+        self.strings.push(node.value().into_owned());
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: DartType<'a>) {
         match node {
             DartType::Named(n) => {
-                if let Some(seg) = n.segments.last() {
-                    self.named_types.push(seg.name.clone());
+                if let Some(seg) = n.segments().last() {
+                    self.named_types.push(seg.name().to_owned());
                 }
             }
-            DartType::Dynamic { .. } => self.dynamic_types += 1,
+            DartType::Dynamic(_) => self.dynamic_types += 1,
             _ => {}
         }
         walk_dart_type(self, node);
     }
 
-    fn visit_identifier(&mut self, node: &Identifier) {
-        self.idents.push(node.name.clone());
+    fn visit_identifier(&mut self, node: Identifier<'a>) {
+        self.idents.push(node.name().to_owned());
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
+    fn visit_annotation(&mut self, node: Annotation<'a>) {
         self.annotations += 1;
         walk_annotation(self, node);
     }
@@ -77,17 +76,13 @@ impl Visitor for Recorder {
 fn record(src: &str) -> Recorder {
     let parsed = parse(src);
     cst_visitor_parity::assert_parity(src, &parsed);
-    let falcon_dart_parser::parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parsed;
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parsed;
     assert!(
         errors.is_empty(),
         "unexpected parse errors in {src:?}: {errors:?}"
     );
     let mut r = Recorder::default();
-    r.visit_program(&prog);
+    r.visit_program(tree.program(src));
     r
 }
 
@@ -159,64 +154,69 @@ fn walks_collection_for_in_header_types_and_bindings() {
 }
 
 #[test]
-fn local_var_hook_borrows_statement_and_loop_declarations() {
+fn local_var_hook_observes_statement_and_loop_declarations() {
     #[derive(Default)]
     struct Locals {
-        declarations: Vec<*const LocalVarDecl>,
+        declarations: Vec<NodeId>,
     }
 
-    impl Visitor for Locals {
-        fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
-            self.declarations.push(std::ptr::from_ref(declaration));
+    impl<'a> Visitor<'a> for Locals {
+        fn visit_local_var(&mut self, declaration: LocalVarDecl<'a>) {
+            self.declarations.push(declaration.syntax().id());
         }
     }
 
-    let falcon_dart_parser::parser::ParseResult {
-        program, errors, ..
-    } = parse(
-        "void f() { var statement = 1; \
+    let src = "void f() { var statement = 1; \
      for (var counter = 0; counter < 1; counter++) {} \
-     var collection = [for (var item = 0; item < 1; item++) item]; }",
-    );
+     var collection = [for (var item = 0; item < 1; item++) item]; }";
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
+    let program = tree.program(src);
     assert!(errors.is_empty(), "{errors:?}");
-    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+    let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
         panic!("expected function");
     };
-    let Some(FunctionBody::Block(body)) = &function.body else {
+    let Some(FunctionBody::Block(body)) = function.body() else {
         panic!("expected block");
     };
-    let Stmt::LocalVar(statement) = &body.stmts[0] else {
+    let Stmt::LocalVar(statement) = body.stmts().next().unwrap() else {
         panic!("expected local declaration");
     };
-    let Stmt::For(loop_statement) = &body.stmts[1] else {
+    let Stmt::For(loop_statement) = body.stmts().nth(1).unwrap() else {
         panic!("expected statement loop");
     };
-    let Some(ForInit::VarDecl(counter)) = &loop_statement.header.init else {
+    let Some(ForInit::VarDecl(counter)) = loop_statement.header().init() else {
         panic!("expected loop declaration");
     };
-    let Stmt::LocalVar(collection) = &body.stmts[2] else {
+    let Stmt::LocalVar(collection) = body.stmts().nth(2).unwrap() else {
         panic!("expected collection declaration");
     };
-    let Some(Expr::List { elements, .. }) = &collection.declarators[0].initializer else {
+    let Some(Expr::List(list)) = collection.declarators().next().unwrap().initializer() else {
         panic!("expected list");
     };
-    let CollectionElement::For { header, .. } = &elements[0] else {
+    let CollectionElement::For(element) = list.elements().next().unwrap() else {
         panic!("expected collection loop");
     };
-    let Some(ForInit::VarDecl(item)) = &header.init else {
+    let Some(ForInit::VarDecl(item)) = element.header().init() else {
         panic!("expected collection loop declaration");
     };
 
     let mut visitor = Locals::default();
-    visitor.visit_stmt(&body.stmts[0]);
-    visitor.visit_stmt(&body.stmts[1]);
-    visitor.visit_expr(collection.declarators[0].initializer.as_ref().unwrap());
+    visitor.visit_stmt(body.stmts().next().unwrap());
+    visitor.visit_stmt(body.stmts().nth(1).unwrap());
+    visitor.visit_expr(
+        collection
+            .declarators()
+            .next()
+            .unwrap()
+            .initializer()
+            .unwrap(),
+    );
     assert_eq!(
         visitor.declarations,
         [
-            std::ptr::from_ref(statement),
-            std::ptr::from_ref(counter),
-            std::ptr::from_ref(item),
+            statement.syntax().id(),
+            counter.syntax().id(),
+            item.syntax().id(),
         ],
     );
 }
@@ -423,17 +423,14 @@ fn walks_function_typed_param_inner_params() {
 #[test]
 fn adjacent_string_span_covers_full_run() {
     let src = r"var x = 'a\q' 'b\w';";
-    let falcon_dart_parser::parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
     assert!(errors.is_empty(), "parse errors: {errors:?}");
+    let prog = tree.program(src);
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+    let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
         panic!("expected top-level var");
     };
-    let Some(Expr::StringLit(lit)) = &v.declarators[0].initializer else {
+    let Some(Expr::StringLit(lit)) = v.declarators().next().unwrap().initializer() else {
         panic!("expected string literal initializer");
     };
 
@@ -443,14 +440,16 @@ fn adjacent_string_span_covers_full_run() {
     let expected_start = src.find(full_run).unwrap();
     let expected_end = expected_start + full_run.len();
     assert_eq!(
-        lit.span.start, expected_start,
+        lit.span().start,
+        expected_start,
         "span.start must be the first fragment"
     );
     assert_eq!(
-        lit.span.end, expected_end,
+        lit.span().end,
+        expected_end,
         "span.end must be the last fragment"
     );
-    assert_eq!(&src[lit.span.start..lit.span.end], full_run);
+    assert_eq!(&src[lit.span().start..lit.span().end], full_run);
 }
 
 #[derive(Default)]
@@ -460,18 +459,18 @@ struct CountingVisitor {
     field_count: usize,
 }
 
-impl Visitor for CountingVisitor {
-    fn visit_class_decl(&mut self, node: &ClassDecl) {
+impl<'a> Visitor<'a> for CountingVisitor {
+    fn visit_class_decl(&mut self, node: ClassDecl<'a>) {
         self.class_count += 1;
         walk_class_decl(self, node);
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
         self.function_count += 1;
         walk_function_decl(self, node);
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
         self.field_count += 1;
         walk_field_decl(self, node);
     }
@@ -480,15 +479,11 @@ impl Visitor for CountingVisitor {
 #[test]
 fn test_visitor_empty_program() {
     let src = "";
-    let falcon_dart_parser::parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
-    visitor.visit_program(&prog);
+    visitor.visit_program(tree.program(src));
 
     assert_eq!(visitor.class_count, 0);
     assert_eq!(visitor.function_count, 0);
@@ -497,15 +492,11 @@ fn test_visitor_empty_program() {
 #[test]
 fn test_visitor_single_class() {
     let src = "class Foo {}";
-    let falcon_dart_parser::parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
-    visitor.visit_program(&prog);
+    visitor.visit_program(tree.program(src));
 
     assert_eq!(visitor.class_count, 1);
 }
@@ -513,15 +504,11 @@ fn test_visitor_single_class() {
 #[test]
 fn test_visitor_class_with_fields() {
     let src = "class Foo { int x; String y; }";
-    let falcon_dart_parser::parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
-    visitor.visit_program(&prog);
+    visitor.visit_program(tree.program(src));
 
     assert_eq!(visitor.class_count, 1);
     assert_eq!(visitor.field_count, 2);
@@ -530,15 +517,11 @@ fn test_visitor_class_with_fields() {
 #[test]
 fn test_visitor_multiple_declarations() {
     let src = "class Foo {} void bar() {} class Baz {}";
-    let falcon_dart_parser::parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(src);
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
-    visitor.visit_program(&prog);
+    visitor.visit_program(tree.program(src));
 
     assert_eq!(visitor.class_count, 2);
     assert_eq!(visitor.function_count, 1);
@@ -546,10 +529,7 @@ fn test_visitor_multiple_declarations() {
 
 #[test]
 fn program_callbacks_preserve_traversal_order_and_coverage() {
-    let falcon_dart_parser::parser::ParseResult {
-        program, errors, ..
-    } = parse(
-        "@tag(1 + 2) int top = 3; \
+    let src = "@tag(1 + 2) int top = 3; \
      class C { \
        int field = 4; \
        C([int value = 5]) : field = 6; \
@@ -558,25 +538,24 @@ fn program_callbacks_preserve_traversal_order_and_coverage() {
          return [for (var j = 12; j < 13; j += 14) 15, \
                  for (final x in [16]) 17]; \
        } \
-     }",
-    );
+     }";
+    let falcon_dart_parser::parser::ParseResult { tree, errors, .. } = parse(src);
+    let program = tree.program(src);
     assert!(errors.is_empty(), "{errors:?}");
 
     struct Expressions(Vec<String>);
-    impl Visitor for Expressions {
-        fn visit_expr(&mut self, expr: &Expr) {
+    impl<'a> Visitor<'a> for Expressions {
+        fn visit_expr(&mut self, expr: Expr<'a>) {
             match expr {
-                Expr::Binary {
-                    op: BinaryOp::Add, ..
-                } => self.0.push("+".to_owned()),
-                Expr::IntLit { value, .. } => self.0.push(value.clone()),
+                Expr::Binary(binary) if binary.op() == BinaryOp::Add => self.0.push("+".to_owned()),
+                Expr::IntLit(value) => self.0.push(value.value().to_owned()),
                 _ => {}
             }
             walk_expr(self, expr);
         }
     }
     let mut expressions = Expressions(Vec::new());
-    expressions.visit_program(&program);
+    expressions.visit_program(program);
     assert_eq!(
         expressions.0,
         [
@@ -586,7 +565,7 @@ fn program_callbacks_preserve_traversal_order_and_coverage() {
     );
 
     let mut statements = Vec::new();
-    for_each_stmt_in_program(&program, |stmt| {
+    for_each_stmt_in_program(program, |stmt| {
         statements.push(match stmt {
             Stmt::For(_) => "for",
             Stmt::Block(_) => "block",
@@ -614,41 +593,54 @@ fn source_name_observation_preserves_semantic_identifier_boundary() {
         source: Vec<String>,
     }
 
-    impl Visitor for Names {
-        fn visit_identifier(&mut self, node: &Identifier) {
-            self.semantic.push(node.name.clone());
+    impl<'a> Visitor<'a> for Names {
+        fn visit_identifier(&mut self, node: Identifier<'a>) {
+            self.semantic.push(node.name().to_owned());
         }
 
-        fn visit_name(&mut self, node: &Identifier) {
-            self.source.push(node.name.clone());
+        fn visit_name(&mut self, node: Identifier<'a>) {
+            self.source.push(node.name().to_owned());
         }
     }
 
-    let result = parse("void f() { target.field; }");
+    let src = "void f() { target.field; }";
+    let result = parse(src);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let mut names = Names::default();
-    names.visit_program(&result.program);
+    names.visit_program(result.tree.program(src));
     assert_eq!(names.semantic, ["f", "target"]);
     assert_eq!(names.source, ["field"]);
 }
 
 #[test]
 fn non_expression_strings_walk_interpolations_once() {
-    let parsed = parse("var text = '${90061}';");
+    let src = "var text = '${90061}';";
+    let parsed = parse(src);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let TopLevelDecl::Variable(variable) = &parsed.program.declarations[0] else {
+    let TopLevelDecl::Variable(variable) = parsed.tree.program(src).declarations().next().unwrap()
+    else {
         panic!("expected variable");
     };
-    let Some(Expr::StringLit(literal)) = &variable.declarators[0].initializer else {
+    let Some(Expr::StringLit(literal)) = variable.declarators().next().unwrap().initializer()
+    else {
         panic!("expected interpolated string");
     };
 
     let mut pattern = Recorder::default();
-    pattern.visit_literal_pattern_value(&LiteralPatternValue::String(literal.clone()));
+    pattern.visit_literal_pattern_value(LiteralPatternValue::String(literal));
     assert!(pattern.has_int("90061"));
 
+    let src = "void f() native '${90061}';";
+    let parsed = parse(src);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let TopLevelDecl::Function(function) = parsed.tree.program(src).declarations().next().unwrap()
+    else {
+        panic!("expected function");
+    };
+    let body = function.body().expect("expected native body");
+    assert!(matches!(body, FunctionBody::Native(_)));
     let mut native = Recorder::default();
-    native.visit_function_body(&FunctionBody::Native(Some(literal.clone()), literal.span));
+    native.visit_function_body(body);
     assert!(native.has_int("90061"));
 }
 
@@ -660,29 +652,28 @@ fn shorthand_pattern_labels_are_not_duplicate_source_names() {
         labels: usize,
     }
 
-    impl Visitor for Names {
-        fn visit_identifier(&mut self, node: &Identifier) {
-            if matches!(node.name.as_str(), "first" | "second") {
+    impl<'a> Visitor<'a> for Names {
+        fn visit_identifier(&mut self, node: Identifier<'a>) {
+            if matches!(node.name(), "first" | "second") {
                 self.bindings += 1;
             }
         }
 
-        fn visit_name(&mut self, node: &Identifier) {
-            if matches!(node.name.as_str(), "first" | "second") {
+        fn visit_name(&mut self, node: Identifier<'a>) {
+            if matches!(node.name(), "first" | "second") {
                 self.labels += 1;
             }
         }
     }
 
-    let parsed = parse(
-        "void f(Object value) { \
+    let src = "void f(Object value) { \
          if (value case (:var first)) {} \
          if (value case C(:var second)) {} \
-         }",
-    );
+         }";
+    let parsed = parse(src);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut names = Names::default();
-    names.visit_program(&parsed.program);
+    names.visit_program(parsed.tree.program(src));
     assert_eq!(names.bindings, 2);
     assert_eq!(names.labels, 0);
 }

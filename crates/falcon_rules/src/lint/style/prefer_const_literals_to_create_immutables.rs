@@ -26,8 +26,7 @@
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -38,7 +37,7 @@ pub struct PreferConstLiteralsToCreateImmutables;
 impl Rule for PreferConstLiteralsToCreateImmutables {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -57,13 +56,14 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if matches!(node, Expr::New { is_const: true, .. }) || self.contexts.contains(node.span()) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if matches!(node, Expr::New(new) if new.is_const()) || self.contexts.contains(&node.span())
+        {
             return;
         }
         let Some((identity, _, args)) =
@@ -75,15 +75,14 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         }
         let arguments = args
-            .positional
-            .iter()
-            .chain(args.named.iter().map(|argument| &argument.value));
+            .positional()
+            .chain(args.named().map(|argument| argument.value()));
         for literal in arguments.flat_map(collection_literals) {
             if constant_in_context(literal, &self.deferred, state) {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-const-literals-to-create-immutables",
                     "Use 'const' literals as arguments to constructors of '@immutable' classes.",
-                    *literal.unparenthesized().span(),
+                    literal.unparenthesized().span(),
                 ));
             }
         }
@@ -118,46 +117,37 @@ fn is_immutable(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bo
 
 /// Non-const collection literals reachable from an argument through
 /// collection-literal elements and map entries only, outermost first.
-fn collection_literals(argument: &Expr) -> Vec<&Expr> {
+fn collection_literals(argument: Expr<'_>) -> Vec<Expr<'_>> {
     let mut literals = Vec::new();
     if !matches!(
         argument.unparenthesized(),
-        Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. }
+        Expr::List(_) | Expr::Set(_) | Expr::Map(_)
     ) {
         return literals;
     }
     let mut pending = vec![argument];
     while let Some(expression) = pending.pop() {
         match expression.unparenthesized() {
-            Expr::List {
-                is_const: false,
-                elements,
-                ..
-            }
-            | Expr::Set {
-                is_const: false,
-                elements,
-                ..
-            } => {
+            Expr::List(list) if !list.is_const() => {
                 literals.push(expression);
-                pending.extend(elements.iter().filter_map(|element| match element {
+                pending.extend(list.elements().filter_map(|element| match element {
                     CollectionElement::Expr(element) => Some(element),
-                    CollectionElement::NullAware { .. }
-                    | CollectionElement::Spread { .. }
-                    | CollectionElement::If { .. }
-                    | CollectionElement::For { .. } => None,
+                    _ => None,
                 }));
             }
-            Expr::Map {
-                is_const: false,
-                elements,
-                ..
-            } => {
+            Expr::Set(set) if !set.is_const() => {
                 literals.push(expression);
-                for element in elements {
+                pending.extend(set.elements().filter_map(|element| match element {
+                    CollectionElement::Expr(element) => Some(element),
+                    _ => None,
+                }));
+            }
+            Expr::Map(map) if !map.is_const() => {
+                literals.push(expression);
+                for element in map.elements() {
                     if let MapElement::Entry(entry) = element {
-                        pending.push(&entry.key);
-                        pending.push(&entry.value);
+                        pending.push(entry.key());
+                        pending.push(entry.value());
                     }
                 }
             }

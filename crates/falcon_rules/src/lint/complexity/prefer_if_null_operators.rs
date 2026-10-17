@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferIfNullOperators;
@@ -18,7 +18,7 @@ pub struct PreferIfNullOperators;
 impl Rule for PreferIfNullOperators {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -37,24 +37,19 @@ struct Collector<'s> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            span,
-        } = node
-            && let Some((operand, is_eq)) = null_check(condition)
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Conditional(conditional) = node
+            && let Some((operand, is_eq)) = null_check(conditional.condition())
         {
             // `x == null ? y : x` keeps `x` in the else branch;
             // `x != null ? x : y` keeps `x` in the then branch.
-            let fallthrough = if is_eq { else_expr } else { then_expr };
+            let fallthrough = if is_eq { conditional.else_expr() } else { conditional.then_expr() };
             if equivalent(operand, fallthrough, self.ctx) {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-if-null-operators",
                     "Prefer using the if-null operator '??'.",
-                    *span,
+                    conditional.span(),
                 ));
             }
         }

@@ -14,8 +14,7 @@
 use falcon_analyze::resolve::TypeKind;
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -25,7 +24,7 @@ pub struct CollectionMethodsUnrelatedType;
 impl Rule for CollectionMethodsUnrelatedType {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -53,13 +52,13 @@ const METHODS: &[(&str, &str, &str, usize)] = &[
     ("remove", "dart:core", "Set", 0),
 ];
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn check(
         &mut self,
-        argument: &Expr,
+        argument: Expr<'a>,
         expected: &ResolvedType,
         context: Option<&ResolvedType>,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         let actual = state.infer_with_context(argument, context);
         if state
@@ -72,7 +71,7 @@ impl Collector<'_> {
         self.diagnostics.push(self.ctx.diagnostic(
             "collection-methods-unrelated-type",
             "The argument type is unrelated to this collection's element type.",
-            *argument.span(),
+            argument.span(),
         ));
     }
 
@@ -98,11 +97,13 @@ impl Collector<'_> {
         &mut self,
         receiver: &ResolvedType,
         method: &str,
-        args: &ArgList,
-        state: &SemanticState<'_>,
+        args: ArgList<'a>,
+        state: &SemanticState<'a>,
     ) {
-        if let [argument] = args.positional.as_slice()
-            && args.named.is_empty()
+        let mut positional = args.positional();
+        if let Some(argument) = positional.next()
+            && positional.next().is_none()
+            && args.named().is_empty()
             && let Some(expected) = self.expected_argument(receiver, method, state)
         {
             let context = self.argument_context(receiver, method, state);
@@ -126,7 +127,7 @@ impl Collector<'_> {
             .map(|parameter| state.model.substitute(parameter, &substitutions))
     }
 
-    fn check_index(&mut self, receiver: &ResolvedType, index: &Expr, state: &SemanticState<'_>) {
+    fn check_index(&mut self, receiver: &ResolvedType, index: Expr<'a>, state: &SemanticState<'a>) {
         if let Some(map) =
             state
                 .signatures
@@ -139,16 +140,21 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
-            Expr::Call { callee, args, .. } => match callee.unparenthesized() {
-                Expr::Field { object, field, .. } => {
-                    self.check_call(&receiver_type(object, state), &field.name, args, state);
+            Expr::Call(call) => match call.callee().unparenthesized() {
+                Expr::Field(field) => {
+                    self.check_call(
+                        &receiver_type(field.object(), state),
+                        field.field().name(),
+                        call.args(),
+                        state,
+                    );
                 }
                 // The linter finds an implicit receiver only in classes,
                 // mixins, enums, and extensions, not extension types.
@@ -157,28 +163,27 @@ impl SemanticRuleVisitor for Collector<'_> {
                         &state.enclosing_type
                         && state.signatures.type_kind(identity) != Some(TypeKind::ExtensionType)
                     {
-                        self.check_call(enclosing, &identifier.name, args, state);
+                        self.check_call(enclosing, identifier.name(), call.args(), state);
                     }
                 }
                 _ => {}
             },
-            Expr::Index { object, index, .. } => {
-                self.check_index(&receiver_type(object, state), index, state);
+            Expr::Index(index) => {
+                self.check_index(&receiver_type(index.object(), state), index.index(), state);
             }
             // Only a section's first selector has the cascade target as receiver.
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                let receiver = state.infer(object);
-                for section in sections {
-                    match section.ops.first() {
-                        Some(CascadeOp::Call(method, _, args)) => {
-                            self.check_call(&receiver, &method.name, args, state);
+            Expr::Cascade(cascade) => {
+                let receiver = state.infer(cascade.object());
+                for section in cascade.sections() {
+                    match section.ops().next() {
+                        Some(CascadeOp::Call(call)) => {
+                            self.check_call(&receiver, call.name().name(), call.args(), state);
                         }
-                        Some(
-                            CascadeOp::Index { index, .. } | CascadeOp::IndexAssign(index, _, _),
-                        ) => {
-                            self.check_index(&receiver, index, state);
+                        Some(CascadeOp::Index(index)) => {
+                            self.check_index(&receiver, index.index(), state);
+                        }
+                        Some(CascadeOp::IndexAssign(assign)) => {
+                            self.check_index(&receiver, assign.target(), state);
                         }
                         _ => {}
                     }
@@ -190,9 +195,9 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 /// The static type of an explicit receiver: `super` has the enclosing type.
-fn receiver_type(object: &Expr, state: &SemanticState<'_>) -> ResolvedType {
+fn receiver_type<'a>(object: Expr<'a>, state: &SemanticState<'a>) -> ResolvedType {
     match object.unparenthesized() {
-        Expr::Super { .. } => state
+        Expr::Super(_) => state
             .enclosing_type
             .clone()
             .unwrap_or(ResolvedType::Unknown),

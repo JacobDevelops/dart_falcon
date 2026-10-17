@@ -30,6 +30,54 @@ pub fn lex_syntax(source: &str) -> SyntaxStore {
     }
 }
 
+/// Lex source into a lossless syntax tree without parsing declarations.
+///
+/// # Panics
+///
+/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+pub fn lex_tree(source: &str) -> falcon_syntax::cst::SyntaxTree {
+    use falcon_syntax::cst::{Event, NodeKind, SyntaxTree};
+
+    let syntax = lex_syntax(source);
+    let mut regions = Vec::new();
+    let tokens = cst_tokens_with_regions(&syntax, source, |span| regions.push(span));
+    if regions.is_empty() {
+        return SyntaxTree::build(source, &tokens, Vec::new());
+    }
+    regions.sort_unstable_by_key(|span| span.start);
+    let mut events = Vec::with_capacity(tokens.len() + 2 * (regions.len() + 1));
+    events.push(Event::Start {
+        kind: NodeKind::Program,
+        forward_parent: None,
+        offset: 0,
+    });
+    let mut interpolation_ends = Vec::with_capacity(regions.len());
+    let mut regions = regions.into_iter();
+    for token in &tokens {
+        if token.kind == TokenKind::InterpolationStart {
+            interpolation_ends.push(regions.next().expect("interpolation region").end);
+            events.push(Event::Start {
+                kind: NodeKind::StringInterpolation,
+                forward_parent: None,
+                offset: token.offset(),
+            });
+        }
+        if !token.is_trivia() && token.kind != TokenKind::Eof {
+            events.push(Event::Token {
+                kind: token.kind,
+                offset: token.offset(),
+                len: token.len(),
+            });
+        }
+        if token.kind == TokenKind::RBrace && interpolation_ends.last() == Some(&token.offset()) {
+            interpolation_ends.pop();
+            events.push(Event::Finish);
+        }
+    }
+    events.push(Event::Finish);
+    SyntaxTree::build(source, &tokens, events)
+}
+
 struct LexedRegion {
     span: Span,
     tokens: Vec<Token>,
@@ -141,6 +189,14 @@ fn is_interp_ident_continue(c: u8) -> bool {
 }
 
 pub(super) fn cst_tokens(syntax: &SyntaxStore, source: &str) -> Vec<Token> {
+    cst_tokens_with_regions(syntax, source, |_| {})
+}
+
+fn cst_tokens_with_regions(
+    syntax: &SyntaxStore,
+    source: &str,
+    mut visit: impl FnMut(Span),
+) -> Vec<Token> {
     let mut output = Vec::with_capacity(syntax.tokens().len());
     let mut roots = syntax.tokens().iter().copied();
     let mut pending = Vec::new();
@@ -156,7 +212,10 @@ pub(super) fn cst_tokens(syntax: &SyntaxStore, source: &str) -> Vec<Token> {
         let mut cursor = token.offset();
         visit_interpolations(token.text(source), token.offset(), |region| {
             let (span, prefix, prefix_len) = match region {
-                InterpolationRegion::Expression(span) => (span, TokenKind::InterpolationStart, 2),
+                InterpolationRegion::Expression(span) => {
+                    visit(span);
+                    (span, TokenKind::InterpolationStart, 2)
+                }
                 InterpolationRegion::Identifier(span) => (span, TokenKind::InterpolationDollar, 1),
             };
             let start = span.start - prefix_len;

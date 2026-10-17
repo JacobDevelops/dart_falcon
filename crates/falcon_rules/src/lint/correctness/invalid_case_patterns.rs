@@ -16,7 +16,7 @@
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::flutter::scoped_constructor_invocation;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -27,7 +27,7 @@ pub struct InvalidCasePatterns;
 impl Rule for InvalidCasePatterns {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if ctx.language_version().supports(Feature::Patterns) {
@@ -46,23 +46,24 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         if let Stmt::Switch(switch) = node {
-            for case in &switch.cases {
-                for kind in &case.cases {
+            for case in switch.cases() {
+                for kind in case.cases() {
                     match kind {
-                        SwitchCaseKind::Pattern(_, _) | SwitchCaseKind::Default => {}
-                        SwitchCaseKind::Expr(expression) => {
+                        SwitchCaseKind::Pattern(_) | SwitchCaseKind::Default(_) => {}
+                        SwitchCaseKind::Expr(label) => {
+                            let expression = label.expr();
                             if invalid_expression(expression, state) {
                                 self.diags.push(self.ctx.diagnostic(
                                     "invalid-case-patterns",
                                     "This expression is not valid in a 'case' clause in Dart 3.0.",
-                                    *expression.span(),
+                                    expression.span(),
                                 ));
                             }
                         }
@@ -74,35 +75,39 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 /// The analyzer's verdict on a Dart 2 case expression.
-fn invalid_expression(expression: &Expr, state: &SemanticState<'_>) -> bool {
+fn invalid_expression<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> bool {
     match expression.unparenthesized() {
-        Expr::List { is_const, .. } | Expr::Set { is_const, .. } | Expr::Map { is_const, .. } => {
-            !is_const
-        }
-        Expr::Unary { operand, .. } => !matches!(operand.unparenthesized(), Expr::IntLit { .. }),
-        Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Is { .. } => true,
-        Expr::Call { callee, .. } => {
+        Expr::List(node) => !node.is_const(),
+        Expr::Set(node) => !node.is_const(),
+        Expr::Map(node) => !node.is_const(),
+        Expr::Unary(node) => !matches!(node.operand().unparenthesized(), Expr::IntLit(_)),
+        Expr::Binary(_) | Expr::Conditional(_) | Expr::Is(_) => true,
+        Expr::Call(node) => {
             if scoped_constructor_invocation(expression, state).is_some() {
                 return true;
             }
-            let (first, name) = match callee.unparenthesized() {
-                Expr::Ident(name) => (name, QualifiedName::from(name.name.as_str())),
-                Expr::Field { object, field, .. } => {
-                    let Expr::Ident(prefix) = object.unparenthesized() else {
+            let (first, name) = match node.callee().unparenthesized() {
+                Expr::Ident(name) => (name, QualifiedName::from(name.name())),
+                Expr::Field(field) => {
+                    let Expr::Ident(prefix) = field.object().unparenthesized() else {
                         return false;
                     };
-                    (prefix, QualifiedName::prefixed(&prefix.name, &field.name))
+                    (
+                        prefix,
+                        QualifiedName::prefixed(prefix.name(), field.field().name()),
+                    )
                 }
                 _ => return false,
             };
-            !state.environment.is_bound(&first.name)
+            !state.environment.is_bound(first.name())
                 && state.model.resolve_sdk_member(name)
                     == Some(DeclarationIdentity::sdk("dart:core", "identical"))
         }
-        Expr::Field { object, field, .. } => {
-            field.name == "length" && !matches!(object.unparenthesized(), Expr::Ident(_))
+        Expr::Field(node) => {
+            node.field().name() == "length"
+                && !matches!(node.object().unparenthesized(), Expr::Ident(_))
         }
-        Expr::Ident(name) => name.name == "_",
+        Expr::Ident(name) => name.name() == "_",
         _ => false,
     }
 }

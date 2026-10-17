@@ -5,7 +5,9 @@
 use falcon_analyze::{
     DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex,
 };
-use falcon_syntax::ast::{ClassMember, DartType, Identifier, PrimaryConstructor, TopLevelDecl};
+use falcon_syntax::cst::{
+    AstChildren, ClassMember, DartType, Identifier, PrimaryConstructor, TopLevelDecl,
+};
 
 /// Where a declaration's inherited concrete members come from.
 pub(crate) enum InheritanceSource<'a> {
@@ -13,46 +15,46 @@ pub(crate) enum InheritanceSource<'a> {
     /// applications.
     Superclasses,
     /// Mixins: the interfaces of their `on` types (`Object` without one).
-    SuperclassConstraints(&'a [DartType]),
+    SuperclassConstraints(AstChildren<'a, DartType<'a>>),
 }
 
 /// A declaration whose instance members can override inherited ones.
 pub(crate) struct InheritingDeclaration<'a> {
-    pub name: &'a Identifier,
-    pub members: &'a [ClassMember],
+    pub name: Identifier<'a>,
+    pub members: AstChildren<'a, ClassMember<'a>>,
     /// The header's primary constructor, whose declaring parameters are
     /// instance fields alongside `members`.
-    pub primary_constructor: Option<&'a PrimaryConstructor>,
+    pub primary_constructor: Option<PrimaryConstructor<'a>>,
     pub source: InheritanceSource<'a>,
 }
 
-pub(crate) fn inheriting_declaration(
-    declaration: &TopLevelDecl,
-) -> Option<InheritingDeclaration<'_>> {
+pub(crate) fn inheriting_declaration<'a>(
+    declaration: TopLevelDecl<'a>,
+) -> Option<InheritingDeclaration<'a>> {
     let (name, members, primary_constructor, source) = match declaration {
         TopLevelDecl::Class(node) => (
-            &node.name,
-            &node.members,
-            node.primary_constructor.as_ref(),
+            node.name(),
+            node.members(),
+            node.primary_constructor(),
             InheritanceSource::Superclasses,
         ),
         TopLevelDecl::MixinClass(node) => (
-            &node.name,
-            &node.members,
-            node.primary_constructor.as_ref(),
+            node.name(),
+            node.members(),
+            node.primary_constructor(),
             InheritanceSource::Superclasses,
         ),
         TopLevelDecl::Enum(node) => (
-            &node.name,
-            &node.members,
-            node.primary_constructor.as_ref(),
+            node.name(),
+            node.members(),
+            node.primary_constructor(),
             InheritanceSource::Superclasses,
         ),
         TopLevelDecl::Mixin(node) => (
-            &node.name,
-            &node.members,
+            node.name(),
+            node.members(),
             None,
-            InheritanceSource::SuperclassConstraints(&node.on_clause),
+            InheritanceSource::SuperclassConstraints(node.on_clause()),
         ),
         TopLevelDecl::ExtensionType(_)
         | TopLevelDecl::ClassTypeAlias(_)
@@ -89,11 +91,11 @@ pub(crate) fn inherited_concrete_member<'a>(
     };
     match source {
         InheritanceSource::Superclasses => signatures.inherited_concrete_member(owner, name)?,
-        InheritanceSource::SuperclassConstraints([]) => {
+        InheritanceSource::SuperclassConstraints(constraints) if constraints.is_empty() => {
             interface_member(&model.core_type("Object", false))
         }
         InheritanceSource::SuperclassConstraints(constraints) => constraints
-            .iter()
+            .clone()
             .find_map(|constraint| interface_member(&model.resolve_type(constraint))),
     }
 }

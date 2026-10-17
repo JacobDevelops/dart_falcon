@@ -28,7 +28,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseEnums;
@@ -36,12 +36,11 @@ pub struct UseEnums;
 impl Rule for UseEnums {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let candidates: Vec<_> = program
-            .declarations
-            .iter()
+            .declarations()
             .filter_map(|decl| {
                 if let TopLevelDecl::Class(class) = decl {
                     enum_candidate(class)
@@ -71,37 +70,37 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.candidates.into_iter().filter(|candidate| !candidate.found).map(|candidate| {
             self.ctx.diagnostic("use-enums", "Class should be an enum.", candidate.span)
         }).collect()
     }
 
-    fn visit_library_directive(&mut self, _node: &LibraryDirective) -> StructuralTraversal {
+    fn visit_library_directive(&mut self, _node: LibraryDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_part_of_directive(&mut self, _node: &PartOfDirective) -> StructuralTraversal {
+    fn visit_part_of_directive(&mut self, _node: PartOfDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_part_directive(&mut self, _node: &PartDirective) -> StructuralTraversal {
+    fn visit_part_directive(&mut self, _node: PartDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_import(&mut self, _node: &ImportDirective) -> StructuralTraversal {
+    fn visit_import(&mut self, _node: ImportDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_export(&mut self, _node: &ExportDirective) -> StructuralTraversal {
+    fn visit_export(&mut self, _node: ExportDirective<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         for candidate in &mut self.candidates {
             if !candidate.found
-                && !matches!(decl, TopLevelDecl::Class(class) if class.name.span == candidate.span)
+                && !matches!(decl, TopLevelDecl::Class(class) if class.name().span() == candidate.span)
                 && inherits_from(decl, candidate.name)
             {
                 candidate.found = true;
@@ -110,15 +109,15 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if !matches!(node, Expr::Paren { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if !matches!(node, Expr::Paren(_)) {
             for candidate in &mut self.candidates {
                 if candidate.found {
                     continue;
                 }
                 let invoked = creation(node, candidate.name).or(match node {
-                    Expr::Call { callee, .. } => match callee.unparenthesized() {
-                        Expr::DotShorthand { name, .. } => Some(name.name.as_str()),
+                    Expr::Call(call) => match call.callee().unparenthesized() {
+                        Expr::DotShorthand(dot) => Some(dot.name().name()),
                         _ => None,
                     },
                     _ => None,
@@ -135,62 +134,52 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
 }
 }
 
-fn enum_candidate(class: &ClassDecl) -> Option<Candidate<'_>> {
-    if class.modifiers.is_abstract
-        || class.modifiers.restriction == Some(ClassRestriction::Sealed)
-        || class.extends.as_ref().is_some_and(|ty| !is_object(ty))
+fn enum_candidate(class: ClassDecl<'_>) -> Option<Candidate<'_>> {
+    if class.modifiers().is_abstract
+        || class.modifiers().restriction == Some(ClassRestriction::Sealed)
+        || class.extends().is_some_and(|ty| !is_object(ty))
     {
         return None;
     }
-    let public = !class.name.name.starts_with('_');
+    let public = !class.name().name().starts_with('_');
     let mut generative: Vec<&str> = Vec::new();
-    if let Some(primary) = &class.primary_constructor {
-        let name = primary
-            .constructor_name
-            .as_ref()
-            .map_or("new", |name| name.name.as_str());
-        if !primary.is_const
+    if let Some(primary) = class.primary_constructor() {
+        let name = primary.constructor_name().map_or("new", |name| name.name());
+        if !primary.is_const()
             || (public && !name.starts_with('_'))
             || primary
-                .params
-                .params
-                .iter()
-                .any(|param| is_reserved(&param.name.name))
+                .params()
+                .params()
+                .any(|param| is_reserved(param.name().name()))
         {
             return None;
         }
         generative.push(name);
     }
-    for member in &class.members {
+    for member in class.members() {
         match member {
-            ClassMember::Operator(op) if op.op == "==" => return None,
+            ClassMember::Operator(op) if op.op() == "==" => return None,
             ClassMember::Field(field)
                 if field
-                    .declarators
-                    .iter()
-                    .any(|declarator| is_reserved(&declarator.name.name)) =>
+                    .declarators()
+                    .any(|declarator| is_reserved(declarator.name().name())) =>
             {
                 return None;
             }
-            ClassMember::Method(MethodDecl { name, .. })
-            | ClassMember::Getter(GetterDecl { name, .. })
-            | ClassMember::Setter(SetterDecl { name, .. })
-                if is_reserved(&name.name) =>
-            {
-                return None;
-            }
+            ClassMember::Method(method) if is_reserved(method.name().name()) => return None,
+            ClassMember::Getter(getter) if is_reserved(getter.name().name()) => return None,
+            ClassMember::Setter(setter) if is_reserved(setter.name().name()) => return None,
             ClassMember::Constructor(constructor) => {
-                if !constructor.is_factory && !constructor.is_const {
+                if !constructor.is_factory() && !constructor.is_const() {
                     return None;
                 }
                 let private = constructor
-                    .constructor_name
-                    .as_ref()
-                    .is_some_and(|name| name.name.starts_with('_'));
+                    .constructor_name()
+                    .is_some_and(|name| name.name().starts_with('_'));
                 if public && !private {
                     return None;
                 }
-                if !constructor.is_factory {
+                if !constructor.is_factory() {
                     generative.push(constructor_name(constructor));
                 }
             }
@@ -198,23 +187,17 @@ fn enum_candidate(class: &ClassDecl) -> Option<Candidate<'_>> {
         }
     }
 
-    let name = class.name.name.as_str();
+    let name = class.name().name();
     let mut candidates = Vec::new();
-    for member in &class.members {
+    for member in class.members() {
         let ClassMember::Field(field) = member else {
             continue;
         };
-        if !field.is_static || field.keyword != VarKeyword::Const {
+        if !field.is_static() || field.keyword() != VarKeyword::Const {
             continue;
         }
-        for initializer in field
-            .declarators
-            .iter()
-            .filter_map(|d| d.initializer.as_ref())
-        {
-            let is_candidate =
-                creation(initializer, name).is_some_and(|invoked| generative.contains(&invoked));
-            if is_candidate {
+        for initializer in field.declarators().filter_map(|d| d.initializer()) {
+            if creation(initializer, name).is_some_and(|invoked| generative.contains(&invoked)) {
                 candidates.push(initializer.span().start);
             }
         }
@@ -222,10 +205,9 @@ fn enum_candidate(class: &ClassDecl) -> Option<Candidate<'_>> {
     if candidates.len() < 2 {
         return None;
     }
-
     Some(Candidate {
         name,
-        span: class.name.span,
+        span: class.name().span(),
         generative,
         allowed: candidates,
         found: false,
@@ -237,67 +219,75 @@ fn is_reserved(name: &str) -> bool {
     matches!(name, "hashCode" | "index" | "values")
 }
 
-fn is_object(ty: &DartType) -> bool {
+fn is_object(ty: DartType<'_>) -> bool {
     matches!(ty, DartType::Named(named)
-        if named.type_args.is_empty()
-            && matches!(named.segments.as_slice(), [segment] if segment.name == "Object"))
+    if named.type_args().is_empty() && {
+        let mut segments = named.segments();
+        matches!((segments.next(), segments.next()), (Some(segment), None) if segment.name() == "Object")
+    })
 }
 
-fn constructor_name(constructor: &ConstructorDecl) -> &str {
+fn constructor_name(constructor: ConstructorDecl<'_>) -> &str {
     constructor
-        .constructor_name
-        .as_ref()
-        .map_or("new", |name| name.name.as_str())
+        .constructor_name()
+        .map_or("new", |name| name.name())
 }
 
-fn names_class(ty: &DartType, name: &str) -> bool {
-    matches!(ty, DartType::Named(named)
-        if matches!(named.segments.as_slice(), [segment] if segment.name == name))
+fn names_class(ty: DartType<'_>, name: &str) -> bool {
+    matches!(ty, DartType::Named(named) if {
+        let mut segments = named.segments();
+        matches!((segments.next(), segments.next()), (Some(segment), None) if segment.name() == name)
+    })
 }
 
 /// Another class in the file that extends, implements, or mixes in `name`.
-fn inherits_from(decl: &TopLevelDecl, name: &str) -> bool {
+fn inherits_from(decl: TopLevelDecl<'_>, name: &str) -> bool {
     let (extends, with_clause, implements) = match decl {
-        TopLevelDecl::Class(node) => (&node.extends, &node.with_clause, &node.implements),
-        TopLevelDecl::MixinClass(node) => (&node.extends, &node.with_clause, &node.implements),
+        TopLevelDecl::Class(node) => (node.extends(), node.with_clause(), node.implements()),
+        TopLevelDecl::MixinClass(node) => (node.extends(), node.with_clause(), node.implements()),
         _ => return false,
     };
     extends
-        .iter()
+        .into_iter()
         .chain(with_clause)
         .chain(implements)
         .any(|ty| names_class(ty, name))
 }
 
 /// The constructor a creation expression of class `name` invokes.
-fn creation<'a>(expr: &'a Expr, name: &str) -> Option<&'a str> {
+fn creation<'a>(expr: Expr<'a>, name: &str) -> Option<&'a str> {
     match expr.unparenthesized() {
-        Expr::New {
-            dart_type: DartType::Named(named),
-            constructor_name,
-            ..
-        } => match (named.segments.as_slice(), constructor_name) {
-            ([class], ctor) if class.name == name => {
-                Some(ctor.as_ref().map_or("new", |ctor| ctor.name.as_str()))
+        Expr::New(new) => {
+            let DartType::Named(named) = new.dart_type() else {
+                return None;
+            };
+            let mut segments = named.segments();
+            match (
+                segments.next(),
+                segments.next(),
+                segments.next(),
+                new.constructor_name(),
+            ) {
+                (Some(class), None, None, ctor) if class.name() == name => {
+                    Some(ctor.map_or("new", |ctor| ctor.name()))
+                }
+                // `const C.named()` parses `C.named` as a qualified type name.
+                (Some(class), Some(ctor), None, None) if class.name() == name => Some(ctor.name()),
+                _ => None,
             }
-            // `const C.named()` parses `C.named` as a qualified type name.
-            ([class, ctor], None) if class.name == name => Some(ctor.name.as_str()),
-            _ => None,
-        },
-        Expr::Call { callee, .. } => {
+        }
+        Expr::Call(call) => {
             // `C<int>(...)` and `C<int>.named(...)` name the class through a
             // generic instantiation.
-            let names_class = |expr: &Expr| match expr.unparenthesized() {
-                Expr::GenericInstantiation { target, .. } => {
-                    matches!(target.unparenthesized(), Expr::Ident(identifier) if identifier.name == name)
+            let names_class = |expr: Expr<'a>| match expr.unparenthesized() {
+                Expr::GenericInstantiation(generic) => {
+                    matches!(generic.target().unparenthesized(), Expr::Ident(identifier) if identifier.name() == name)
                 }
-                Expr::Ident(identifier) => identifier.name == name,
+                Expr::Ident(identifier) => identifier.name() == name,
                 _ => false,
             };
-            match callee.unparenthesized() {
-                Expr::Field { object, field, .. } if names_class(object) => {
-                    Some(field.name.as_str())
-                }
+            match call.callee().unparenthesized() {
+                Expr::Field(field) if names_class(field.object()) => Some(field.field().name()),
                 callee if names_class(callee) => Some("new"),
                 _ => None,
             }

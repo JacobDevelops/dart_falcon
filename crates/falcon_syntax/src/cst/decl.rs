@@ -1281,12 +1281,14 @@ impl<'a> EffectiveMembers<'a> {
             .filter(move |p| representation || p.is_var() || p.is_final())
     }
     pub fn constructors(&self) -> impl Iterator<Item = ConstructorRef<'a>> {
-        let body = self.declared.clone().find_map(|m| {
-            if let ClassMember::PrimaryConstructorBody(body) = m {
-                Some(body)
-            } else {
-                None
-            }
+        let body = self.primary.and_then(|_| {
+            self.declared.clone().find_map(|m| {
+                if let ClassMember::PrimaryConstructorBody(body) = m {
+                    Some(body)
+                } else {
+                    None
+                }
+            })
         });
         self.declared
             .clone()

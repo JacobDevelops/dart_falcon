@@ -9,8 +9,8 @@ use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::{BinaryOp, Expr, Span};
+use falcon_syntax::cst::Program;
+use falcon_syntax::cst::{BinaryOp, Expr, Span};
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -20,7 +20,7 @@ pub struct ImplicitCallTearoffs;
 impl Rule for ImplicitCallTearoffs {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -38,39 +38,30 @@ struct Collector<'a> {
     coerced: HashSet<Span>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let inside_coerced = self.coerced.contains(node.span());
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'_>) {
+        let inside_coerced = self.coerced.contains(&node.span());
         if !inside_coerced && !state.implicit_call_tearoff(node) {
             return;
         }
         match node {
-            Expr::Conditional {
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                self.coerced.insert(*then_expr.span());
-                self.coerced.insert(*else_expr.span());
+            Expr::Conditional(expr) => {
+                self.coerced.insert(expr.then_expr().span());
+                self.coerced.insert(expr.else_expr().span());
             }
-            Expr::Binary {
-                op: BinaryOp::NullCoalesce,
-                left,
-                right,
-                ..
-            } => {
-                self.coerced.insert(*left.span());
-                self.coerced.insert(*right.span());
+            Expr::Binary(expr) if expr.op() == BinaryOp::NullCoalesce => {
+                self.coerced.insert(expr.left().span());
+                self.coerced.insert(expr.right().span());
             }
-            Expr::Cascade { object, .. } => {
-                self.coerced.insert(*object.span());
+            Expr::Cascade(expr) => {
+                self.coerced.insert(expr.object().span());
             }
-            Expr::GenericInstantiation { target, .. } => {
-                self.coerced.insert(*target.span());
+            Expr::GenericInstantiation(expr) => {
+                self.coerced.insert(expr.target().span());
             }
             _ => {}
         }
@@ -80,7 +71,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         self.diags.push(self.ctx.diagnostic(
             "implicit-call-tearoffs",
             "Explicitly tear off the 'call' method.",
-            *node.span(),
+            node.span(),
         ));
     }
 }

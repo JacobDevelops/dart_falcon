@@ -22,8 +22,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -33,7 +32,7 @@ pub struct AvoidSlowAsyncIo;
 impl Rule for AvoidSlowAsyncIo {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -58,32 +57,34 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
-            Expr::Call { callee, span, .. } => {
-                let Expr::Field { object, field, .. } = callee.unparenthesized() else {
+            Expr::Call(call) => {
+                let Expr::Field(field) = call.callee().unparenthesized() else {
                     return;
                 };
-                if is_static_entity_query(object, &field.name, state)
-                    || slow_instance_method(&state.infer(object), &field.name, state)
+                if is_static_entity_query(field.object(), field.field().name(), state)
+                    || slow_instance_method(
+                        &state.infer(field.object()),
+                        field.field().name(),
+                        state,
+                    )
                 {
-                    self.report(*span);
+                    self.report(call.span());
                 }
             }
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                let receiver = state.infer(object);
-                for section in sections {
-                    if let [CascadeOp::Call(name, _, _), ..] = section.ops.as_slice()
-                        && slow_instance_method(&receiver, &name.name, state)
+            Expr::Cascade(cascade) => {
+                let receiver = state.infer(cascade.object());
+                for section in cascade.sections() {
+                    if let Some(CascadeOp::Call(call)) = section.ops().next()
+                        && slow_instance_method(&receiver, call.name().name(), state)
                     {
-                        self.report(section.span);
+                        self.report(section.span());
                     }
                 }
             }
@@ -93,7 +94,7 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 /// `FileSystemEntity.isDirectory(path)` and the other static type queries.
-fn is_static_entity_query(object: &Expr, method: &str, state: &SemanticState<'_>) -> bool {
+fn is_static_entity_query(object: Expr<'_>, method: &str, state: &SemanticState<'_>) -> bool {
     let Some(segments) = falcon_analyze::expression_segments(object, false) else {
         return false;
     };

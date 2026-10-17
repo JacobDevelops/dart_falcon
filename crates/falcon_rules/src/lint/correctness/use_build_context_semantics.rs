@@ -15,32 +15,32 @@ use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, ResolvedType, Truth, evaluate_constant,
     expression_segments, resolve_call_constructor,
 };
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub(super) struct Semantics {
-    pub uses: HashMap<usize, bool>,
-    pub mounted: HashMap<usize, bool>,
-    pub protected_callbacks: HashSet<usize>,
-    pub constants: HashMap<usize, bool>,
-    pub never: HashSet<usize>,
+    pub uses: HashMap<NodeId, bool>,
+    pub mounted: HashMap<NodeId, bool>,
+    pub protected_callbacks: HashSet<NodeId>,
+    pub constants: HashMap<NodeId, bool>,
+    pub never: HashSet<NodeId>,
 }
 
 pub(super) fn prepare<'a>(
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
 ) -> Option<Collector<'a>> {
     let state = SemanticState::new(program, ctx)?;
     let global_count = program
-        .declarations
-        .iter()
+        .declarations()
         .map(|declaration| match declaration {
-            TopLevelDecl::Variable(variable) => variable.declarators.len(),
-            TopLevelDecl::Function(function) if matches!(function.kind, FunctionKind::Getter) => 1,
+            TopLevelDecl::Variable(variable) => variable.declarators().len(),
+            TopLevelDecl::Function(function) if matches!(function.kind(), FunctionKind::Getter) => {
+                1
+            }
             _ => 0,
         })
         .sum();
@@ -50,29 +50,25 @@ pub(super) fn prepare<'a>(
         semantics: Semantics::default(),
         globals: HashMap::with_capacity(global_count),
     };
-    for declaration in &program.declarations {
+    for declaration in program.declarations() {
         match declaration {
             TopLevelDecl::Variable(variable) => {
-                let ty = variable
-                    .var_type
-                    .as_ref()
-                    .map(|ty| state.model.resolve_type(ty));
-                for declarator in &variable.declarators {
-                    if let Some(ty) = ty.as_ref().cloned().or_else(|| {
-                        declarator
-                            .initializer
-                            .as_ref()
-                            .map(|value| state.infer(value))
-                    }) {
-                        collector.globals.insert(declarator.name.name.as_str(), ty);
+                let ty = variable.var_type().map(|ty| state.model.resolve_type(ty));
+                for declarator in variable.declarators() {
+                    if let Some(ty) = ty
+                        .as_ref()
+                        .cloned()
+                        .or_else(|| declarator.initializer().map(|value| state.infer(value)))
+                    {
+                        collector.globals.insert(declarator.name().name(), ty);
                     }
                 }
             }
-            TopLevelDecl::Function(function) if matches!(function.kind, FunctionKind::Getter) => {
-                if let Some(ty) = &function.return_type {
+            TopLevelDecl::Function(function) if matches!(function.kind(), FunctionKind::Getter) => {
+                if let Some(ty) = function.return_type() {
                     collector
                         .globals
-                        .insert(function.name.name.as_str(), state.model.resolve_type(ty));
+                        .insert(function.name().name(), state.model.resolve_type(ty));
                 }
             }
             _ => {}
@@ -82,14 +78,14 @@ pub(super) fn prepare<'a>(
 }
 
 pub(super) struct Collector<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     semantics: Semantics,
     globals: HashMap<&'a str, ResolvedType>,
 }
 
 #[cfg(test)]
-fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics {
+fn collect<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Semantics {
     let Some(mut collector) = prepare(program, ctx) else {
         return Semantics::default();
     };
@@ -100,8 +96,8 @@ fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics {
     collector.semantics
 }
 
-fn key(expression: &Expr) -> usize {
-    expression as *const Expr as usize
+fn key(expression: Expr<'_>) -> NodeId {
+    expression.syntax().id()
 }
 
 fn mounted_kind(receiver: &ResolvedType, state: &SemanticState<'_>) -> Option<bool> {
@@ -136,47 +132,47 @@ fn mounted_kind(receiver: &ResolvedType, state: &SemanticState<'_>) -> Option<bo
 /// Use declaration types, not assignment values or flow promotions. The SDK
 /// recognizes identifiers/property reads (plus parentheses and `!`), not calls
 /// which happen to return a context.
-fn context_kind(
-    expression: &Expr,
-    state: &SemanticState<'_>,
+fn context_kind<'a>(
+    expression: Expr<'a>,
+    state: &SemanticState<'a>,
     globals: &HashMap<&str, ResolvedType>,
 ) -> Option<bool> {
     match expression {
-        Expr::Paren { expr, .. } => context_kind(expr.unparenthesized(), state, globals),
-        Expr::NullAssert { operand, .. } => context_kind(operand, state, globals),
+        Expr::Paren(paren) => context_kind(paren.expr().unparenthesized(), state, globals),
+        Expr::NullAssert(assertion) => context_kind(assertion.operand(), state, globals),
         Expr::Ident(identifier) => {
-            if state.is_own_field(&identifier.name) {
-                context_member_kind(state.enclosing_type.as_ref()?, &identifier.name, state)
-            } else if state.environment.is_bound(&identifier.name) {
+            if state.is_own_field(identifier.name()) {
+                context_member_kind(state.enclosing_type.as_ref()?, identifier.name(), state)
+            } else if state.environment.is_bound(identifier.name()) {
                 context_type_kind(
-                    &state.environment.declared_type(&identifier.name),
+                    &state.environment.declared_type(identifier.name()),
                     false,
                     state,
                 )
             } else {
-                if let Some(ty) = globals.get(identifier.name.as_str()) {
+                if let Some(ty) = globals.get(identifier.name()) {
                     return context_type_kind(ty, true, state);
                 }
                 if let Some(receiver) = &state.enclosing_type {
-                    let kind = context_member_kind(receiver, &identifier.name, state);
+                    let kind = context_member_kind(receiver, identifier.name(), state);
                     if kind.is_some()
                         || state
                             .signatures
-                            .resolved_field(receiver, &identifier.name, &state.model)
+                            .resolved_field(receiver, identifier.name(), &state.model)
                             .is_some()
                     {
                         return kind;
                     }
                 }
                 globals
-                    .get(identifier.name.as_str())
+                    .get(identifier.name())
                     .and_then(|ty| context_type_kind(ty, true, state))
                     .or_else(|| {
                         // Inference reports a promoted implicit-`this` field
                         // read; its declaration was classified above.
                         if state
                             .environment
-                            .promoted_this_field(&identifier.name)
+                            .promoted_this_field(identifier.name())
                             .is_some()
                         {
                             return None;
@@ -185,42 +181,42 @@ fn context_kind(
                     })
             }
         }
-        Expr::Field { object, field, .. } => {
-            let receiver = receiver_type(object, state, globals);
+        Expr::Field(field) => {
+            let receiver = receiver_type(field.object(), state, globals);
             // Only the getter declaration establishes a context use. An
             // inferred access type may substitute T with BuildContext.
-            context_member_kind(&receiver, &field.name, state)
+            context_member_kind(&receiver, field.field().name(), state)
         }
-        Expr::IntLit { .. }
-        | Expr::DoubleLit { .. }
+        Expr::IntLit(_)
+        | Expr::DoubleLit(_)
         | Expr::StringLit(_)
-        | Expr::BoolLit { .. }
-        | Expr::NullLit { .. }
-        | Expr::This { .. }
-        | Expr::Super { .. }
-        | Expr::Unary { .. }
-        | Expr::PostfixIncDec { .. }
-        | Expr::Binary { .. }
-        | Expr::Assign { .. }
-        | Expr::Conditional { .. }
-        | Expr::Is { .. }
-        | Expr::As { .. }
-        | Expr::Index { .. }
-        | Expr::Call { .. }
-        | Expr::Cascade { .. }
-        | Expr::List { .. }
-        | Expr::Map { .. }
-        | Expr::Set { .. }
-        | Expr::Record { .. }
-        | Expr::FuncExpr { .. }
-        | Expr::New { .. }
-        | Expr::DotShorthand { .. }
-        | Expr::Await { .. }
-        | Expr::Throw { .. }
-        | Expr::Switch { .. }
-        | Expr::SymbolLit { .. }
-        | Expr::GenericInstantiation { .. }
-        | Expr::Error { .. } => None,
+        | Expr::BoolLit(_)
+        | Expr::NullLit(_)
+        | Expr::This(_)
+        | Expr::Super(_)
+        | Expr::Unary(_)
+        | Expr::PostfixIncDec(_)
+        | Expr::Binary(_)
+        | Expr::Assign(_)
+        | Expr::Conditional(_)
+        | Expr::Is(_)
+        | Expr::As(_)
+        | Expr::Index(_)
+        | Expr::Call(_)
+        | Expr::Cascade(_)
+        | Expr::List(_)
+        | Expr::Map(_)
+        | Expr::Set(_)
+        | Expr::Record(_)
+        | Expr::FuncExpr(_)
+        | Expr::New(_)
+        | Expr::DotShorthand(_)
+        | Expr::Await(_)
+        | Expr::Throw(_)
+        | Expr::Switch(_)
+        | Expr::SymbolLit(_)
+        | Expr::GenericInstantiation(_)
+        | Expr::Error(_) => None,
     }
 }
 
@@ -287,17 +283,13 @@ fn context_type_kind(
         .flatten()
 }
 
-fn constant_bool(expression: &Expr, state: &SemanticState<'_>) -> Option<bool> {
-    if let Expr::BoolLit { value, .. } = expression.unparenthesized() {
-        return Some(*value);
+fn constant_bool<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Option<bool> {
+    if let Expr::BoolLit(literal) = expression.unparenthesized() {
+        return Some(literal.value());
     }
     if !matches!(
         expression.unparenthesized(),
-        Expr::Ident(_)
-            | Expr::Field { .. }
-            | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Conditional { .. }
+        Expr::Ident(_) | Expr::Field(_) | Expr::Unary(_) | Expr::Binary(_) | Expr::Conditional(_)
     ) {
         return None;
     }
@@ -307,10 +299,10 @@ fn constant_bool(expression: &Expr, state: &SemanticState<'_>) -> Option<bool> {
         state: &'a SemanticState<'model>,
         found: bool,
     }
-    impl Visitor for BoundNames<'_, '_> {
-        fn visit_expr(&mut self, expression: &Expr) {
+    impl<'a> Visitor<'a> for BoundNames<'_, '_> {
+        fn visit_expr(&mut self, expression: Expr<'a>) {
             if let Expr::Ident(identifier) = expression {
-                self.found |= self.state.environment.is_bound(&identifier.name);
+                self.found |= self.state.environment.is_bound(identifier.name());
             } else if !self.found {
                 walk_expr(self, expression);
             }
@@ -336,14 +328,14 @@ fn constant_bool(expression: &Expr, state: &SemanticState<'_>) -> Option<bool> {
     }
 }
 
-fn receiver_type(
-    expression: &Expr,
-    state: &SemanticState<'_>,
+fn receiver_type<'a>(
+    expression: Expr<'a>,
+    state: &SemanticState<'a>,
     globals: &HashMap<&str, ResolvedType>,
 ) -> ResolvedType {
     if let Expr::Ident(identifier) = expression.unparenthesized()
-        && !state.environment.is_bound(&identifier.name)
-        && let Some(ty) = globals.get(identifier.name.as_str())
+        && !state.environment.is_bound(identifier.name())
+        && let Some(ty) = globals.get(identifier.name())
     {
         return ty.clone();
     }
@@ -358,37 +350,37 @@ fn receiver_type(
     }
 }
 
-impl Collector<'_> {
-    fn use_context(&mut self, expression: &Expr, state: &SemanticState<'_>) {
+impl<'a> Collector<'a> {
+    fn use_context(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
         if let Some(kind) = context_kind(expression, state, &self.globals) {
             self.semantics.uses.insert(key(expression), kind);
         }
     }
 
-    fn arguments(&mut self, args: &ArgList, state: &SemanticState<'_>) {
-        for expression in &args.positional {
+    fn arguments(&mut self, args: ArgList<'a>, state: &SemanticState<'a>) {
+        for expression in args.positional() {
             self.use_context(expression, state);
         }
-        for argument in &args.named {
-            self.use_context(&argument.value, state);
+        for argument in args.named() {
+            self.use_context(argument.value(), state);
         }
     }
 
-    fn callbacks(&mut self, args: &ArgList, positional: &[usize], named: &[&str]) {
+    fn callbacks(&mut self, args: ArgList<'a>, positional: &[usize], named: &[&str]) {
         for &position in positional {
-            if let Some(expression @ Expr::FuncExpr { .. }) =
-                args.positional.get(position).map(Expr::unparenthesized)
+            if let Some(expression @ Expr::FuncExpr(_)) =
+                args.positional().nth(position).map(Expr::unparenthesized)
             {
                 self.semantics.protected_callbacks.insert(key(expression));
             }
         }
-        for argument in &args.named {
-            if named.contains(&argument.name.name.as_str())
-                && matches!(argument.value.unparenthesized(), Expr::FuncExpr { .. })
+        for argument in args.named() {
+            if named.contains(&argument.name().name())
+                && matches!(argument.value().unparenthesized(), Expr::FuncExpr(_))
             {
                 self.semantics
                     .protected_callbacks
-                    .insert(key(&argument.value));
+                    .insert(key(argument.value()));
             }
         }
     }
@@ -397,7 +389,7 @@ impl Collector<'_> {
         &mut self,
         identity: &DeclarationIdentity,
         constructor: &str,
-        args: &ArgList,
+        args: ArgList<'a>,
     ) {
         if !identity.is_sdk("dart:async", identity.name()) {
             return;
@@ -417,10 +409,11 @@ impl Collector<'_> {
         }
     }
 
-    fn method_callbacks(&mut self, callee: &Expr, args: &ArgList, state: &SemanticState<'_>) {
-        let Expr::Field { object, field, .. } = callee.unparenthesized() else {
+    fn method_callbacks(&mut self, callee: Expr<'a>, args: ArgList<'a>, state: &SemanticState<'a>) {
+        let Expr::Field(field) = callee.unparenthesized() else {
             return;
         };
+        let object = field.object();
         // The SDK's method catalog deliberately matches the class name, unlike
         // its constructor catalog, which also requires dart:async identity.
         let static_class = expression_segments(object, false).and_then(|segments| {
@@ -429,7 +422,7 @@ impl Collector<'_> {
                 .flatten()
         });
         if let Some(identity) = static_class {
-            match (identity.name(), field.name.as_str()) {
+            match (identity.name(), field.field().name()) {
                 ("Future", "doWhile") => self.callbacks(args, &[0], &[]),
                 ("Future", "forEach") => self.callbacks(args, &[1], &[]),
                 ("Future", "wait") => self.callbacks(args, &[], &["cleanUp"]),
@@ -438,10 +431,10 @@ impl Collector<'_> {
             return;
         }
         let receiver = receiver_type(object, state, &self.globals);
-        self.instance_callbacks(&receiver, &field.name, args);
+        self.instance_callbacks(&receiver, field.field().name(), args);
     }
 
-    fn instance_callbacks(&mut self, receiver: &ResolvedType, method: &str, args: &ArgList) {
+    fn instance_callbacks(&mut self, receiver: &ResolvedType, method: &str, args: ArgList<'a>) {
         let ResolvedType::Interface { identity, .. } = receiver else {
             return;
         };
@@ -474,19 +467,17 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<falcon_diagnostics::Diagnostic> {
         super::analyze_semantics(self.program, self.ctx, self.semantics)
     }
 
-    fn visit_expr(&mut self, expression: &Expr, state: &SemanticState<'_>) {
-        if matches!(expression, Expr::Paren { .. }) {
+    fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
+        if matches!(expression, Expr::Paren(_)) {
             return;
         }
-        if matches!(
-            expression,
-            Expr::Ident(_) | Expr::Field { .. } | Expr::Call { .. }
-        ) && state.infer(expression) == ResolvedType::Never
+        if matches!(expression, Expr::Ident(_) | Expr::Field(_) | Expr::Call(_))
+            && state.infer(expression) == ResolvedType::Never
         {
             self.semantics.never.insert(key(expression));
         }
@@ -495,8 +486,8 @@ impl SemanticRuleVisitor for Collector<'_> {
         }
         match expression {
             Expr::Ident(identifier)
-                if identifier.name == "mounted"
-                    && !state.environment.is_bound(&identifier.name) =>
+                if identifier.name() == "mounted"
+                    && !state.environment.is_bound(identifier.name()) =>
             {
                 if let Some(kind) = state
                     .enclosing_type
@@ -506,29 +497,29 @@ impl SemanticRuleVisitor for Collector<'_> {
                     self.semantics.mounted.insert(key(expression), kind);
                 }
             }
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } => {
-                if field.name == "mounted" {
+            Expr::Field(field) => {
+                let object = field.object();
+                if field.field().name() == "mounted" {
                     if let Some(kind) =
                         mounted_kind(&receiver_type(object, state, &self.globals), state)
                     {
                         self.semantics.mounted.insert(key(expression), kind);
                     }
-                } else if !is_null_safe && matches!(object.unparenthesized(), Expr::Ident(_)) {
+                } else if !field.is_null_safe()
+                    && matches!(object.unparenthesized(), Expr::Ident(_))
+                {
                     self.use_context(object, state);
                 }
             }
-            Expr::Call { callee, args, .. } => {
+            Expr::Call(call) => {
+                let callee = call.callee();
+                let args = call.args();
                 self.arguments(args, state);
-                if let Expr::Field { object, .. } = callee.unparenthesized()
-                    && (is_context(&receiver_type(object, state, &self.globals), true)
-                        || context_kind(object, state, &self.globals) == Some(true))
+                if let Expr::Field(field) = callee.unparenthesized()
+                    && (is_context(&receiver_type(field.object(), state, &self.globals), true)
+                        || context_kind(field.object(), state, &self.globals) == Some(true))
                 {
-                    self.use_context(object, state);
+                    self.use_context(field.object(), state);
                 }
                 let constructor = expression_segments(callee, true)
                     .filter(|segments| {
@@ -541,25 +532,28 @@ impl SemanticRuleVisitor for Collector<'_> {
                 }
                 self.method_callbacks(callee, args, state);
             }
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                let base = receiver_type(object, state, &self.globals);
-                for section in sections {
+            Expr::Cascade(cascade) => {
+                let base = receiver_type(cascade.object(), state, &self.globals);
+                for section in cascade.sections() {
                     let mut receiver = Cow::Borrowed(&base);
-                    for (index, operation) in section.ops.iter().enumerate() {
+                    let mut operations = section.ops().peekable();
+                    while let Some(operation) = operations.next() {
                         match operation {
-                            CascadeOp::NullAssert { .. } => {
+                            CascadeOp::NullAssert(_) => {
                                 receiver = Cow::Owned(receiver.non_null());
                             }
-                            CascadeOp::Call(name, _, args) => {
-                                self.arguments(args, state);
-                                self.instance_callbacks(&receiver, &name.name, args);
-                                if index + 1 < section.ops.len() {
+                            CascadeOp::Call(call) => {
+                                self.arguments(call.args(), state);
+                                self.instance_callbacks(&receiver, call.name().name(), call.args());
+                                if operations.peek().is_some() {
                                     receiver = Cow::Owned(
                                         state
                                             .signatures
-                                            .resolved_member(&receiver, &name.name, &state.model)
+                                            .resolved_member(
+                                                &receiver,
+                                                call.name().name(),
+                                                &state.model,
+                                            )
                                             .map(|(signature, substitutions)| {
                                                 state.model.substitute(
                                                     &signature.return_type,
@@ -570,25 +564,30 @@ impl SemanticRuleVisitor for Collector<'_> {
                                     );
                                 }
                             }
-                            CascadeOp::Invoke(type_args, args) => {
-                                self.arguments(args, state);
-                                if index + 1 < section.ops.len() {
-                                    receiver = Cow::Owned(
-                                        state
-                                            .cascade_invoke_return_type(&receiver, type_args, args),
-                                    );
+                            CascadeOp::Invoke(invoke) => {
+                                self.arguments(invoke.args(), state);
+                                if operations.peek().is_some() {
+                                    receiver = Cow::Owned(state.cascade_invoke_return_type(
+                                        &receiver,
+                                        invoke.type_args(),
+                                        invoke.args(),
+                                    ));
                                 }
                             }
-                            CascadeOp::Field { name, .. } => {
-                                if index + 1 < section.ops.len() {
+                            CascadeOp::Field(field) => {
+                                if operations.peek().is_some() {
                                     receiver = Cow::Owned(
                                         state
                                             .signatures
-                                            .resolved_field(&receiver, &name.name, &state.model)
+                                            .resolved_field(
+                                                &receiver,
+                                                field.name().name(),
+                                                &state.model,
+                                            )
                                             .or_else(|| {
                                                 state.signatures.resolved_extension_getter(
                                                     &receiver,
-                                                    &name.name,
+                                                    field.name().name(),
                                                     &state.model,
                                                 )
                                             })
@@ -599,7 +598,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                                     );
                                 }
                             }
-                            CascadeOp::Index { .. } => {
+                            CascadeOp::Index(_) => {
                                 receiver = Cow::Owned(
                                     state
                                         .signatures
@@ -617,20 +616,16 @@ impl SemanticRuleVisitor for Collector<'_> {
                     }
                 }
             }
-            Expr::New {
-                dart_type,
-                constructor_name,
-                args,
-                ..
-            } => {
+            Expr::New(new) => {
+                let args = new.args();
                 self.arguments(args, state);
                 if let ResolvedType::Interface { identity, .. } = state
                     .model
-                    .resolve_type_in(dart_type, &state.type_parameters)
+                    .resolve_type_in(new.dart_type(), &state.type_parameters)
                 {
                     self.constructor_callbacks(
                         &identity,
-                        constructor_name.as_ref().map_or("new", |name| &name.name),
+                        new.constructor_name().map_or("new", |name| name.name()),
                         args,
                     );
                 }
@@ -655,7 +650,7 @@ mod tests {
     impl Rule for CheckProtectedCallbacks {
         fn prepare<'a>(
             &self,
-            program: &'a Program,
+            program: Program<'a>,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
             assert_eq!(collect(program, ctx).protected_callbacks.len(), 3);
@@ -686,7 +681,7 @@ void callbacks() {
     impl Rule for CheckCascadeCallbacks {
         fn prepare<'a>(
             &self,
-            program: &'a Program,
+            program: Program<'a>,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
             let semantics = collect(program, ctx);

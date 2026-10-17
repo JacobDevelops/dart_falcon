@@ -1,7 +1,7 @@
-//! LSP server state: document cache, cached ASTs, config-driven rule set.
+//! LSP server state: document cache, cached syntax trees, config-driven rule set.
 //!
-//! Text changes invalidate a document's AST; config changes rerun rules over
-//! cached ASTs, reparsing only when the effective language version changes.
+//! Text changes invalidate a document's tree; config changes rerun rules over
+//! cached trees, reparsing only when the effective language version changes.
 //! Unresolved filesystem identities are retried before analysis when files materialize.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -14,30 +14,28 @@ use lsp_types::Uri;
 use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalOrigin,
     ExternalSources, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
-    PackageIdentity, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex, TypeIndex,
-    canonical_or_lexical, environment::ExternalTarget, group_libraries, import_path, library_unit,
-    syntax_error_diagnostics,
+    PackageIdentity, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex,
+    TypeIndex, canonical_or_lexical, environment::ExternalTarget, group_libraries, import_path,
+    library_unit, syntax_error_diagnostics,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
-use falcon_dart_parser::{lex_syntax, parse_for_package};
+use falcon_dart_parser::{lex_tree, parse_for_package};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, package_identities,
     requires_resolution, run_cross_file,
 };
-use falcon_syntax::{LanguageVersion, Program, ast::Span};
+use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
-/// One open document: full text, cached AST, and instrumentation counters.
+/// One open document: full text, cached syntax tree, and instrumentation counters.
 pub struct DocumentState {
-    pub text: String,
+    parsed: Arc<ParsedFile>,
     path: PathBuf,
     /// Only unresolved paths need filesystem checks between document events.
     unresolved_path: bool,
     pub version: Option<i32>,
-    program: Program,
-    syntax: falcon_syntax::SyntaxStore,
     language_version: LanguageVersion,
     /// Whether the last parse produced errors — carried so the cross-file pass
     /// can populate [`ProjectFile::has_parse_errors`] without re-parsing.
@@ -65,6 +63,12 @@ pub struct DocumentState {
     pub parse_count: u64,
     /// Number of times this document has been analyzed (incremental tests).
     pub analyze_count: u64,
+}
+
+impl DocumentState {
+    pub fn text(&self) -> &str {
+        &self.parsed.source
+    }
 }
 
 /// One immutable semantic view of the workspace. It owns the parsed files and
@@ -106,9 +110,7 @@ impl ExternalTopology {
             .libraries()
             .iter()
             .flat_map(|library| library.files.iter())
-            .map(|file| {
-                1 + file.facts.imports.len() + file.facts.exports.len() + file.doc_imports.len()
-            })
+            .map(|file| 1 + file.doc_imports.len())
             .sum();
         let mut targets = HashSet::with_capacity(capacity);
         for (instance, library) in external.libraries().iter().enumerate() {
@@ -117,20 +119,18 @@ impl ExternalTopology {
                     targets.insert(file.path.clone());
                 }
                 for uri in file
-                    .facts
-                    .imports
-                    .iter()
-                    .map(|import| import.uri.value.as_str())
+                    .program()
+                    .imports()
+                    .map(|import| import.uri().value())
+                    .chain(file.program().exports().map(|export| export.uri().value()))
                     .chain(
-                        file.facts
-                            .exports
+                        file.doc_imports
                             .iter()
-                            .map(|export| export.uri.value.as_str()),
+                            .map(|uri| std::borrow::Cow::Borrowed(uri.as_str())),
                     )
-                    .chain(file.doc_imports.iter().map(String::as_str))
                 {
                     if let Some(ExternalTarget::Path(path)) =
-                        external.resolve_target(environment, &file.path, Some(instance), uri)
+                        external.resolve_target(environment, &file.path, Some(instance), &uri)
                     {
                         targets.insert(path);
                     }
@@ -376,18 +376,20 @@ impl LspState {
             if doc.source_rejected {
                 continue;
             }
-            let language_version = self.environment.language_version(&doc.path, &doc.text);
+            let language_version = self.environment.language_version(&doc.path, doc.text());
             if language_version == doc.language_version {
                 continue;
             }
-            let falcon_dart_parser::ParseResult {
-                program,
-                errors,
-                syntax,
-                ..
-            } = parse_for_package(&doc.text, Some(language_version));
-            doc.program = program;
-            doc.syntax = syntax;
+            let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                parse_for_package(doc.text(), Some(language_version));
+            if let Some(parsed) = Arc::get_mut(&mut doc.parsed) {
+                parsed.tree = tree;
+            } else {
+                doc.parsed = Arc::new(ParsedFile {
+                    source: doc.text().into(),
+                    tree,
+                });
+            }
             doc.has_parse_errors = !errors.is_empty();
             doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &errors);
             doc.language_version = language_version;
@@ -446,9 +448,8 @@ impl LspState {
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
         let falcon_dart_parser::ParseResult {
-            program,
+            tree,
             errors: parse_errors,
-            syntax,
             ..
         } = parse_for_package(&text, package_version);
         let language_version = self.environment.language_version(&path, &text);
@@ -460,10 +461,11 @@ impl LspState {
             DocumentState {
                 path,
                 unresolved_path,
-                text,
+                parsed: Arc::new(ParsedFile {
+                    source: text.into_boxed_str(),
+                    tree,
+                }),
                 version,
-                program,
-                syntax,
                 language_version,
                 has_parse_errors: source_rejected || !parse_errors.is_empty(),
                 source_rejected,
@@ -515,19 +517,19 @@ impl LspState {
         let package_version = self.environment.package_language_version(&path);
         let doc = self.documents.get_mut(uri).expect("document checked above");
         let falcon_dart_parser::ParseResult {
-            program,
+            tree,
             errors: parse_errors,
-            syntax,
             ..
         } = parse_for_package(&text, package_version);
         doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
         doc.source_rejected = source_error.is_some();
         doc.syntax_diagnostics.extend(source_error);
-        doc.text = text;
+        doc.parsed = Arc::new(ParsedFile {
+            source: text.into_boxed_str(),
+            tree,
+        });
         doc.version = version;
-        doc.program = program;
-        doc.syntax = syntax;
-        doc.language_version = self.environment.language_version(&doc.path, &doc.text);
+        doc.language_version = self.environment.language_version(&doc.path, doc.text());
         doc.has_parse_errors = doc.source_rejected || !parse_errors.is_empty();
         doc.parse_count += 1;
         self.invalidate_semantic_snapshot();
@@ -563,7 +565,10 @@ impl LspState {
                 .unresolved_path = false;
         }
         if let Some(text) = text {
-            let differs = self.documents.get(uri).is_some_and(|doc| doc.text != text);
+            let differs = self
+                .documents
+                .get(uri)
+                .is_some_and(|doc| doc.text() != text);
             if differs {
                 let version = self.documents.get(uri).and_then(|d| d.version);
                 self.change(uri, text, version);
@@ -614,36 +619,24 @@ impl LspState {
         let Some(doc) = self.documents.get_mut(uri) else {
             return Vec::new();
         };
-        let mut ctx = AnalyzeContext::new(&doc.path, &doc.text, &self.config, &doc.syntax)
+        let mut ctx = AnalyzeContext::new(&doc.path, &self.config, &doc.parsed)
             .with_environment(Some(&self.environment));
-        let programs;
-        let sources;
-        let syntax;
+        let parsed;
         let library;
         if let Some((snapshot, file_index)) = semantic {
-            programs = snapshot
+            parsed = snapshot
                 .files
                 .iter()
-                .map(|file| &file.program)
+                .map(|file| &file.parsed)
                 .collect::<Vec<_>>();
-            sources = snapshot
-                .files
-                .iter()
-                .map(|file| file.source.as_str())
-                .collect::<Vec<_>>();
-            syntax = snapshot
-                .files
-                .iter()
-                .map(|file| &file.syntax)
-                .collect::<Vec<_>>();
-            library = library_unit(&snapshot.grouping, &programs, &sources, &syntax, file_index);
+            library = library_unit(&snapshot.grouping, &parsed, file_index);
             ctx = ctx
                 .with_types(&snapshot.indexes.types)
                 .with_identities(&snapshot.indexes.identities)
                 .with_signatures(&snapshot.indexes.signatures)
                 .with_library(&library);
         }
-        let mut diagnostics = self.rules.run_all(&doc.program, &ctx);
+        let mut diagnostics = self.rules.run_all(doc.parsed.program(), &ctx);
         diagnostics.extend(doc.syntax_diagnostics.iter().cloned());
         apply_severities(&mut diagnostics, &self.config);
         diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
@@ -810,7 +803,7 @@ impl LspState {
                 && dart_files.all(|file| {
                     snapshot.by_path.get(&file.path).is_some_and(|&index| {
                         let cached = &snapshot.files[index];
-                        cached.source == file.source
+                        cached.source() == file.source()
                             && cached.has_parse_errors == file.has_parse_errors
                     })
                 });
@@ -924,9 +917,9 @@ impl LspState {
                         .map(|doc| doc.path.as_path()),
                 )
                 .collect();
-            let roots: Vec<(&Path, &Program, &str)> = files
+            let roots: Vec<(&Path, Program<'_>, &str)> = files
                 .iter()
-                .map(|file| (file.path.as_path(), &file.program, file.source.as_str()))
+                .map(|file| (file.path.as_path(), file.program(), file.source()))
                 .collect();
             self.external_libraries
                 .extend(&self.environment, &roots, |path| {
@@ -957,17 +950,14 @@ impl LspState {
             }
             match falcon_analyze::source::read_source(path) {
                 Ok(source) => {
-                    let falcon_dart_parser::ParseResult {
-                        program,
-                        errors,
-                        syntax,
-                        ..
-                    } = parse_for_package(&source, self.environment.package_language_version(path));
+                    let falcon_dart_parser::ParseResult { tree, errors, .. } =
+                        parse_for_package(&source, self.environment.package_language_version(path));
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
-                        source,
-                        program,
-                        syntax,
+                        parsed: Arc::new(ParsedFile {
+                            source: source.into_boxed_str(),
+                            tree,
+                        }),
                         has_parse_errors: !errors.is_empty(),
                     });
                 }
@@ -976,23 +966,27 @@ impl LspState {
         }
         let semantic_files = files
             .iter()
-            .map(|file| (file.path.clone(), &file.program))
+            .map(|file| (file.path.clone(), Arc::clone(&file.parsed)))
             .collect::<Vec<_>>();
         let external = ExternalSources {
             libraries: &self.external_libraries,
             environment: &self.environment,
         };
-        let grouping = group_libraries(&semantic_files);
+        let grouping_files = files
+            .iter()
+            .map(|file| (file.path.clone(), file.program()))
+            .collect::<Vec<_>>();
+        let grouping = group_libraries(&grouping_files);
         let identity_sources = files
             .iter()
             .map(|file| IdentitySource {
                 path: &file.path,
-                program: &file.program,
+                parsed: &file.parsed,
                 has_parse_errors: file.has_parse_errors,
             })
             .collect::<Vec<_>>();
         let packages = package_identities(files.iter().map(|file| file.path.as_path()));
-        let sources: Vec<&str> = files.iter().map(|file| file.source.as_str()).collect();
+        let sources: Vec<&str> = files.iter().map(ProjectFile::source).collect();
         // A dependency importing a project file depends on mutable buffer facts.
         // Keep the ordinary combined build for that graph instead of freezing
         // unresolved/project references into the immutable external layer.
@@ -1073,7 +1067,7 @@ impl LspState {
                 (
                     file.path.as_path(),
                     LibrarySource {
-                        program: &file.program,
+                        program: file.program(),
                         has_parse_errors: file.has_parse_errors,
                         has_unresolved_parts: grouping.is_unresolved(index),
                     },
@@ -1203,50 +1197,26 @@ impl LspState {
                 }
                 files.push(ProjectFile {
                     path: normalized,
-                    source: doc.text.clone(),
-                    program: doc.program.clone(),
-                    syntax: doc.syntax.clone(),
+                    parsed: Arc::clone(&doc.parsed),
                     has_parse_errors: doc.has_parse_errors,
                 });
             } else {
                 match falcon_analyze::source::read_source(path) {
                     Ok(source) => {
-                        let falcon_dart_parser::ParseResult {
-                            program,
-                            errors,
-                            syntax,
-                            ..
-                        } = if is_dart {
+                        let (tree, has_parse_errors) = if is_dart {
                             let package_version = self.environment.package_language_version(path);
-                            parse_for_package(&source, package_version)
+                            let parsed = parse_for_package(&source, package_version);
+                            (parsed.tree, !parsed.errors.is_empty())
                         } else {
-                            let syntax = lex_syntax(&source);
-                            let tree = falcon_syntax::cst::SyntaxTree::build(
-                                &source,
-                                syntax.tokens(),
-                                Vec::new(),
-                            );
-                            falcon_dart_parser::ParseResult {
-                                program: Program {
-                                    library_directive: None,
-                                    part_of_directive: None,
-                                    part_directives: Vec::new(),
-                                    imports: Vec::new(),
-                                    exports: Vec::new(),
-                                    declarations: Vec::new(),
-                                    span: Span::new(0, 0),
-                                },
-                                errors: Vec::new(),
-                                syntax,
-                                tree,
-                            }
+                            (lex_tree(&source), false)
                         };
                         files.push(ProjectFile {
                             path: normalized,
-                            source,
-                            program,
-                            syntax,
-                            has_parse_errors: is_dart && !errors.is_empty(),
+                            parsed: Arc::new(ParsedFile {
+                                source: source.into_boxed_str(),
+                                tree,
+                            }),
+                            has_parse_errors,
                         });
                     }
                     Err(e) => {
@@ -1263,9 +1233,7 @@ impl LspState {
                 if !doc.source_rejected && !seen.contains(path) {
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
-                        source: doc.text.clone(),
-                        program: doc.program.clone(),
-                        syntax: doc.syntax.clone(),
+                        parsed: Arc::clone(&doc.parsed),
                         has_parse_errors: doc.has_parse_errors,
                     });
                 }
@@ -1437,18 +1405,16 @@ fn build_reverse_dependencies(
             reverse_dependencies[sibling].push(index);
         }
         for dependency in file
-            .program
-            .imports
-            .iter()
-            .map(|directive| directive.uri.value.as_str())
+            .program()
+            .imports()
+            .map(|directive| directive.uri().value())
             .chain(
-                file.program
-                    .exports
-                    .iter()
-                    .map(|directive| directive.uri.value.as_str()),
+                file.program()
+                    .exports()
+                    .map(|directive| directive.uri().value()),
             )
         {
-            if let Some(target) = resolve_dependency(&file.path, dependency, by_path, packages) {
+            if let Some(target) = resolve_dependency(&file.path, &dependency, by_path, packages) {
                 reverse_dependencies[target].push(index);
             }
         }
@@ -1676,17 +1642,13 @@ mod dependency_tests {
         std::fs::write(outer.join("pubspec.yaml"), "name: outer\n").unwrap();
         std::fs::write(nested.join("pubspec.yaml"), [0xff, 0xfe]).unwrap();
         let path = nested.join("lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = falcon_dart_parser::parse("");
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = falcon_dart_parser::parse("");
         let files = [ProjectFile {
             path: path.clone(),
-            source: String::new(),
-            program,
-            syntax,
+            parsed: Arc::new(ParsedFile {
+                source: "".into(),
+                tree,
+            }),
             has_parse_errors: !errors.is_empty(),
         }];
 
@@ -1726,18 +1688,21 @@ mod dependency_tests {
             .unwrap();
     }
 
-    fn switch_has_pattern(program: &Program) -> bool {
-        use falcon_syntax::ast::{FunctionBody, Stmt, SwitchCaseKind, TopLevelDecl};
-        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+    fn switch_has_pattern(program: Program<'_>) -> bool {
+        use falcon_syntax::cst::{FunctionBody, Stmt, SwitchCaseKind, TopLevelDecl};
+        let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
             panic!("expected function")
         };
-        let Some(FunctionBody::Block(block)) = &function.body else {
+        let Some(FunctionBody::Block(block)) = function.body() else {
             panic!("expected function body")
         };
-        let Stmt::Switch(switch) = &block.stmts[0] else {
+        let Stmt::Switch(switch) = block.stmts().next().unwrap() else {
             panic!("expected switch")
         };
-        matches!(switch.cases[0].cases[0], SwitchCaseKind::Pattern(..))
+        matches!(
+            switch.cases().next().unwrap().cases().next().unwrap(),
+            SwitchCaseKind::Pattern(..)
+        )
     }
 
     #[test]
@@ -1768,18 +1733,20 @@ mod dependency_tests {
             );
             state.open(&unrelated_uri, VERSIONED_SWITCH.to_string(), Some(1));
             assert!(!initial.iter().any(|diag| diag.rule == "syntax-error"));
-            assert!(!switch_has_pattern(&state.documents[&uri].program));
+            assert!(!switch_has_pattern(state.documents[&uri].parsed.program()));
             assert_eq!(state.documents[&uri].parse_count, 1);
 
             write_package_version(dir.path(), "3.0");
             let published = state.reload_config();
             let diagnostics = &published.iter().find(|(key, _)| key == &uri).unwrap().1;
             assert!(diagnostics.iter().any(|diag| diag.rule == "syntax-error"));
-            assert!(switch_has_pattern(&state.documents[&uri].program));
+            assert!(switch_has_pattern(state.documents[&uri].parsed.program()));
             assert_eq!(state.documents[&uri].parse_count, 2);
             assert_eq!(state.documents[&marker_uri].parse_count, 1);
             assert_eq!(state.documents[&unrelated_uri].parse_count, 1);
-            assert!(!switch_has_pattern(&state.documents[&marker_uri].program));
+            assert!(!switch_has_pattern(
+                state.documents[&marker_uri].parsed.program()
+            ));
             state.analyze(&uri);
             state.reload_config();
             assert_eq!(state.documents[&uri].parse_count, 2);
@@ -1791,7 +1758,7 @@ mod dependency_tests {
             if semantic {
                 let snapshot = state.semantic_snapshot.as_ref().unwrap();
                 let file = &snapshot.files[snapshot.by_path[&state.documents[&uri].path]];
-                assert!(switch_has_pattern(&file.program));
+                assert!(switch_has_pattern(file.program()));
                 assert!(file.has_parse_errors);
             }
 
@@ -1800,7 +1767,7 @@ mod dependency_tests {
             assert!(state.change(&uri, VERSIONED_SWITCH.to_string(), Some(2)));
             let diagnostics = state.analyze(&uri);
             assert!(!diagnostics.iter().any(|diag| diag.rule == "syntax-error"));
-            assert!(!switch_has_pattern(&state.documents[&uri].program));
+            assert!(!switch_has_pattern(state.documents[&uri].parsed.program()));
             assert_eq!(state.documents[&uri].parse_count, 5);
             assert_eq!(state.documents[&marker_uri].parse_count, 1);
             assert_eq!(state.documents[&unrelated_uri].parse_count, 1);
@@ -1832,13 +1799,13 @@ mod dependency_tests {
         let snapshot = state.semantic_snapshot.as_ref().unwrap();
         for (path, pattern) in paths.iter().zip([false, true]) {
             let file = &snapshot.files[snapshot.by_path[path]];
-            assert_eq!(switch_has_pattern(&file.program), pattern);
+            assert_eq!(switch_has_pattern(file.program()), pattern);
             assert_eq!(file.has_parse_errors, pattern);
         }
         let (files, _) = state.collect_project_files(ProjectView::CrossFile);
         for (path, pattern) in paths.iter().zip([false, true]) {
             let file = files.iter().find(|file| &file.path == path).unwrap();
-            assert_eq!(switch_has_pattern(&file.program), pattern);
+            assert_eq!(switch_has_pattern(file.program()), pattern);
             assert_eq!(file.has_parse_errors, pattern);
         }
         assert_eq!(state.documents[&uri].parse_count, 1);
@@ -1870,8 +1837,10 @@ mod dependency_tests {
             state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
             state.open(&uri, VERSIONED_SWITCH.to_string(), Some(1));
             state.open(&marker_uri, marker.clone(), Some(1));
-            assert!(switch_has_pattern(&state.documents[&uri].program));
-            assert!(!switch_has_pattern(&state.documents[&marker_uri].program));
+            assert!(switch_has_pattern(state.documents[&uri].parsed.program()));
+            assert!(!switch_has_pattern(
+                state.documents[&marker_uri].parsed.program()
+            ));
             std::fs::write(&path, VERSIONED_SWITCH).unwrap();
             std::fs::write(&marker_path, &marker).unwrap();
             let diagnostics = match event {
@@ -1883,7 +1852,7 @@ mod dependency_tests {
                 _ => state.analyze(&uri),
             };
             assert!(!diagnostics.iter().any(|diag| diag.rule == "syntax-error"));
-            assert!(!switch_has_pattern(&state.documents[&uri].program));
+            assert!(!switch_has_pattern(state.documents[&uri].parsed.program()));
             assert_eq!(state.documents[&uri].path, canonical_or_lexical(&path));
             assert_eq!(state.documents[&uri].parse_count, 2);
             assert_eq!(state.documents[&marker_uri].parse_count, 1);
@@ -1910,19 +1879,32 @@ mod dependency_tests {
             .iter()
             .find(|file| file.path == canonical_or_lexical(&manifest_path))
             .expect("pubspec.yaml must be included in the cross-file project view");
-        assert_eq!(manifest.source, source);
+        assert_eq!(manifest.source(), source);
         assert!(!manifest.has_parse_errors);
-        assert!(manifest.program.declarations.is_empty());
-        assert_eq!(manifest.syntax.tokens()[0].text(&manifest.source), "name");
+        assert!(manifest.program().declarations().is_empty());
         assert_eq!(
-            manifest.syntax.tokens().last().unwrap().kind,
+            manifest
+                .tree()
+                .tokens(manifest.source())
+                .next()
+                .unwrap()
+                .text(),
+            "name"
+        );
+        assert_eq!(
+            manifest
+                .tree()
+                .tokens(manifest.source())
+                .last()
+                .unwrap()
+                .kind(),
             falcon_syntax::TokenKind::Eof
         );
         assert_eq!(
             manifest
-                .syntax
-                .identifier_tokens()
-                .map(|token| token.text(&manifest.source))
+                .tree()
+                .identifier_tokens(manifest.source())
+                .map(|token| token.text())
                 .collect::<Vec<_>>(),
             ["name", "workspace", "value", "Simple", "Braced"]
         );
@@ -2036,7 +2018,7 @@ mod dependency_tests {
                 let (files, _) = state.collect_project_files(view);
                 assert_eq!(files.len(), 2);
                 let file = files.iter().find(|file| file.path == canonical).unwrap();
-                assert_eq!(file.source, buffer);
+                assert_eq!(file.source(), buffer);
             }
             let published = state.cross_file_pass();
             let (_, diagnostics) = published.iter().find(|(key, _)| key == &uri).unwrap();
@@ -2437,8 +2419,8 @@ mod environment_regressions {
 
     fn has_external_class(state: &LspState, name: &str) -> bool {
         state.external_libraries.libraries().iter().flat_map(|library| library.files.iter())
-            .flat_map(|file| &file.facts.declarations).any(|declaration| {
-                matches!(declaration, falcon_syntax::ast::TopLevelDecl::Class(class) if class.name.name == name)
+            .flat_map(|file| file.program().declarations()).any(|declaration| {
+                matches!(declaration, falcon_syntax::cst::TopLevelDecl::Class(class) if class.name().name() == name)
             })
     }
 
@@ -2470,7 +2452,7 @@ mod environment_regressions {
         let generated = canonical_or_lexical(&generated);
         assert!(
             snapshot.files[snapshot.by_path[&generated]]
-                .source
+                .source()
                 .contains("class After")
         );
     }
@@ -2546,7 +2528,7 @@ mod environment_regressions {
         let peer = canonical_or_lexical(&peer);
         assert!(
             snapshot.files[snapshot.by_path[&peer]]
-                .source
+                .source()
                 .contains("class After")
         );
     }
@@ -2630,8 +2612,8 @@ mod environment_regressions {
         assert!(!Arc::ptr_eq(&signatures, &cache.signatures));
         let snapshot = state.semantic_snapshot.as_ref().unwrap();
         let file = &snapshot.files[snapshot.by_path[&companion]];
-        assert!(file.source.contains("class After"));
-        assert!(!file.source.contains("class Before"));
+        assert!(file.source().contains("class After"));
+        assert!(!file.source().contains("class Before"));
     }
 
     #[test]
@@ -2964,10 +2946,12 @@ mod environment_regressions {
         state.ensure_semantic_snapshot();
         assert_eq!(state.external_reset_count, resets + 1);
         let file = &state.external_libraries.libraries()[0].files[0];
-        let falcon_syntax::ast::TopLevelDecl::Class(class) = &file.facts.declarations[0] else {
+        let falcon_syntax::cst::TopLevelDecl::Class(class) =
+            file.program().declarations().next().unwrap()
+        else {
             panic!("expected dependency class");
         };
-        assert_eq!(class.name.name, "ChangedDependency");
+        assert_eq!(class.name().name(), "ChangedDependency");
         let dependency_uri = format!("file://{}", dependency.display());
         state.open(
             &dependency_uri,
@@ -3039,7 +3023,12 @@ mod environment_regressions {
             let snapshot = state.semantic_snapshot.as_ref().unwrap();
             let indexes = &snapshot.indexes;
             let functions = apps.each_ref().map(|app| {
-                let model = SemanticModel::new(app, &indexes.identities, Some(&indexes.types));
+                let model = SemanticModel::new(
+                    app,
+                    &snapshot.files[snapshot.by_path[app]].parsed,
+                    &indexes.identities,
+                    Some(&indexes.types),
+                );
                 let foo = model.resolve_name("Foo").unwrap();
                 let function = model.resolve_value("makeValue").unwrap();
                 assert!(foo.is_package("foo", "Foo"));
@@ -3051,7 +3040,12 @@ mod environment_regressions {
                 function
             });
             for (app, copy) in apps.iter().zip(copies) {
-                let model = SemanticModel::new(app, &indexes.identities, Some(&indexes.types));
+                let model = SemanticModel::new(
+                    app,
+                    &snapshot.files[snapshot.by_path[app]].parsed,
+                    &indexes.identities,
+                    Some(&indexes.types),
+                );
                 let foo = model.resolve_name("Foo").unwrap();
                 let expected =
                     canonical_or_lexical(&root.join(format!("deps/{copy}/lib/foo.dart")));
@@ -3109,12 +3103,23 @@ mod environment_regressions {
                     .iter()
                     .all(|library| { library.files.iter().all(|file| file.path != shared) })
             );
-            let indexes = &state.semantic_snapshot.as_ref().unwrap().indexes;
-            let owner = SemanticModel::new(&shared, &indexes.identities, Some(&indexes.types));
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            let indexes = &snapshot.indexes;
+            let owner = SemanticModel::new(
+                &shared,
+                &snapshot.files[snapshot.by_path[&shared]].parsed,
+                &indexes.identities,
+                Some(&indexes.types),
+            );
             let buffered = owner.resolve_name("Buffered").unwrap();
             let function = owner.resolve_value("makeValue").unwrap();
             for app in &apps {
-                let model = SemanticModel::new(app, &indexes.identities, Some(&indexes.types));
+                let model = SemanticModel::new(
+                    app,
+                    &snapshot.files[snapshot.by_path[app]].parsed,
+                    &indexes.identities,
+                    Some(&indexes.types),
+                );
                 assert_eq!(model.resolve_name("Buffered"), Some(buffered.clone()));
                 assert_eq!(model.resolve_value("makeValue"), Some(function.clone()));
                 assert_eq!(
@@ -3158,10 +3163,16 @@ mod environment_regressions {
         state.open(&uris[1], second_source.clone(), Some(1));
         state.ensure_semantic_snapshot();
         let primary_function = |state: &LspState| {
-            let indexes = &state.semantic_snapshot.as_ref().unwrap().indexes;
-            SemanticModel::new(&apps[2], &indexes.identities, Some(&indexes.types))
-                .resolve_value("makeValue")
-                .unwrap()
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            let indexes = &snapshot.indexes;
+            SemanticModel::new(
+                &apps[2],
+                &snapshot.files[snapshot.by_path[&apps[2]]].parsed,
+                &indexes.identities,
+                Some(&indexes.types),
+            )
+            .resolve_value("makeValue")
+            .unwrap()
         };
         let before = primary_function(&state);
         let builds = state.external_index_build_count;
@@ -3180,9 +3191,16 @@ mod environment_regressions {
             libraries: &state.external_libraries,
             environment: &state.environment,
         });
+        let shared_file = state
+            .external_libraries
+            .libraries()
+            .iter()
+            .flat_map(|library| library.files.iter())
+            .find(|file| file.path == shared)
+            .unwrap();
         assert_eq!(
             after,
-            SemanticModel::new(&shared, &fresh, None)
+            SemanticModel::new(&shared, &shared_file.parsed, &fresh, None)
                 .resolve_value("makeValue")
                 .unwrap()
         );
@@ -3234,7 +3252,7 @@ mod environment_regressions {
                 .filter(|file| file.path == part)
                 .collect();
             assert_eq!(parts.len(), 1);
-            assert_eq!(parts[0].source, buffered);
+            assert_eq!(parts[0].source(), buffered);
             assert!(state.external_libraries.libraries().iter().all(|library| {
                 library
                     .files

@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidEmptyElse;
@@ -19,7 +19,7 @@ pub struct AvoidEmptyElse;
 impl Rule for AvoidEmptyElse {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -36,21 +36,21 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::If(if_stmt) = node
-            && let Some(else_branch) = &if_stmt.else_branch
-            && matches!(else_branch.as_ref(), Stmt::Empty(_))
+            && let Some(else_branch) = if_stmt.else_branch()
+            && matches!(else_branch, Stmt::Empty(_))
         {
             let span = else_branch.span();
             self.diags.push(self.ctx.diagnostic(
                 "avoid-empty-else",
                 "Empty `else` clause — remove the `else` or give it a body",
-                *span,
+                span,
             ));
         }
         StructuralTraversal::Continue

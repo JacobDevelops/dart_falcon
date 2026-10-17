@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rayon::prelude::*;
 use tracing::{info, info_span};
@@ -8,7 +9,7 @@ use falcon_config::FalconConfig;
 use falcon_dart_parser::parse_for_package;
 use falcon_dart_parser::parser::ParseError;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
-use falcon_syntax::ast::Program;
+use falcon_syntax::cst::Program;
 use falcon_syntax::language_version::LanguageVersion;
 
 use crate::environment::{AnalysisEnvironment, ExternalLibraries};
@@ -16,7 +17,7 @@ use crate::resolve::{
     ExternalSources, IdentityIndex, IdentitySource, LibrarySource, LibraryUnit, PackageIdentity,
     SignatureIndex, TypeIndex, canonical_or_lexical, group_libraries, library_unit,
 };
-use crate::{AnalyzeContext, ProjectFile, RuleRegistry, SemanticIndexes};
+use crate::{AnalyzeContext, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes};
 
 /// Parse `source`, run every per-file rule (with no project index), and
 /// optionally keep the parsed program for the cross-file pass. This is the fast
@@ -37,24 +38,25 @@ fn analyze_file(
     }
     let package_version = workspace.package_language_version(path);
     let falcon_dart_parser::ParseResult {
-        program,
         errors: parse_errors,
-        syntax,
+        tree,
         ..
     } = parse_for_package(source, package_version);
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    });
     let ctx = AnalyzeContext {
         environment: workspace.environment,
         package_language_version: package_version,
-        ..AnalyzeContext::new(path, source, config, &syntax)
+        ..AnalyzeContext::new(path, config, &parsed)
     };
     let mut diagnostics = syntax_error_diagnostics(path, &parse_errors);
-    diagnostics.extend(registry.run_all(&program, &ctx));
+    diagnostics.extend(registry.run_all(parsed.program(), &ctx));
     info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
     let retained = collect_programs.then(|| ProjectFile {
         path: path.to_path_buf(),
-        source: source.to_owned(),
-        program,
-        syntax,
+        parsed,
         has_parse_errors: !parse_errors.is_empty(),
     });
     (diagnostics, retained)
@@ -98,24 +100,19 @@ pub fn source_size_diagnostic(path: &Path, bytes: u64) -> Option<Diagnostic> {
 /// A parsed file retained until shared semantic indexes are built.
 struct Parsed<'src> {
     path: &'src Path,
-    source: &'src str,
-    program: Program,
-    syntax: falcon_syntax::SyntaxStore,
+    parsed: Arc<ParsedFile>,
     parse_errors: Vec<ParseError>,
 }
 
-fn parse_one<'src>(path: &'src Path, source: &'src str, workspace: Workspace<'_>) -> Parsed<'src> {
+fn parse_one<'src>(path: &'src Path, source: Box<str>, workspace: Workspace<'_>) -> Parsed<'src> {
     let falcon_dart_parser::ParseResult {
-        program,
         errors: parse_errors,
-        syntax,
+        tree,
         ..
-    } = parse_for_package(source, workspace.package_language_version(path));
+    } = parse_for_package(&source, workspace.package_language_version(path));
     Parsed {
         path,
-        source,
-        program,
-        syntax,
+        parsed: Arc::new(ParsedFile { source, tree }),
         parse_errors,
     }
 }
@@ -130,9 +127,7 @@ fn retain(parsed: Vec<Parsed<'_>>, collect_programs: bool) -> Vec<ProjectFile> {
         .into_iter()
         .map(|p| ProjectFile {
             path: p.path.to_path_buf(),
-            source: p.source.to_owned(),
-            program: p.program,
-            syntax: p.syntax,
+            parsed: p.parsed,
             has_parse_errors: !p.parse_errors.is_empty(),
         })
         .collect()
@@ -157,9 +152,9 @@ fn analyze_indexed(
                 .iter()
                 .map(|p| canonical_or_lexical(p.path))
                 .collect();
-            let roots: Vec<(&Path, &Program, &str)> = parsed
+            let roots: Vec<(&Path, Program<'_>, &str)> = parsed
                 .iter()
-                .map(|p| (p.path, &p.program, p.source))
+                .map(|p| (p.path, p.parsed.program(), p.parsed.source.as_ref()))
                 .collect();
             let libraries =
                 ExternalLibraries::load(environment, &roots, |path| project_paths.contains(path));
@@ -173,7 +168,7 @@ fn analyze_indexed(
         });
     // Opening a dependency part promotes the defining library into the project
     // view. Index its unopened companions without linting them as requested files.
-    let companion_sources: Vec<(PathBuf, String)> = externals
+    let mut companion_sources: Vec<(PathBuf, Box<str>)> = externals
         .as_ref()
         .into_iter()
         .flat_map(|(libraries, _, project_paths)| {
@@ -184,28 +179,31 @@ fn analyze_indexed(
         .filter_map(|path| {
             crate::source::read_source(path)
                 .ok()
-                .map(|source| (path.to_path_buf(), source))
+                .map(|source| (path.to_path_buf(), source.into_boxed_str()))
         })
         .collect();
     let companions: Vec<Parsed<'_>> = companion_sources
-        .iter()
-        .map(|(path, source)| parse_one(path, source, workspace))
+        .iter_mut()
+        .map(|(path, source)| parse_one(path, std::mem::take(source), workspace))
         .collect();
     let semantic_parsed: Vec<&Parsed<'_>> = parsed.iter().chain(&companions).collect();
-    let project_files: Vec<(PathBuf, &Program)> = semantic_parsed
+    let project_files: Vec<(PathBuf, Program<'_>)> = semantic_parsed
         .iter()
-        .map(|file| (file.path.to_path_buf(), &file.program))
+        .map(|file| (file.path.to_path_buf(), file.parsed.program()))
         .collect();
     let grouping = group_libraries(&project_files);
     let identity_sources: Vec<IdentitySource<'_>> = semantic_parsed
         .iter()
         .map(|p| IdentitySource {
             path: p.path,
-            program: &p.program,
+            parsed: &p.parsed,
             has_parse_errors: !p.parse_errors.is_empty(),
         })
         .collect();
-    let sources: Vec<&str> = semantic_parsed.iter().map(|p| p.source).collect();
+    let sources: Vec<&str> = semantic_parsed
+        .iter()
+        .map(|p| p.parsed.source.as_ref())
+        .collect();
     let identities = IdentityIndex::build_layer(
         &identity_sources,
         &sources,
@@ -224,7 +222,7 @@ fn analyze_indexed(
             (
                 p.path,
                 LibrarySource {
-                    program: &p.program,
+                    program: p.parsed.program(),
                     has_parse_errors: !p.parse_errors.is_empty(),
                     has_unresolved_parts: grouping.is_unresolved(i),
                 },
@@ -235,32 +233,36 @@ fn analyze_indexed(
     if let Some((libraries, _, _)) = &externals {
         type_index.add_external(libraries, &identities);
     }
+    let signature_files: Vec<_> = project_files
+        .into_iter()
+        .zip(&semantic_parsed)
+        .map(|((path, _), p)| (path, Arc::clone(&p.parsed)))
+        .collect();
     let signatures = SignatureIndex::build(
-        &project_files,
+        &signature_files,
         externals.as_ref().map(|(libraries, _, _)| libraries),
         &identities,
         &type_index,
     );
     info!("semantic indexes built");
-    // Release compact external declaration facts after the indexes own them.
+    // The indexes retain the external declaration nodes they need.
     drop(externals);
-    let programs: Vec<&Program> = semantic_parsed.iter().map(|p| &p.program).collect();
-    let syntax: Vec<_> = semantic_parsed.iter().map(|p| &p.syntax).collect();
+    let parsed_files: Vec<_> = semantic_parsed.iter().map(|p| &p.parsed).collect();
     let library_units: Vec<LibraryUnit> = (0..parsed.len())
-        .map(|i| library_unit(&grouping, &programs, &sources, &syntax, i))
+        .map(|i| library_unit(&grouping, &parsed_files, i))
         .collect();
 
     let run_one = |(i, p): (usize, &Parsed<'_>)| {
         let span = info_span!("analyze_file", file = %p.path.display());
         let _enter = span.enter();
-        let ctx = AnalyzeContext::new(p.path, p.source, config, &p.syntax)
+        let ctx = AnalyzeContext::new(p.path, config, &p.parsed)
             .with_types(&type_index)
             .with_identities(&identities)
             .with_signatures(&signatures)
             .with_library(&library_units[i])
             .with_environment(workspace.environment);
         let mut diagnostics = syntax_error_diagnostics(p.path, &p.parse_errors);
-        diagnostics.extend(registry.run_all(&p.program, &ctx));
+        diagnostics.extend(registry.run_all(p.parsed.program(), &ctx));
         info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
         diagnostics
     };
@@ -392,7 +394,7 @@ pub fn analyze_parallel_collecting_resolving(
         // the normal case; no intermediate list of accepted files is needed.
         files
             .par_iter()
-            .map(|(path, source)| parse_one(path, source, workspace))
+            .map(|(path, source)| parse_one(path, source.as_str().into(), workspace))
             .collect()
     } else {
         files
@@ -402,7 +404,7 @@ pub fn analyze_parallel_collecting_resolving(
                     diagnostics.push(diagnostic);
                     None
                 } else {
-                    Some(parse_one(path, source, workspace))
+                    Some(parse_one(path, source.as_str().into(), workspace))
                 }
             })
             .collect()
@@ -444,7 +446,7 @@ pub fn analyze_sequential_collecting_resolving(
                 diagnostics.push(diagnostic);
                 None
             } else {
-                Some(parse_one(path, source, workspace))
+                Some(parse_one(path, source.as_str().into(), workspace))
             }
         })
         .collect();

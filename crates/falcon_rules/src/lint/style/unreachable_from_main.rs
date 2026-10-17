@@ -44,11 +44,11 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
+use falcon_syntax::cst::visit::{
     Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_pattern,
     walk_stmt, walk_top_level_decl,
 };
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::operator_token_span;
 use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
@@ -69,7 +69,7 @@ pub struct UnreachableFromMain;
 impl Rule for UnreachableFromMain {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(units) = library_units(program, ctx) else {
@@ -97,12 +97,12 @@ struct Reachability<'a> {
     primary_types: ExpressionTypes,
 }
 
-impl SemanticRuleVisitor for Reachability<'_> {
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+impl<'a> SemanticRuleVisitor<'a> for Reachability<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         self.primary_types.visit_expr(node, state);
     }
 
-    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+    fn visit_program_end(&mut self, state: &SemanticState<'a>) {
         self.diagnostics = Some(self.diagnostics(Some(state)));
     }
 
@@ -113,8 +113,8 @@ impl SemanticRuleVisitor for Reachability<'_> {
     }
 }
 
-impl Reachability<'_> {
-    fn diagnostics(&self, primary_state: Option<&SemanticState<'_>>) -> Vec<Diagnostic> {
+impl<'a> Reachability<'a> {
+    fn diagnostics(&self, primary_state: Option<&SemanticState<'a>>) -> Vec<Diagnostic> {
         let ctx = self.ctx;
         let tables = &self.tables;
 
@@ -122,9 +122,18 @@ impl Reachability<'_> {
         for (index, unit) in self.units.iter().enumerate() {
             let bound = locally_bound_identifiers(unit.program);
             let mut sibling_types = ExpressionTypes::default();
-            let sibling_state = (index != 0)
-                .then(|| SemanticState::new(unit.program, ctx))
-                .flatten()
+            // A sibling needs its own parsed backing and per-file semantic caches.
+            let sibling_ctx = (index != 0).then(|| {
+                let mut sibling = AnalyzeContext::new(unit.path, ctx.config, unit.parsed)
+                    .with_environment(ctx.environment);
+                sibling.identities = ctx.identities;
+                sibling.types = ctx.types;
+                sibling.signatures = ctx.signatures;
+                sibling
+            });
+            let sibling_state = sibling_ctx
+                .as_ref()
+                .and_then(|ctx| SemanticState::new(unit.program, ctx))
                 .map(|state| visit_program(&mut sibling_types, unit.program, state));
             let (state, types) = if index == 0 {
                 (primary_state, &self.primary_types)
@@ -132,9 +141,9 @@ impl Reachability<'_> {
                 (sibling_state.as_ref(), &sibling_types)
             };
             let mut walker =
-                RefWalker::new(tables, index, unit.source, unit.syntax, &bound, &mut deps);
+                RefWalker::new(tables, index, unit.source, unit.tree, &bound, &mut deps);
             walker.semantic = state.map(|state| (state, &types.0));
-            for declaration in &unit.program.declarations {
+            for declaration in unit.program.declarations() {
                 walker.visit_top_level_decl(declaration);
             }
             walker.doc_references();
@@ -186,19 +195,23 @@ impl Reachability<'_> {
 /// One compilation unit of the analyzed library. Unit 0 is the file under
 /// analysis; the rest are its library siblings.
 struct Unit<'a> {
-    program: &'a Program,
+    program: Program<'a>,
+    parsed: &'a std::sync::Arc<falcon_analyze::ParsedFile>,
+    path: &'a std::path::Path,
     /// The in-memory text `program` was parsed from, so its spans index it.
     source: &'a str,
-    syntax: &'a falcon_syntax::SyntaxStore,
+    tree: &'a SyntaxTree,
 }
 
 /// The analyzed file plus every sibling unit of its library, each with the
 /// source text it was parsed from. `None` when the library is incomplete.
-fn library_units<'a>(program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> Option<Vec<Unit<'a>>> {
+fn library_units<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Option<Vec<Unit<'a>>> {
     let current = Unit {
         program,
+        parsed: ctx.parsed,
+        path: ctx.file_path,
         source: ctx.source,
-        syntax: ctx.syntax,
+        tree: ctx.tree(),
     };
     if ctx
         .library
@@ -207,34 +220,37 @@ fn library_units<'a>(program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> Optio
         return None;
     }
     let Some(library) = ctx.library.filter(|library| !library.siblings().is_empty()) else {
-        let standalone = program.part_of_directive.is_none() && program.part_directives.is_empty();
+        let standalone =
+            program.part_of_directive().is_none() && program.part_directives().is_empty();
         return standalone.then(|| vec![current]);
     };
     let siblings = library
         .siblings()
         .iter()
-        .zip(library.sibling_sources())
-        .zip(library.sibling_syntax())
-        .map(|((&program, &source), &syntax)| Unit {
+        .zip(library.sibling_parsed())
+        .zip(library.sibling_paths())
+        .map(|((&program, parsed), &path)| Unit {
             program,
-            source,
-            syntax,
+            parsed,
+            path,
+            source: &parsed.source,
+            tree: &parsed.tree,
         });
     Some(std::iter::once(current).chain(siblings).collect())
 }
 
-fn top_level_name(declaration: &TopLevelDecl) -> Option<&Identifier> {
+fn top_level_name(declaration: TopLevelDecl<'_>) -> Option<Identifier<'_>> {
     match declaration {
-        TopLevelDecl::Class(x) => Some(&x.name),
-        TopLevelDecl::ClassTypeAlias(x) => Some(&x.name),
-        TopLevelDecl::Mixin(x) => Some(&x.name),
-        TopLevelDecl::MixinClass(x) => Some(&x.name),
-        TopLevelDecl::Enum(x) => Some(&x.name),
-        TopLevelDecl::Extension(x) => x.name.as_ref(),
-        TopLevelDecl::ExtensionType(x) => Some(&x.name),
-        TopLevelDecl::Function(x) => Some(&x.name),
-        TopLevelDecl::Variable(x) => x.declarators.first().map(|declarator| &declarator.name),
-        TopLevelDecl::TypeAlias(x) => Some(&x.name),
+        TopLevelDecl::Class(x) => Some(x.name()),
+        TopLevelDecl::ClassTypeAlias(x) => Some(x.name()),
+        TopLevelDecl::Mixin(x) => Some(x.name()),
+        TopLevelDecl::MixinClass(x) => Some(x.name()),
+        TopLevelDecl::Enum(x) => Some(x.name()),
+        TopLevelDecl::Extension(x) => x.name(),
+        TopLevelDecl::ExtensionType(x) => Some(x.name()),
+        TopLevelDecl::Function(x) => Some(x.name()),
+        TopLevelDecl::Variable(x) => x.declarators().next().map(|declarator| declarator.name()),
+        TopLevelDecl::TypeAlias(x) => Some(x.name()),
         TopLevelDecl::Error(_) => None,
     }
 }
@@ -279,19 +295,19 @@ enum ContainerKind {
 struct Container<'a> {
     decl: DeclId,
     kind: ContainerKind,
-    superclass: Option<&'a DartType>,
+    superclass: Option<DartType<'a>>,
     /// Types whose members this declaration inherits or must implement.
-    supertypes: Vec<&'a DartType>,
+    supertypes: Vec<DartType<'a>>,
     /// Every member name in the declaration's lexical scope.
-    declared: HashSet<String>,
+    declared: HashSet<&'a str>,
     /// Instance member names, for override detection.
-    instance: HashSet<String>,
-    constructors: HashSet<String>,
+    instance: HashSet<&'a str>,
+    constructors: HashSet<&'a str>,
     /// Candidate non-constructor members by name.
-    members: HashMap<String, Vec<DeclId>>,
+    members: HashMap<&'a str, Vec<DeclId>>,
     /// Candidate constructors by name (`new` for the unnamed one).
-    candidate_constructors: HashMap<String, DeclId>,
-    members_source: &'a [ClassMember],
+    candidate_constructors: HashMap<&'a str, DeclId>,
+    members_source: AstChildren<'a, ClassMember<'a>>,
     public: bool,
     unit: usize,
 }
@@ -300,7 +316,7 @@ impl<'a> Container<'a> {
     fn new(
         decl: DeclId,
         kind: ContainerKind,
-        members_source: &'a [ClassMember],
+        members_source: AstChildren<'a, ClassMember<'a>>,
         public: bool,
         unit: usize,
     ) -> Self {
@@ -329,11 +345,11 @@ struct Tables<'a> {
     container_named: HashMap<&'a str, ContainerId>,
     container_identities: HashMap<falcon_analyze::DeclarationIdentity, ContainerId>,
     extension_on_types: Vec<(ContainerId, falcon_analyze::ResolvedType)>,
-    alias_named: HashMap<&'a str, &'a DartType>,
+    alias_named: HashMap<&'a str, DartType<'a>>,
     /// Top-level variable initializers, for annotations through a constant.
-    initializers: HashMap<&'a str, &'a Expr>,
+    initializers: HashMap<&'a str, Expr<'a>>,
     /// Candidate non-constructor members of every container, by name.
-    members_named: HashMap<String, Vec<DeclId>>,
+    members_named: HashMap<&'a str, Vec<DeclId>>,
     /// Declaration ids by `(unit, span start)` of their declaring node.
     at: HashMap<(usize, usize), DeclId>,
     container_at: HashMap<(usize, usize), ContainerId>,
@@ -369,12 +385,12 @@ impl<'a> Tables<'a> {
             named_elsewhere: Vec::new(),
         };
         for (unit, source) in units.iter().enumerate() {
-            for declaration in &source.program.declarations {
-                tables.add_top_level(unit, source.source, source.syntax, declaration);
+            for declaration in source.program.declarations() {
+                tables.add_top_level(unit, source.source, source.tree, declaration);
             }
         }
         let model = ctx.identities.map(|identities| {
-            falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types)
+            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
         });
         let semantic = model.as_ref().zip(ctx.signatures);
         if let Some((model, signatures)) = semantic {
@@ -398,7 +414,7 @@ impl<'a> Tables<'a> {
             tables.add_members(
                 container,
                 units[tables.containers[container].unit].source,
-                units[tables.containers[container].unit].syntax,
+                units[tables.containers[container].unit].tree,
                 semantic,
             );
         }
@@ -418,47 +434,55 @@ impl<'a> Tables<'a> {
         &mut self,
         unit: usize,
         source: &str,
-        syntax: &falcon_syntax::SyntaxStore,
-        declaration: &'a TopLevelDecl,
+        tree: &SyntaxTree,
+        declaration: TopLevelDecl<'a>,
     ) {
-        let annotations: &[Annotation] = match declaration {
-            TopLevelDecl::Class(x) => &x.annotations,
-            TopLevelDecl::ClassTypeAlias(x) => &x.annotations,
-            TopLevelDecl::Mixin(x) => &x.annotations,
-            TopLevelDecl::MixinClass(x) => &x.annotations,
-            TopLevelDecl::Enum(x) => &x.annotations,
-            TopLevelDecl::Extension(x) => &x.annotations,
-            TopLevelDecl::ExtensionType(x) => &x.annotations,
-            TopLevelDecl::Function(x) => &x.annotations,
-            TopLevelDecl::Variable(x) => &x.annotations,
-            TopLevelDecl::TypeAlias(x) => &x.annotations,
+        let annotations = match declaration {
+            TopLevelDecl::Class(x) => x.annotations(),
+            TopLevelDecl::ClassTypeAlias(x) => x.annotations(),
+            TopLevelDecl::Mixin(x) => x.annotations(),
+            TopLevelDecl::MixinClass(x) => x.annotations(),
+            TopLevelDecl::Enum(x) => x.annotations(),
+            TopLevelDecl::Extension(x) => x.annotations(),
+            TopLevelDecl::ExtensionType(x) => x.annotations(),
+            TopLevelDecl::Function(x) => x.annotations(),
+            TopLevelDecl::Variable(x) => x.annotations(),
+            TopLevelDecl::TypeAlias(x) => x.annotations(),
             TopLevelDecl::Error(_) => return,
         };
-        let span = *declaration.span();
-        let doc_start = doc_start(source, syntax, annotated_start(annotations, span.start));
-        let exempt = annotations.iter().any(is_visible_for_testing);
+        let span = declaration.span();
+        let doc_start = doc_start(
+            source,
+            tree,
+            annotated_start(annotations.clone(), span.start),
+        );
+        let exempt = annotations.clone().any(is_visible_for_testing);
 
         if let TopLevelDecl::Variable(variable) = declaration {
-            for declarator in &variable.declarators {
+            for declarator in variable.declarators() {
                 let id = self.add_decl(
                     unit,
-                    declarator.span.start,
+                    declarator.span().start,
                     Decl {
-                        label: declarator.name.name.clone(),
+                        label: declarator.name().name().to_string(),
                         unit,
-                        name_span: declarator.name.span,
+                        name_span: declarator.name().span(),
                         container: None,
                         scope: None,
-                        reportable: is_public(&declarator.name.name) && !exempt,
+                        reportable: is_public(declarator.name().name()) && !exempt,
                         doc_start,
-                        end: declarator.span.end,
+                        end: declarator.span().end,
                         field: false,
                     },
                 );
-                self.top.entry(&declarator.name.name).or_default().push(id);
-                self.conflicting |= !self.defined.insert(&declarator.name.name);
-                if let Some(initializer) = &declarator.initializer {
-                    self.initializers.insert(&declarator.name.name, initializer);
+                self.top
+                    .entry(declarator.name().name())
+                    .or_default()
+                    .push(id);
+                self.conflicting |= !self.defined.insert(declarator.name().name());
+                if let Some(initializer) = declarator.initializer() {
+                    self.initializers
+                        .insert(declarator.name().name(), initializer);
                 }
             }
             return;
@@ -488,7 +512,7 @@ impl<'a> Tables<'a> {
                     Container::new(
                         id,
                         ContainerKind::Extension,
-                        &extension.members,
+                        extension.members(),
                         false,
                         unit,
                     ),
@@ -500,79 +524,79 @@ impl<'a> Tables<'a> {
             unit,
             span.start,
             Decl {
-                label: name.name.clone(),
+                label: name.name().to_string(),
                 unit,
-                name_span: name.span,
+                name_span: name.span(),
                 container: None,
                 scope: None,
-                reportable: is_public(&name.name) && !exempt,
+                reportable: is_public(name.name()) && !exempt,
                 doc_start,
                 end: span.end,
                 field: false,
             },
         );
-        self.top.entry(&name.name).or_default().push(id);
+        self.top.entry(name.name()).or_default().push(id);
         let accessor = matches!(declaration, TopLevelDecl::Function(function)
-            if !matches!(function.kind, FunctionKind::Function(_)));
+            if !matches!(function.kind(), FunctionKind::Function(_)));
         if !accessor {
-            self.conflicting |= !self.defined.insert(&name.name);
+            self.conflicting |= !self.defined.insert(name.name());
         }
 
-        let public = is_public(&name.name);
-        let (kind, superclass, supertypes, members): (_, _, Vec<&DartType>, &[ClassMember]) =
+        let public = is_public(name.name());
+        let (kind, superclass, supertypes, members): (_, _, Vec<DartType<'a>>, _) =
             match declaration {
                 TopLevelDecl::Class(x) => (
                     ContainerKind::Class,
-                    x.extends.as_ref(),
-                    x.extends
-                        .iter()
-                        .chain(&x.with_clause)
-                        .chain(&x.implements)
+                    x.extends(),
+                    x.extends()
+                        .into_iter()
+                        .chain(x.with_clause())
+                        .chain(x.implements())
                         .collect(),
-                    &x.members,
+                    x.members(),
                 ),
                 TopLevelDecl::MixinClass(x) => (
                     ContainerKind::Class,
-                    x.extends.as_ref(),
-                    x.extends
-                        .iter()
-                        .chain(&x.with_clause)
-                        .chain(&x.implements)
+                    x.extends(),
+                    x.extends()
+                        .into_iter()
+                        .chain(x.with_clause())
+                        .chain(x.implements())
                         .collect(),
-                    &x.members,
+                    x.members(),
                 ),
                 TopLevelDecl::ClassTypeAlias(x) => (
                     ContainerKind::ClassTypeAlias,
-                    Some(&x.superclass),
-                    std::iter::once(&x.superclass)
-                        .chain(&x.with_clause)
-                        .chain(&x.implements)
+                    Some(x.superclass()),
+                    std::iter::once(x.superclass())
+                        .chain(x.with_clause())
+                        .chain(x.implements())
                         .collect(),
-                    &[],
+                    AstChildren::empty(),
                 ),
                 TopLevelDecl::Mixin(x) => (
                     ContainerKind::Mixin,
                     None,
-                    x.on_clause.iter().chain(&x.implements).collect(),
-                    &x.members,
+                    x.on_clause().chain(x.implements()).collect(),
+                    x.members(),
                 ),
                 TopLevelDecl::Enum(x) => (
                     ContainerKind::Enum,
                     None,
-                    x.with_clause.iter().chain(&x.implements).collect(),
-                    &x.members,
+                    x.with_clause().chain(x.implements()).collect(),
+                    x.members(),
                 ),
                 TopLevelDecl::Extension(x) => {
-                    (ContainerKind::Extension, None, Vec::new(), &x.members)
+                    (ContainerKind::Extension, None, Vec::new(), x.members())
                 }
                 TopLevelDecl::ExtensionType(x) => (
                     ContainerKind::ExtensionType,
                     None,
-                    x.implements.iter().collect(),
-                    &x.members,
+                    x.implements().collect(),
+                    x.members(),
                 ),
                 TopLevelDecl::TypeAlias(x) => {
-                    self.alias_named.insert(&name.name, &x.aliased);
+                    self.alias_named.insert(name.name(), x.aliased());
                     return;
                 }
                 TopLevelDecl::Function(_) | TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => {
@@ -587,26 +611,25 @@ impl<'a> Tables<'a> {
                 ..Container::new(id, kind, members, public, unit)
             },
         );
-        self.container_named.entry(&name.name).or_insert(container);
+        self.container_named.entry(name.name()).or_insert(container);
         self.decls[id].scope = Some(container);
         let lexical = &mut self.containers[container];
         match declaration {
             TopLevelDecl::Enum(x) => {
                 lexical
                     .declared
-                    .extend(x.variants.iter().map(|variant| variant.name.name.clone()));
+                    .extend(x.variants().map(|variant| variant.name().name()));
             }
             TopLevelDecl::ExtensionType(x) => {
                 if let Some(representation) = x.representation() {
-                    let field = &representation.name.name;
-                    lexical.declared.insert(field.clone());
-                    lexical.instance.insert(field.clone());
+                    let field = representation.name().name();
+                    lexical.declared.insert(field);
+                    lexical.instance.insert(field);
                 }
                 lexical.constructors.insert(
-                    x.primary_constructor
-                        .constructor_name
-                        .as_ref()
-                        .map_or_else(|| "new".to_string(), |name| name.name.clone()),
+                    x.primary_constructor()
+                        .constructor_name()
+                        .map_or("new", |name| name.name()),
                 );
             }
             _ => {}
@@ -615,26 +638,27 @@ impl<'a> Tables<'a> {
 
     /// Register a container, indexing the names its members declare.
     fn add_container(&mut self, key: usize, mut container: Container<'a>) -> ContainerId {
-        for member in container.members_source {
-            let (is_static, single, fields): (bool, Option<String>, &[VarDeclarator]) = match member
-            {
+        for member in container.members_source.clone() {
+            let (is_static, single, fields) = match member {
                 ClassMember::Constructor(constructor) => {
                     container.constructors.insert(constructor_key(constructor));
                     continue;
                 }
-                ClassMember::Field(x) => (x.is_static, None, &x.declarators),
-                ClassMember::Method(x) => (x.is_static, Some(x.name.name.clone()), &[]),
-                ClassMember::Getter(x) => (x.is_static, Some(x.name.name.clone()), &[]),
-                ClassMember::Setter(x) => (x.is_static, Some(x.name.name.clone()), &[]),
-                ClassMember::Operator(x) => (false, Some(x.lookup_name().to_string()), &[]),
+                ClassMember::Field(x) => (x.is_static(), None, Some(x.declarators())),
+                ClassMember::Method(x) => (x.is_static(), Some(x.name().name()), None),
+                ClassMember::Getter(x) => (x.is_static(), Some(x.name().name()), None),
+                ClassMember::Setter(x) => (x.is_static(), Some(x.name().name()), None),
+                ClassMember::Operator(x) => (false, Some(x.lookup_name()), None),
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => continue,
             };
-            for name in single
-                .into_iter()
-                .chain(fields.iter().map(|declarator| declarator.name.name.clone()))
-            {
+            for name in single.into_iter().chain(
+                fields
+                    .into_iter()
+                    .flatten()
+                    .map(|declarator| declarator.name().name()),
+            ) {
                 if !is_static {
-                    container.instance.insert(name.clone());
+                    container.instance.insert(name);
                 }
                 container.declared.insert(name);
             }
@@ -651,7 +675,7 @@ impl<'a> Tables<'a> {
         &mut self,
         container: ContainerId,
         source: &str,
-        syntax: &falcon_syntax::SyntaxStore,
+        tree: &SyntaxTree,
         semantic: Option<(
             &falcon_analyze::SemanticModel<'_>,
             &falcon_analyze::SignatureIndex,
@@ -661,7 +685,7 @@ impl<'a> Tables<'a> {
             public,
             unit,
             kind,
-            members_source,
+            ref members_source,
             decl,
             ..
         } = self.containers[container];
@@ -669,66 +693,74 @@ impl<'a> Tables<'a> {
             return;
         }
         let owner = self.decls[decl].label.clone();
+        let members_source = members_source.clone();
         for member in members_source {
-            let span = *member.span();
-            let (annotations, is_static): (&[Annotation], bool) = match member {
-                ClassMember::Field(x) => (&x.annotations, x.is_static),
-                ClassMember::Constructor(x) => (&x.annotations, true),
-                ClassMember::Method(x) => (&x.annotations, x.is_static),
-                ClassMember::Getter(x) => (&x.annotations, x.is_static),
-                ClassMember::Setter(x) => (&x.annotations, x.is_static),
-                ClassMember::Operator(x) => (&x.annotations, false),
+            let span = member.span();
+            let (annotations, is_static) = match member {
+                ClassMember::Field(x) => (x.annotations(), x.is_static()),
+                ClassMember::Constructor(x) => (x.annotations(), true),
+                ClassMember::Method(x) => (x.annotations(), x.is_static()),
+                ClassMember::Getter(x) => (x.annotations(), x.is_static()),
+                ClassMember::Setter(x) => (x.annotations(), x.is_static()),
+                ClassMember::Operator(x) => (x.annotations(), false),
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => continue,
             };
-            let doc_start = doc_start(source, syntax, annotated_start(annotations, span.start));
-            let visible_for_testing = annotations.iter().any(is_visible_for_testing);
-            let preview = annotations.iter().any(|a| self.is_preview(a));
-            let mut entries: Vec<(usize, String, String, Span, Span)> = Vec::new();
+            let doc_start = doc_start(
+                source,
+                tree,
+                annotated_start(annotations.clone(), span.start),
+            );
+            let visible_for_testing = annotations.clone().any(is_visible_for_testing);
+            let preview = annotations.clone().any(|a| self.is_preview(a));
+            let mut entries: Vec<(usize, &'a str, String, Span, Span)> = Vec::new();
             match member {
                 ClassMember::Constructor(constructor) => {
                     let key = constructor_key(constructor);
-                    if kind == ContainerKind::Enum || !is_public(&key) {
+                    if kind == ContainerKind::Enum || !is_public(key) {
                         continue;
                     }
                     let name_span = constructor
-                        .constructor_name
-                        .as_ref()
-                        .map_or(constructor.name.span, |name| name.span);
+                        .constructor_name()
+                        .map_or(constructor.name().span(), |name| name.span());
                     let label = format!("{owner}.{key}");
                     entries.push((span.start, key, label, name_span, span));
                 }
                 ClassMember::Field(field) => {
-                    for declarator in &field.declarators {
-                        let name = &declarator.name.name;
+                    for declarator in field.declarators() {
+                        let name = declarator.name().name();
                         if is_public(name)
                             && (is_static || !self.may_override(container, name, semantic))
                         {
                             entries.push((
-                                declarator.span.start,
-                                name.clone(),
-                                name.clone(),
-                                declarator.name.span,
-                                Span::new(span.start, declarator.span.end),
+                                declarator.span().start,
+                                name,
+                                name.to_string(),
+                                declarator.name().span(),
+                                Span::new(span.start, declarator.span().end),
                             ));
                         }
                     }
                 }
                 ClassMember::Operator(operator) => {
-                    let key = operator.lookup_name().to_string();
-                    if !self.may_override(container, &key, semantic) {
-                        let name_span = operator_token_span(operator, syntax);
-                        entries.push((span.start, key, operator.op.clone(), name_span, span));
+                    let key = operator.lookup_name();
+                    if !self.may_override(container, key, semantic) {
+                        let name_span = operator_token_span(operator);
+                        entries.push((span.start, key, operator.op().to_string(), name_span, span));
                     }
                 }
-                ClassMember::Method(MethodDecl { name, .. })
-                | ClassMember::Getter(GetterDecl { name, .. })
-                | ClassMember::Setter(SetterDecl { name, .. }) => {
-                    let key = &name.name;
+                ClassMember::Method(_) | ClassMember::Getter(_) | ClassMember::Setter(_) => {
+                    let name = match member {
+                        ClassMember::Method(x) => x.name(),
+                        ClassMember::Getter(x) => x.name(),
+                        ClassMember::Setter(x) => x.name(),
+                        _ => unreachable!(),
+                    };
+                    let key = name.name();
                     if is_public(key)
                         && !is_test_method(key)
                         && (is_static || !self.may_override(container, key, semantic))
                     {
-                        entries.push((span.start, key.clone(), key.clone(), name.span, span));
+                        entries.push((span.start, key, key.to_string(), name.span(), span));
                     }
                 }
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
@@ -737,7 +769,7 @@ impl<'a> Tables<'a> {
             let preview_exempt = preview
                 && match member {
                     ClassMember::Constructor(_) => true,
-                    ClassMember::Method(method) => method.is_static,
+                    ClassMember::Method(method) => method.is_static(),
                     _ => false,
                 };
             let is_constructor = matches!(member, ClassMember::Constructor(_));
@@ -764,7 +796,7 @@ impl<'a> Tables<'a> {
                 } else {
                     self.containers[container]
                         .members
-                        .entry(key.clone())
+                        .entry(key)
                         .or_default()
                         .push(id);
                     self.members_named.entry(key).or_default().push(id);
@@ -794,7 +826,7 @@ impl<'a> Tables<'a> {
             _ => {}
         }
         let mut visited = HashSet::from([container]);
-        let mut pending: Vec<&DartType> = declaration.supertypes.clone();
+        let mut pending = declaration.supertypes.clone();
         while let Some(supertype) = pending.pop() {
             if is_object(supertype) && !self.top.contains_key("Object") {
                 continue;
@@ -830,19 +862,21 @@ impl<'a> Tables<'a> {
     }
 
     /// The library container a written type denotes, following typedefs.
-    fn library_container(&self, ty: &DartType) -> Option<ContainerId> {
+    fn library_container(&self, ty: DartType<'a>) -> Option<ContainerId> {
         let mut ty = ty;
         for _ in 0..MAX_ALIAS_DEPTH {
             let DartType::Named(named) = ty else {
                 return None;
             };
-            let [segment] = named.segments.as_slice() else {
+            let mut segments = named.segments();
+            let segment = segments.next()?;
+            if segments.next().is_some() {
                 return None;
-            };
-            if let Some(&container) = self.container_named.get(segment.name.as_str()) {
+            }
+            if let Some(&container) = self.container_named.get(segment.name()) {
                 return Some(container);
             }
-            ty = self.alias_named.get(segment.name.as_str())?;
+            ty = *self.alias_named.get(segment.name())?;
         }
         None
     }
@@ -852,7 +886,7 @@ impl<'a> Tables<'a> {
         if let Some(&container) = self.container_named.get(name) {
             return Some(container);
         }
-        self.library_container(self.alias_named.get(name)?)
+        self.library_container(*self.alias_named.get(name)?)
     }
 
     fn find_named_elsewhere(&mut self, units: &[Unit<'_>]) {
@@ -901,20 +935,19 @@ impl<'a> Tables<'a> {
             ))
         });
         for (unit, source) in units.iter().enumerate() {
-            for declaration in &source.program.declarations {
+            for declaration in source.program.declarations() {
                 let TopLevelDecl::Function(function) = declaration else {
                     continue;
                 };
-                let Some(&id) = self.at.get(&(unit, function.span.start)) else {
+                let Some(&id) = self.at.get(&(unit, function.span().start)) else {
                     continue;
                 };
-                let is_main = function.name.name == "main";
+                let is_main = function.name().name() == "main";
                 let pragmas: Vec<QualifiedName<'_>> = function
-                    .annotations
-                    .iter()
+                    .annotations()
                     .filter_map(|annotation| self.entry_point_pragma(annotation))
                     .collect();
-                let preview = function.annotations.iter().any(|a| self.is_preview(a));
+                let preview = function.annotations().any(|a| self.is_preview(a));
                 if preview {
                     self.decls[id].reportable = false;
                 }
@@ -936,36 +969,41 @@ impl<'a> Tables<'a> {
 
     /// The written `pragma` name of an `@pragma('vm:entry-point')` annotation,
     /// directly or through a top-level constant.
-    fn entry_point_pragma(&self, annotation: &'a Annotation) -> Option<QualifiedName<'a>> {
-        let (callee, args) = match annotation.name.as_slice() {
-            [single] if annotation.args.is_none() => {
-                invocation(self.initializers.get(single.name.as_str())?)?
-            }
-            segments => (
-                QualifiedName::from_identifiers(segments)?,
-                annotation.args.as_ref()?,
-            ),
+    fn entry_point_pragma(&self, annotation: Annotation<'a>) -> Option<QualifiedName<'a>> {
+        let mut segments = annotation.name();
+        let single = segments.next()?;
+        let (callee, args) = if segments.next().is_none() && annotation.args().is_none() {
+            invocation(*self.initializers.get(single.name())?)?
+        } else {
+            (
+                QualifiedName::from_identifiers(annotation.name())?,
+                annotation.args()?,
+            )
         };
         let is_entry_point = callee.name == "pragma"
-            && matches!(args.positional.first().map(Expr::unparenthesized), Some(Expr::StringLit(literal))
-                if literal.interpolations.is_empty() && literal.value == "vm:entry-point");
+            && matches!(args.positional().first().map(Expr::unparenthesized), Some(Expr::StringLit(literal))
+                if literal.interpolations().next().is_none() && literal.value() == "vm:entry-point");
         is_entry_point.then_some(callee)
     }
 
     /// Whether an annotation is a widget-preview `@Preview(...)`, directly or
     /// through a top-level constant. A library-declared `Preview` is not the
     /// Flutter one.
-    fn is_preview(&self, annotation: &Annotation) -> bool {
+    fn is_preview(&self, annotation: Annotation<'a>) -> bool {
         if self.top.contains_key("Preview") {
             return false;
         }
-        let callee = match annotation.name.as_slice() {
-            [single] if annotation.args.is_none() => self
-                .initializers
-                .get(single.name.as_str())
-                .and_then(|initializer| invocation(initializer))
-                .map(|(callee, _)| callee),
-            segments => QualifiedName::from_identifiers(segments),
+        let mut segments = annotation.name();
+        let Some(single) = segments.next() else {
+            return false;
+        };
+        let callee = if segments.next().is_none() && annotation.args().is_none() {
+            self.initializers
+                .get(single.name())
+                .and_then(|&initializer| invocation(initializer))
+                .map(|(callee, _)| callee)
+        } else {
+            QualifiedName::from_identifiers(annotation.name())
         };
         callee.is_some_and(|callee| callee.name == "Preview")
     }
@@ -973,34 +1011,39 @@ impl<'a> Tables<'a> {
 
 /// The invoked (possibly prefixed) name and arguments of `name(...)`,
 /// `prefix.name(...)`, or `const name(...)`.
-fn invocation(expr: &Expr) -> Option<(QualifiedName<'_>, &ArgList)> {
+fn invocation(expr: Expr<'_>) -> Option<(QualifiedName<'_>, ArgList<'_>)> {
     match expr.unparenthesized() {
-        Expr::Call { callee, args, .. } => {
-            let name = match callee.unparenthesized() {
-                Expr::Ident(name) => QualifiedName::from(&name.name),
-                Expr::Field { object, field, .. } => match object.unparenthesized() {
-                    Expr::Ident(prefix) => QualifiedName::prefixed(&prefix.name, &field.name),
+        Expr::Call(call) => {
+            let name = match call.callee().unparenthesized() {
+                Expr::Ident(name) => QualifiedName::from(name.name()),
+                Expr::Field(field) => match field.object().unparenthesized() {
+                    Expr::Ident(prefix) => {
+                        QualifiedName::prefixed(prefix.name(), field.field().name())
+                    }
                     _ => return None,
                 },
                 _ => return None,
             };
-            Some((name, args))
+            Some((name, call.args()))
         }
-        Expr::New {
-            dart_type: DartType::Named(named),
-            constructor_name: None,
-            args,
-            ..
-        } => Some((QualifiedName::from_identifiers(&named.segments)?, args)),
+        Expr::New(new) if new.constructor_name().is_none() => {
+            let DartType::Named(named) = new.dart_type() else {
+                return None;
+            };
+            Some((
+                QualifiedName::from_identifiers(named.segments())?,
+                new.args(),
+            ))
+        }
         _ => None,
     }
 }
 
-fn is_visible_for_testing(annotation: &Annotation) -> bool {
+fn is_visible_for_testing(annotation: Annotation<'_>) -> bool {
     annotation
-        .name
+        .name()
         .last()
-        .is_some_and(|name| name.name == "visibleForTesting")
+        .is_some_and(|name| name.name() == "visibleForTesting")
 }
 
 fn is_public(name: &str) -> bool {
@@ -1013,21 +1056,23 @@ fn is_test_method(name: &str) -> bool {
         || matches!(name, "setUp" | "tearDown" | "setUpClass" | "tearDownClass")
 }
 
-fn is_object(ty: &DartType) -> bool {
-    matches!(ty, DartType::Named(named) if matches!(named.segments.as_slice(), [only] if only.name == "Object"))
+fn is_object(ty: DartType<'_>) -> bool {
+    let DartType::Named(named) = ty else {
+        return false;
+    };
+    let mut segments = named.segments();
+    segments.next().is_some_and(|only| only.name() == "Object") && segments.next().is_none()
 }
 
-fn constructor_key(constructor: &ConstructorDecl) -> String {
+fn constructor_key<'a>(constructor: ConstructorDecl<'a>) -> &'a str {
     constructor
-        .constructor_name
-        .as_ref()
-        .map_or_else(|| "new".to_string(), |name| name.name.clone())
+        .constructor_name()
+        .map_or("new", |name| name.name())
 }
 
-fn annotated_start(annotations: &[Annotation], start: usize) -> usize {
+fn annotated_start<'a>(annotations: AstChildren<'a, Annotation<'a>>, start: usize) -> usize {
     annotations
-        .iter()
-        .map(|annotation| annotation.span.start)
+        .map(|annotation| annotation.span().start)
         .fold(start, usize::min)
 }
 
@@ -1035,18 +1080,14 @@ fn annotated_start(annotations: &[Annotation], start: usize) -> usize {
 /// The empty block comment `/**/` is not a doc comment.
 // Unlike documentation_start/doc_blocks, attachment here includes all adjacent
 // documentation groups and stops at ordinary comments.
-fn doc_start(source: &str, syntax: &falcon_syntax::SyntaxStore, start: usize) -> usize {
+fn doc_start(source: &str, tree: &SyntaxTree, start: usize) -> usize {
     let mut start = start.min(source.len());
-    let syntax = syntax.syntax_for_span(Span::new(start, start));
-    let end = syntax
-        .tokens()
-        .partition_point(|token| token.offset() < start);
-    for token in syntax.tokens()[..end].iter().rev() {
-        match token.kind {
+    for token in tree.tokens_in(source, Span::new(0, start)).rev() {
+        match token.kind() {
             falcon_syntax::TokenKind::Whitespace | falcon_syntax::TokenKind::Newline => {}
             falcon_syntax::TokenKind::DocComment => {
                 let offset = token.offset();
-                if token.text(source).starts_with("///") {
+                if token.text().starts_with("///") {
                     let line_start = source[..offset]
                         .rfind('\n')
                         .map_or(0, |newline| newline + 1);
@@ -1072,15 +1113,12 @@ struct DocReference<'s> {
 }
 
 /// Every reference in the `///` and `/** */` doc comments of `source`.
-fn doc_comment_references<'s>(
-    source: &'s str,
-    syntax: &falcon_syntax::SyntaxStore,
-) -> Vec<DocReference<'s>> {
+fn doc_comment_references<'s>(source: &'s str, tree: &'s SyntaxTree) -> Vec<DocReference<'s>> {
     let mut references = Vec::new();
     let mut checked = 0;
     let mut line_start = 0;
-    for comment in syntax.comment_tokens().filter(|comment| {
-        if comment.kind != falcon_syntax::TokenKind::DocComment {
+    for comment in tree.comment_tokens(source).filter(|comment| {
+        if comment.kind() != falcon_syntax::TokenKind::DocComment {
             return false;
         }
         if let Some(newline) = source[checked..comment.offset()].rfind('\n') {
@@ -1090,7 +1128,7 @@ fn doc_comment_references<'s>(
         source[line_start..comment.offset()].trim().is_empty()
     }) {
         let mut offset = comment.offset();
-        for line in comment.text(source).split_inclusive('\n') {
+        for line in comment.text().split_inclusive('\n') {
             let mut cursor = 0;
             while let Some(open) = line[cursor..].find('[') {
                 let open = cursor + open;
@@ -1131,19 +1169,20 @@ enum Lexical {
 #[derive(Default)]
 struct ExpressionTypes(HashMap<Span, falcon_analyze::ResolvedType>);
 
-impl SemanticRuleVisitor for ExpressionTypes {
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+impl<'a> SemanticRuleVisitor<'a> for ExpressionTypes {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let receiver = match node {
-            Expr::Field { object, .. }
-            | Expr::Index { object, .. }
-            | Expr::Cascade { object, .. } => object.as_ref(),
-            Expr::Binary { left, .. } => left.as_ref(),
-            Expr::Unary { operand, .. } | Expr::PostfixIncDec { operand, .. } => operand.as_ref(),
-            Expr::Assign { target, .. } => target.as_ref(),
+            Expr::Field(field) => field.object(),
+            Expr::Index(index) => index.object(),
+            Expr::Cascade(cascade) => cascade.object(),
+            Expr::Binary(binary) => binary.left(),
+            Expr::Unary(unary) => unary.operand(),
+            Expr::PostfixIncDec(postfix) => postfix.operand(),
+            Expr::Assign(assign) => assign.target(),
             _ => return,
         };
         self.0
-            .entry(*receiver.span())
+            .entry(receiver.span())
             .or_insert_with(|| state.infer(receiver));
     }
 }
@@ -1153,7 +1192,7 @@ struct RefWalker<'t, 'a> {
     tables: &'t Tables<'a>,
     unit: usize,
     source: &'t str,
-    syntax: &'t falcon_syntax::SyntaxStore,
+    tree: &'t SyntaxTree,
     /// Identifier expressions resolving to locals.
     bound: &'t HashSet<usize>,
     deps: &'t mut Vec<Vec<DeclId>>,
@@ -1176,7 +1215,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         tables: &'t Tables<'a>,
         unit: usize,
         source: &'t str,
-        syntax: &'t falcon_syntax::SyntaxStore,
+        tree: &'t SyntaxTree,
         bound: &'t HashSet<usize>,
         deps: &'t mut Vec<Vec<DeclId>>,
     ) -> Self {
@@ -1184,7 +1223,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             tables,
             unit,
             source,
-            syntax,
+            tree,
             bound,
             deps,
             stack: Vec::new(),
@@ -1197,10 +1236,10 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         }
     }
 
-    fn push_type_parameters(&mut self, parameters: &[TypeParam]) -> usize {
+    fn push_type_parameters(&mut self, parameters: AstChildren<'a, TypeParam<'a>>) -> usize {
         let depth = self.type_parameters.len();
         self.type_parameters
-            .extend(parameters.iter().map(|parameter| parameter.name.span));
+            .extend(parameters.map(|parameter| parameter.name().span()));
         depth
     }
 
@@ -1307,7 +1346,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
                 declaration
                     .supertypes
                     .iter()
-                    .filter_map(|supertype| tables.library_container(supertype)),
+                    .filter_map(|&supertype| tables.library_container(supertype)),
             );
         }
         found
@@ -1344,12 +1383,12 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     }
 
     /// The library container an unqualified, non-local identifier names.
-    fn named_container(&self, identifier: &Identifier) -> Option<ContainerId> {
-        if self.bound.contains(&identifier.span.start) {
+    fn named_container(&self, identifier: Identifier<'a>) -> Option<ContainerId> {
+        if self.bound.contains(&identifier.span().start) {
             return None;
         }
-        match self.lexical(&identifier.name) {
-            Lexical::TopLevel => self.tables.container_for(&identifier.name),
+        match self.lexical(identifier.name()) {
+            Lexical::TopLevel => self.tables.container_for(identifier.name()),
             Lexical::Member(_) | Lexical::Unknown => None,
         }
     }
@@ -1367,19 +1406,22 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     }
 
     /// The constructor a written `Type`, `Type.name`, or `prefix.Type` names.
-    fn constructor_target<'n>(
+    fn constructor_target(
         &self,
-        segments: &'n [Identifier],
-        constructor: Option<&'n Identifier>,
-    ) -> Option<(&'n str, &'n str)> {
-        let named = |name: Option<&'n Identifier>| name.map_or("new", |name| name.name.as_str());
-        match segments {
-            [type_name] => Some((&type_name.name, named(constructor))),
-            [type_name, name]
+        mut segments: impl Iterator<Item = Identifier<'a>>,
+        constructor: Option<Identifier<'a>>,
+    ) -> Option<(&'a str, &'a str)> {
+        let type_name = segments.next()?;
+        match (segments.next(), segments.next()) {
+            (None, _) => Some((
+                type_name.name(),
+                constructor.map_or("new", |name| name.name()),
+            )),
+            (Some(name), None)
                 if constructor.is_none()
-                    && self.tables.container_for(&type_name.name).is_some() =>
+                    && self.tables.container_for(type_name.name()).is_some() =>
             {
-                Some((&type_name.name, &name.name))
+                Some((type_name.name(), name.name()))
             }
             _ => None,
         }
@@ -1387,38 +1429,38 @@ impl<'t, 'a> RefWalker<'t, 'a> {
 
     /// The class-like declaration an expression is an instance of, when it is
     /// syntactically evident.
-    fn receiver_container(&self, receiver: &Expr) -> Option<ContainerId> {
+    fn receiver_container(&self, receiver: Expr<'a>) -> Option<ContainerId> {
         match receiver.unparenthesized() {
-            Expr::This { .. } => self.container.filter(|&container| {
+            Expr::This(_) => self.container.filter(|&container| {
                 self.tables.containers[container].kind != ContainerKind::Extension
             }),
-            Expr::Call { callee, .. } => match callee.unparenthesized() {
+            Expr::Call(call) => match call.callee().unparenthesized() {
                 Expr::Ident(type_name) => self.named_container(type_name),
-                Expr::Field { object, field, .. } => match object.unparenthesized() {
+                Expr::Field(field) => match field.object().unparenthesized() {
                     Expr::Ident(type_name) => {
                         self.named_container(type_name).filter(|&container| {
                             self.tables.containers[container]
                                 .constructors
-                                .contains(&field.name)
+                                .contains(field.field().name())
                         })
                     }
                     _ => None,
                 },
                 _ => None,
             },
-            Expr::New {
-                dart_type: DartType::Named(named),
-                constructor_name,
-                ..
-            } => self
-                .constructor_target(&named.segments, constructor_name.as_ref())
-                .and_then(|(type_name, _)| self.tables.container_for(type_name)),
+            Expr::New(new) => {
+                let DartType::Named(named) = new.dart_type() else {
+                    return None;
+                };
+                self.constructor_target(named.segments(), new.constructor_name())
+                    .and_then(|(type_name, _)| self.tables.container_for(type_name))
+            }
             _ => None,
         }
     }
 
     /// `receiver.name` where the receiver is not a type name.
-    fn instance_member(&mut self, receiver: &Expr, name: &str) {
+    fn instance_member(&mut self, receiver: Expr<'a>, name: &str) {
         if self.resolved_instance_member(receiver, name) {
             return;
         }
@@ -1435,11 +1477,11 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         self.tables.container_identities.get(identity).copied()
     }
 
-    fn resolved_instance_member(&mut self, receiver: &Expr, name: &str) -> bool {
+    fn resolved_instance_member(&mut self, receiver: Expr<'a>, name: &str) -> bool {
         let Some((state, types)) = self.semantic else {
             return false;
         };
-        let Some(ty) = types.get(receiver.span()) else {
+        let Some(ty) = types.get(&receiver.span()) else {
             return false;
         };
         if matches!(
@@ -1480,7 +1522,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
 
     /// `object.name`: a static member or constructor when `object` names a
     /// library type, an instance member otherwise.
-    fn member_access(&mut self, object: &Expr, name: &str) {
+    fn member_access(&mut self, object: Expr<'a>, name: &str) {
         if let Expr::Ident(type_name) = object.unparenthesized()
             && let Some(container) = self.named_container(type_name)
         {
@@ -1500,7 +1542,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         }
     }
 
-    fn visit_type_arguments(&mut self, arguments: &[DartType]) {
+    fn visit_type_arguments(&mut self, arguments: impl IntoIterator<Item = DartType<'a>>) {
         self.type_argument_depth += 1;
         for argument in arguments {
             self.visit_dart_type(argument);
@@ -1508,7 +1550,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         self.type_argument_depth -= 1;
     }
 
-    fn visit_external_type(&mut self, ty: Option<&DartType>, is_external: bool) {
+    fn visit_external_type(&mut self, ty: Option<DartType<'a>>, is_external: bool) {
         if let Some(ty) = ty
             && is_external
         {
@@ -1522,14 +1564,14 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     /// every declarator, each initializer only to its own.
     fn visit_declarators(
         &mut self,
-        annotations: &[Annotation],
-        ty: Option<&DartType>,
+        annotations: AstChildren<'a, Annotation<'a>>,
+        ty: Option<DartType<'a>>,
         is_external: bool,
-        declarators: &[VarDeclarator],
+        declarators: AstChildren<'a, VarDeclarator<'a>>,
     ) {
         let ids: Vec<DeclId> = declarators
-            .iter()
-            .filter_map(|declarator| self.id_at(declarator.span.start))
+            .clone()
+            .filter_map(|declarator| self.id_at(declarator.span().start))
             .collect();
         let depth = self.stack.len();
         self.stack.extend(ids);
@@ -1542,9 +1584,9 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         self.visit_external_type(ty, is_external);
         self.stack.truncate(depth);
         for declarator in declarators {
-            let id = self.id_at(declarator.span.start);
+            let id = self.id_at(declarator.span().start);
             self.stack.extend(id);
-            if let Some(initializer) = &declarator.initializer {
+            if let Some(initializer) = declarator.initializer() {
                 self.visit_expr(initializer);
             }
             self.stack.truncate(depth);
@@ -1553,65 +1595,50 @@ impl<'t, 'a> RefWalker<'t, 'a> {
 
     /// Container-level references: named supertypes, the implicit super
     /// constructor call, reflective-test instantiation, and `toJson`.
-    fn container_references(&mut self, declaration: &TopLevelDecl, container: ContainerId) {
-        let (supertypes, members, annotations): (Vec<&DartType>, &[ClassMember], &[Annotation]) =
-            match declaration {
-                TopLevelDecl::Class(x) => (
-                    x.extends
-                        .iter()
-                        .chain(&x.with_clause)
-                        .chain(&x.implements)
-                        .collect(),
-                    &x.members,
-                    &x.annotations,
-                ),
-                TopLevelDecl::MixinClass(x) => (
-                    x.extends
-                        .iter()
-                        .chain(&x.with_clause)
-                        .chain(&x.implements)
-                        .collect(),
-                    &x.members,
-                    &x.annotations,
-                ),
-                TopLevelDecl::ExtensionType(x) => (x.implements.iter().collect(), &x.members, &[]),
-                TopLevelDecl::Mixin(x) => (Vec::new(), &x.members, &[]),
-                TopLevelDecl::Enum(x) => (Vec::new(), &x.members, &[]),
-                TopLevelDecl::Extension(x) => (Vec::new(), &x.members, &[]),
-                TopLevelDecl::ClassTypeAlias(_)
-                | TopLevelDecl::Function(_)
-                | TopLevelDecl::Variable(_)
-                | TopLevelDecl::TypeAlias(_)
-                | TopLevelDecl::Error(_) => (Vec::new(), &[], &[]),
-            };
-        for supertype in supertypes {
-            if let DartType::Named(named) = supertype
-                && let [name] = named.segments.as_slice()
-            {
-                self.mark_top(&name.name);
+    fn container_references(&mut self, declaration: TopLevelDecl<'a>, container: ContainerId) {
+        let tables = self.tables;
+        let members = tables.containers[container].members_source.clone();
+        let annotations = match declaration {
+            TopLevelDecl::Class(x) => Some(x.annotations()),
+            TopLevelDecl::MixinClass(x) => Some(x.annotations()),
+            _ => None,
+        };
+        if matches!(
+            declaration,
+            TopLevelDecl::Class(_) | TopLevelDecl::MixinClass(_) | TopLevelDecl::ExtensionType(_)
+        ) {
+            for &supertype in &tables.containers[container].supertypes {
+                if let DartType::Named(named) = supertype {
+                    let mut segments = named.segments();
+                    if let Some(name) = segments.next()
+                        && segments.next().is_none()
+                    {
+                        self.mark_top(name.name());
+                    }
+                }
             }
         }
-        let kind = self.tables.containers[container].kind;
+        let kind = tables.containers[container].kind;
         if kind == ContainerKind::Class {
             if !members
-                .iter()
+                .clone()
                 .any(|member| matches!(member, ClassMember::Constructor(_)))
             {
                 self.superclass_constructor(container, "new");
             }
-            if annotations.iter().any(|annotation| {
+            if annotations.into_iter().flatten().any(|annotation| {
                 annotation
-                    .name
+                    .name()
                     .last()
-                    .is_some_and(|name| name.name == "reflectiveTest")
+                    .is_some_and(|name| name.name() == "reflectiveTest")
             }) {
                 self.mark_constructor(container, "new");
             }
         }
         for member in members {
             if let ClassMember::Method(method) = member
-                && method.name.name == "toJson"
-                && !method.is_static
+                && method.name().name() == "toJson"
+                && !method.is_static()
                 && let Some(id) = self.id_at(member.span().start)
             {
                 self.mark(id);
@@ -1619,35 +1646,35 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         }
     }
 
-    fn constructor_references(&mut self, constructor: &ConstructorDecl) {
+    fn constructor_references(&mut self, constructor: ConstructorDecl<'a>) {
         let Some(container) = self.container else {
             return;
         };
         let mut has_super_call = false;
-        for initializer in &constructor.initializers {
+        for initializer in constructor.initializers() {
             match initializer {
-                ConstructorInitializer::SuperCall { call_name, .. } => {
+                ConstructorInitializer::SuperCall(call) => {
                     has_super_call = true;
-                    let name = call_name.as_ref().map_or("new", |name| name.name.as_str());
+                    let name = call.call_name().map_or("new", |name| name.name());
                     self.superclass_constructor(container, name);
                 }
-                ConstructorInitializer::ThisCall { call_name, .. } => {
-                    let name = call_name.as_ref().map_or("new", |name| name.name.as_str());
+                ConstructorInitializer::ThisCall(call) => {
+                    let name = call.call_name().map_or("new", |name| name.name());
                     self.mark_constructor(container, name);
                 }
-                ConstructorInitializer::FieldInit { field, .. } => {
-                    self.mark_members(container, &field.name);
+                ConstructorInitializer::FieldInit(field) => {
+                    self.mark_members(container, field.field().name());
                 }
-                ConstructorInitializer::Assert { .. } => {}
+                ConstructorInitializer::Assert(_) => {}
             }
         }
         if !has_super_call && self.tables.containers[container].kind == ContainerKind::Class {
             self.superclass_constructor(container, "new");
         }
-        if let Some(redirect) = &constructor.redirect
-            && let DartType::Named(named) = &redirect.type_
+        if let Some(redirect) = constructor.redirect()
+            && let DartType::Named(named) = redirect.type_()
             && let Some((type_name, name)) =
-                self.constructor_target(&named.segments, redirect.constructor_name.as_ref())
+                self.constructor_target(named.segments(), redirect.constructor_name())
         {
             self.constructor_reference(type_name, name);
         }
@@ -1660,7 +1687,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         let unit_decls: Vec<DeclId> = (0..tables.decls.len())
             .filter(|&id| tables.decls[id].unit == self.unit)
             .collect();
-        for reference in doc_comment_references(self.source, self.syntax) {
+        for reference in doc_comment_references(self.source, self.tree) {
             self.stack.extend(unit_decls.iter().copied().filter(|&id| {
                 let decl = &tables.decls[id];
                 decl.doc_start <= reference.at && reference.at < decl.end
@@ -1750,28 +1777,28 @@ fn relational_operator(op: RelationalPatternOp) -> Option<&'static str> {
     }
 }
 
-impl Visitor for RefWalker<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if let TopLevelDecl::Variable(variable) = node {
             self.visit_declarators(
-                &variable.annotations,
-                variable.var_type.as_ref(),
-                variable.is_external,
-                &variable.declarators,
+                variable.annotations(),
+                variable.var_type(),
+                variable.is_external(),
+                variable.declarators(),
             );
             return;
         }
         let parameters = match node {
-            TopLevelDecl::Class(x) => x.type_params.as_slice(),
-            TopLevelDecl::ClassTypeAlias(x) => x.type_params.as_slice(),
-            TopLevelDecl::Mixin(x) => x.type_params.as_slice(),
-            TopLevelDecl::MixinClass(x) => x.type_params.as_slice(),
-            TopLevelDecl::Enum(x) => x.type_params.as_slice(),
-            TopLevelDecl::Extension(x) => x.type_params.as_slice(),
-            TopLevelDecl::ExtensionType(x) => x.type_params.as_slice(),
-            TopLevelDecl::Function(x) => x.type_params.as_slice(),
-            TopLevelDecl::TypeAlias(x) => x.type_params.as_slice(),
-            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => &[],
+            TopLevelDecl::Class(x) => x.type_params(),
+            TopLevelDecl::ClassTypeAlias(x) => x.type_params(),
+            TopLevelDecl::Mixin(x) => x.type_params(),
+            TopLevelDecl::MixinClass(x) => x.type_params(),
+            TopLevelDecl::Enum(x) => x.type_params(),
+            TopLevelDecl::Extension(x) => x.type_params(),
+            TopLevelDecl::ExtensionType(x) => x.type_params(),
+            TopLevelDecl::Function(x) => x.type_params(),
+            TopLevelDecl::TypeAlias(x) => x.type_params(),
+            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => AstChildren::empty(),
         };
         let parameter_depth = self.push_type_parameters(parameters);
         let start = node.span().start;
@@ -1788,39 +1815,39 @@ impl Visitor for RefWalker<'_, '_> {
         self.stack.clear();
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) {
         let depth = self.stack.len();
         let parameter_depth = match node {
-            ClassMember::Method(method) => self.push_type_parameters(&method.type_params),
+            ClassMember::Method(method) => self.push_type_parameters(method.type_params()),
             _ => self.type_parameters.len(),
         };
         match node {
             ClassMember::Field(field) => {
                 self.visit_declarators(
-                    &field.annotations,
-                    field.field_type.as_ref(),
-                    field.is_external,
-                    &field.declarators,
+                    field.annotations(),
+                    field.field_type(),
+                    field.is_external(),
+                    field.declarators(),
                 );
                 return;
             }
             ClassMember::Constructor(constructor) => {
-                self.stack.extend(self.id_at(constructor.span.start));
+                self.stack.extend(self.id_at(constructor.span().start));
                 self.constructor_references(constructor);
             }
             ClassMember::Method(method) => {
-                self.stack.extend(self.id_at(method.span.start));
-                self.visit_external_type(method.return_type.as_ref(), method.is_external);
+                self.stack.extend(self.id_at(method.span().start));
+                self.visit_external_type(method.return_type(), method.is_external());
             }
             ClassMember::Getter(getter) => {
-                self.stack.extend(self.id_at(getter.span.start));
-                self.visit_external_type(getter.return_type.as_ref(), getter.is_external);
+                self.stack.extend(self.id_at(getter.span().start));
+                self.visit_external_type(getter.return_type(), getter.is_external());
             }
             ClassMember::Operator(operator) => {
-                self.stack.extend(self.id_at(operator.span.start));
-                self.visit_external_type(operator.return_type.as_ref(), operator.is_external);
+                self.stack.extend(self.id_at(operator.span().start));
+                self.visit_external_type(operator.return_type(), operator.is_external());
             }
-            ClassMember::Setter(setter) => self.stack.extend(self.id_at(setter.span.start)),
+            ClassMember::Setter(setter) => self.stack.extend(self.id_at(setter.span().start)),
             ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
         }
         walk_class_member(self, node);
@@ -1828,25 +1855,23 @@ impl Visitor for RefWalker<'_, '_> {
         self.type_parameters.truncate(parameter_depth);
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
-        let invoked = node.args.is_some();
-        match node.name.as_slice() {
-            [name] if invoked => {
-                let constructor = node
-                    .constructor_name
-                    .as_ref()
-                    .map_or("new", |name| name.name.as_str());
-                if self.tables.container_for(&name.name).is_some() {
-                    self.constructor_reference(&name.name, constructor);
+    fn visit_annotation(&mut self, node: Annotation<'a>) {
+        let invoked = node.args().is_some();
+        let mut names = node.name();
+        match (names.next(), names.next(), names.next()) {
+            (Some(name), None, _) if invoked => {
+                let constructor = node.constructor_name().map_or("new", |name| name.name());
+                if self.tables.container_for(name.name()).is_some() {
+                    self.constructor_reference(name.name(), constructor);
                 } else {
-                    self.mark_top(&name.name);
+                    self.mark_top(name.name());
                 }
             }
-            [name] => self.mark_top(&name.name),
-            [type_name, member] => {
-                if let Some(container) = self.tables.container_for(&type_name.name) {
-                    self.mark_top(&type_name.name);
-                    self.mark_static(container, &member.name);
+            (Some(name), None, _) => self.mark_top(name.name()),
+            (Some(type_name), Some(member), None) => {
+                if let Some(container) = self.tables.container_for(type_name.name()) {
+                    self.mark_top(type_name.name());
+                    self.mark_static(container, member.name());
                 }
             }
             _ => {}
@@ -1856,18 +1881,19 @@ impl Visitor for RefWalker<'_, '_> {
         self.type_argument_depth -= 1;
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: DartType<'a>) {
         let DartType::Named(named) = node else {
             let depth = match node {
-                DartType::Function(function) => self.push_type_parameters(&function.type_params),
+                DartType::Function(function) => self.push_type_parameters(function.type_params()),
                 _ => self.type_parameters.len(),
             };
             walk_dart_type(self, node);
             self.type_parameters.truncate(depth);
             return;
         };
-        if let [segment] = named.segments.as_slice() {
-            let name = segment.name.as_str();
+        let mut segments = named.segments();
+        if let (Some(segment), None) = (segments.next(), segments.next()) {
+            let name = segment.name();
             let counts = self.type_argument_depth > 0
                 || self.external_depth > 0
                 || self.tables.alias_named.contains_key(name)
@@ -1882,74 +1908,67 @@ impl Visitor for RefWalker<'_, '_> {
                 self.mark_top(name);
             }
         }
-        self.visit_type_arguments(&named.type_args);
+        self.visit_type_arguments(named.type_args());
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         let parameter_depth = match node {
-            Stmt::LocalFunc(function) => self.push_type_parameters(&function.type_params),
+            Stmt::LocalFunc(function) => self.push_type_parameters(function.type_params()),
             _ => self.type_parameters.len(),
         };
         if let Stmt::For(statement) = node
-            && let Some(ForInit::ForIn {
-                declares_variable: false,
-                name,
-                ..
-            }) = &statement.header.init
+            && let Some(ForInit::ForIn(init)) = statement.header().init()
+            && !init.declares_variable()
         {
-            self.reference(&name.name);
+            self.reference(init.name().name());
         }
         walk_stmt(self, node);
         self.type_parameters.truncate(parameter_depth);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         let parameter_depth = match node {
-            Expr::FuncExpr { type_params, .. } => self.push_type_parameters(type_params),
+            Expr::FuncExpr(function) => self.push_type_parameters(function.type_params()),
             _ => self.type_parameters.len(),
         };
         match node {
-            Expr::Ident(identifier) if !self.bound.contains(&identifier.span.start) => {
-                self.reference(&identifier.name);
+            Expr::Ident(identifier) if !self.bound.contains(&identifier.span().start) => {
+                self.reference(identifier.name());
             }
-            Expr::Field { object, field, .. } => self.member_access(object, &field.name),
-            Expr::Call {
-                callee, type_args, ..
-            } => {
-                self.visit_type_arguments(type_args);
-                if let Expr::Ident(type_name) = callee.unparenthesized()
+            Expr::Field(field) => self.member_access(field.object(), field.field().name()),
+            Expr::Call(call) => {
+                self.visit_type_arguments(call.type_args());
+                if let Expr::Ident(type_name) = call.callee().unparenthesized()
                     && self.named_container(type_name).is_some()
                 {
-                    self.constructor_reference(&type_name.name, "new");
+                    self.constructor_reference(type_name.name(), "new");
                 }
             }
-            Expr::New {
-                dart_type: DartType::Named(named),
-                constructor_name,
-                ..
-            } => {
-                if let Some((type_name, name)) =
-                    self.constructor_target(&named.segments, constructor_name.as_ref())
+            Expr::New(new) => {
+                if let DartType::Named(named) = new.dart_type()
+                    && let Some((type_name, name)) =
+                        self.constructor_target(named.segments(), new.constructor_name())
                 {
                     self.constructor_reference(type_name, name);
                 }
             }
-            Expr::DotShorthand { name, .. } => {
-                self.mark_any_member(&name.name);
+            Expr::DotShorthand(shorthand) => {
+                let name = shorthand.name().name();
+                self.mark_any_member(name);
                 let tables = self.tables;
                 for (container, declaration) in tables.containers.iter().enumerate() {
-                    if declaration.constructors.contains(&name.name) {
-                        self.mark_constructor(container, &name.name);
+                    if declaration.constructors.contains(name) {
+                        self.mark_constructor(container, name);
                     }
                 }
             }
-            Expr::Binary { left, op, .. } => {
-                if let Some(operator) = binary_operator(*op) {
-                    self.instance_member(left, operator);
+            Expr::Binary(binary) => {
+                if let Some(operator) = binary_operator(binary.op()) {
+                    self.instance_member(binary.left(), operator);
                 }
             }
-            Expr::Unary { operand, op, .. } => {
-                let operator = match op {
+            Expr::Unary(unary) => {
+                let operator = match unary.op() {
                     UnaryOp::Minus => Some("unary-"),
                     UnaryOp::Tilde => Some("~"),
                     UnaryOp::PlusPlus => Some("+"),
@@ -1957,101 +1976,102 @@ impl Visitor for RefWalker<'_, '_> {
                     UnaryOp::Bang => None,
                 };
                 if let Some(operator) = operator {
-                    self.instance_member(operand, operator);
+                    self.instance_member(unary.operand(), operator);
                 }
             }
-            Expr::PostfixIncDec { operand, op, .. } => self.instance_member(
-                operand,
-                match op {
+            Expr::PostfixIncDec(postfix) => self.instance_member(
+                postfix.operand(),
+                match postfix.op() {
                     PostfixIncDec::Increment => "+",
                     PostfixIncDec::Decrement => "-",
                 },
             ),
-            Expr::Assign { target, op, .. } => {
-                if let Some(operator) = assignment_operator(*op) {
-                    self.instance_member(target, operator);
+            Expr::Assign(assign) => {
+                if let Some(operator) = assignment_operator(assign.op()) {
+                    self.instance_member(assign.target(), operator);
                 }
-                if let Expr::Index { object, .. } = target.unparenthesized() {
-                    self.instance_member(object, "[]=");
+                if let Expr::Index(index) = assign.target().unparenthesized() {
+                    self.instance_member(index.object(), "[]=");
                 }
             }
-            Expr::Index { object, .. } => self.instance_member(object, "[]"),
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                for operation in sections.iter().flat_map(|section| &section.ops) {
+            Expr::Index(index) => self.instance_member(index.object(), "[]"),
+            Expr::Cascade(cascade) => {
+                let object = cascade.object();
+                for operation in cascade.sections().flat_map(|section| section.ops()) {
                     match operation {
-                        CascadeOp::NullAssert { .. } => {}
-                        CascadeOp::Field { name, .. } => self.instance_member(object, &name.name),
-                        CascadeOp::Call(name, type_args, _) => {
-                            self.visit_type_arguments(type_args);
-                            self.instance_member(object, &name.name);
+                        CascadeOp::NullAssert(_) => {}
+                        CascadeOp::Field(field) => {
+                            self.instance_member(object, field.name().name())
+                        }
+                        CascadeOp::Call(call) => {
+                            self.visit_type_arguments(call.type_args());
+                            self.instance_member(object, call.name().name());
                         }
                         // Like ordinary function-expression invocations, an implicit
                         // `call` names no element, so it references no member.
-                        CascadeOp::Invoke(type_args, _) => self.visit_type_arguments(type_args),
-                        CascadeOp::Index { .. } => self.mark_any_member("[]"),
-                        CascadeOp::Assign(target, op, _) => {
+                        CascadeOp::Invoke(invoke) => self.visit_type_arguments(invoke.type_args()),
+                        CascadeOp::Index(_) => self.mark_any_member("[]"),
+                        CascadeOp::Assign(assign) => {
                             // A named cascade assignment writes the receiver member.
-                            if let Expr::Ident(name) = target.unparenthesized() {
-                                self.instance_member(object, &name.name);
+                            if let Expr::Ident(name) = assign.target().unparenthesized() {
+                                self.instance_member(object, name.name());
                             }
-                            if let Some(operator) = assignment_operator(*op) {
+                            if let Some(operator) = assignment_operator(assign.op()) {
                                 self.mark_any_member(operator);
                             }
                         }
-                        CascadeOp::IndexAssign(_, op, _) => {
+                        CascadeOp::IndexAssign(assign) => {
                             self.instance_member(object, "[]=");
-                            if *op != AssignOp::Eq {
+                            if assign.op() != AssignOp::Eq {
                                 self.instance_member(object, "[]");
                             }
-                            if let Some(operator) = assignment_operator(*op) {
+                            if let Some(operator) = assignment_operator(assign.op()) {
                                 self.mark_any_member(operator);
                             }
                         }
                     }
                 }
             }
-            Expr::List { type_arg, .. } | Expr::Set { type_arg, .. } => {
-                self.visit_type_arguments(type_arg.as_slice());
-            }
-            Expr::Map { type_args, .. } | Expr::GenericInstantiation { type_args, .. } => {
-                self.visit_type_arguments(type_args);
-            }
+            Expr::List(list) => self.visit_type_arguments(list.type_arg()),
+            Expr::Set(set) => self.visit_type_arguments(set.type_arg()),
+            Expr::Map(map) => self.visit_type_arguments(map.type_args()),
+            Expr::GenericInstantiation(generic) => self.visit_type_arguments(generic.type_args()),
             _ => {}
         }
         walk_expr(self, node);
         self.type_parameters.truncate(parameter_depth);
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
+    fn visit_pattern(&mut self, node: Pattern<'a>) {
         match node {
             Pattern::Object(object) => {
                 let tables = self.tables;
-                let container = match &object.type_ {
+                let container = match object.type_() {
                     named @ DartType::Named(_) => tables.library_container(named),
                     _ => None,
                 };
-                for field in &object.fields {
+                for field in object.fields() {
                     match container {
-                        Some(container) => self.mark_member_of(container, &field.name.name),
-                        None => self.mark_any_member(&field.name.name),
+                        Some(container) => self.mark_member_of(container, field.name().name()),
+                        None => self.mark_any_member(field.name().name()),
                     }
                 }
             }
             Pattern::Const(constant) => {
-                if let ConstPatternValue::Name(segments) = &constant.value {
-                    match segments.as_slice() {
-                        [name] => self.reference(&name.name),
-                        [type_name, member] => {
-                            self.reference(&type_name.name);
+                if let ConstPatternValue::Name(mut segments) = constant.value() {
+                    match (segments.next(), segments.next(), segments.next()) {
+                        (Some(name), None, _) => self.reference(name.name()),
+                        (Some(type_name), Some(member), None) => {
+                            self.reference(type_name.name());
                             match self.named_container(type_name) {
-                                Some(container) => self.mark_static(container, &member.name),
-                                None => self.mark_any_member(&member.name),
+                                Some(container) => self.mark_static(container, member.name()),
+                                None => self.mark_any_member(member.name()),
                             }
                         }
-                        [.., member] => self.mark_any_member(&member.name),
-                        [] => {}
+                        (_, _, Some(member)) => {
+                            self.mark_any_member(segments.last().unwrap_or(member).name());
+                        }
+                        _ => {}
                     }
                 }
                 self.constant_pattern_depth += 1;
@@ -2059,13 +2079,13 @@ impl Visitor for RefWalker<'_, '_> {
                 self.constant_pattern_depth -= 1;
                 return;
             }
-            Pattern::Relational { op, .. } => {
-                if let Some(operator) = relational_operator(*op) {
+            Pattern::Relational(relational) => {
+                if let Some(operator) = relational_operator(relational.op()) {
                     self.mark_any_member(operator);
                 }
             }
-            Pattern::List(list) => self.visit_type_arguments(list.type_arg.as_slice()),
-            Pattern::Map(map) => self.visit_type_arguments(&map.type_args),
+            Pattern::List(list) => self.visit_type_arguments(list.type_arg()),
+            Pattern::Map(map) => self.visit_type_arguments(map.type_args()),
             _ => {}
         }
         walk_pattern(self, node);
@@ -2080,14 +2100,20 @@ mod tests {
 
     use super::{UnreachableFromMain, doc_comment_references, doc_start};
 
+    fn parse(source: &str) -> std::sync::Arc<falcon_analyze::ParsedFile> {
+        std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: falcon_dart_parser::parse(source).tree,
+        })
+    }
+
     fn lint(source: &str) -> Vec<String> {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = falcon_dart_parser::parse(source);
+        let parsed = parse(source);
+        let program = parsed.program();
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), source, &config, &syntax);
+        let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), &config, &parsed);
         UnreachableFromMain
-            .analyze(&program, &ctx)
+            .analyze(program, &ctx)
             .into_iter()
             .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_string())
             .collect()
@@ -2096,8 +2122,8 @@ mod tests {
     #[test]
     fn doc_comment_references_parse_names_members_and_constructors() {
         let source = "/// See [A], [B.c], [new D] and [text](url).\n/** [E] */\nvoid f() {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
-        let references: Vec<(bool, Vec<&str>)> = doc_comment_references(source, &syntax)
+        let parsed = parse(source);
+        let references: Vec<(bool, Vec<&str>)> = doc_comment_references(source, &parsed.tree)
             .into_iter()
             .map(|reference| (reference.is_new, reference.segments))
             .collect();
@@ -2116,23 +2142,29 @@ mod tests {
     #[test]
     fn doc_start_covers_line_and_block_doc_comments() {
         let source = "int a = 0;\n/// One.\n/// Two.\nvoid f() {}\n/** Block. */\nvoid g() {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
+        let parsed = parse(source);
         assert_eq!(
-            doc_start(source, &syntax, source.find("void f").unwrap()),
+            doc_start(source, &parsed.tree, source.find("void f").unwrap()),
             source.find("/// One").unwrap()
         );
         assert_eq!(
-            doc_start(source, &syntax, source.find("void g").unwrap()),
+            doc_start(source, &parsed.tree, source.find("void g").unwrap()),
             source.find("/**").unwrap()
         );
-        assert_eq!(doc_start(source, &syntax, source.find("int a").unwrap()), 0);
+        assert_eq!(
+            doc_start(source, &parsed.tree, source.find("int a").unwrap()),
+            0
+        );
     }
 
     #[test]
     fn empty_block_comment_is_not_a_doc_comment() {
         let source = "/**/\nvoid main() {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
-        assert_eq!(doc_start(source, &syntax, source.find("void").unwrap()), 5);
+        let parsed = parse(source);
+        assert_eq!(
+            doc_start(source, &parsed.tree, source.find("void").unwrap()),
+            5
+        );
         assert!(lint(source).is_empty());
         assert_eq!(lint("/**/\nvoid main() {}\nclass C {}\n"), ["C"]);
     }
@@ -2141,13 +2173,13 @@ mod tests {
     fn doc_start_preserves_adjacent_groups_and_plain_comment_boundary() {
         let source = "/// First.\n/** Second. */\n  /// Third.\nvoid f() {}\n\
                       /// Detached.\n// Boundary.\n  /// Attached.\nvoid g() {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
+        let parsed = parse(source);
         assert_eq!(
-            doc_start(source, &syntax, source.find("void f").unwrap()),
+            doc_start(source, &parsed.tree, source.find("void f").unwrap()),
             0
         );
         assert_eq!(
-            doc_start(source, &syntax, source.find("void g").unwrap()),
+            doc_start(source, &parsed.tree, source.find("void g").unwrap()),
             source.find("  /// Attached").unwrap()
         );
     }
@@ -2157,8 +2189,8 @@ mod tests {
         let source = "const text = '/// [StringOnly]';\n\
                       // [PlainOnly]\n/**/\n\
                       /// [Attached]\nvoid f() {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
-        let references = doc_comment_references(source, &syntax);
+        let parsed = parse(source);
+        let references = doc_comment_references(source, &parsed.tree);
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].segments, ["Attached"]);
         assert_eq!(references[0].at, source.find("[Attached]").unwrap());
@@ -2176,18 +2208,18 @@ mod tests {
     #[test]
     fn inline_line_documentation_does_not_attach_to_next_declaration() {
         let source = "void first() {} /// [Helper]\nvoid main() {}\nclass Helper {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
+        let parsed = parse(source);
         let start = source.find("void main").unwrap();
-        assert_eq!(doc_start(source, &syntax, start), start);
-        assert!(doc_comment_references(source, &syntax).is_empty());
+        assert_eq!(doc_start(source, &parsed.tree, start), start);
+        assert!(doc_comment_references(source, &parsed.tree).is_empty());
     }
 
     #[test]
     fn doc_references_include_nested_interpolation_comments() {
         let source = "void main() { print('''${() {\n\
                       /// [Helper]\nreturn 0;\n}()}'''); }\nclass Helper {}\n";
-        let syntax = falcon_dart_parser::parse(source).syntax;
-        let references = doc_comment_references(source, &syntax);
+        let parsed = parse(source);
+        let references = doc_comment_references(source, &parsed.tree);
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].segments, ["Helper"]);
         assert_eq!(references[0].at, source.find("[Helper]").unwrap());
@@ -2206,6 +2238,50 @@ mod tests {
                       class C { int f() => 0; void m() => f(); }\n\
                       int f = 0;\n";
         assert_eq!(lint(source), ["f"]);
+    }
+
+    #[test]
+    fn sibling_semantics_use_their_own_parsed_file_without_shared_signatures() {
+        use falcon_analyze::{IdentityIndex, IdentitySource, group_libraries, library_unit};
+        use std::path::Path;
+
+        let path = Path::new("/project/main.dart");
+        let part_path = Path::new("/project/part.dart");
+        let parsed =
+            parse("part 'part.dart';\nvoid main() => run();\nclass _C { void used() {} }\n");
+        let part = parse(
+            "part of 'main.dart';\nvoid run() {\n\
+             final receiver = _C();\nreceiver.used();\n}\n",
+        );
+        let identities = IdentityIndex::from_project_files(
+            &[
+                IdentitySource {
+                    path,
+                    parsed: &parsed,
+                    has_parse_errors: false,
+                },
+                IdentitySource {
+                    path: part_path,
+                    parsed: &part,
+                    has_parse_errors: false,
+                },
+            ],
+            &[],
+        );
+        let grouping = group_libraries(&[
+            (path.to_path_buf(), parsed.program()),
+            (part_path.to_path_buf(), part.program()),
+        ]);
+        let library = library_unit(&grouping, &[&parsed, &part], 0);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
+            .with_identities(&identities)
+            .with_library(&library);
+        assert!(
+            UnreachableFromMain
+                .analyze(parsed.program(), &ctx)
+                .is_empty()
+        );
     }
 
     #[test]

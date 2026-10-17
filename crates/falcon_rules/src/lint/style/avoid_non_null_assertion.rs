@@ -2,7 +2,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -12,7 +12,7 @@ pub struct AvoidNonNullAssertion;
 impl Rule for AvoidNonNullAssertion {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -27,17 +27,18 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::NullAssert { operand, span } = node else {
+    fn visit_expr(&mut self, node: cst::Expr<'_>, state: &SemanticState<'_>) {
+        let cst::Expr::NullAssert(assertion) = node else {
             return;
         };
-        if let Expr::Index { object, .. } = operand.unparenthesized() {
-            let receiver = state.infer(object);
+        let operand = assertion.operand();
+        if let cst::Expr::Index(index) = operand.unparenthesized() {
+            let receiver = state.infer(index.object());
             if state
                 .signatures
                 .instantiated_supertype(&receiver, "dart:core", "Map", &state.model)
@@ -52,7 +53,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         self.diags.push(self.ctx.diagnostic(
             "avoid-non-null-assertion",
             "Avoid using the null assertion operator '!'",
-            *span,
+            assertion.span(),
         ));
     }
 }

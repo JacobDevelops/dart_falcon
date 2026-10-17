@@ -21,9 +21,9 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, for_each_expr, walk_expr, walk_stmt};
-use falcon_syntax::{Program, TokenKind};
+use falcon_syntax::TokenKind;
+use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr, walk_stmt};
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -33,7 +33,7 @@ pub struct AvoidCatchesWithoutOnClauses;
 impl Rule for AvoidCatchesWithoutOnClauses {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -48,29 +48,29 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let Stmt::TryCatch(statement) = node else {
             return;
         };
-        for catch in &statement.catches {
-            if catch.exception_type.is_some() {
+        for catch in statement.catches() {
+            if catch.exception_type().is_some() {
                 continue;
             }
-            let Some(exception) = &catch.exception_var else {
+            let Some(exception) = catch.exception_var() else {
                 continue;
             };
             let mut uses = ValidUse {
-                exception: &exception.name,
+                exception: exception.name(),
                 state,
                 can_rethrow: true,
                 has_valid_use: false,
             };
-            for statement in &catch.body.stmts {
+            for statement in catch.body().stmts() {
                 uses.visit_stmt(statement);
             }
             if uses.has_valid_use {
@@ -78,10 +78,10 @@ impl SemanticRuleVisitor for Collector<'_> {
             }
             let span = self
                 .ctx
-                .syntax
-                .keywords_in(catch.span, TokenKind::Catch)
+                .tree()
+                .keywords_in(self.ctx.source, catch.span(), TokenKind::Catch)
                 .next()
-                .map_or(catch.span, |token| {
+                .map_or(catch.span(), |token| {
                     Span::new(token.offset(), token.offset() + token.len())
                 });
             self.diagnostics.push(self.ctx.diagnostic(
@@ -102,20 +102,19 @@ struct ValidUse<'s, 'a> {
     has_valid_use: bool,
 }
 
-impl ValidUse<'_, '_> {
-    fn mentions_exception(&self, expr: &Expr) -> bool {
+impl<'s, 'a> ValidUse<'s, 'a> {
+    fn mentions_exception(&self, expr: Expr<'a>) -> bool {
         let mut found = false;
         for_each_expr(expr, &mut |node| {
-            found |= matches!(node.unparenthesized(), Expr::Ident(identifier) if identifier.name == self.exception);
+            found |= matches!(node.unparenthesized(), Expr::Ident(identifier) if identifier.name() == self.exception);
         });
         found
     }
 
-    fn check_arguments(&mut self, args: &ArgList) {
+    fn check_arguments(&mut self, args: ArgList<'a>) {
         if args
-            .positional
-            .iter()
-            .chain(args.named.iter().map(|argument| &argument.value))
+            .positional()
+            .chain(args.named().map(|argument| argument.value()))
             .any(|argument| self.mentions_exception(argument))
         {
             self.has_valid_use = true;
@@ -123,23 +122,29 @@ impl ValidUse<'_, '_> {
     }
 
     /// Whether a call hands its arguments on as an error.
-    fn forwards_error(&self, callee: &Expr, type_args: &[DartType], args: &ArgList) -> bool {
-        if let Expr::Field { object, field, .. } = callee.unparenthesized() {
+    fn forwards_error(
+        &self,
+        callee: Expr<'a>,
+        type_args: AstChildren<'a, DartType<'a>>,
+        args: ArgList<'a>,
+    ) -> bool {
+        if let Expr::Field(field) = callee.unparenthesized() {
+            let object = field.object();
             // `Future<T>.error(...)` names the class through an instantiation.
             let class = match object.unparenthesized() {
-                Expr::GenericInstantiation { target, .. } => target.as_ref(),
+                Expr::GenericInstantiation(instantiation) => instantiation.target(),
                 other => other,
             };
             if let Expr::Ident(target) = class.unparenthesized() {
-                let is_class = |name: &str| target.name == name && !self.is_project_name(name);
-                if (field.name == "error" && is_class("Future"))
-                    || (field.name == "reportError" && target.name == "FlutterError")
-                    || (field.name == "throwWithStackTrace" && is_class("Error"))
+                let is_class = |name: &str| target.name() == name && !self.is_project_name(name);
+                if (field.field().name() == "error" && is_class("Future"))
+                    || (field.field().name() == "reportError" && target.name() == "FlutterError")
+                    || (field.field().name() == "throwWithStackTrace" && is_class("Error"))
                 {
                     return true;
                 }
             }
-            if field.name == "completeError" {
+            if field.field().name() == "completeError" {
                 let receiver = self.state.infer(object);
                 if self.state.signatures.interface_check_sdk(
                     &receiver,
@@ -166,20 +171,20 @@ impl ValidUse<'_, '_> {
     }
 }
 
-impl Visitor for ValidUse<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         if let Stmt::TryCatch(statement) = node {
-            for nested in &statement.body.stmts {
+            for nested in statement.body().stmts() {
                 self.visit_stmt(nested);
             }
-            for catch in &statement.catches {
+            for catch in statement.catches() {
                 self.can_rethrow = false;
-                for nested in &catch.body.stmts {
+                for nested in catch.body().stmts() {
                     self.visit_stmt(nested);
                 }
             }
-            if let Some(finally) = &statement.finally {
-                for nested in &finally.stmts {
+            if let Some(finally) = statement.finally() {
+                for nested in finally.stmts() {
                     self.visit_stmt(nested);
                 }
             }
@@ -188,34 +193,30 @@ impl Visitor for ValidUse<'_, '_> {
         if matches!(node, Stmt::Rethrow(_)) {
             self.has_valid_use = self.can_rethrow;
         } else if let Stmt::Throw(statement) = node
-            && self.mentions_exception(&statement.value)
+            && self.mentions_exception(statement.value())
         {
             self.has_valid_use = true;
         }
         walk_stmt(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         match node {
-            Expr::Throw { expr, .. } if self.mentions_exception(expr) => {
+            Expr::Throw(throw) if self.mentions_exception(throw.expr()) => {
                 self.has_valid_use = true;
             }
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } if self.forwards_error(callee, type_args, args) => self.check_arguments(args),
-            Expr::New {
-                dart_type: DartType::Named(named),
-                constructor_name: Some(constructor),
-                args,
-                ..
-            } if constructor.name == "error"
-                && matches!(named.segments.last(), Some(name) if name.name == "Future")
-                && !self.is_project_name("Future") =>
+            Expr::Call(call)
+                if self.forwards_error(call.callee(), call.type_args(), call.args()) =>
             {
-                self.check_arguments(args);
+                self.check_arguments(call.args());
+            }
+            Expr::New(new)
+                if matches!(new.constructor_name(), Some(constructor) if constructor.name() == "error")
+                    && matches!(new.dart_type(), DartType::Named(named)
+                        if matches!(named.segments().last(), Some(name) if name.name() == "Future"))
+                    && !self.is_project_name("Future") =>
+            {
+                self.check_arguments(new.args());
             }
             _ => {}
         }

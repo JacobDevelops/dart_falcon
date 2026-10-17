@@ -10,7 +10,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, expression_segments};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -23,7 +23,7 @@ const MESSAGE: &str = "Invalid use of an environment declaration.";
 impl Rule for DoNotUseEnvironment {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if !ctx.source.contains("Environment") {
@@ -49,21 +49,23 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let (ty, constructor, span) = match node {
-            Expr::Call { callee, .. } => {
-                if let Expr::DotShorthand { name, .. } = callee.unparenthesized() {
+            Expr::Call(call) => {
+                let callee = call.callee();
+                if let Expr::DotShorthand(shorthand) = callee.unparenthesized() {
+                    let name = shorthand.name();
                     let Some(ty) = state.expected() else {
                         return;
                     };
-                    if reads_environment(ty, &name.name) {
+                    if reads_environment(ty, name.name()) {
                         self.diags
-                            .push(self.ctx.diagnostic(NAME, MESSAGE, name.span));
+                            .push(self.ctx.diagnostic(NAME, MESSAGE, name.span()));
                     }
                     return;
                 }
@@ -82,20 +84,20 @@ impl SemanticRuleVisitor for Collector<'_> {
                 let Some(ty) = state.model.resolve_type_name(&segments) else {
                     return;
                 };
-                (ty, constructor, *callee.span())
+                (ty, constructor, callee.span())
             }
-            Expr::New {
-                dart_type: DartType::Named(named),
-                constructor_name,
-                ..
-            } if named.type_args.is_empty() => {
-                let mut segments: Vec<&str> = named
-                    .segments
-                    .iter()
-                    .map(|segment| segment.name.as_str())
-                    .collect();
+            Expr::New(construction) => {
+                let DartType::Named(named) = construction.dart_type() else {
+                    return;
+                };
+                if !named.type_args().is_empty() {
+                    return;
+                }
+                let constructor_name = construction.constructor_name();
+                let mut segments: Vec<&str> =
+                    named.segments().map(|segment| segment.name()).collect();
                 let constructor = match constructor_name {
-                    Some(name) => name.name.as_str(),
+                    Some(name) => name.name(),
                     None => {
                         let Some(name) = segments.pop() else {
                             return;
@@ -106,14 +108,12 @@ impl SemanticRuleVisitor for Collector<'_> {
                 let Some(ty) = state.model.resolve_type_name(&segments) else {
                     return;
                 };
-                let end = constructor_name
-                    .as_ref()
-                    .map_or(named.span.end, |name| name.span.end);
+                let end = constructor_name.map_or(named.span().end, |name| name.span().end);
                 (
                     ty,
                     constructor,
                     Span {
-                        start: named.span.start,
+                        start: named.span().start,
                         end,
                     },
                 )

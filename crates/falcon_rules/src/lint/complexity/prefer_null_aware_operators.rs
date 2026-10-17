@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferNullAwareOperators;
@@ -18,7 +18,7 @@ pub struct PreferNullAwareOperators;
 impl Rule for PreferNullAwareOperators {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -38,11 +38,13 @@ struct Collector<'s> {
 
 /// The receiver of a direct member access, index, or method call — the part
 /// that `?.` would guard.
-fn access_receiver(expr: &Expr) -> Option<&Expr> {
+fn access_receiver(expr: Expr<'_>) -> Option<Expr<'_>> {
     match expr.unparenthesized() {
-        Expr::Field { object, .. } | Expr::Index { object, .. } => Some(object),
-        Expr::Call { callee, .. } => match callee.unparenthesized() {
-            Expr::Field { object, .. } | Expr::Index { object, .. } => Some(object),
+        Expr::Field(field) => Some(field.object()),
+        Expr::Index(index) => Some(index.object()),
+        Expr::Call(call) => match call.callee().unparenthesized() {
+            Expr::Field(field) => Some(field.object()),
+            Expr::Index(index) => Some(index.object()),
             _ => None,
         },
         _ => None,
@@ -50,31 +52,26 @@ fn access_receiver(expr: &Expr) -> Option<&Expr> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            span,
-        } = node
-            && let Some((operand, is_eq)) = null_check(condition)
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Conditional(conditional) = node
+            && let Some((operand, is_eq)) = null_check(conditional.condition())
         {
             // `x == null ? null : x.y` — null branch is `then`, access is `else`;
             // `x != null ? x.y : null` — access is `then`, null branch is `else`.
             let (null_branch, access_branch) = if is_eq {
-                (then_expr, else_expr)
+                (conditional.then_expr(), conditional.else_expr())
             } else {
-                (else_expr, then_expr)
+                (conditional.else_expr(), conditional.then_expr())
             };
-            if matches!(null_branch.unparenthesized(), Expr::NullLit { .. })
+            if matches!(null_branch.unparenthesized(), Expr::NullLit(_))
                 && let Some(receiver) = access_receiver(access_branch)
                 && equivalent(receiver, operand, self.ctx)
             {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-null-aware-operators",
                     "Prefer using the null-aware operator '?.'.",
-                    *span,
+                    conditional.span(),
                 ));
             }
         }

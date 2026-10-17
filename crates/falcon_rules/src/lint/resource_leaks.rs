@@ -18,11 +18,10 @@ use falcon_analyze::{
     AnalyzeContext, ResolvedType, SemanticModel, Truth, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    self, Visitor, walk_expr, walk_formal_param, walk_program, walk_stmt,
+use falcon_syntax::cst::visit::{
+    self as visitor, Visitor, walk_expr, walk_formal_param, walk_program, walk_stmt,
 };
+use falcon_syntax::cst::*;
 
 use crate::lint::function_bodies::{FunctionBodies, contains};
 use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
@@ -44,10 +43,10 @@ pub(crate) struct LeakRule {
 impl LeakRule {
     pub(crate) fn semantic_visitor<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> Option<Box<dyn SemanticRuleVisitor + 'a>> {
-        let model = SemanticModel::new(ctx.file_path, ctx.identities?, ctx.types);
+    ) -> Option<Box<dyn SemanticRuleVisitor<'a> + 'a>> {
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, ctx.identities?, ctx.types);
         Some(Box::new(LocalCandidates {
             rule: *self,
             program,
@@ -76,30 +75,30 @@ impl LeakRule {
             .collect()
     }
 
-    fn candidate(
+    fn candidate<'a>(
         &self,
-        declarator: &VarDeclarator,
-        declared: Option<&DartType>,
+        declarator: VarDeclarator<'a>,
+        declared: Option<DartType<'a>>,
         kind: VariableKind,
         container: Span,
-        state: &SemanticState<'_>,
-    ) -> Option<Candidate> {
+        state: &SemanticState<'a>,
+    ) -> Option<Candidate<'a>> {
         // `var a = b;` only aliases a resource tracked through `b`.
-        if matches!(&declarator.initializer, Some(Expr::Ident(_))) {
+        if matches!(declarator.initializer(), Some(Expr::Ident(_))) {
             return None;
         }
-        let ty = match (declared, &declarator.initializer) {
+        let ty = match (declared, declarator.initializer()) {
             (Some(declared), _) => state
                 .model
                 .resolve_type_in(declared, &state.type_parameters),
-            (None, Some(Expr::Cascade { object, .. })) => state.infer_receiver(object),
+            (None, Some(Expr::Cascade(cascade))) => state.infer_receiver(cascade.object()),
             (None, Some(initializer)) => state.infer_receiver(initializer),
             (None, None) => return None,
         };
         let methods = self.methods(&ty, state);
         (!methods.is_empty()).then(|| Candidate {
-            name: declarator.name.name.clone(),
-            declarator: declarator.span,
+            name: declarator.name().name(),
+            declarator: declarator.span(),
             container,
             kind,
             methods,
@@ -114,8 +113,8 @@ enum VariableKind {
     Field,
 }
 
-struct Candidate {
-    name: String,
+struct Candidate<'a> {
+    name: &'a str,
     declarator: Span,
     container: Span,
     kind: VariableKind,
@@ -123,99 +122,99 @@ struct Candidate {
     valid: bool,
 }
 
-impl Candidate {
+impl Candidate<'_> {
     /// `name`, `name!`, or `this.name`.
-    fn is_reference(&self, expr: &Expr, references: &References) -> bool {
+    fn is_reference(&self, expr: Expr<'_>, references: &References<'_>) -> bool {
         match expr {
             Expr::Ident(_) => self.is_name(expr, references),
-            Expr::NullAssert { operand, .. } => self.is_name(operand, references),
-            Expr::Field { object, field, .. } if matches!(object.as_ref(), Expr::This { .. }) => {
-                references.resolve(&field.name, &field.span, true) == Some(self.declarator)
+            Expr::NullAssert(assertion) => self.is_name(assertion.operand(), references),
+            Expr::Field(access) if matches!(access.object(), Expr::This(_)) => {
+                let field = access.field();
+                references.resolve(field.name(), &field.span(), true) == Some(self.declarator)
             }
             _ => false,
         }
     }
 
-    fn is_name(&self, expr: &Expr, references: &References) -> bool {
+    fn is_name(&self, expr: Expr<'_>, references: &References<'_>) -> bool {
         matches!(expr, Expr::Ident(identifier)
-            if references.resolve(&identifier.name, &identifier.span, false) == Some(self.declarator))
+            if references.resolve(identifier.name(), &identifier.span(), false) == Some(self.declarator))
     }
 
-    fn passed_in(&self, args: &ArgList, references: &References) -> bool {
+    fn passed_in(&self, args: ArgList<'_>, references: &References<'_>) -> bool {
         self.kind == VariableKind::Local
             && args
-                .positional
-                .iter()
+                .positional()
                 .any(|argument| self.is_name(argument, references))
     }
 
     fn is_valid_use(
         &self,
-        node: &Expr,
-        references: &References,
+        node: Expr<'_>,
+        references: &References<'_>,
         excluded_calls: &[(usize, usize)],
     ) -> bool {
         match node {
-            Expr::Assign { target, value, .. }
-                if matches!(value.as_ref(), Expr::Ident(_)) => {
+            Expr::Assign(assignment) if matches!(assignment.value(), Expr::Ident(_)) => {
+                let target = assignment.target();
                 self.is_name(target, references)
-                    || matches!(target.as_ref(), Expr::Field { object, field, .. }
-                        if if matches!(object.as_ref(), Expr::This { .. }) {
-                            references.resolve(&field.name, &field.span, true) == Some(self.declarator)
+                    || matches!(target, Expr::Field(access)
+                        if if matches!(access.object(), Expr::This(_)) {
+                            references.resolve(access.field().name(), &access.field().span(), true) == Some(self.declarator)
                         } else {
                             references.resolved_fields.iter().any(|(reference, declaration)|
-                                *reference == field.span && *declaration == self.declarator)
+                                *reference == access.field().span() && *declaration == self.declarator)
                         })
                     // A `PropertyAccess` (not a prefixed identifier) setter
                     // named like the variable.
-                    || matches!(target.as_ref(), Expr::Field { object, field, is_null_safe, .. }
-                        if field.name == self.name
-                            && (*is_null_safe || !matches!(object.as_ref(), Expr::Ident(_))))
+                    || matches!(target, Expr::Field(access)
+                        if access.field().name() == self.name
+                            && (access.is_null_safe() || !matches!(access.object(), Expr::Ident(_))))
                     // Only dynamic receivers have no analyzer write element;
                     // missing SDK/package index entries are not dynamic.
                     || (references.dynamic_writes.contains(&(target.span().start, target.span().end))
-                        && self.is_name(value, references))
+                        && self.is_name(assignment.value(), references))
             }
-            Expr::Call {
-                callee, args, span, ..
-            } if !excluded_calls.contains(&(span.start, span.end)) => {
-                let invoked = matches!(callee.as_ref(), Expr::Field { object, field, .. }
-                    if (self.is_reference(object, references)
-                        && self.methods.contains(&field.name.as_str()))
-                        || (self.methods.contains(&field.name.as_str())
-                            && contains(&self.declarator, span))
+            Expr::Call(call)
+                if !excluded_calls.contains(&(call.span().start, call.span().end)) => {
+                let invoked = matches!(call.callee(), Expr::Field(access)
+                    if (self.is_reference(access.object(), references)
+                        && self.methods.contains(&access.field().name()))
+                        || (self.methods.contains(&access.field().name())
+                            && contains(&self.declarator, &call.span()))
                         // Only field/accessor elements match the official
                         // cascade helper for an arbitrary method name.
-                        || (self.kind == VariableKind::Field && self.is_name(object, references)));
-                invoked || self.passed_in(args, references)
+                        || (self.kind == VariableKind::Field && self.is_name(access.object(), references)));
+                invoked || self.passed_in(call.args(), references)
             }
-            Expr::Field { object, field, .. } => {
+            Expr::Field(access) => {
                 self.kind == VariableKind::Local
-                    && self.is_name(object, references)
-                    && self.methods.contains(&field.name.as_str())
+                    && self.is_name(access.object(), references)
+                    && self.methods.contains(&access.field().name())
             }
-            Expr::Cascade {
-                object, sections, ..
-            } => sections.iter().any(|section| {
-                matches!(section.ops.first(), Some(CascadeOp::Call(method, _, _))
-                    if (self.kind == VariableKind::Field && self.is_name(object, references))
-                        || (self.is_reference(object, references)
-                            && self.methods.contains(&method.name.as_str()))
-                        || (contains(&self.declarator, node.span())
-                            && self.methods.contains(&method.name.as_str())))
-                    || section.ops.iter().any(|op|
-                        matches!(op, CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args)
-                            if self.passed_in(args, references)))
-                    || section.ops.iter().any(|op| {
-                        matches!(op, CascadeOp::Assign(target, _, value)
-                            if matches!(value.as_ref(), Expr::Ident(_))
-                                && (references.cascade_properties.contains(&(target.span().start, target.span().end))
-                                    && matches!(target.as_ref(), Expr::Ident(name) if name.name == self.name)
-                                    || references.dynamic_writes.contains(&(target.span().start, target.span().end))
-                                        && self.is_name(value, references)))
-                            || matches!(op, CascadeOp::IndexAssign(target, _, value)
-                                if matches!(value.as_ref(), Expr::Ident(_))
-                                    && references.dynamic_writes.contains(&(target.span().start, target.span().end))
+            Expr::Cascade(cascade) => cascade.sections().any(|section| {
+                matches!(section.ops().next(), Some(CascadeOp::Call(call))
+                    if (self.kind == VariableKind::Field && self.is_name(cascade.object(), references))
+                        || (self.is_reference(cascade.object(), references)
+                            && self.methods.contains(&call.name().name()))
+                        || (contains(&self.declarator, &node.span())
+                            && self.methods.contains(&call.name().name())))
+                    || section.ops().any(|op| match op {
+                        CascadeOp::Call(call) => self.passed_in(call.args(), references),
+                        CascadeOp::Invoke(call) => self.passed_in(call.args(), references),
+                        _ => false,
+                    })
+                    || section.ops().any(|op| {
+                        let (target, value, indexed) = match op {
+                            CascadeOp::Assign(assignment) => (assignment.target(), assignment.value(), false),
+                            CascadeOp::IndexAssign(assignment) => (assignment.target(), assignment.value(), true),
+                            _ => return false,
+                        };
+                        matches!(value, Expr::Ident(_))
+                            && ((!indexed
+                                && references.cascade_properties.contains(&(target.span().start, target.span().end))
+                                && matches!(target, Expr::Ident(name) if name.name() == self.name))
+                                || references.dynamic_writes.contains(&(target.span().start, target.span().end))
                                     && self.is_name(value, references))
                     })
             }),
@@ -226,15 +225,15 @@ impl Candidate {
 
 struct LocalCandidates<'a> {
     rule: LeakRule,
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies,
-    candidates: Vec<Candidate>,
-    references: References,
+    bodies: FunctionBodies<'a>,
+    candidates: Vec<Candidate<'a>>,
+    references: References<'a>,
     excluded_calls: Vec<(usize, usize)>,
 }
 
-impl SemanticRuleVisitor for LocalCandidates<'_> {
+impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         let mut uses = ValidUses {
             candidates: self.candidates,
@@ -252,7 +251,7 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
             .collect()
     }
 
-    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+    fn visit_program_end(&mut self, state: &SemanticState<'a>) {
         let mut fields = FieldCandidates {
             rule: &self.rule,
             state,
@@ -263,16 +262,16 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
         self.candidates = fields.candidates;
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let enclosing = self
             .references
             .extension_receivers
             .iter()
-            .find(|(scope, _)| contains(scope, node.span()))
+            .find(|(scope, _)| contains(scope, &node.span()))
             .map(|(_, receiver)| receiver)
             .or(state.enclosing_type.as_ref());
-        let static_owner = if let Expr::Field { object, field, .. } = node {
-            falcon_analyze::expression_segments(object, false).and_then(|segments| {
+        let static_owner = if let Expr::Field(access) = node {
+            falcon_analyze::expression_segments(access.object(), false).and_then(|segments| {
                 let head = segments.first()?;
                 if state.environment.is_bound(head) {
                     return None;
@@ -280,7 +279,7 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                 let identity = state.model.resolve_dotted(&segments)?;
                 state
                     .signatures
-                    .declared_member_facts(&identity, &field.name)
+                    .declared_member_facts(&identity, access.field().name())
                     .iter()
                     .any(|facts| {
                         facts.is_static
@@ -294,10 +293,10 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
         let reference = match node {
             Expr::Ident(identifier)
                 if self.references.bindings.iter().any(|binding| {
-                    binding.kind == BindingKind::Field && binding.name == identifier.name
+                    binding.kind == BindingKind::Field && binding.name == identifier.name()
                 }) && self
                     .references
-                    .resolve(&identifier.name, &identifier.span, false)
+                    .resolve(identifier.name(), &identifier.span(), false)
                     .is_none_or(|declaration| {
                         self.references.bindings.iter().any(|binding| {
                             binding.declaration == declaration && binding.kind == BindingKind::Field
@@ -306,15 +305,15 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
             {
                 enclosing.map(|receiver| (identifier, receiver.clone()))
             }
-            Expr::Field { object, field, .. }
+            Expr::Field(access)
                 if self.references.bindings.iter().any(|binding| {
-                    binding.kind == BindingKind::Field && binding.name == field.name
+                    binding.kind == BindingKind::Field && binding.name == access.field().name()
                 }) =>
             {
-                if matches!(object.as_ref(), Expr::This { .. }) {
-                    enclosing.map(|receiver| (field, receiver.clone()))
+                if matches!(access.object(), Expr::This(_)) {
+                    enclosing.map(|receiver| (access.field(), receiver.clone()))
                 } else {
-                    Some((field, state.infer_receiver(object)))
+                    Some((access.field(), state.infer_receiver(access.object())))
                 }
             }
             _ => None,
@@ -324,7 +323,7 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                 .or_else(|| {
                     state.signatures.resolved_member_owner(
                         &receiver,
-                        &identifier.name,
+                        identifier.name(),
                         &state.model,
                     )
                 })
@@ -332,34 +331,35 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                     self.references
                         .mixin_constraints
                         .iter()
-                        .filter(|(scope, _)| contains(scope, node.span()))
+                        .filter(|(scope, _)| contains(scope, &node.span()))
                         .find_map(|(_, constraint)| {
                             state.signatures.resolved_member_owner(
                                 constraint,
-                                &identifier.name,
+                                identifier.name(),
                                 &state.model,
                             )
                         })
                 })
-            && let Some((scope, _)) =
-                self.references.owners.iter().find(|(_, name)| {
-                    state.model.resolve_name(name.as_str()).as_ref() == Some(&owner)
-                })
+            && let Some((scope, _)) = self
+                .references
+                .owners
+                .iter()
+                .find(|(_, name)| state.model.resolve_name(*name).as_ref() == Some(&owner))
             && let Some(binding) = self.references.bindings.iter().find(|binding| {
                 binding.kind == BindingKind::Field
                     && binding.scope == *scope
-                    && binding.name == identifier.name
+                    && binding.name == identifier.name()
             })
         {
             self.references
                 .resolved_fields
-                .push((identifier.span, binding.declaration));
+                .push((identifier.span(), binding.declaration));
         }
-        if let Expr::Assign { target, value, .. } = node
-            && let Expr::Ident(identifier) = value.as_ref()
+        if let Expr::Assign(assignment) = node
+            && let Expr::Ident(identifier) = assignment.value()
             && self
                 .references
-                .resolve(&identifier.name, &identifier.span, false)
+                .resolve(identifier.name(), &identifier.span(), false)
                 .is_some_and(|declaration| {
                     self.candidates
                         .iter()
@@ -368,25 +368,32 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                             binding.declaration == declaration && binding.kind == BindingKind::Field
                         })
                 })
-            && let Expr::Field { object, .. } | Expr::Index { object, .. } = target.as_ref()
+            && let Some(object) = (match assignment.target() {
+                Expr::Field(access) => Some(access.object()),
+                Expr::Index(access) => Some(access.object()),
+                _ => None,
+            })
             && matches!(state.infer_receiver(object), ResolvedType::Dynamic)
         {
+            let target = assignment.target();
             self.references
                 .dynamic_writes
                 .insert((target.span().start, target.span().end));
         }
-        let Expr::Call { callee, span, .. } = node else {
+        let Expr::Call(call) = node else {
             return;
         };
-        let callable = match callee.as_ref() {
-            Expr::GenericInstantiation { target, .. } => target.as_ref(),
+        let callee = call.callee();
+        let span = call.span();
+        let callable = match callee {
+            Expr::GenericInstantiation(instantiation) => instantiation.target(),
             target => target,
         };
         let callable_value = match callable {
             Expr::Ident(name) => {
                 let binding = self
                     .references
-                    .resolve(&name.name, &name.span, false)
+                    .resolve(name.name(), &name.span(), false)
                     .and_then(|declaration| {
                         self.references
                             .bindings
@@ -398,11 +405,11 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                     None | Some(BindingKind::Field) => enclosing.is_some_and(|receiver| {
                         state
                             .signatures
-                            .resolved_field(receiver, &name.name, &state.model)
+                            .resolved_field(receiver, name.name(), &state.model)
                             .or_else(|| {
                                 state.signatures.resolved_extension_getter(
                                     receiver,
-                                    &name.name,
+                                    name.name(),
                                     &state.model,
                                 )
                             })
@@ -411,15 +418,15 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                     Some(BindingKind::Method | BindingKind::LocalFunction) => false,
                 }
             }
-            Expr::Field { object, field, .. } => {
-                let receiver = state.infer_receiver(object);
+            Expr::Field(access) => {
+                let receiver = state.infer_receiver(access.object());
                 state
                     .signatures
-                    .resolved_field(&receiver, &field.name, &state.model)
+                    .resolved_field(&receiver, access.field().name(), &state.model)
                     .or_else(|| {
                         state.signatures.resolved_extension_getter(
                             &receiver,
-                            &field.name,
+                            access.field().name(),
                             &state.model,
                         )
                     })
@@ -436,7 +443,7 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
         let identity = resolve_call_constructor(callee, &state.model, true);
         if identity.is_some_and(|(identity, name)| {
             self.references
-                .resolve(identity.name(), callee.span(), false)
+                .resolve(identity.name(), &callee.span(), false)
                 .is_none()
                 && (name == "new"
                     || state.signatures.constructor(&identity, name).is_some()
@@ -445,10 +452,10 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
                         .constructors
                         .iter()
                         .any(|(span, constructor)| {
-                            constructor == name
+                            *constructor == name
                                 && self.references.owners.iter().any(|(owner, class)| {
                                     contains(owner, span)
-                                        && state.model.resolve_name(class.as_str()).as_ref()
+                                        && state.model.resolve_name(*class).as_ref()
                                             == Some(&identity)
                                 })
                         }))
@@ -459,10 +466,10 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
 
     fn visit_cascade_assignment(
         &mut self,
-        assignment: CascadeAssignment<'_>,
+        assignment: CascadeAssignment<'a>,
         receiver: &ResolvedType,
         _section: Span,
-        _state: &SemanticState<'_>,
+        _state: &SemanticState<'a>,
     ) {
         let CascadeAssignment {
             target,
@@ -482,21 +489,21 @@ impl SemanticRuleVisitor for LocalCandidates<'_> {
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let Stmt::LocalVar(declaration) = node else {
             return;
         };
         let Some(container) = self
             .bodies
-            .enclosing(&declaration.span)
+            .enclosing(&declaration.span())
             .map(|body| body.span)
         else {
             return;
         };
-        for declarator in &declaration.declarators {
+        for declarator in declaration.declarators() {
             self.candidates.extend(self.rule.candidate(
                 declarator,
-                declaration.var_type.as_ref(),
+                declaration.var_type(),
                 VariableKind::Local,
                 container,
                 state,
@@ -509,15 +516,15 @@ struct FieldCandidates<'r, 's, 'a> {
     rule: &'r LeakRule,
     state: &'s SemanticState<'a>,
     file: Span,
-    candidates: Vec<Candidate>,
+    candidates: Vec<Candidate<'a>>,
 }
 
-impl Visitor for FieldCandidates<'_, '_, '_> {
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        for declarator in &node.declarators {
+impl<'a> Visitor<'a> for FieldCandidates<'_, '_, 'a> {
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
+        for declarator in node.declarators() {
             self.candidates.extend(self.rule.candidate(
                 declarator,
-                node.field_type.as_ref(),
+                node.field_type(),
                 VariableKind::Field,
                 self.file,
                 self.state,
@@ -525,7 +532,7 @@ impl Visitor for FieldCandidates<'_, '_, '_> {
         }
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         let elements = match node {
             TopLevelDecl::Class(class) => Some(class.element_members()),
             TopLevelDecl::MixinClass(class) => Some(class.element_members()),
@@ -534,15 +541,15 @@ impl Visitor for FieldCandidates<'_, '_, '_> {
         };
         if let Some(elements) = elements {
             for param in elements.declaring_params() {
-                let Some(ty) = &param.param_type else {
+                let Some(ty) = param.param_type() else {
                     continue;
                 };
                 let ty = self.state.model.resolve_type(ty);
                 let methods = self.rule.methods(&ty, self.state);
                 if !methods.is_empty() {
                     self.candidates.push(Candidate {
-                        name: param.name.name.clone(),
-                        declarator: param.span,
+                        name: param.name().name(),
+                        declarator: param.span(),
                         container: self.file,
                         kind: VariableKind::Field,
                         methods,
@@ -555,14 +562,14 @@ impl Visitor for FieldCandidates<'_, '_, '_> {
     }
 }
 
-struct ValidUses {
-    candidates: Vec<Candidate>,
-    references: References,
+struct ValidUses<'a> {
+    candidates: Vec<Candidate<'a>>,
+    references: References<'a>,
     excluded_calls: Vec<(usize, usize)>,
 }
 
-impl ValidUses {
-    fn mark(&mut self, span: &Span, valid: impl Fn(&Candidate) -> bool) {
+impl ValidUses<'_> {
+    fn mark(&mut self, span: &Span, valid: impl Fn(&Candidate<'_>) -> bool) {
         for candidate in &mut self.candidates {
             if !candidate.valid && contains(&candidate.container, span) && valid(candidate) {
                 candidate.valid = true;
@@ -571,13 +578,13 @@ impl ValidUses {
     }
 }
 
-impl Visitor for ValidUses {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> Visitor<'a> for ValidUses<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
         let references = &self.references;
         let excluded_calls = &self.excluded_calls;
         for candidate in &mut self.candidates {
             if !candidate.valid
-                && contains(&candidate.container, node.span())
+                && contains(&candidate.container, &node.span())
                 && candidate.is_valid_use(node, references, excluded_calls)
             {
                 candidate.valid = true;
@@ -586,13 +593,13 @@ impl Visitor for ValidUses {
         walk_expr(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         if let Stmt::Return(statement) = node
-            && let Some(value) = &statement.value
+            && let Some(value) = statement.value()
         {
             let references = &self.references;
             for candidate in &mut self.candidates {
-                if contains(&candidate.container, &statement.span)
+                if contains(&candidate.container, &statement.span())
                     && candidate.kind == VariableKind::Local
                     && candidate.is_name(value, references)
                 {
@@ -603,22 +610,28 @@ impl Visitor for ValidUses {
         walk_stmt(self, node);
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) {
         for initializer in node.initializers {
-            if let ConstructorInitializer::FieldInit { field, span, .. } = initializer {
-                let binding = self.references.resolve(&field.name, span, true);
-                self.mark(span, |candidate| {
+            if let ConstructorInitializer::FieldInit(initializer) = initializer {
+                let span = initializer.span();
+                let binding = self
+                    .references
+                    .resolve(initializer.field().name(), &span, true);
+                self.mark(&span, |candidate| {
                     candidate.kind == VariableKind::Field && binding == Some(candidate.declarator)
                 });
             }
         }
     }
 
-    fn visit_primary_constructor_body(&mut self, node: &PrimaryConstructorBody) {
-        for initializer in &node.initializers {
-            if let ConstructorInitializer::FieldInit { field, span, .. } = initializer {
-                let binding = self.references.resolve(&field.name, span, true);
-                self.mark(span, |candidate| {
+    fn visit_primary_constructor_body(&mut self, node: PrimaryConstructorBody<'a>) {
+        for initializer in node.initializers() {
+            if let ConstructorInitializer::FieldInit(initializer) = initializer {
+                let span = initializer.span();
+                let binding = self
+                    .references
+                    .resolve(initializer.field().name(), &span, true);
+                self.mark(&span, |candidate| {
                     candidate.kind == VariableKind::Field && binding == Some(candidate.declarator)
                 });
             }
@@ -626,10 +639,12 @@ impl Visitor for ValidUses {
         visitor::walk_primary_constructor_body(self, node);
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
-        if matches!(node.initializing, Some(InitializingFormal::This)) {
-            let binding = self.references.resolve(&node.name.name, &node.span, true);
-            self.mark(&node.span, |candidate| {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) {
+        if matches!(node.initializing(), Some(InitializingFormal::This)) {
+            let binding = self
+                .references
+                .resolve(node.name().name(), &node.span(), true);
+            self.mark(&node.span(), |candidate| {
                 candidate.kind == VariableKind::Field && binding == Some(candidate.declarator)
             });
         }
@@ -637,19 +652,19 @@ impl Visitor for ValidUses {
     }
 }
 
-/// A lexical identity index built exclusively through the shared AST visitor.
+/// A lexical identity index built exclusively through the shared CST visitor.
 /// Parameters use their callable's scope, fields their class's scope, and
 /// locals the innermost block/loop/callable containing their declaration.
-struct References {
+struct References<'a> {
     scopes: Vec<Span>,
     classes: Vec<Span>,
     callables: Vec<Span>,
-    bindings: Vec<Binding>,
-    owners: Vec<(Span, String)>,
+    bindings: Vec<Binding<'a>>,
+    owners: Vec<(Span, &'a str)>,
     resolved_fields: Vec<(Span, Span)>,
     extension_receivers: Vec<(Span, ResolvedType)>,
     mixin_constraints: Vec<(Span, ResolvedType)>,
-    constructors: Vec<(Span, String)>,
+    constructors: Vec<(Span, &'a str)>,
     primary_parameters: Vec<(Span, Span)>,
     in_primary: bool,
     /// Writes whose receiver is semantically dynamic, including cascades.
@@ -658,8 +673,8 @@ struct References {
     cascade_properties: HashSet<(usize, usize)>,
 }
 
-struct Binding {
-    name: String,
+struct Binding<'a> {
+    name: &'a str,
     declaration: Span,
     scope: Span,
     kind: BindingKind,
@@ -674,8 +689,8 @@ enum BindingKind {
     LocalFunction,
 }
 
-impl References {
-    fn new(program: &Program, len: usize, model: &SemanticModel<'_>) -> Self {
+impl<'a> References<'a> {
+    fn new(program: Program<'a>, len: usize, model: &SemanticModel<'_>) -> Self {
         let file = Span::new(0, len);
         let mut references = Self {
             scopes: vec![file],
@@ -692,23 +707,23 @@ impl References {
             dynamic_writes: HashSet::new(),
             cascade_properties: HashSet::new(),
         };
-        struct Contexts<'r, 's, 'a> {
-            references: &'r mut References,
-            model: &'s SemanticModel<'a>,
+        struct Contexts<'r, 's, 'model, 'tree> {
+            references: &'r mut References<'tree>,
+            model: &'s SemanticModel<'model>,
         }
-        impl Visitor for Contexts<'_, '_, '_> {
-            fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        impl<'tree> Visitor<'tree> for Contexts<'_, '_, '_, 'tree> {
+            fn visit_top_level_decl(&mut self, node: TopLevelDecl<'tree>) {
                 if let TopLevelDecl::Extension(extension) = node {
-                    self.references
-                        .extension_receivers
-                        .push((extension.span, self.model.resolve_type(&extension.on_type)));
+                    self.references.extension_receivers.push((
+                        extension.span(),
+                        self.model.resolve_type(extension.on_type()),
+                    ));
                 }
                 if let TopLevelDecl::Mixin(mixin) = node {
                     self.references.mixin_constraints.extend(
                         mixin
-                            .on_clause
-                            .iter()
-                            .map(|constraint| (mixin.span, self.model.resolve_type(constraint))),
+                            .on_clause()
+                            .map(|constraint| (mixin.span(), self.model.resolve_type(constraint))),
                     );
                 }
                 self.references.visit_top_level_decl(node);
@@ -749,9 +764,9 @@ impl References {
         references
     }
 
-    fn bind(&mut self, name: &Identifier, declaration: Span, kind: BindingKind) {
+    fn bind(&mut self, name: Identifier<'a>, declaration: Span, kind: BindingKind) {
         self.bindings.push(Binding {
-            name: name.name.clone(),
+            name: name.name(),
             declaration,
             scope: declaration,
             kind,
@@ -783,17 +798,17 @@ impl References {
     }
 }
 
-impl Visitor for References {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+impl<'a> Visitor<'a> for References<'a> {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         let owner = match node {
-            TopLevelDecl::Class(class) => Some(&class.name),
-            TopLevelDecl::Mixin(class) => Some(&class.name),
-            TopLevelDecl::MixinClass(class) => Some(&class.name),
-            TopLevelDecl::Enum(class) => Some(&class.name),
+            TopLevelDecl::Class(class) => Some(class.name()),
+            TopLevelDecl::Mixin(class) => Some(class.name()),
+            TopLevelDecl::MixinClass(class) => Some(class.name()),
+            TopLevelDecl::Enum(class) => Some(class.name()),
             _ => None,
         };
         if let Some(owner) = owner {
-            self.owners.push((*node.span(), owner.name.clone()));
+            self.owners.push((node.span(), owner.name()));
         }
         match node {
             TopLevelDecl::Class(_)
@@ -802,48 +817,43 @@ impl Visitor for References {
             | TopLevelDecl::Enum(_)
             | TopLevelDecl::Extension(_)
             | TopLevelDecl::ExtensionType(_) => {
-                self.classes.push(*node.span());
-                self.scopes.push(*node.span());
+                self.classes.push(node.span());
+                self.scopes.push(node.span());
             }
             TopLevelDecl::Variable(declaration) => {
-                for variable in &declaration.declarators {
-                    self.bind(&variable.name, variable.span, BindingKind::Local);
+                for variable in declaration.declarators() {
+                    self.bind(variable.name(), variable.span(), BindingKind::Local);
                 }
             }
             _ => {}
         }
-        let (primary, members, representation): (_, &[ClassMember], _) = match node {
-            TopLevelDecl::Class(class) => {
-                (class.primary_constructor.as_ref(), &class.members, false)
-            }
-            TopLevelDecl::MixinClass(class) => {
-                (class.primary_constructor.as_ref(), &class.members, false)
-            }
-            TopLevelDecl::Enum(class) => {
-                (class.primary_constructor.as_ref(), &class.members, false)
-            }
-            TopLevelDecl::ExtensionType(class) => {
-                (Some(&class.primary_constructor), &class.members, true)
-            }
-            _ => (None, &[], false),
+        let elements = match node {
+            TopLevelDecl::Class(class) => Some(class.element_members()),
+            TopLevelDecl::MixinClass(class) => Some(class.element_members()),
+            TopLevelDecl::Enum(class) => Some(class.element_members()),
+            TopLevelDecl::ExtensionType(class) => Some(class.element_members()),
+            _ => None,
         };
-        if let Some(primary) = primary {
-            let body_scope = members
-                .iter()
+        if let Some(mut elements) = elements
+            && let Some(primary) = elements.primary
+        {
+            let body_scope = elements
+                .declared
                 .find_map(|member| match member {
-                    ClassMember::PrimaryConstructorBody(body) => Some(body.span),
+                    ClassMember::PrimaryConstructorBody(body) => Some(body.span()),
                     _ => None,
                 })
-                .unwrap_or(primary.span);
-            self.primary_parameters.reserve(primary.params.params.len());
-            for param in &primary.params.params {
-                if param.initializing == Some(InitializingFormal::This) {
+                .unwrap_or(primary.span());
+            self.primary_parameters
+                .reserve(primary.params().params().count());
+            for param in primary.params().params() {
+                if param.initializing() == Some(InitializingFormal::This) {
                     continue;
                 }
-                let field = representation || param.is_var || param.is_final;
+                let field = elements.representation || param.is_var() || param.is_final();
                 self.bind(
-                    &param.name,
-                    param.span,
+                    param.name(),
+                    param.span(),
                     if field {
                         BindingKind::Field
                     } else {
@@ -851,100 +861,99 @@ impl Visitor for References {
                     },
                 );
                 if !field {
-                    self.primary_parameters.push((param.span, body_scope));
+                    self.primary_parameters.push((param.span(), body_scope));
                 }
             }
         }
         visitor::walk_top_level_decl(self, node);
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.callable(node.span);
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
+        self.callable(node.span());
         visitor::walk_function_decl(self, node);
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) {
         if let ClassMember::Method(method) = node {
-            self.bind(&method.name, method.span, BindingKind::Method);
+            self.bind(method.name(), method.span(), BindingKind::Method);
         }
         if !matches!(node, ClassMember::Field(_)) {
-            self.callable(*node.span());
+            self.callable(node.span());
         }
         visitor::walk_class_member(self, node);
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        for variable in &node.declarators {
-            self.bind(&variable.name, variable.span, BindingKind::Field);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
+        for variable in node.declarators() {
+            self.bind(variable.name(), variable.span(), BindingKind::Field);
         }
         visitor::walk_field_decl(self, node);
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) {
         self.constructors.push((
             node.span,
-            node.constructor_name
-                .as_ref()
-                .map_or_else(|| "new".to_string(), |name| name.name.clone()),
+            node.constructor_name.map_or("new", |name| name.name()),
         ));
     }
 
-    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) {
+    fn visit_primary_constructor(&mut self, node: PrimaryConstructor<'a>) {
         self.in_primary = true;
         visitor::walk_primary_constructor(self, node);
         self.in_primary = false;
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        for variable in &node.declarators {
-            self.bind(&variable.name, variable.span, BindingKind::Local);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
+        for variable in node.declarators() {
+            self.bind(variable.name(), variable.span(), BindingKind::Local);
         }
         visitor::walk_local_var(self, node);
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) {
         // `this.field` parameters are field references, not shadowing locals.
-        if !self.in_primary && node.initializing != Some(InitializingFormal::This) {
-            self.bind(&node.name, node.span, BindingKind::Parameter);
+        if !self.in_primary && node.initializing() != Some(InitializingFormal::This) {
+            self.bind(node.name(), node.span(), BindingKind::Parameter);
         }
-        if let Some(parameters) = &node.function_params {
-            self.callables.push(parameters.span);
+        if let Some(parameters) = node.function_params() {
+            self.callables.push(parameters.span());
         }
         walk_formal_param(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
-            Stmt::Block(block) => self.scopes.push(block.span),
+            Stmt::Block(block) => self.scopes.push(block.span()),
             Stmt::LocalFunc(function) => {
-                self.bind(&function.name, function.span, BindingKind::LocalFunction);
-                self.callable(function.span);
+                self.bind(function.name(), function.span(), BindingKind::LocalFunction);
+                self.callable(function.span());
             }
             Stmt::For(statement) => {
-                self.scopes.push(statement.span);
-                if let Some(ForInit::ForIn {
-                    declares_variable: true,
-                    name,
-                    ..
-                }) = &statement.header.init
+                self.scopes.push(statement.span());
+                if let Some(ForInit::ForIn(initializer)) = statement.header().init()
+                    && initializer.declares_variable()
                 {
-                    self.bind(name, name.span, BindingKind::Local);
+                    self.bind(
+                        initializer.name(),
+                        initializer.name().span(),
+                        BindingKind::Local,
+                    );
                 }
             }
             Stmt::TryCatch(statement) => {
-                self.scopes.push(statement.body.span);
-                for catch in &statement.catches {
-                    self.scopes.push(catch.span);
-                    self.scopes.push(catch.body.span);
-                    for name in [&catch.exception_var, &catch.stack_trace_var]
+                self.scopes.push(statement.body().span());
+                for catch in statement.catches() {
+                    self.scopes.push(catch.span());
+                    self.scopes.push(catch.body().span());
+                    for name in [catch.exception_var(), catch.stack_trace_var()]
                         .into_iter()
                         .flatten()
                     {
-                        self.bind(name, name.span, BindingKind::Local);
+                        self.bind(name, name.span(), BindingKind::Local);
                     }
                 }
-                if let Some(block) = &statement.finally {
-                    self.scopes.push(block.span);
+                if let Some(block) = statement.finally() {
+                    self.scopes.push(block.span());
                 }
             }
             _ => {}
@@ -952,49 +961,51 @@ impl Visitor for References {
         walk_stmt(self, node);
     }
 
-    fn visit_block(&mut self, node: &Block) {
-        self.scopes.push(node.span);
+    fn visit_block(&mut self, node: Block<'a>) {
+        self.scopes.push(node.span());
         visitor::walk_block(self, node);
     }
 
-    fn visit_switch_case(&mut self, node: &SwitchCase) {
-        self.scopes.push(node.span);
+    fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
+        self.scopes.push(node.span());
         visitor::walk_switch_case(self, node);
     }
 
-    fn visit_collection_element(&mut self, node: &CollectionElement) {
-        if let CollectionElement::For { header, span, .. } = node {
-            self.scopes.push(*span);
-            if let Some(ForInit::ForIn {
-                declares_variable: true,
-                name,
-                ..
-            }) = &header.init
+    fn visit_collection_element(&mut self, node: CollectionElement<'a>) {
+        if let CollectionElement::For(element) = node {
+            self.scopes.push(element.span());
+            if let Some(ForInit::ForIn(initializer)) = element.header().init()
+                && initializer.declares_variable()
             {
-                self.bind(name, name.span, BindingKind::Local);
+                self.bind(
+                    initializer.name(),
+                    initializer.name().span(),
+                    BindingKind::Local,
+                );
             }
         }
         visitor::walk_collection_element(self, node);
     }
 
-    fn visit_map_element(&mut self, node: &MapElement) {
-        if let MapElement::For { header, span, .. } = node {
-            self.scopes.push(*span);
-            if let Some(ForInit::ForIn {
-                declares_variable: true,
-                name,
-                ..
-            }) = &header.init
+    fn visit_map_element(&mut self, node: MapElement<'a>) {
+        if let MapElement::For(element) = node {
+            self.scopes.push(element.span());
+            if let Some(ForInit::ForIn(initializer)) = element.header().init()
+                && initializer.declares_variable()
             {
-                self.bind(name, name.span, BindingKind::Local);
+                self.bind(
+                    initializer.name(),
+                    initializer.name().span(),
+                    BindingKind::Local,
+                );
             }
         }
         visitor::walk_map_element(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::FuncExpr { .. }) {
-            self.callable(*node.span());
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        if matches!(node, Expr::FuncExpr(_)) {
+            self.callable(node.span());
         }
         walk_expr(self, node);
     }

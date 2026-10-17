@@ -22,7 +22,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct CyclomaticComplexity;
@@ -30,7 +30,7 @@ pub struct CyclomaticComplexity;
 impl Rule for CyclomaticComplexity {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(DecisionPoints {
@@ -61,22 +61,22 @@ struct DecisionPoints<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for DecisionPoints<'_> {
+impl<'a> StructuralRuleVisitor<'a> for DecisionPoints<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.name = node.body.as_ref().map(|_| node.name.span);
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.name = node.body().map(|_| node.name().span());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
-        self.name = falcon_syntax::visitor::declared_member_name(node, self.ctx.source);
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
+        self.name = falcon_syntax::cst::visit::declared_member_name(node, self.ctx.source);
         if self.name.is_some() { StructuralTraversal::Continue } else { StructuralTraversal::SkipChildren }
     }
 
-    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+    fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
         match parent {
             StructuralNode::FunctionDecl(_) | StructuralNode::MethodDecl(_)
             | StructuralNode::ConstructorDecl(_) | StructuralNode::GetterDecl(_)
@@ -86,7 +86,7 @@ impl StructuralRuleVisitor for DecisionPoints<'_> {
         }
     }
 
-    fn visit_function_body(&mut self, _node: &FunctionBody) -> StructuralTraversal {
+    fn visit_function_body(&mut self, _node: FunctionBody<'a>) -> StructuralTraversal {
         if self.name.is_none() {
             return StructuralTraversal::SkipChildren;
         }
@@ -97,7 +97,7 @@ impl StructuralRuleVisitor for DecisionPoints<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_function_body(&mut self, _node: &FunctionBody) {
+    fn exit_function_body(&mut self, _node: FunctionBody<'a>) {
         if self.name.is_none() {
             return;
         }
@@ -116,28 +116,27 @@ impl StructuralRuleVisitor for DecisionPoints<'_> {
         }
     }
 
-    fn visit_formal_param(&mut self, _node: &FormalParam) -> StructuralTraversal {
+    fn visit_formal_param(&mut self, _node: FormalParam<'a>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if self.body_depth == 0 {
             return StructuralTraversal::Continue;
         }
         self.count += match node {
             Stmt::If(n) => {
-                1 + usize::from(matches!(&n.condition, IfCondition::Case(_, _, Some(_))))
+                1 + usize::from(matches!(n.condition(), IfCondition::Case(case) if case.guard().is_some()))
             }
             Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => 1,
-            Stmt::TryCatch(n) => n.catches.len(),
+            Stmt::TryCatch(n) => n.catches().len(),
             Stmt::Switch(n) => n
-                .cases
-                .iter()
-                .flat_map(|case| &case.cases)
+                .cases()
+                .flat_map(|case| case.cases())
                 .map(|kind| match kind {
-                    SwitchCaseKind::Pattern(_, guard) => 1 + usize::from(guard.is_some()),
+                    SwitchCaseKind::Pattern(label) => 1 + usize::from(label.guard().is_some()),
                     SwitchCaseKind::Expr(_) => 1,
-                    SwitchCaseKind::Default => 0,
+                    SwitchCaseKind::Default(_) => 0,
                 })
                 .sum(),
             _ => 0,
@@ -145,19 +144,15 @@ impl StructuralRuleVisitor for DecisionPoints<'_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if self.body_depth == 0 {
             return StructuralTraversal::Continue;
         }
         self.count += match node {
-            Expr::Binary {
-                op: BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce,
-                ..
-            }
-            | Expr::Conditional { .. } => 1,
-            Expr::Switch { arms, .. } => arms
-                .iter()
-                .map(|arm| 1 + usize::from(arm.guard.is_some()))
+            Expr::Binary(binary) if matches!(binary.op(), BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce) => 1,
+            Expr::Conditional(_) => 1,
+            Expr::Switch(switch) => switch.arms()
+                .map(|arm| 1 + usize::from(arm.guard().is_some()))
                 .sum(),
             _ => 0,
         };

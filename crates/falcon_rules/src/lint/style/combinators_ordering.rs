@@ -13,7 +13,7 @@
 //! Adopted from the official `combinators_ordering` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct CombinatorsOrdering;
@@ -21,35 +21,35 @@ pub struct CombinatorsOrdering;
 impl Rule for CombinatorsOrdering {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let combinators = program
-            .imports
-            .iter()
-            .flat_map(|import| &import.combinators)
-            .chain(
-                program
-                    .exports
-                    .iter()
-                    .flat_map(|export| &export.combinators),
-            );
-        RulePreparation::Diagnostics(combinators
-            .filter_map(|combinator| {
-                let (ImportCombinator::Show(names, span) | ImportCombinator::Hide(names, span)) =
-                    combinator;
-                let sorted = names
-                    .windows(2)
-                    .all(|pair| dart_compare(&pair[0].name, &pair[1].name).is_le());
-                (!sorted).then(|| {
-                    ctx.diagnostic(
-                        "combinators-ordering",
-                        "Sort combinator names alphabetically.",
-                        *span,
-                    )
+            .imports()
+            .flat_map(|import| import.combinators())
+            .chain(program.exports().flat_map(|export| export.combinators()));
+        RulePreparation::Diagnostics(
+            combinators
+                .filter_map(|combinator| {
+                    let (ImportCombinator::Show(combinator) | ImportCombinator::Hide(combinator)) =
+                        combinator;
+                    let mut previous = None;
+                    let sorted = combinator.names().all(|name| {
+                        let ordered =
+                            previous.is_none_or(|prior| dart_compare(prior, name.name()).is_le());
+                        previous = Some(name.name());
+                        ordered
+                    });
+                    (!sorted).then(|| {
+                        ctx.diagnostic(
+                            "combinators-ordering",
+                            "Sort combinator names alphabetically.",
+                            combinator.span(),
+                        )
+                    })
                 })
-            })
-            .collect())
+                .collect(),
+        )
     }
 }
 

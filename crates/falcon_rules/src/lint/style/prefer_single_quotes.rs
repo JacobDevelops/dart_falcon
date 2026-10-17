@@ -22,7 +22,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferSingleQuotes;
@@ -30,7 +30,7 @@ pub struct PreferSingleQuotes;
 impl Rule for PreferSingleQuotes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(QuoteVisitor::new(
@@ -71,19 +71,19 @@ impl<'a> QuoteVisitor<'a> {
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for QuoteVisitor<'_> {
+impl<'a> StructuralRuleVisitor<'a> for QuoteVisitor<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_string_interpolation(&mut self, _node: &StringInterpolation) -> StructuralTraversal {
+    fn visit_string_interpolation(&mut self, _node: StringInterpolation<'a>) -> StructuralTraversal {
         self.interpolation_depth += 1;
         StructuralTraversal::Continue
     }
 
-    fn exit_string_interpolation(&mut self, _node: &StringInterpolation) {
+    fn exit_string_interpolation(&mut self, _node: StringInterpolation<'a>) {
         self.interpolation_depth -= 1;
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
+    fn visit_string_lit(&mut self, node: StringLitNode<'a>) -> StructuralTraversal {
         if self.interpolation_depth > 0 {
             return StructuralTraversal::Continue;
         }

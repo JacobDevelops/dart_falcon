@@ -19,8 +19,8 @@ use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, NameIdentity, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -30,16 +30,15 @@ pub struct PreferForeach;
 impl Rule for PreferForeach {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             import_prefixes: program
-                .imports
-                .iter()
-                .filter_map(|import| import.as_name.as_ref().map(|name| name.name.clone()))
+                .imports()
+                .filter_map(|import| import.as_name().map(|name| name.name()))
                 .collect(),
             pending: HashMap::new(),
         }))
@@ -49,22 +48,22 @@ impl Rule for PreferForeach {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    import_prefixes: Vec<String>,
+    import_prefixes: Vec<&'a str>,
     /// Candidate loops, keyed by their call argument's start: the argument's
     /// context decides whether it is implicitly torn off.
     pending: HashMap<usize, Span>,
 }
 
 /// Whether `expr` mentions the identifier `name` anywhere.
-fn mentions(expr: &Expr, name: &str) -> bool {
+fn mentions(expr: Expr<'_>, name: &str) -> bool {
     struct Finder<'n> {
         name: &'n str,
         found: bool,
     }
-    impl Visitor for Finder<'_> {
-        fn visit_expr(&mut self, node: &Expr) {
+    impl<'a> Visitor<'a> for Finder<'_> {
+        fn visit_expr(&mut self, node: Expr<'a>) {
             if let Expr::Ident(identifier) = node
-                && identifier.name == self.name
+                && identifier.name() == self.name
             {
                 self.found = true;
             }
@@ -97,98 +96,104 @@ impl Collector<'_> {
 
     /// Whether `callee(arg)` is a function or method invocation, not a
     /// constructor call.
-    fn is_invocation(&self, callee: &Expr, loop_variable: &str, state: &SemanticState<'_>) -> bool {
+    fn is_invocation(
+        &self,
+        callee: Expr<'_>,
+        loop_variable: &str,
+        state: &SemanticState<'_>,
+    ) -> bool {
         match callee.unparenthesized() {
-            Expr::Ident(identifier) => self.is_function_name(&identifier.name, state),
-            Expr::Field { object, field, .. } => {
+            Expr::Ident(identifier) => self.is_function_name(identifier.name(), state),
+            Expr::Field(field) => {
+                let object = field.object();
                 if mentions(object, loop_variable) {
                     return false;
                 }
                 match object.unparenthesized() {
-                    Expr::Ident(prefix) if !state.environment.is_bound(&prefix.name) => {
-                        if self.import_prefixes.contains(&prefix.name) {
-                            return state
-                                .model
-                                .name_identity(QualifiedName::prefixed(&prefix.name, &field.name))
-                                == NameIdentity::Value;
+                    Expr::Ident(prefix) if !state.environment.is_bound(prefix.name()) => {
+                        if self.import_prefixes.contains(&prefix.name()) {
+                            return state.model.name_identity(QualifiedName::prefixed(
+                                prefix.name(),
+                                field.field().name(),
+                            )) == NameIdentity::Value;
                         }
-                        match state.model.name_identity(prefix.name.as_str()) {
+                        match state.model.name_identity(prefix.name()) {
                             // `Type.member(e)`: a static method, unless it is a
                             // named constructor.
                             NameIdentity::Type => state
                                 .model
-                                .resolve_name(prefix.name.as_str())
+                                .resolve_name(prefix.name())
                                 .is_some_and(|identity| {
-                                    state.signatures.member(&identity, &field.name).is_some()
+                                    state
+                                        .signatures
+                                        .member(&identity, field.field().name())
+                                        .is_some()
                                         && state
                                             .signatures
-                                            .constructor(&identity, &field.name)
+                                            .constructor(&identity, field.field().name())
                                             .is_none()
                                 }),
                             NameIdentity::Value => true,
-                            NameIdentity::Unknown => self.is_function_name(&prefix.name, state),
+                            NameIdentity::Unknown => self.is_function_name(prefix.name(), state),
                         }
                     }
                     _ => true,
                 }
             }
-            Expr::New { .. } => false,
+            Expr::New(_) => false,
             _ => true,
         }
     }
 
-    fn check(&mut self, statement: &ForStmt, state: &SemanticState<'_>) {
-        let Some(ForInit::ForIn {
-            declares_variable: true,
-            name,
-            ..
-        }) = &statement.header.init
-        else {
+    fn check(&mut self, statement: ForStmt<'_>, state: &SemanticState<'_>) {
+        let Some(ForInit::ForIn(init)) = statement.header().init() else {
             return;
         };
-        let body = match statement.body.as_ref() {
-            Stmt::Block(block) if block.stmts.len() == 1 => &block.stmts[0],
+        if !init.declares_variable() {
+            return;
+        }
+        let name = init.name();
+        let body = match statement.body() {
+            Stmt::Block(block) if block.stmts().len() == 1 => block.stmts().next().unwrap(),
             other => other,
         };
-        let Stmt::Expr(ExprStmt {
-            expr: invocation, ..
-        }) = body
-        else {
+        let Stmt::Expr(expression) = body else {
             return;
         };
-        let Expr::Call { callee, args, .. } = invocation.unparenthesized() else {
+        let Expr::Call(call) = expression.expr().unparenthesized() else {
             return;
         };
-        let [argument] = args.positional.as_slice() else {
+        if call.args().positional().len() != 1 {
             return;
-        };
+        }
+        let argument = call.args().positional().next().unwrap();
         let Expr::Ident(argument) = argument.unparenthesized() else {
             return;
         };
-        if !args.named.is_empty()
-            || argument.name != name.name
-            || !self.is_invocation(callee, &name.name, state)
+        if !call.args().named().is_empty()
+            || argument.name() != name.name()
+            || !self.is_invocation(call.callee(), name.name(), state)
         {
             return;
         }
-        self.pending.insert(argument.span.start, statement.span);
+        self.pending.insert(argument.span().start, statement.span());
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         if let Stmt::For(statement) = node {
             self.check(statement, state);
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Expr::Ident(argument) = node
-            && let Some(span) = self.pending.remove(&argument.span.start)
+            && let Some(span) = self.pending.remove(&argument.span().start)
             && !state.implicit_call_tearoff(node)
         {
             self.diags.push(self.ctx.diagnostic(

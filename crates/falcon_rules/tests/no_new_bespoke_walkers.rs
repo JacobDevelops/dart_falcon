@@ -7,7 +7,7 @@
 //! goes blind, and nothing warns or fails to compile. That is exactly how a
 //! whole class of false positives and missed detections reached a release.
 //!
-//! `falcon_syntax::visitor` already provides an exhaustive walker plus the
+//! `falcon_syntax::cst::visit` already provides an exhaustive walker plus the
 //! `for_each_expr` / `bound_names` helpers. A rule
 //! built on those cannot go blind, because the shared walker matches every AST
 //! variant with no catch-all.
@@ -128,7 +128,7 @@ fn no_new_hand_rolled_ast_walkers() {
     if std::env::var("UPDATE_BESPOKE_WALKER_BASELINE").is_ok() {
         let mut out = String::from(
             "# Hand-rolled AST walkers, pinned by tests/no_new_bespoke_walkers.rs.\n\
-             # This list may only shrink. Build new rules on falcon_syntax::visitor.\n",
+             # This list may only shrink. Build new rules on falcon_syntax::cst::visit.\n",
         );
         for entry in &current {
             out.push_str(entry);
@@ -153,7 +153,7 @@ fn no_new_hand_rolled_ast_walkers() {
     if !added.is_empty() {
         problems.push_str(
             "\nNew hand-rolled AST walker(s). These go blind on new Dart syntax —\n\
-             build on falcon_syntax::visitor instead (walk_expr / for_each_expr /\n\
+             build on falcon_syntax::cst::visit instead (walk_expr / for_each_expr /\n\
              bound_names), which is exhaustive:\n",
         );
         for entry in added {

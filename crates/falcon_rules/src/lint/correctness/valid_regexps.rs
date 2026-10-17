@@ -9,7 +9,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ValidRegexps;
@@ -17,7 +17,7 @@ pub struct ValidRegexps;
 impl Rule for ValidRegexps {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
@@ -26,7 +26,7 @@ impl Rule for ValidRegexps {
         let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
         };
         RulePreparation::Structural(Box::new(collector))
     }
@@ -39,19 +39,19 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, args: &ArgList) {
-        let Some(argument) = args.positional.first() else {
+    fn check(&mut self, args: ArgList<'_>) {
+        let Some(argument) = args.positional().first() else {
             return;
         };
         if args
-            .named
-            .iter()
-            .any(|arg| arg.span.start < argument.span().start)
+            .named()
+            .any(|arg| arg.span().start < argument.span().start)
         {
             return;
         }
-        let unicode = args.named.iter().any(|arg| {
-            arg.name.name == "unicode" && matches!(arg.value, Expr::BoolLit { value: true, .. })
+        let unicode = args.named().any(|arg| {
+            arg.name().name() == "unicode"
+                && matches!(arg.value(), Expr::BoolLit(value) if value.value())
         });
         if extractable_pattern(argument).is_some_and(|pattern| {
             let pattern = regexp_units(pattern, unicode);
@@ -69,26 +69,24 @@ impl Collector<'_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 "valid-regexps",
                 "Invalid regular expression.",
-                *span,
+                span,
             ));
         }
     }
 
-    fn sdk_regexp_name(&self, expression: &Expr) -> bool {
+    fn sdk_regexp_name(&self, expression: Expr<'_>) -> bool {
         let segments = falcon_analyze::expression_segments(expression, false);
         matches!(segments.as_deref().and_then(|segments| self.model.resolve_dotted(segments)), Some(DeclarationIdentity::Sdk { library, name }) if library == "dart:core" && name == "RegExp")
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::Call { callee, args, .. } if self.sdk_regexp_name(callee) => self.check(args),
-            Expr::New {
-                dart_type, args, ..
-            } if matches!(self.model.resolve_type(dart_type), ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. } if library == "dart:core" && name == "RegExp") => {
-                self.check(args)
+            Expr::Call(call) if self.sdk_regexp_name(call.callee()) => self.check(call.args()),
+            Expr::New(construction) if matches!(self.model.resolve_type(construction.dart_type()), ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. } if library == "dart:core" && name == "RegExp") => {
+                self.check(construction.args())
             }
             _ => {}
         }
@@ -101,14 +99,15 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn extractable_pattern(expr: &Expr) -> Option<Vec<u32>> {
+fn extractable_pattern(expr: Expr<'_>) -> Option<Vec<u32>> {
     let Expr::StringLit(node) = expr else {
         return None;
     };
-    if !node.interpolations.is_empty() {
+    if node.interpolations().next().is_some() {
         return None;
     }
-    let mut pattern = Vec::with_capacity(node.value.len());
+    let span = node.span();
+    let mut pattern = Vec::with_capacity(span.end - span.start);
     for (literal, _) in node.segments() {
         if !literal.terminated {
             return None;

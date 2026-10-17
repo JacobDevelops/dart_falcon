@@ -22,7 +22,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UseDesignSystemItem;
@@ -30,7 +30,7 @@ pub struct UseDesignSystemItem;
 impl Rule for UseDesignSystemItem {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let items = parse_config_items(ctx);
@@ -53,15 +53,15 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_expr(&mut self, expr: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, expr: Expr<'a>) -> StructuralTraversal {
         let construction = match expr.unparenthesized() {
-            Expr::New { .. } => crate::lint::flutter::widget_construction(expr)
+            Expr::New(_) => crate::lint::flutter::widget_construction(expr)
                 .map(|(name, _, span)| (name, span)),
-            Expr::Call { callee, span, .. } => {
-                callee_base_name(callee).map(|name| (name, span))
+            Expr::Call(call) => {
+                callee_base_name(call.callee()).map(|name| (name, call.span()))
             }
             _ => None,
         };
@@ -91,19 +91,19 @@ fn parse_config_items<'a>(ctx: &'a AnalyzeContext<'_>) -> Vec<(&'a str, Option<&
         .collect()
 }
 
-fn callee_base_name(mut callee: &Expr) -> Option<&str> {
-    while let Expr::Call { callee: inner, .. } = callee.unparenthesized() {
-        callee = inner;
+fn callee_base_name(mut callee: Expr<'_>) -> Option<&str> {
+    while let Expr::Call(call) = callee.unparenthesized() {
+        callee = call.callee();
     }
     match callee.unparenthesized() {
-        Expr::Ident(id) => Some(id.name.as_str()),
+        Expr::Ident(id) => Some(id.name()),
         _ => None,
     }
 }
 
 fn emit_for_base(
     base_name: &str,
-    span: &Span,
+    span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     items: &[(&str, Option<&str>)],
@@ -122,7 +122,7 @@ fn emit_for_base(
                 )
             };
 
-            diags.push(ctx.diagnostic("use-design-system-item", message, *span));
+            diags.push(ctx.diagnostic("use-design-system-item", message, span));
             break;
         }
     }

@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidNestedIf;
@@ -23,7 +23,7 @@ const MAX_NESTING_LEVEL: usize = 2;
 impl Rule for AvoidNestedIf {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(NestedIf {
@@ -47,7 +47,7 @@ struct NestedIf<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for NestedIf<'_> {
+impl<'a> StructuralRuleVisitor<'a> for NestedIf<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.candidates.iter().filter(|candidate| candidate.count >= MAX_NESTING_LEVEL)
             .map(|candidate| self.ctx.diagnostic(
@@ -57,26 +57,26 @@ impl StructuralRuleVisitor for NestedIf<'_> {
             )).collect()
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::If(n) = node {
             for &index in &self.active {
                 let candidate = &mut self.candidates[index];
-                if candidate.then_span.start <= n.span.start
-                    && n.span.end <= candidate.then_span.end
-                    && candidate.then_span != n.span
+                if candidate.then_span.start <= n.span().start
+                    && n.span().end <= candidate.then_span.end
+                    && candidate.then_span != n.span()
                 {
                     candidate.count += 1;
                 }
             }
             self.active.push(self.candidates.len());
             self.candidates.push(Candidate {
-                span: n.span, then_span: *n.then_branch.span(), count: 0,
+                span: n.span(), then_span: n.then_branch().span(), count: 0,
             });
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, node: &Stmt) {
+    fn exit_stmt(&mut self, node: Stmt<'a>) {
         if matches!(node, Stmt::If(_)) {
             self.active.pop();
         }

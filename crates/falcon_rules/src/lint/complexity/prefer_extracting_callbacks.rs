@@ -9,7 +9,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferExtractingCallbacks;
@@ -34,14 +34,14 @@ fn cfg(ctx: &AnalyzeContext) -> Cfg {
 impl Rule for PreferExtractingCallbacks {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(CallbackCollector {
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
             widget: DeclarationIdentity::flutter("Widget"),
             cfg: cfg(ctx),
@@ -73,7 +73,7 @@ struct CallbackCollector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for CallbackCollector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for CallbackCollector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.candidates.iter()
             .filter(|callback| !(callback.builder_parameter && callback.returns_widget))
@@ -84,7 +84,7 @@ impl StructuralRuleVisitor for CallbackCollector<'_> {
             )).collect()
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if matches!(node, TopLevelDecl::Class(_)) {
             StructuralTraversal::Continue
         } else {
@@ -92,8 +92,8 @@ impl StructuralRuleVisitor for CallbackCollector<'_> {
         }
     }
 
-    fn visit_class_decl(&mut self, class: &ClassDecl) -> StructuralTraversal {
-        let Some(identity) = self.model.resolve_name(&class.name.name) else {
+    fn visit_class_decl(&mut self, class: ClassDecl<'a>) -> StructuralTraversal {
+        let Some(identity) = self.model.resolve_name(class.name().name()) else {
             return StructuralTraversal::SkipChildren;
         };
         let class_type = ResolvedType::interface_identity(identity);
@@ -106,12 +106,12 @@ impl StructuralRuleVisitor for CallbackCollector<'_> {
         }
     }
 
-    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+    fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
         !matches!(parent, StructuralNode::ClassDecl(_)) || matches!(child, StructuralNode::ClassMember(_))
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if matches!(node, Expr::FuncExpr { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if matches!(node, Expr::FuncExpr(_)) {
             self.active.push(self.pending.remove(&node.span().start));
         }
         if let Some((constructed, args)) = crate::lint::flutter::construction(node, &self.model)
@@ -120,34 +120,35 @@ impl StructuralRuleVisitor for CallbackCollector<'_> {
                 .is_subtype_of(&constructed, &self.widget, &self.model)
                 == Truth::Yes
         {
-            for argument in &args.positional {
+            for argument in args.positional() {
                 self.check_callback(argument);
             }
-            for argument in &args.named {
+            for argument in args.named() {
                 if !self
                     .cfg
                     .ignored
                     .iter()
-                    .any(|name| name == &argument.name.name)
+                    .any(|name| name == argument.name().name())
                 {
-                    self.check_callback(&argument.value);
+                    self.check_callback(argument.value());
                 }
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::FuncExpr { .. }) {
+    fn exit_expr(&mut self, node: Expr<'a>) {
+        if matches!(node, Expr::FuncExpr(_)) {
             self.active.pop();
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Some(index) = self.active.last().copied().flatten()
             && self.candidates[index].builder_parameter
             && !self.candidates[index].returns_widget
-            && let Stmt::Return(ReturnStmt { value: Some(value), .. }) = node
+            && let Stmt::Return(ret) = node
+            && let Some(value) = ret.value()
             && expression_is_widget(value, &self.model, self.signatures, &self.widget)
         {
             self.candidates[index].returns_widget = true;
@@ -158,20 +159,18 @@ impl StructuralRuleVisitor for CallbackCollector<'_> {
 }
 
 impl CallbackCollector<'_> {
-    fn check_callback(&mut self, expression: &Expr) {
-        let Expr::FuncExpr {
-            params, body, span, ..
-        } = expression.unparenthesized()
-        else {
+    fn check_callback(&mut self, expression: Expr<'_>) {
+        let Expr::FuncExpr(function) = expression.unparenthesized() else {
             return;
         };
-        if !matches!(body.as_ref(), FunctionBody::Block(block) if !block.stmts.is_empty())
-            || !is_long_enough(span, self.source, &self.cfg)
+        let span = function.span();
+        if !matches!(function.body(), FunctionBody::Block(block) if !block.stmts().is_empty())
+            || !is_long_enough(&span, self.source, &self.cfg)
         {
             return;
         }
-        let builder_parameter = params.params.first().is_none_or(|first| {
-            first.param_type.as_ref().is_none_or(|ty| {
+        let builder_parameter = function.params().params().first().is_none_or(|first| {
+            first.param_type().is_none_or(|ty| {
                 matches!(self.model.resolve_type(ty), ResolvedType::Interface { identity, nullable: false, .. }
                     if identity.is_package("flutter", "BuildContext"))
             })
@@ -180,7 +179,7 @@ impl CallbackCollector<'_> {
             self.pending.insert(span.start, self.candidates.len());
         }
         self.candidates.push(Callback {
-            span: *span,
+            span,
             builder_parameter,
             returns_widget: false,
         });
@@ -188,7 +187,7 @@ impl CallbackCollector<'_> {
 }
 
 fn expression_is_widget(
-    expression: &Expr,
+    expression: Expr<'_>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
     widget: &DeclarationIdentity,

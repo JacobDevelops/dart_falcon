@@ -6,7 +6,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ProperSuperInitState;
@@ -14,13 +14,13 @@ pub struct ProperSuperInitState;
 impl Rule for ProperSuperInitState {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let state = DeclarationIdentity::flutter("State");
         RulePreparation::Structural(Box::new(Collector {
             ctx,
@@ -41,8 +41,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let model = &self.model;
         let signatures = self.signatures;
@@ -51,7 +51,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         let TopLevelDecl::Class(class) = declaration else {
             return StructuralTraversal::SkipChildren;
         };
-        let Some(identity) = model.resolve_name(&class.name.name) else {
+        let Some(identity) = model.resolve_name(class.name().name()) else {
             return StructuralTraversal::SkipChildren;
         };
         if signatures.is_subtype_of(&ResolvedType::interface_identity(identity), state, model)
@@ -59,33 +59,32 @@ impl StructuralRuleVisitor for Collector<'_> {
         {
             return StructuralTraversal::SkipChildren;
         }
-        for member in &class.members {
+        for member in class.members() {
             let ClassMember::Method(method) = member else {
                 continue;
             };
-            if method.name.name != "initState" {
+            if method.name().name() != "initState" {
                 continue;
             }
-            let Some(FunctionBody::Block(block)) = &method.body else {
+            let Some(FunctionBody::Block(block)) = method.body() else {
                 continue;
             };
             if block
-                .stmts
+                .stmts()
                 .first()
                 .is_some_and(is_super_init_state_statement)
             {
                 continue;
             }
             let report = block
-                .stmts
-                .iter()
-                .find(|statement| is_super_init_state_statement(statement))
+                .stmts()
+                .find(|statement| is_super_init_state_statement(*statement))
                 .map(Stmt::span)
-                .unwrap_or(&method.name.span);
+                .unwrap_or(method.name().span());
             diags.push(ctx.diagnostic(
                 "proper-super-init-state",
                 "super.initState() should be called first in initState().",
-                *report,
+                report,
             ));
         }
         StructuralTraversal::SkipChildren
@@ -97,16 +96,16 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn is_super_init_state_statement(statement: &Stmt) -> bool {
-    let Stmt::Expr(ExprStmt { expr, .. }) = statement else {
+fn is_super_init_state_statement(statement: Stmt<'_>) -> bool {
+    let Stmt::Expr(statement) = statement else {
         return false;
     };
-    matches!(expr.unparenthesized(),
-        Expr::Call { callee, args, .. }
-            if args.positional.is_empty()
-                && args.named.is_empty()
-                && matches!(callee.as_ref(),
-                    Expr::Field { object, field, .. }
-                        if matches!(object.as_ref(), Expr::Super { .. })
-                            && field.name == "initState"))
+    matches!(statement.expr().unparenthesized(),
+        Expr::Call(call)
+            if call.args().positional().is_empty()
+                && call.args().named().is_empty()
+                && matches!(call.callee(),
+                    Expr::Field(field)
+                        if matches!(field.object(), Expr::Super(_))
+                            && field.field().name() == "initState"))
 }

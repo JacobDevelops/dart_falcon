@@ -12,7 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoEqualThenElse;
@@ -20,7 +20,7 @@ pub struct NoEqualThenElse;
 impl Rule for NoEqualThenElse {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -35,31 +35,41 @@ fn normalize<'a>(ctx: &'a AnalyzeContext<'_>, span: Span) -> impl Iterator<Item 
     use falcon_syntax::TokenKind;
 
     let mut line_comment = false;
-    ctx.syntax.tokens_in(span).flat_map(move |token| {
-        let mut text = token.text(ctx.source);
-        let preserve_whitespace = if line_comment {
-            // The retained comment excludes its terminating newline; equality
-            // includes that newline and any preceding CR.
-            line_comment = token.kind != TokenKind::Newline;
-            true
-        } else {
-            if token.kind.is_comment() && text.starts_with("/* expect:") {
-                text = "";
-            } else if matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment)
-                && text.starts_with("//")
-            {
-                line_comment = true;
-            }
-            token.kind.is_comment() || token.kind == TokenKind::StringLit
-        };
-        text.bytes()
-            .filter(move |byte| preserve_whitespace || !byte.is_ascii_whitespace())
-    })
+    ctx.tree()
+        .tokens_in(ctx.source, span)
+        .flat_map(move |token| {
+            let mut text = token.text();
+            let in_literal = token.parent().ancestors().any(|node| {
+                node.kind() == NodeKind::StringLitNode
+                    && node.span().start >= span.start
+                    && node.span().end <= span.end
+            });
+            let preserve_whitespace = if in_literal {
+                true
+            } else if line_comment {
+                // The retained comment excludes its terminating newline; equality
+                // includes that newline and any preceding CR.
+                line_comment = token.kind() != TokenKind::Newline;
+                true
+            } else {
+                if token.kind().is_comment() && text.starts_with("/* expect:") {
+                    text = "";
+                } else if matches!(token.kind(), TokenKind::LineComment | TokenKind::DocComment)
+                    && text.starts_with("//")
+                {
+                    line_comment = true;
+                }
+                token.kind().is_comment()
+                    || matches!(token.kind(), TokenKind::StringLit | TokenKind::StringPart)
+            };
+            text.bytes()
+                .filter(move |byte| preserve_whitespace || !byte.is_ascii_whitespace())
+        })
 }
 
-fn last_stmt_span(stmt: &Stmt) -> &Span {
+fn last_stmt_span(stmt: Stmt<'_>) -> Span {
     match stmt {
-        Stmt::Block(b) => b.stmts.last().map(last_stmt_span).unwrap_or(&b.span),
+        Stmt::Block(b) => b.stmts().last().map(last_stmt_span).unwrap_or(b.span()),
         other => other.span(),
     }
 }
@@ -72,40 +82,35 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Conditional {
-            then_expr,
-            else_expr,
-            span,
-            ..
-        } = node
-            && normalize(self.ctx, *then_expr.span()).eq(normalize(self.ctx, *else_expr.span()))
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Conditional(conditional) = node
+            && normalize(self.ctx, conditional.then_expr().span()).eq(normalize(self.ctx, conditional.else_expr().span()))
         {
             self.diags.push(self.ctx.diagnostic(
                 "no-equal-then-else",
                 "Both branches of ternary are identical — remove the condition",
-                *span,
+                conditional.span(),
             ));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::If(i) = node
-            && let Some(else_branch) = &i.else_branch
-            && normalize(self.ctx, *i.then_branch.span())
-                .eq(normalize(self.ctx, *else_branch.span()))
+            && let Some(else_branch) = i.else_branch()
+            && normalize(self.ctx, i.then_branch().span())
+                .eq(normalize(self.ctx, else_branch.span()))
         {
-            let last = last_stmt_span(&i.then_branch);
+            let last = last_stmt_span(i.then_branch());
             self.diags.push(self.ctx.diagnostic(
                 "no-equal-then-else",
                 "Both branches of if/else are identical — remove the condition",
-                *last,
+                last,
             ));
         }
         StructuralTraversal::Continue
@@ -118,13 +123,16 @@ mod tests {
     use super::normalize;
     use falcon_analyze::AnalyzeContext;
     use falcon_config::FalconConfig;
-    use falcon_syntax::ast::Span;
+    use falcon_syntax::cst::Span;
     use std::path::Path;
 
     fn normalized(source: &str) -> Vec<u8> {
-        let parsed = falcon_dart_parser::parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: falcon_dart_parser::parse(source).tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         normalize(&ctx, Span::new(0, source.len())).collect()
     }
 

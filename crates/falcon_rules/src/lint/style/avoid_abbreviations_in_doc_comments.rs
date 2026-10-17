@@ -9,7 +9,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::Program;
 
 #[derive(Default)]
 pub struct AvoidAbbreviationsInDocComments;
@@ -17,7 +17,7 @@ pub struct AvoidAbbreviationsInDocComments;
 impl Rule for AvoidAbbreviationsInDocComments {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();

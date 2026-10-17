@@ -36,8 +36,8 @@ use falcon_analyze::{
     expression_segments, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{self as cst_visit, Visitor};
+use falcon_syntax::cst::{self, AstChildren, Span};
 
 use crate::lint::const_eval::ConstructorConstContexts as ConstContexts;
 use crate::lint::const_eval::mentions_type_parameter;
@@ -49,7 +49,7 @@ pub struct AvoidRedundantArgumentValues;
 impl Rule for AvoidRedundantArgumentValues {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if ctx.identities.is_none() {
@@ -104,7 +104,7 @@ impl Target<'_> {
 }
 
 struct Collector<'a> {
-    program: &'a Program,
+    program: cst::Program<'a>,
     diags: Vec<Diagnostic>,
     targets: Targets<'a>,
 }
@@ -226,12 +226,12 @@ impl Targets<'_> {
     /// A local function or function literal's own declaration.
     fn literal_target(
         &self,
-        type_params: &[TypeParam],
-        params: &FormalParamList,
+        type_params: AstChildren<'_, cst::TypeParam<'_>>,
+        params: cst::FormalParamList<'_>,
         state: &SemanticState<'_>,
     ) -> Target<'static> {
         let mut scope = state.type_parameters.clone();
-        scope.push(type_params, &state.model);
+        scope.push(type_params.clone(), &state.model);
         let signature =
             ResolvedSignature::local_callable(&scope, type_params, params, &state.model);
         let owner = self.enclosing_type(state);
@@ -243,7 +243,7 @@ impl Targets<'_> {
                 let value = match default {
                     ParameterDefault::Declared(expression) => {
                         evaluate_constant_with_local_values_in_context(
-                            expression,
+                            expression.expr(),
                             owner.as_ref(),
                             &locals,
                             &state.model,
@@ -273,15 +273,16 @@ impl Targets<'_> {
     /// A decided lookup may be absent and must not fall through at this level.
     fn decided_level_target<'s>(
         &'s self,
-        callee: &Expr,
+        callee: cst::Expr<'_>,
         state: &'s SemanticState<'_>,
     ) -> ControlFlow<Option<Target<'s>>> {
         // `G<int>.named(...)`: type arguments on the class still name it.
         let segments = expression_segments(callee, true);
-        if let Expr::Ident(identifier) = callee.unparenthesized() {
-            if state.environment.is_bound(&identifier.name) {
+        if let cst::Expr::Ident(identifier) = callee.unparenthesized() {
+            let name = identifier.name();
+            if state.environment.is_bound(name) {
                 return ControlFlow::Break(
-                    self.local_target(&identifier.name, state)
+                    self.local_target(name, state)
                         .or_else(|| self.instance_target(&state.infer(callee), "call", state)),
                 );
             }
@@ -290,21 +291,17 @@ impl Targets<'_> {
             {
                 if !state
                     .signatures
-                    .declared_member_facts(identity, &identifier.name)
+                    .declared_member_facts(identity, name)
                     .is_empty()
                 {
-                    return ControlFlow::Break(self.method_target(
-                        identity.clone(),
-                        &identifier.name,
-                        state,
-                    ));
+                    return ControlFlow::Break(self.method_target(identity.clone(), name, state));
                 }
-                if let Some(owner) = state.signatures.resolved_readable_member_owner(
-                    receiver,
-                    &identifier.name,
-                    &state.model,
-                ) {
-                    return ControlFlow::Break(self.method_target(owner, &identifier.name, state));
+                if let Some(owner) =
+                    state
+                        .signatures
+                        .resolved_readable_member_owner(receiver, name, &state.model)
+                {
+                    return ControlFlow::Break(self.method_target(owner, name, state));
                 }
             }
         }
@@ -340,12 +337,16 @@ impl Targets<'_> {
             {
                 return ControlFlow::Break(Some(target));
             }
-            if let Expr::Field { object, field, .. } = callee.unparenthesized()
-                && let Some(identity) = expression_segments(object, false)
+            if let cst::Expr::Field(field) = callee.unparenthesized()
+                && let Some(identity) = expression_segments(field.object(), false)
                     .and_then(|segments| state.model.resolve_dotted(&segments))
                 && state.signatures.type_kind(&identity).is_some()
             {
-                return ControlFlow::Break(self.method_target(identity, &field.name, state));
+                return ControlFlow::Break(self.method_target(
+                    identity,
+                    field.field().name(),
+                    state,
+                ));
             }
         }
         ControlFlow::Continue(())
@@ -353,29 +354,32 @@ impl Targets<'_> {
 
     fn member_level_target<'s>(
         &'s self,
-        callee: &Expr,
+        callee: cst::Expr<'_>,
         state: &'s SemanticState<'_>,
     ) -> Option<Target<'s>> {
         let (receiver, name) = match callee.unparenthesized() {
-            Expr::Ident(identifier) => (state.enclosing_type.as_ref()?.clone(), &identifier.name),
-            // An explicit extension override `E(receiver).m(...)`.
-            Expr::Field { object, field, .. }
-                if let Expr::Call {
-                    callee: extension, ..
-                } = object.unparenthesized()
-                    && let Some(identity) = state.named_extension(extension)
+            cst::Expr::Ident(identifier) => {
+                (state.enclosing_type.as_ref()?.clone(), identifier.name())
+            }
+            cst::Expr::Field(field) => {
+                let object = field.object().unparenthesized();
+                // An explicit named extension call determines the extension
+                // override before receiver inference can lose that identity.
+                if let cst::Expr::Call(extension_call) = object
+                    && let Some(identity) = state.named_extension(extension_call.callee())
                     && let Some(signature) = state
                         .signatures
-                        .extension_override_method(&identity, &field.name) =>
-            {
-                return (!signature.mentions_owner_parameters()).then(|| Target {
-                    signature: Cow::Borrowed(signature),
-                    owner: Some(identity),
-                    library: None,
-                    defaults: None,
-                });
+                        .extension_override_method(&identity, field.field().name())
+                {
+                    return (!signature.mentions_owner_parameters()).then(|| Target {
+                        signature: Cow::Borrowed(signature),
+                        owner: Some(identity),
+                        library: None,
+                        defaults: None,
+                    });
+                }
+                (state.infer_receiver(field.object()), field.field().name())
             }
-            Expr::Field { object, field, .. } => (state.infer_receiver(object), &field.name),
             _ => return None,
         };
         self.instance_target(&receiver, name, state)
@@ -383,7 +387,7 @@ impl Targets<'_> {
 
     fn call_target<'s>(
         &'s self,
-        callee: &Expr,
+        callee: cst::Expr<'_>,
         state: &'s SemanticState<'_>,
     ) -> Option<Target<'s>> {
         let mut callee = callee;
@@ -393,11 +397,11 @@ impl Targets<'_> {
                 return target.or(fallback);
             }
             let target = self.member_level_target(callee, state);
+            // The closest callable target is only a fallback; a target found
+            // by following an explicit receiver takes precedence.
             let Some(receiver) = explicit_call_receiver(callee) else {
                 return target.or(fallback);
             };
-            // An inner callable's result wins; retain an outer member only if
-            // every lookup farther down the `.call` chain remains unresolved.
             if target.is_some() {
                 fallback = target;
             }
@@ -407,7 +411,7 @@ impl Targets<'_> {
 
     fn check(
         &self,
-        args: &ArgList,
+        args: cst::ArgList<'_>,
         target: &Target<'_>,
         state: &SemanticState<'_>,
         caller: Option<&DeclarationIdentity>,
@@ -415,8 +419,7 @@ impl Targets<'_> {
     ) {
         let signature = &*target.signature;
         let mut arguments: Vec<_> = args
-            .positional
-            .iter()
+            .positional()
             .enumerate()
             .map(|(index, argument)| {
                 (
@@ -429,14 +432,12 @@ impl Targets<'_> {
                     true,
                 )
             })
-            .chain(args.named.iter().map(|argument| {
+            .chain(args.named().map(|argument| {
+                let name = argument.name().name();
                 (
-                    &argument.value,
-                    signature
-                        .named
-                        .contains_key(&argument.name.name)
-                        .then_some(argument.name.name.as_str()),
-                    signature.named.get(&argument.name.name),
+                    argument.value(),
+                    signature.named.contains_key(name).then_some(name),
+                    signature.named.get(name),
                     false,
                 )
             }))
@@ -478,7 +479,7 @@ impl Targets<'_> {
 
     fn check_argument(
         &self,
-        argument: &Expr,
+        argument: cst::Expr<'_>,
         parameter: (&str, Option<&ResolvedType>),
         target: &Target<'_>,
         caller: Option<&ResolvedType>,
@@ -495,9 +496,9 @@ impl Targets<'_> {
             return;
         }
         let (default, default_owner) = match default {
-            ParameterDefault::Declared(default) => (Some(default), target.owner.as_ref()),
+            ParameterDefault::Declared(default) => (Some(default.expr()), target.owner.as_ref()),
             ParameterDefault::Inherited { owner, default } => match default.as_ref() {
-                ParameterDefault::Declared(default) => (Some(default), Some(owner)),
+                ParameterDefault::Declared(default) => (Some(default.expr()), Some(owner)),
                 _ => (None, None),
             },
             ParameterDefault::Null => (None, None),
@@ -547,7 +548,7 @@ impl Targets<'_> {
         diags.push(self.ctx.diagnostic(
             "avoid-redundant-argument-values",
             "The value of the argument is redundant because it matches the default value.",
-            *argument.span(),
+            argument.span(),
         ));
     }
 
@@ -555,13 +556,13 @@ impl Targets<'_> {
     /// constructor calls only count when they are in a constant context.
     fn is_constant(
         &self,
-        argument: &Expr,
+        argument: cst::Expr<'_>,
         state: &SemanticState<'_>,
         caller: Option<&ResolvedType>,
     ) -> bool {
         let mut checker = NonConstantFinder {
             found: false,
-            constant_context: self.contexts.contains(argument.span()),
+            constant_context: self.contexts.contains(&argument.span()),
             state,
             caller,
         };
@@ -571,48 +572,44 @@ impl Targets<'_> {
 
     fn visit_declarations(
         &self,
-        program: &Program,
+        program: cst::Program<'_>,
         state: &SemanticState<'_>,
         diags: &mut Vec<Diagnostic>,
     ) {
-        for declaration in &program.declarations {
+        for declaration in program.declarations() {
             let name = match declaration {
-                TopLevelDecl::Class(declaration) => Some(&declaration.name.name),
-                TopLevelDecl::Mixin(declaration) => Some(&declaration.name.name),
-                TopLevelDecl::MixinClass(declaration) => Some(&declaration.name.name),
-                TopLevelDecl::Enum(declaration) => Some(&declaration.name.name),
-                TopLevelDecl::Extension(declaration) => {
-                    declaration.name.as_ref().map(|name| &name.name)
-                }
-                TopLevelDecl::ExtensionType(declaration) => Some(&declaration.name.name),
+                cst::TopLevelDecl::Class(declaration) => Some(declaration.name()),
+                cst::TopLevelDecl::Mixin(declaration) => Some(declaration.name()),
+                cst::TopLevelDecl::MixinClass(declaration) => Some(declaration.name()),
+                cst::TopLevelDecl::Enum(declaration) => Some(declaration.name()),
+                cst::TopLevelDecl::Extension(declaration) => declaration.name(),
+                cst::TopLevelDecl::ExtensionType(declaration) => Some(declaration.name()),
                 _ => None,
             };
-            let owner = name.and_then(|name| state.model.resolve_name(name));
-            if let TopLevelDecl::Enum(declaration) = declaration
+            let owner = name.and_then(|name| state.model.resolve_name(name.name()));
+            if let cst::TopLevelDecl::Enum(declaration) = declaration
                 && let Some(owner) = &owner
             {
-                for variant in &declaration.variants {
-                    let Some(args) = &variant.args else { continue };
-                    let name = variant
-                        .constructor_name
-                        .as_ref()
-                        .map_or("new", |name| name.name.as_str());
+                for variant in declaration.variants() {
+                    let Some(args) = variant.args() else { continue };
+                    let name = variant.constructor_name().map_or("new", |name| name.name());
                     if let Some(target) = self.constructor_target(owner.clone(), name, state) {
                         self.check(args, &target, state, Some(owner), diags);
                     }
                 }
             }
-            let mut visit = |annotation: &Annotation| {
-                let Some(args) = &annotation.args else { return };
-                let Some(identity) = QualifiedName::from_identifiers(&annotation.name)
+            let mut visit = |annotation: cst::Annotation<'_>| {
+                let Some(args) = annotation.args() else {
+                    return;
+                };
+                let Some(identity) = QualifiedName::from_identifiers(annotation.name())
                     .and_then(|name| state.model.resolve_name(name))
                 else {
                     return;
                 };
                 let constructor = annotation
-                    .constructor_name
-                    .as_ref()
-                    .map_or("new", |name| name.name.as_str());
+                    .constructor_name()
+                    .map_or("new", |name| name.name());
                 if let Some(target) = self.constructor_target(identity, constructor, state) {
                     self.check(args, &target, state, owner.as_ref(), diags);
                 }
@@ -629,145 +626,148 @@ struct NonConstantFinder<'a, 'm> {
     state: &'a SemanticState<'m>,
     caller: Option<&'a ResolvedType>,
 }
-
-impl Visitor for NonConstantFinder<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+impl<'a> cst_visit::Visitor<'a> for NonConstantFinder<'_, '_> {
+    fn visit_expr(&mut self, node: cst::Expr<'a>) {
+        if let cst::Expr::Ident(identifier) = node {
+            let name = identifier.name();
+            let constant = matches!(self.caller,
+                Some(ResolvedType::Interface { identity, .. })
+                    if self.state.signatures.declaration(identity).is_some_and(|facts|
+                        facts.static_consts.iter().any(|field| field.name == name)));
+            let bound = self.state.environment.is_bound(name)
+                && self.state.local_constant(name).is_none()
+                && !(constant && self.state.environment.is_bound_in_root_scope(name));
+            let member = self.caller.is_some_and(|receiver| {
+                matches!(receiver, ResolvedType::Interface { identity, .. }
+                    if !self.state.signatures.declared_member_facts(identity, name).is_empty())
+                    || self
+                        .state
+                        .signatures
+                        .resolved_readable_member_owner(receiver, name, &self.state.model)
+                        .is_some()
+            });
+            if bound || (member && !constant) {
+                self.found = true;
+            }
+            return;
+        }
+        let (is_container, is_const) = match node {
+            cst::Expr::List(value) => (true, value.is_const()),
+            cst::Expr::Map(value) => (true, value.is_const()),
+            cst::Expr::Set(value) => (true, value.is_const()),
+            cst::Expr::Record(value) => (true, value.is_const()),
+            cst::Expr::New(value) => (true, value.is_const()),
+            _ => (false, false),
+        };
+        if is_container {
+            // Unlike other collections, a record literal is not itself nonconstant;
+            // descend into its fields to check the contained expressions.
+            if !is_const && !self.constant_context && !matches!(node, cst::Expr::Record(_)) {
+                self.found = true;
+                return;
+            }
+            let previous = self.constant_context;
+            self.constant_context |= is_const;
+            cst_visit::walk_expr(self, node);
+            self.constant_context = previous;
+            return;
+        }
         match node {
-            Expr::Ident(identifier) => {
-                let constant = matches!(self.caller,
-                    Some(ResolvedType::Interface { identity, .. })
-                        if self.state.signatures.declaration(identity).is_some_and(|facts|
-                            facts.static_consts.iter().any(|field| field.name == identifier.name)));
-                let bound = self.state.environment.is_bound(&identifier.name)
-                    && self.state.local_constant(&identifier.name).is_none()
-                    && !(constant
-                        && self
-                            .state
-                            .environment
-                            .is_bound_in_root_scope(&identifier.name));
-                let member = self.caller.is_some_and(|receiver| {
-                    matches!(receiver, ResolvedType::Interface { identity, .. }
-                        if !self.state.signatures.declared_member_facts(identity, &identifier.name).is_empty())
-                        || self.state.signatures.resolved_readable_member_owner(
-                            receiver, &identifier.name, &self.state.model,
-                        ).is_some()
-                });
-                if bound || (member && !constant) {
-                    self.found = true;
-                }
-            }
-            // A record of constants is constant without `const`; `const`
-            // still makes its fields a constant context.
-            Expr::List { is_const, .. }
-            | Expr::Map { is_const, .. }
-            | Expr::Set { is_const, .. }
-            | Expr::Record {
-                is_const: is_const @ true,
-                ..
-            }
-            | Expr::New { is_const, .. } => {
-                if !is_const && !self.constant_context {
-                    self.found = true;
-                } else {
-                    let previous = self.constant_context;
-                    self.constant_context = true;
-                    walk_expr(self, node);
-                    self.constant_context = previous;
-                }
-            }
-            Expr::Call { .. } if !self.constant_context => self.found = true,
-            Expr::FuncExpr { .. } | Expr::This { .. } => self.found = true,
-            _ => walk_expr(self, node),
+            cst::Expr::Call(_) if !self.constant_context => self.found = true,
+            cst::Expr::FuncExpr(_) | cst::Expr::This(_) => self.found = true,
+            _ => cst_visit::walk_expr(self, node),
         }
     }
 }
 
-/// Visit annotation arguments immediately without cloning or retaining their ASTs.
-struct AnnotationVisitor<'a> {
-    visit: &'a mut dyn FnMut(&Annotation),
+/// Visit annotation arguments immediately without cloning or retaining their syntax nodes.
+struct AnnotationVisitor<'a, 'tree> {
+    visit: &'a mut dyn FnMut(cst::Annotation<'tree>),
 }
 
-impl Visitor for AnnotationVisitor<'_> {
-    fn visit_annotation(&mut self, node: &Annotation) {
+impl<'tree> cst_visit::Visitor<'tree> for AnnotationVisitor<'_, 'tree> {
+    fn visit_annotation(&mut self, node: cst::Annotation<'tree>) {
         (self.visit)(node);
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+    fn visit_program_end(&mut self, state: &SemanticState<'a>) {
         self.targets
             .visit_declarations(self.program, state, &mut self.diags);
     }
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+
+    fn visit_stmt(&mut self, node: cst::Stmt<'a>, state: &SemanticState<'a>) {
         match node {
-            Stmt::LocalFunc(function) => {
+            cst::Stmt::LocalFunc(function) => {
                 let target =
                     self.targets
-                        .literal_target(&function.type_params, &function.params, state);
-                self.targets.declare_local(function.name.span, Some(target));
+                        .literal_target(function.type_params(), function.params(), state);
+                self.targets
+                    .declare_local(function.name().span(), Some(target));
             }
-            Stmt::LocalVar(declaration) => {
-                for declarator in &declaration.declarators {
-                    let target = match declarator.initializer.as_ref().map(Expr::unparenthesized) {
-                        _ if declaration.var_type.is_some() => None,
-                        Some(Expr::FuncExpr {
-                            type_params,
-                            params,
-                            ..
-                        }) => Some(self.targets.literal_target(type_params, params, state)),
-                        Some(initializer @ (Expr::Ident(_) | Expr::Field { .. })) => {
+            cst::Stmt::LocalVar(declaration) => {
+                for declarator in declaration.declarators() {
+                    let initializer = declarator.initializer().map(cst::Expr::unparenthesized);
+                    let target = match initializer {
+                        _ if declaration.var_type().is_some() => None,
+                        Some(cst::Expr::FuncExpr(function)) => Some(self.targets.literal_target(
+                            function.type_params(),
+                            function.params(),
+                            state,
+                        )),
+                        Some(initializer @ (cst::Expr::Ident(_) | cst::Expr::Field(_))) => {
                             self.targets.call_target(initializer, state)
                         }
                         _ => None,
                     }
                     .map(Target::into_owned);
-                    self.targets.declare_local(declarator.name.span, target);
+                    self.targets.declare_local(declarator.name().span(), target);
                 }
             }
             _ => {}
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: cst::Expr<'a>, state: &SemanticState<'a>) {
         let target = match node {
-            Expr::Call { callee, args, .. } => {
-                self.targets.call_target(callee, state).map(|t| (t, args))
-            }
-            Expr::New {
-                dart_type,
-                constructor_name,
-                args,
-                ..
-            } => match state.model.resolve_type(dart_type) {
+            cst::Expr::Call(call) => self
+                .targets
+                .call_target(call.callee(), state)
+                .map(|target| (target, call.args())),
+            cst::Expr::New(new) => match state.model.resolve_type(new.dart_type()) {
                 ResolvedType::Interface { identity, .. } => self
                     .targets
                     .constructor_target(
                         identity,
-                        constructor_name
-                            .as_ref()
-                            .map_or("new", |name| name.name.as_str()),
+                        new.constructor_name().map_or("new", |name| name.name()),
                         state,
                     )
-                    .map(|t| (t, args)),
+                    .map(|target| (target, new.args())),
                 _ => None,
             },
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                let receiver = state.infer(object);
+            cst::Expr::Cascade(cascade) => {
+                let receiver = state.infer(cascade.object());
                 let caller = self.targets.enclosing_type(state);
-                // Each section's first selector is invoked on the cascade target.
-                for section in sections {
-                    if let Some(CascadeOp::Call(name, _, args)) = section.ops.first()
+                // The first operation identifies this section's selector;
+                // later cascade operations apply to its result.
+                for section in cascade.sections() {
+                    if let Some(cst::CascadeOp::Call(call)) = section.ops().next()
                         && let Some(target) =
-                            self.targets.instance_target(&receiver, &name.name, state)
+                            self.targets
+                                .instance_target(&receiver, call.name().name(), state)
                     {
-                        self.targets
-                            .check(args, &target, state, caller.as_ref(), &mut self.diags);
+                        self.targets.check(
+                            call.args(),
+                            &target,
+                            state,
+                            caller.as_ref(),
+                            &mut self.diags,
+                        );
                     }
                 }
                 None
@@ -786,48 +786,51 @@ impl SemanticRuleVisitor for Collector<'_> {
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex, TypeIndex};
+    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     /// In-memory imported libraries: no filesystem or installed SDK is needed.
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult {
-            program: dependency,
-            errors,
-            ..
-        } = parse(imported);
-        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let dependency = parse(imported);
+        assert!(dependency.errors.is_empty(), "{:?}", dependency.errors);
+        let dependency = Arc::new(ParsedFile {
+            source: imported.into(),
+            tree: dependency.tree,
+        });
         let sources = [
             IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: &imported_path,
-                program: &dependency,
+                parsed: &dependency,
                 has_parse_errors: false,
             },
         ];
         let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let files = [(path.clone(), &program), (imported_path, &dependency)];
+        let files = [
+            (path.clone(), Arc::clone(&parsed)),
+            (imported_path, dependency),
+        ];
         let types = TypeIndex::from_resolved_files(
-            files.iter().map(|(path, program)| {
+            files.iter().map(|(path, parsed)| {
                 (
                     path.as_path(),
                     falcon_analyze::LibrarySource {
-                        program,
+                        program: parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -837,11 +840,11 @@ mod tests {
         );
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
+        let context = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let mut diagnostics = AvoidRedundantArgumentValues.analyze(&program, &context);
+        let mut diagnostics = AvoidRedundantArgumentValues.analyze(parsed.program(), &context);
         diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
         diagnostics
             .into_iter()
@@ -904,24 +907,23 @@ void run() {
 }
 "#;
         std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
         let external = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &program, source)],
+            &[(path.as_path(), parsed.program(), source)],
             |candidate| candidate == path,
         );
         let identities = IdentityIndex::build(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
@@ -935,7 +937,7 @@ void run() {
             [(
                 path.as_path(),
                 LibrarySource {
-                    program: &program,
+                    program: parsed.program(),
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -944,17 +946,17 @@ void run() {
         );
         types.add_external(&external, &identities);
         let signatures = SignatureIndex::build(
-            &[(path.clone(), &program)],
+            &[(path.clone(), Arc::clone(&parsed))],
             Some(&external),
             &identities,
             &types,
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
+        let context = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = AvoidRedundantArgumentValues.analyze(&program, &context);
+        let diagnostics = AvoidRedundantArgumentValues.analyze(parsed.program(), &context);
         let arguments: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

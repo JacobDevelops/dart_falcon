@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryNullInIfNullOperators;
@@ -18,7 +18,7 @@ pub struct UnnecessaryNullInIfNullOperators;
 impl Rule for UnnecessaryNullInIfNullOperators {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -35,26 +35,21 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Binary {
-            op: BinaryOp::NullCoalesce,
-            left,
-            right,
-            span,
-            ..
-        } = node
-            && (matches!(left.unparenthesized(), Expr::NullLit { .. })
-                || matches!(right.unparenthesized(), Expr::NullLit { .. }))
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Binary(binary) = node
+            && binary.op() == BinaryOp::NullCoalesce
+            && (matches!(binary.left().unparenthesized(), Expr::NullLit(_))
+                || matches!(binary.right().unparenthesized(), Expr::NullLit(_)))
         {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-null-in-if-null-operators",
                 "Unnecessary null in an if-null ('??') operator.",
-                *span,
+                binary.span(),
             ));
         }
         StructuralTraversal::Continue

@@ -12,13 +12,16 @@ use std::path::Path;
 fn run(source: &str) -> Vec<String> {
     let mut registry = RuleRegistry::with_lookup(suppression_lookup);
     registry.register("avoid-dynamic", Box::new(AvoidDynamic));
-    let falcon_dart_parser::ParseResult {
-        program, syntax, ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
     registry
-        .run_all(&program, &ctx)
+        .run_all(program, &ctx)
         .into_iter()
         .map(|d| d.rule.to_string())
         .collect()

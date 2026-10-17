@@ -1,8 +1,11 @@
-use falcon_analyze::{AnalyzeContext, Rule, RuleAnalysis, RulePreparation, RuleRegistry};
+use falcon_analyze::{
+    AnalyzeContext, ParsedFile, Rule, RuleAnalysis, RulePreparation, RuleRegistry,
+};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 use std::path::Path;
+use std::sync::Arc;
 
 // Mock rules for testing
 
@@ -10,7 +13,7 @@ struct NoOpRule;
 impl Rule for NoOpRule {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         _ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(vec![])
@@ -21,7 +24,7 @@ struct AlwaysErrorRule;
 impl Rule for AlwaysErrorRule {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(vec![Diagnostic::new(
@@ -38,7 +41,7 @@ struct CountFunctionDeclsRule(u32);
 impl Rule for CountFunctionDeclsRule {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         _ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(
@@ -60,13 +63,15 @@ impl Rule for CountFunctionDeclsRule {
 #[test]
 fn test_mock_rule_analyze_empty() {
     let rule = NoOpRule;
-    let falcon_dart_parser::ParseResult {
-        program, syntax, ..
-    } = falcon_dart_parser::parse("void main() {}");
+    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
+    let parsed = Arc::new(ParsedFile {
+        source: "void main() {}".into(),
+        tree,
+    });
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
-    let diagnostics = rule.analyze(&program, &ctx);
+    let diagnostics = rule.analyze(parsed.program(), &ctx);
     assert!(diagnostics.is_empty());
 }
 
@@ -75,13 +80,15 @@ fn test_registry_register_and_run_all_empty() {
     let mut registry = RuleRegistry::new();
     registry.register("no_op", Box::new(NoOpRule));
 
-    let falcon_dart_parser::ParseResult {
-        program, syntax, ..
-    } = falcon_dart_parser::parse("void main() {}");
+    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
+    let parsed = Arc::new(ParsedFile {
+        source: "void main() {}".into(),
+        tree,
+    });
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
-    let diagnostics = registry.run_all(&program, &ctx);
+    let diagnostics = registry.run_all(parsed.program(), &ctx);
     assert!(diagnostics.is_empty());
 }
 
@@ -90,13 +97,15 @@ fn test_registry_run_all_emits_diagnostic() {
     let mut registry = RuleRegistry::new();
     registry.register("always_error", Box::new(AlwaysErrorRule));
 
-    let falcon_dart_parser::ParseResult {
-        program, syntax, ..
-    } = falcon_dart_parser::parse("void main() {}");
+    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
+    let parsed = Arc::new(ParsedFile {
+        source: "void main() {}".into(),
+        tree,
+    });
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
-    let diagnostics = registry.run_all(&program, &ctx);
+    let diagnostics = registry.run_all(parsed.program(), &ctx);
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].rule, "always_error");
     assert_eq!(diagnostics[0].severity, Severity::Error);
@@ -109,13 +118,15 @@ fn test_registry_multiple_rules() {
     registry.register("always_error", Box::new(AlwaysErrorRule));
     registry.register("count_functions", Box::new(CountFunctionDeclsRule(2)));
 
-    let falcon_dart_parser::ParseResult {
-        program, syntax, ..
-    } = falcon_dart_parser::parse("void main() {}");
+    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
+    let parsed = Arc::new(ParsedFile {
+        source: "void main() {}".into(),
+        tree,
+    });
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
-    let diagnostics = registry.run_all(&program, &ctx);
+    let diagnostics = registry.run_all(parsed.program(), &ctx);
     // NoOpRule: 0, AlwaysErrorRule: 1, CountFunctionDeclsRule: 2
     assert_eq!(diagnostics.len(), 3);
 }
@@ -125,9 +136,12 @@ fn test_analyze_context_fields() {
     let config = FalconConfig::default();
     let source = "void main() {}";
     let path = Path::new("test.dart");
-    let syntax = falcon_dart_parser::parse(source).syntax;
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree: falcon_dart_parser::parse(source).tree,
+    });
 
-    let ctx = AnalyzeContext::new(path, source, &config, &syntax);
+    let ctx = AnalyzeContext::new(path, &config, &parsed);
 
     assert_eq!(ctx.file_path, path);
     assert_eq!(ctx.source, source);
@@ -240,9 +254,8 @@ fn test_end_to_end_parse_analyze_serialize() {
     "#;
 
     let falcon_dart_parser::ParseResult {
-        program,
+        tree,
         errors: parse_errors,
-        syntax,
         ..
     } = falcon_dart_parser::parse(source);
     assert!(
@@ -254,10 +267,14 @@ fn test_end_to_end_parse_analyze_serialize() {
     let mut registry = RuleRegistry::new();
     registry.register("always_error", Box::new(AlwaysErrorRule));
 
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    });
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("foo.dart"), source, &config, &syntax);
+    let ctx = AnalyzeContext::new(Path::new("foo.dart"), &config, &parsed);
 
-    let diagnostics = registry.run_all(&program, &ctx);
+    let diagnostics = registry.run_all(parsed.program(), &ctx);
     assert_eq!(
         diagnostics.len(),
         1,
@@ -273,9 +290,12 @@ fn test_end_to_end_parse_analyze_serialize() {
 #[test]
 fn test_context_diagnostic_uses_file_and_warning_default() {
     let config = FalconConfig::default();
-    let syntax = falcon_dart_parser::parse("abc").syntax;
-    let ctx = AnalyzeContext::new(Path::new("foo.dart"), "abc", &config, &syntax);
-    let span = falcon_syntax::ast::Span { start: 1, end: 3 };
+    let parsed = Arc::new(ParsedFile {
+        source: "abc".into(),
+        tree: falcon_dart_parser::parse("abc").tree,
+    });
+    let ctx = AnalyzeContext::new(Path::new("foo.dart"), &config, &parsed);
+    let span = falcon_syntax::cst::Span { start: 1, end: 3 };
     let diagnostic = ctx.diagnostic("rule", "message", span);
     assert_eq!(diagnostic.rule, "rule");
     assert_eq!(diagnostic.message, "message");
@@ -287,36 +307,39 @@ fn test_context_diagnostic_uses_file_and_warning_default() {
 #[test]
 fn context_reuses_per_file_analysis_facts() {
     let source = "int value = 0; void main() { while (value < 2) { value++; } }";
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     let config = FalconConfig::default();
     let path = Path::new("test.dart");
     let identities = falcon_analyze::resolve::IdentityIndex::from_project_files(
         &[falcon_analyze::resolve::IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
-    let ctx = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
+    let ctx = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     assert!(std::ptr::eq(
-        ctx.flow_writes(&program),
-        ctx.flow_writes(&program)
+        ctx.flow_writes(program),
+        ctx.flow_writes(program)
     ));
-    assert!(std::ptr::eq(ctx.globals(&program), ctx.globals(&program)));
-    assert!(ctx.globals(&program).contains_key("value"));
-    assert!(std::ptr::eq(ctx.tokens().as_ptr(), ctx.tokens().as_ptr()));
-    assert!(!ctx.tokens().is_empty());
+    assert!(std::ptr::eq(ctx.globals(program), ctx.globals(program)));
+    assert!(ctx.globals(program).contains_key("value"));
+    assert_eq!(
+        ctx.tokens().map(|token| token.span()).collect::<Vec<_>>(),
+        ctx.tokens().map(|token| token.span()).collect::<Vec<_>>(),
+    );
+    assert!(ctx.tokens().next().is_some());
 
-    let second = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
+    let second = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     assert!(!std::ptr::eq(
-        ctx.flow_writes(&program),
-        second.flow_writes(&program)
+        ctx.flow_writes(program),
+        second.flow_writes(program)
     ));
 }

@@ -2,39 +2,44 @@
 //! construct must parse with zero errors (unless the gap is specifically about a
 //! *missing* diagnostic) and produce a faithful AST shape.
 
-use falcon_dart_parser::parser::{ParseError, parse};
-use falcon_syntax::ast::*;
+use falcon_dart_parser::parser::parse;
+use falcon_syntax::cst::*;
 #[path = "common/only_class.rs"]
 mod common_class;
 use common_class::only_class;
 
-/// Parse `var x = <expr>;` and return the initializer expression plus any parse
-/// errors. Wrapping in a top-level variable is the simplest way to drive the
+/// Parse `var x = <expr>;` and retain its source and concrete tree. Wrapping in a top-level variable is the simplest way to drive the
 /// expression parser through the public `parse` entry point.
-fn parse_expr(expr_src: &str) -> (Expr, Vec<ParseError>) {
-    let src = format!("var x = {expr_src};");
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(&src);
-    let init = match &prog.declarations[0] {
-        TopLevelDecl::Variable(v) => v.declarators[0]
-            .initializer
-            .clone()
-            .expect("initializer present"),
-        other => panic!("expected top-level variable, got {other:?}"),
-    };
-    (init, errors)
+fn parse_expr(expr_src: &str) -> (String, falcon_dart_parser::ParseResult) {
+    let source = format!("var x = {expr_src};");
+    let parsed = parse(&source);
+    (source, parsed)
 }
 
-fn parse_ok(expr_src: &str) -> Expr {
-    let (expr, errors) = parse_expr(expr_src);
+fn initializer(program: Program<'_>) -> Expr<'_> {
+    match program
+        .declarations()
+        .next()
+        .expect("top-level declaration")
+    {
+        TopLevelDecl::Variable(v) => v
+            .declarators()
+            .next()
+            .expect("declarator")
+            .initializer()
+            .expect("initializer present"),
+        other => panic!("expected top-level variable, got {other:?}"),
+    }
+}
+
+fn parse_ok(expr_src: &str) -> (String, falcon_dart_parser::ParseResult) {
+    let (source, parsed) = parse_expr(expr_src);
+    let errors = &parsed.errors;
     assert!(
         errors.is_empty(),
         "unexpected errors for `{expr_src}`: {errors:?}"
     );
-    expr
+    (source, parsed)
 }
 
 mod common;
@@ -42,140 +47,139 @@ mod common;
 mod common_errs;
 #[path = "common/first_stmt_expr.rs"]
 mod common_expr;
-use common::parse_body;
+use common::body_stmts;
 use common_errs::errs;
 
 #[test]
 fn test_leading_spread_then_entry_is_map() {
-    let expr = parse_ok("{...a, 'k': 1}");
-    assert!(matches!(expr, Expr::Map { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("{...a, 'k': 1}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Map(_)), "got {expr:?}");
 }
 
 #[test]
 fn test_leading_spread_then_plain_is_set() {
-    let expr = parse_ok("{...a, b}");
-    assert!(matches!(expr, Expr::Set { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("{...a, b}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Set(_)), "got {expr:?}");
 }
 
 #[test]
 fn test_spread_only_defaults_to_set() {
     // `{...a}` is genuinely ambiguous; with no type args it defaults to a Set.
-    let expr = parse_ok("{...a}");
-    assert!(matches!(expr, Expr::Set { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("{...a}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Set(_)), "got {expr:?}");
 }
 
 #[test]
 fn test_spread_only_two_type_args_is_map() {
-    let expr = parse_ok("<K, V>{...a}");
-    assert!(matches!(expr, Expr::Map { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("<K, V>{...a}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Map(_)), "got {expr:?}");
 }
 
 #[test]
 fn test_spread_only_one_type_arg_is_set() {
-    let expr = parse_ok("<int>{...a}");
-    assert!(matches!(expr, Expr::Set { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("<int>{...a}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Set(_)), "got {expr:?}");
 }
 
 #[test]
 fn test_multiple_spreads_default_to_set() {
-    let expr = parse_ok("{...a, ...b}");
-    assert!(matches!(expr, Expr::Set { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("{...a, ...b}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Set(_)), "got {expr:?}");
 }
 
 #[test]
 fn map_entries_and_control_elements_share_source_order() {
-    let Expr::Map { elements, .. } = parse_ok("{'a': 1, ...other, if (ready) 'b': 2, 'c': 3}")
-    else {
+    let (expr_source, parsed) = parse_ok("{'a': 1, ...other, if (ready) 'b': 2, 'c': 3}");
+    let Expr::Map(node) = initializer(parsed.tree.program(&expr_source)) else {
         panic!("expected map");
     };
+    let elements = node.elements();
+    assert_eq!(elements.len(), 4);
     assert!(matches!(
-        &elements[..],
+        [
+            elements.clone().next().unwrap(),
+            elements.clone().nth(1).unwrap(),
+            elements.clone().nth(2).unwrap(),
+            elements.clone().nth(3).unwrap()
+        ],
         [
             MapElement::Entry(_),
-            MapElement::Spread { .. },
-            MapElement::If { .. },
+            MapElement::Spread(_),
+            MapElement::If(_),
             MapElement::Entry(_)
         ]
     ));
-    let Expr::Map { elements, .. } = parse_ok("{'a': 1, 'b': 2}") else {
+    let (expr_source, parsed) = parse_ok("{'a': 1, 'b': 2}");
+    let Expr::Map(node) = initializer(parsed.tree.program(&expr_source)) else {
         panic!("expected map");
     };
+    let elements = node.elements();
+    assert_eq!(elements.len(), 2);
     assert!(matches!(
-        &elements[..],
+        [
+            elements.clone().next().unwrap(),
+            elements.clone().nth(1).unwrap()
+        ],
         [MapElement::Entry(_), MapElement::Entry(_)]
     ));
 }
 
 #[test]
 fn collection_for_headers_preserve_declarations_and_clauses() {
-    let Expr::List { elements, .. } = parse_ok("[for (final int item in items) item]") else {
+    let (expr_source, parsed) = parse_ok("[for (final int item in items) item]");
+    let Expr::List(list) = initializer(parsed.tree.program(&expr_source)) else {
         panic!("expected list");
     };
-    assert!(matches!(
-        &elements[0],
-        CollectionElement::For { header, .. }
-            if matches!(
-                &**header,
-                ForHeader {
-                    init: Some(ForInit::ForIn {
-                        keyword: VarKeyword::Final,
-                        var_type: Some(_),
-                        ..
-                    }),
-                    ..
-                }
-            )
-    ));
-    let Expr::List { elements, .. } = parse_ok("[for (final (key, value) in pairs) value]") else {
+    assert!(
+        matches!(list.elements().next().unwrap(), CollectionElement::For(element)
+        if matches!(element.header().init(), Some(ForInit::ForIn(init))
+            if init.keyword() == VarKeyword::Final && init.var_type().is_some()))
+    );
+    let (expr_source, parsed) = parse_ok("[for (final (key, value) in pairs) value]");
+    let Expr::List(list) = initializer(parsed.tree.program(&expr_source)) else {
         panic!("expected list");
     };
-    assert!(matches!(
-        &elements[0],
-        CollectionElement::For { header, .. }
-            if matches!(
-                &**header,
-                ForHeader {
-                    init: Some(ForInit::PatternForIn {
-                        keyword: VarKeyword::Final,
-                        ..
-                    }),
-                    ..
-                }
-            )
-    ));
-    let Expr::Map { elements, .. } = parse_ok("{for (var i = 0; i < n; i++) i: i}") else {
+    assert!(
+        matches!(list.elements().next().unwrap(), CollectionElement::For(element)
+        if matches!(element.header().init(), Some(ForInit::PatternForIn(init))
+            if init.keyword() == VarKeyword::Final))
+    );
+    let (expr_source, parsed) = parse_ok("{for (var i = 0; i < n; i++) i: i}");
+    let Expr::Map(map) = initializer(parsed.tree.program(&expr_source)) else {
         panic!("expected map");
     };
-    let MapElement::For {
-        header: ForHeader {
-            init,
-            condition,
-            updates,
-        },
-        ..
-    } = &elements[0]
-    else {
+    let MapElement::For(element) = map.elements().next().unwrap() else {
         panic!("expected C-style map for");
     };
-    assert!(matches!(init.as_ref(), Some(ForInit::VarDecl(_))));
-    assert!(condition.is_some());
-    assert_eq!(updates.len(), 1);
+    let header = element.header();
+    assert!(matches!(header.init(), Some(ForInit::VarDecl(_))));
+    assert!(header.condition().is_some());
+    assert_eq!(header.updates().len(), 1);
 }
 
 #[test]
 fn test_single_type_arg_empty_braces_is_set() {
-    let expr = parse_ok("<int>{}");
+    let (expr_source, parsed) = parse_ok("<int>{}");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Set { elements, .. } => assert!(elements.is_empty()),
+        Expr::Set(node) => assert!(node.elements().is_empty()),
         other => panic!("expected empty Set, got {other:?}"),
     }
 }
 
 #[test]
 fn test_two_type_args_empty_braces_is_map() {
-    let expr = parse_ok("<K, V>{}");
+    let (expr_source, parsed) = parse_ok("<K, V>{}");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Map { elements, .. } => {
+        Expr::Map(node) => {
+            let elements = node.elements();
             assert!(elements.is_empty());
         }
         other => panic!("expected empty Map, got {other:?}"),
@@ -184,18 +188,20 @@ fn test_two_type_args_empty_braces_is_map() {
 
 #[test]
 fn test_no_type_args_empty_braces_is_map() {
-    let expr = parse_ok("{}");
-    assert!(matches!(expr, Expr::Map { .. }), "got {expr:?}");
+    let (expr_source, parsed) = parse_ok("{}");
+    let expr = initializer(parsed.tree.program(&expr_source));
+    assert!(matches!(expr, Expr::Map(_)), "got {expr:?}");
 }
 
 #[test]
 fn test_generic_instantiation_tearoff() {
-    let expr = parse_ok("identity<int>");
+    let (expr_source, parsed) = parse_ok("identity<int>");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::GenericInstantiation {
-            target, type_args, ..
-        } => {
-            assert!(matches!(*target, Expr::Ident(_)));
+        Expr::GenericInstantiation(node) => {
+            let target = node.target();
+            let type_args = node.type_args();
+            assert!(matches!(target, Expr::Ident(_)));
             assert_eq!(type_args.len(), 1);
         }
         other => panic!("expected GenericInstantiation, got {other:?}"),
@@ -209,17 +215,23 @@ fn test_generic_instantiation_function_type_annotations() {
         "identity<void Function(@Meta('value', 1 > 0) int)>",
         "identity<void Function(@Meta<int>.named('value') int)>",
     ] {
-        let expr = parse_ok(source);
-        let Expr::GenericInstantiation { type_args, .. } = expr else {
+        let (expr_source, parsed) = parse_ok(source);
+        let expr = initializer(parsed.tree.program(&expr_source));
+        let Expr::GenericInstantiation(node) = expr else {
             panic!("expected GenericInstantiation, got {expr:?}");
         };
-        let DartType::Function(function) = &type_args[0] else {
-            panic!("expected function type, got {:?}", type_args[0]);
+        let type_args = node.type_args();
+        let DartType::Function(function) = type_args.clone().next().unwrap() else {
+            panic!(
+                "expected function type, got {:?}",
+                type_args.clone().next().unwrap()
+            );
         };
-        assert_eq!(function.params[0].annotations.len(), 1);
-        let invocation = parse_ok(&format!("{source}()"));
+        assert_eq!(function.params().next().unwrap().annotations().len(), 1);
+        let (expr_source, parsed) = parse_ok(&format!("{source}()"));
+        let invocation = initializer(parsed.tree.program(&expr_source));
         assert!(
-            matches!(invocation, Expr::Call { ref type_args, .. } if type_args.len() == 1),
+            matches!(invocation, Expr::Call(call) if call.type_args().len() == 1),
             "got {invocation:?}"
         );
     }
@@ -227,23 +239,29 @@ fn test_generic_instantiation_function_type_annotations() {
 
 #[test]
 fn test_generic_instantiation_multiple_type_args() {
-    let expr = parse_ok("pair<int, String>");
+    let (expr_source, parsed) = parse_ok("pair<int, String>");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::GenericInstantiation { type_args, .. } => assert_eq!(type_args.len(), 2),
+        Expr::GenericInstantiation(node) => assert_eq!(node.type_args().len(), 2),
         other => panic!("expected GenericInstantiation, got {other:?}"),
     }
 }
 
 #[test]
 fn test_generic_instantiation_as_call_argument() {
-    let expr = parse_ok("list.map(identity<int>)");
+    let (expr_source, parsed) = parse_ok("list.map(identity<int>)");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Call { args, .. } => {
-            assert_eq!(args.positional.len(), 1);
+        Expr::Call(node) => {
+            let args = node.args();
+            assert_eq!(args.positional().len(), 1);
             assert!(
-                matches!(args.positional[0], Expr::GenericInstantiation { .. }),
+                matches!(
+                    args.positional().next().unwrap(),
+                    Expr::GenericInstantiation(_)
+                ),
                 "arg was {:?}",
-                args.positional[0]
+                args.positional().next().unwrap()
             );
         }
         other => panic!("expected Call, got {other:?}"),
@@ -252,14 +270,12 @@ fn test_generic_instantiation_as_call_argument() {
 
 #[test]
 fn test_less_than_stays_comparison() {
-    let expr = parse_ok("a < b");
+    let (expr_source, parsed) = parse_ok("a < b");
+    let expr = initializer(parsed.tree.program(&expr_source));
     assert!(
         matches!(
             expr,
-            Expr::Binary {
-                op: BinaryOp::Lt,
-                ..
-            }
+            Expr::Binary(binary) if binary.op() == BinaryOp::Lt
         ),
         "got {expr:?}"
     );
@@ -268,31 +284,27 @@ fn test_less_than_stays_comparison() {
 #[test]
 fn test_relational_pair_in_args_stay_comparisons() {
     // `f(a < b, c > d)` — both args are comparisons, not generic instantiations.
-    let expr = parse_ok("f(a < b, c > d)");
+    let (expr_source, parsed) = parse_ok("f(a < b, c > d)");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Call { args, .. } => {
-            assert_eq!(args.positional.len(), 2, "args: {:?}", args.positional);
+        Expr::Call(node) => {
+            let args = node.args();
+            assert_eq!(args.positional().len(), 2, "args: {:?}", args.positional());
             assert!(
                 matches!(
-                    args.positional[0],
-                    Expr::Binary {
-                        op: BinaryOp::Lt,
-                        ..
-                    }
+                    args.positional().next().unwrap(),
+                    Expr::Binary(binary) if binary.op() == BinaryOp::Lt
                 ),
                 "first arg: {:?}",
-                args.positional[0]
+                args.positional().next().unwrap()
             );
             assert!(
                 matches!(
-                    args.positional[1],
-                    Expr::Binary {
-                        op: BinaryOp::Gt,
-                        ..
-                    }
+                    args.positional().nth(1).unwrap(),
+                    Expr::Binary(binary) if binary.op() == BinaryOp::Gt
                 ),
                 "second arg: {:?}",
-                args.positional[1]
+                args.positional().nth(1).unwrap()
             );
         }
         other => panic!("expected Call, got {other:?}"),
@@ -303,51 +315,55 @@ fn test_relational_pair_in_args_stay_comparisons() {
 fn test_generic_call_still_parses() {
     // `<T>(args)` following the type args must remain a generic Call, not an
     // instantiation.
-    let expr = parse_ok("identity<int>(3)");
+    let (expr_source, parsed) = parse_ok("identity<int>(3)");
+    let expr = initializer(parsed.tree.program(&expr_source));
     assert!(
-        matches!(expr, Expr::Call { ref type_args, .. } if type_args.len() == 1),
+        matches!(expr, Expr::Call(call) if call.type_args().len() == 1),
         "got {expr:?}"
     );
 }
 
 #[test]
 fn test_leading_null_aware_cascade() {
-    let expr = parse_ok("a?..b()");
+    let (expr_source, parsed) = parse_ok("a?..b()");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { is_null_aware, .. } => assert!(is_null_aware),
+        Expr::Cascade(node) => assert!(node.is_null_aware()),
         other => panic!("expected Cascade, got {other:?}"),
     }
 }
 
 #[test]
 fn test_plain_cascade_not_null_aware() {
-    let expr = parse_ok("a..b()");
+    let (expr_source, parsed) = parse_ok("a..b()");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { is_null_aware, .. } => assert!(!is_null_aware),
+        Expr::Cascade(node) => assert!(!node.is_null_aware()),
         other => panic!("expected Cascade, got {other:?}"),
     }
 }
 
 #[test]
 fn test_null_aware_cascade_marks_first_section_only() {
-    let expr = parse_ok("a?..b..c");
+    let (expr_source, parsed) = parse_ok("a?..b..c");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade {
-            is_null_aware,
-            sections,
-            ..
-        } => {
+        Expr::Cascade(node) => {
+            let is_null_aware = node.is_null_aware();
+            let sections = node.sections();
             assert!(is_null_aware);
             assert_eq!(sections.len(), 2);
-            match &sections[0].ops[0] {
-                CascadeOp::Field { is_null_aware, .. } => {
-                    assert!(*is_null_aware, "first section should be null-aware")
+            match sections.clone().next().unwrap().ops().next().unwrap() {
+                CascadeOp::Field(node) => {
+                    let is_null_aware = node.is_null_aware();
+                    assert!(is_null_aware, "first section should be null-aware")
                 }
                 other => panic!("expected Field, got {other:?}"),
             }
-            match &sections[1].ops[0] {
-                CascadeOp::Field { is_null_aware, .. } => {
-                    assert!(!*is_null_aware, "second section is plain `..`")
+            match sections.clone().nth(1).unwrap().ops().next().unwrap() {
+                CascadeOp::Field(node) => {
+                    let is_null_aware = node.is_null_aware();
+                    assert!(!is_null_aware, "second section is plain `..`")
                 }
                 other => panic!("expected Field, got {other:?}"),
             }
@@ -358,26 +374,35 @@ fn test_null_aware_cascade_marks_first_section_only() {
 
 #[test]
 fn test_null_aware_cascade_index_section() {
-    let expr = parse_ok("a?..[0]");
+    let (expr_source, parsed) = parse_ok("a?..[0]");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
-            CascadeOp::Index { is_null_aware, .. } => {
-                assert!(*is_null_aware, "index section should be null-aware")
+        Expr::Cascade(node) => {
+            let sections = node.sections();
+            match sections.clone().next().unwrap().ops().next().unwrap() {
+                CascadeOp::Index(node) => {
+                    let is_null_aware = node.is_null_aware();
+                    assert!(is_null_aware, "index section should be null-aware")
+                }
+                other => panic!("expected Index, got {other:?}"),
             }
-            other => panic!("expected Index, got {other:?}"),
-        },
+        }
         other => panic!("expected Cascade, got {other:?}"),
     }
 }
 
 #[test]
 fn test_plain_cascade_index_section_not_null_aware() {
-    let expr = parse_ok("a..[0]");
+    let (expr_source, parsed) = parse_ok("a..[0]");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
-            CascadeOp::Index { is_null_aware, .. } => assert!(!*is_null_aware),
-            other => panic!("expected Index, got {other:?}"),
-        },
+        Expr::Cascade(node) => {
+            let sections = node.sections();
+            match sections.clone().next().unwrap().ops().next().unwrap() {
+                CascadeOp::Index(node) => assert!(!node.is_null_aware()),
+                other => panic!("expected Index, got {other:?}"),
+            }
+        }
         other => panic!("expected Cascade, got {other:?}"),
     }
 }
@@ -385,14 +410,19 @@ fn test_plain_cascade_index_section_not_null_aware() {
 #[test]
 fn test_null_aware_index_selector_cascade_section() {
     // `..?[0]` — the `?[` null-aware index selector must be accepted and marked.
-    let expr = parse_ok("a..?[0]");
+    let (expr_source, parsed) = parse_ok("a..?[0]");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
-            CascadeOp::Index { is_null_aware, .. } => {
-                assert!(*is_null_aware, "`?[` index should be null-aware")
+        Expr::Cascade(node) => {
+            let sections = node.sections();
+            match sections.clone().next().unwrap().ops().next().unwrap() {
+                CascadeOp::Index(node) => {
+                    let is_null_aware = node.is_null_aware();
+                    assert!(is_null_aware, "`?[` index should be null-aware")
+                }
+                other => panic!("expected Index, got {other:?}"),
             }
-            other => panic!("expected Index, got {other:?}"),
-        },
+        }
         other => panic!("expected Cascade, got {other:?}"),
     }
 }
@@ -400,15 +430,19 @@ fn test_null_aware_index_selector_cascade_section() {
 #[test]
 fn cascade_index_selector_spans_include_closing_delimiters() {
     for source in ["a..[0]", "a..?[0]", "a..items[ (0) ].field"] {
-        let expr = parse_ok(source);
-        let Expr::Cascade { sections, .. } = expr else {
+        let (expr_source, parsed) = parse_ok(source);
+        let expr = initializer(parsed.tree.program(&expr_source));
+        let Expr::Cascade(node) = expr else {
             panic!("expected cascade");
         };
-        let span = sections[0]
-            .ops
-            .iter()
+        let sections = node.sections();
+        let span = sections
+            .clone()
+            .next()
+            .unwrap()
+            .ops()
             .find_map(|operation| match operation {
-                CascadeOp::Index { span, .. } => Some(*span),
+                CascadeOp::Index(node) => Some(node.span()),
                 _ => None,
             })
             .expect("index selector");
@@ -421,7 +455,8 @@ fn cascade_index_selector_spans_include_closing_delimiters() {
 
 #[test]
 fn test_const_type_args_without_collection_records_error() {
-    let (_expr, errors) = parse_expr("const <int>");
+    let (_source, parsed) = parse_expr("const <int>");
+    let errors = parsed.errors;
     assert!(
         !errors.is_empty(),
         "expected a diagnostic for `const <int>` with no collection literal"
@@ -430,34 +465,41 @@ fn test_const_type_args_without_collection_records_error() {
 
 #[test]
 fn test_collection_if_case_guard_retained() {
-    let expr = parse_ok("[if (x case int y when y > 0) y]");
+    let (expr_source, parsed) = parse_ok("[if (x case int y when y > 0) y]");
+    let expr = initializer(parsed.tree.program(&expr_source));
     let elements = match expr {
-        Expr::List { elements, .. } => elements,
+        Expr::List(node) => node.elements(),
         other => panic!("expected List, got {other:?}"),
     };
-    match &elements[0] {
-        CollectionElement::If { condition, .. } => match condition {
-            IfCondition::Case(_, _, guard) => {
-                assert!(guard.is_some(), "when-guard must be retained");
+    match elements.clone().next().unwrap() {
+        CollectionElement::If(node) => {
+            let condition = node.condition();
+            match condition {
+                IfCondition::Case(case) => {
+                    let guard = case.guard();
+                    assert!(guard.is_some(), "when-guard must be retained");
+                }
+                other => panic!("expected IfCondition::Case, got {other:?}"),
             }
-            other => panic!("expected IfCondition::Case, got {other:?}"),
-        },
+        }
         other => panic!("expected CollectionElement::If, got {other:?}"),
     }
 }
 
 #[test]
 fn test_collection_if_case_without_guard() {
-    let expr = parse_ok("[if (x case int y) y]");
+    let (expr_source, parsed) = parse_ok("[if (x case int y) y]");
+    let expr = initializer(parsed.tree.program(&expr_source));
     let elements = match expr {
-        Expr::List { elements, .. } => elements,
+        Expr::List(node) => node.elements(),
         other => panic!("expected List, got {other:?}"),
     };
-    match &elements[0] {
-        CollectionElement::If {
-            condition: IfCondition::Case(_, _, guard),
-            ..
-        } => {
+    match elements.clone().next().unwrap() {
+        CollectionElement::If(element) => {
+            let IfCondition::Case(case) = element.condition() else {
+                panic!("expected if-case element");
+            };
+            let guard = case.guard();
             assert!(guard.is_none());
         }
         other => panic!("expected if-case element, got {other:?}"),
@@ -466,65 +508,72 @@ fn test_collection_if_case_without_guard() {
 
 #[test]
 fn test_symbol_literal_identifier() {
-    let expr = parse_ok("#foo");
+    let (expr_source, parsed) = parse_ok("#foo");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::SymbolLit { raw, .. } => assert_eq!(raw, "#foo"),
+        Expr::SymbolLit(node) => assert_eq!(node.raw(), "#foo"),
         other => panic!("expected SymbolLit, got {other:?}"),
     }
 }
 
 #[test]
 fn test_symbol_literal_dotted() {
-    let expr = parse_ok("#bar.baz");
+    let (expr_source, parsed) = parse_ok("#bar.baz");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::SymbolLit { raw, .. } => assert_eq!(raw, "#bar.baz"),
+        Expr::SymbolLit(node) => assert_eq!(node.raw(), "#bar.baz"),
         other => panic!("expected SymbolLit, got {other:?}"),
     }
 }
 
 #[test]
 fn test_symbol_literal_operator() {
-    let expr = parse_ok("#+");
+    let (expr_source, parsed) = parse_ok("#+");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::SymbolLit { raw, .. } => assert_eq!(raw, "#+"),
+        Expr::SymbolLit(node) => assert_eq!(node.raw(), "#+"),
         other => panic!("expected SymbolLit, got {other:?}"),
     }
 }
 
 #[test]
 fn test_symbol_literal_index_operator() {
-    let expr = parse_ok("#[]");
+    let (expr_source, parsed) = parse_ok("#[]");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::SymbolLit { raw, .. } => assert_eq!(raw, "#[]"),
+        Expr::SymbolLit(node) => assert_eq!(node.raw(), "#[]"),
         other => panic!("expected SymbolLit, got {other:?}"),
     }
 }
 
 #[test]
 fn test_symbol_literal_index_assign_operator() {
-    let expr = parse_ok("#[]=");
+    let (expr_source, parsed) = parse_ok("#[]=");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::SymbolLit { raw, .. } => assert_eq!(raw, "#[]="),
+        Expr::SymbolLit(node) => assert_eq!(node.raw(), "#[]="),
         other => panic!("expected SymbolLit, got {other:?}"),
     }
 }
 
 #[test]
 fn cast_binds_tighter_than_less_than() {
-    let (stmts, e) = parse_body("var r = a < b as int;", "async");
+    let source = format!("void f() {} {{ {} }}", "async", "var r = a < b as int;");
+    let parsed = parse(&source);
+    let stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0, "stmts: {stmts:?}");
     // Expect `a < (b as int)`.
-    let init = match &stmts[0] {
-        Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
+    let init = match stmts.clone().next().unwrap() {
+        Stmt::LocalVar(v) => v.declarators().next().unwrap().initializer().unwrap(),
         other => panic!("expected LocalVar, got {other:?}"),
     };
     match init {
-        Expr::Binary { op, right, .. } => {
+        Expr::Binary(node) => {
+            let op = node.op();
+            let right = node.right();
             assert!(matches!(op, BinaryOp::Lt));
-            assert!(
-                matches!(right.as_ref(), Expr::As { .. }),
-                "right: {right:?}"
-            );
+            assert!(matches!(right, Expr::As(_)), "right: {right:?}");
         }
         other => panic!("expected Binary(<), got {other:?}"),
     }
@@ -533,51 +582,81 @@ fn cast_binds_tighter_than_less_than() {
 #[test]
 fn cast_then_comparison() {
     // `(x as int) <= y`.
-    let (_stmts, e) = parse_body("var r = x as int <= y;", "async");
+    let source = format!("void f() {} {{ {} }}", "async", "var r = x as int <= y;");
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn is_test_then_typed_collection_ternary() {
-    let (_stmts, e) = parse_body("var y = a is Foo ? <int>[] : b;", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "var y = a is Foo ? <int>[] : b;"
+    );
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn await_for_collection_element() {
-    let (stmts, e) = parse_body("var b = [await for (var c in s) ...c];", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "var b = [await for (var c in s) ...c];"
+    );
+    let parsed = parse(&source);
+    let stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0, "stmts: {stmts:?}");
-    let init = match &stmts[0] {
-        Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
+    let init = match stmts.clone().next().unwrap() {
+        Stmt::LocalVar(v) => v.declarators().next().unwrap().initializer().unwrap(),
         other => panic!("expected LocalVar, got {other:?}"),
     };
     match init {
-        Expr::List { elements, .. } => match &elements[0] {
-            CollectionElement::For { is_await, .. } => assert!(is_await, "expected await for"),
-            other => panic!("expected For element, got {other:?}"),
-        },
+        Expr::List(node) => {
+            let elements = node.elements();
+            match elements.clone().next().unwrap() {
+                CollectionElement::For(node) => assert!(node.is_await(), "expected await for"),
+                other => panic!("expected For element, got {other:?}"),
+            }
+        }
         other => panic!("expected List, got {other:?}"),
     }
 }
 
 #[test]
 fn is_not_nullable_function_type() {
-    let (_stmts, e) = parse_body("if (a is! Object? Function()) return;", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "if (a is! Object? Function()) return;"
+    );
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn const_record_literal() {
-    let (stmts, e) = parse_body("var x = const (\"\", Y.Z);", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "var x = const (\"\", Y.Z);"
+    );
+    let parsed = parse(&source);
+    let stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0, "stmts: {stmts:?}");
-    let init = match &stmts[0] {
-        Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
+    let init = match stmts.clone().next().unwrap() {
+        Stmt::LocalVar(v) => v.declarators().next().unwrap().initializer().unwrap(),
         other => panic!("expected LocalVar, got {other:?}"),
     };
     match init {
-        Expr::Record {
-            is_const, fields, ..
-        } => {
+        Expr::Record(node) => {
+            let is_const = node.is_const();
+            let fields = node.fields();
             assert!(is_const, "expected const record");
             assert_eq!(fields.len(), 2);
         }
@@ -595,22 +674,34 @@ fn method_type_args_nested_generic_in_function_type_param() {
     // `Pointer<Uint32> count` is a generic-typed named parameter inside the
     // function type, and the list closes with a `>>>` shift token — both of which
     // used to make the type-arg scan fall back to a `<` comparison.
-    let (_stmts, e) = parse_body(
-        "p.cast<Pointer<NativeFunction<Int32 Function(Pointer<Uint32> count)>>>();",
-        "async",
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "p.cast<Pointer<NativeFunction<Int32 Function(Pointer<Uint32> count)>>>();"
     );
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn typed_collections_do_not_enter_generic_function_lookahead() {
-    let Expr::Call { args, .. } = parse_ok("f(<int>[1], () {})") else {
+    let (expr_source, parsed) = parse_ok("f(<int>[1], () {})");
+    let Expr::Call(node) = initializer(parsed.tree.program(&expr_source)) else {
         panic!("expected call");
     };
-    assert_eq!(args.positional.len(), 2);
-    assert!(matches!(args.positional[0], Expr::List { .. }));
-    assert!(matches!(args.positional[1], Expr::FuncExpr { .. }));
-    assert!(matches!(parse_ok("<List<int>>[]"), Expr::List { .. }));
+    let args = node.args();
+    assert_eq!(args.positional().len(), 2);
+    assert!(matches!(args.positional().next().unwrap(), Expr::List(_)));
+    assert!(matches!(
+        args.positional().nth(1).unwrap(),
+        Expr::FuncExpr(_)
+    ));
+    let (expr_source, parsed) = parse_ok("<List<int>>[]");
+    assert!(matches!(
+        initializer(parsed.tree.program(&expr_source)),
+        Expr::List(_)
+    ));
 }
 
 #[test]
@@ -626,43 +717,59 @@ fn method_type_args_survive_speculative_typed_decl_rollback() {
 
 #[test]
 fn multi_arg_method_type_args() {
-    let (_stmts, e) = parse_body("x.cast<A, B>();", "async");
+    let source = format!("void f() {} {{ {} }}", "async", "x.cast<A, B>();");
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn record_type_with_generic_field_as_type_arg() {
-    let (_stmts, e) = parse_body(
-        "var q = Queue<(Uri sourceDoc, Ref<Parseable> ref)>();",
-        "async",
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "var q = Queue<(Uri sourceDoc, Ref<Parseable> ref)>();"
     );
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn record_type_type_arg_with_nested_generic() {
-    let (_stmts, e) = parse_body("isA<(String, List<String>)>();", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "isA<(String, List<String>)>();"
+    );
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn cascade_on_as_cast() {
-    let (stmts, e) = parse_body("y = x as web.HTMLMetaElement ..name = 'n';", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "y = x as web.HTMLMetaElement ..name = 'n';"
+    );
+    let parsed = parse(&source);
+    let stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0, "stmts: {stmts:?}");
     // The cascade wraps the whole `(x as T)`.
-    let value = match &stmts[0] {
-        Stmt::Expr(s) => match &s.expr {
-            Expr::Assign { value, .. } => value.as_ref(),
+    let value = match stmts.clone().next().unwrap() {
+        Stmt::Expr(s) => match s.expr() {
+            Expr::Assign(node) => node.value(),
             other => panic!("expected Assign, got {other:?}"),
         },
         other => panic!("expected Expr stmt, got {other:?}"),
     };
     match value {
-        Expr::Cascade { object, .. } => {
-            assert!(
-                matches!(object.as_ref(), Expr::As { .. }),
-                "object: {object:?}"
-            );
+        Expr::Cascade(node) => {
+            let object = node.object();
+            assert!(matches!(object, Expr::As(_)), "object: {object:?}");
         }
         other => panic!("expected Cascade, got {other:?}"),
     }
@@ -670,20 +777,29 @@ fn cascade_on_as_cast() {
 
 #[test]
 fn plain_cascade_still_parses() {
-    let (_stmts, e) = parse_body("y..a()..b = 1;", "async");
+    let source = format!("void f() {} {{ {} }}", "async", "y..a()..b = 1;");
+    let parsed = parse(&source);
+    let _stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
 }
 
 #[test]
 fn const_generic_constructor_statement() {
-    let (stmts, e) = parse_body("const Optional<int>.absent();", "async");
+    let source = format!(
+        "void f() {} {{ {} }}",
+        "async", "const Optional<int>.absent();"
+    );
+    let parsed = parse(&source);
+    let stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0, "stmts: {stmts:?}");
-    let expr = match &stmts[0] {
-        Stmt::Expr(s) => &s.expr,
+    let expr = match stmts.clone().next().unwrap() {
+        Stmt::Expr(s) => s.expr(),
         other => panic!("expected Expr stmt, got {other:?}"),
     };
     assert!(
-        matches!(expr, Expr::New { is_const: true, .. }),
+        matches!(expr, Expr::New(node) if node.is_const()),
         "expr: {expr:?}"
     );
 }
@@ -691,9 +807,14 @@ fn const_generic_constructor_statement() {
 #[test]
 fn const_generic_typed_local_decl_still_parses() {
     // Regression guard: `const List<int> xs = []` stays a const var declaration.
-    let (stmts, e) = parse_body("const List<int> xs = [];", "async");
+    let source = format!("void f() {} {{ {} }}", "async", "const List<int> xs = [];");
+    let parsed = parse(&source);
+    let stmts = body_stmts(parsed.tree.program(&source));
+    let e = parsed.errors.len();
     assert_eq!(e, 0);
-    assert!(matches!(&stmts[0], Stmt::LocalVar(v) if v.keyword == VarKeyword::Const));
+    assert!(
+        matches!(stmts.clone().next().unwrap(), Stmt::LocalVar(v) if v.keyword() == VarKeyword::Const)
+    );
 }
 
 #[test]
@@ -702,18 +823,21 @@ fn cascade_section_parses_full_selector_chain() {
     // `..b.c()` is one section holding a Field then a Call. The chain tail used to
     // be dropped, so this only "worked" at statement level by mis-splitting into a
     // separate dot-shorthand statement.
-    let expr = parse_ok("a..b.c()");
+    let (expr_source, parsed) = parse_ok("a..b.c()");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { sections, .. } => {
+        Expr::Cascade(node) => {
+            let sections = node.sections();
             assert_eq!(sections.len(), 1);
+            assert_eq!(sections.clone().next().unwrap().ops().len(), 2);
             assert!(
                 matches!(
-                    sections[0].ops.as_slice(),
-                    [CascadeOp::Field { name: f, .. }, CascadeOp::Call(c, _, _)]
-                        if f.name == "b" && c.name == "c"
+                    [sections.clone().next().unwrap().ops().next().unwrap(), sections.clone().next().unwrap().ops().nth(1).unwrap()],
+                    [CascadeOp::Field(f), CascadeOp::Call(c)]
+                        if f.name().name() == "b" && c.name().name() == "c"
                 ),
                 "ops: {:?}",
-                sections[0].ops
+                sections.clone().next().unwrap().ops()
             );
         }
         other => panic!("expected Cascade, got {other:?}"),
@@ -737,17 +861,22 @@ fn cascade_null_aware_selector_within_chain() {
     // `?.`/`?[` selectors are allowed *within* a cascade section chain, distinct
     // from a leading `?..`. The null-aware field selector is marked.
     assert_eq!(errs("void f() { x..a?.b(); }"), 0);
-    let expr = parse_ok("a..b?.c");
+    let (expr_source, parsed) = parse_ok("a..b?.c");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Cascade { sections, .. } => assert!(
-            matches!(
-                sections[0].ops.as_slice(),
-                [CascadeOp::Field { name: b, is_null_aware: false }, CascadeOp::Field { name: c, is_null_aware: true }]
-                    if b.name == "b" && c.name == "c"
-            ),
-            "ops: {:?}",
-            sections[0].ops
-        ),
+        Expr::Cascade(node) => {
+            let sections = node.sections();
+            assert_eq!(sections.clone().next().unwrap().ops().len(), 2);
+            assert!(
+                matches!(
+                    [sections.clone().next().unwrap().ops().next().unwrap(), sections.clone().next().unwrap().ops().nth(1).unwrap()],
+                    [CascadeOp::Field(b), CascadeOp::Field(c)]
+                        if b.name().name() == "b" && !b.is_null_aware() && c.name().name() == "c" && c.is_null_aware()
+                ),
+                "ops: {:?}",
+                sections.clone().next().unwrap().ops()
+            )
+        }
         other => panic!("expected Cascade, got {other:?}"),
     }
 }
@@ -764,26 +893,49 @@ fn cascade_null_assertions_continue_into_each_selector_kind() {
         "c..parent!.x = 1",
         "c..parent![0] = 1",
     ] {
-        let Expr::Cascade { sections, .. } = parse_ok(source) else {
+        let (expr_source, parsed) = parse_ok(source);
+        let Expr::Cascade(node) = initializer(parsed.tree.program(&expr_source)) else {
             panic!("expected cascade");
         };
+        let sections = node.sections();
         assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].ops.len(), 3);
-        assert!(matches!(sections[0].ops[1], CascadeOp::NullAssert { .. }));
+        assert_eq!(sections.clone().next().unwrap().ops().len(), 3);
+        assert!(matches!(
+            sections.clone().next().unwrap().ops().nth(1).unwrap(),
+            CascadeOp::NullAssert(_)
+        ));
         match source {
             "c..m()!.x" => {
-                assert!(matches!(sections[0].ops[0], CascadeOp::Call(..)));
-                assert!(matches!(sections[0].ops[2], CascadeOp::Field { .. }));
+                assert!(matches!(
+                    sections.clone().next().unwrap().ops().next().unwrap(),
+                    CascadeOp::Call(..)
+                ));
+                assert!(matches!(
+                    sections.clone().next().unwrap().ops().nth(2).unwrap(),
+                    CascadeOp::Field(_)
+                ));
             }
             "c..[0]!.x" => {
-                assert!(matches!(sections[0].ops[0], CascadeOp::Index { .. }));
-                assert!(matches!(sections[0].ops[2], CascadeOp::Field { .. }));
+                assert!(matches!(
+                    sections.clone().next().unwrap().ops().next().unwrap(),
+                    CascadeOp::Index(_)
+                ));
+                assert!(matches!(
+                    sections.clone().next().unwrap().ops().nth(2).unwrap(),
+                    CascadeOp::Field(_)
+                ));
             }
             "c..parent!.x = 1" => {
-                assert!(matches!(sections[0].ops[2], CascadeOp::Assign(..)));
+                assert!(matches!(
+                    sections.clone().next().unwrap().ops().nth(2).unwrap(),
+                    CascadeOp::Assign(..)
+                ));
             }
             "c..parent![0] = 1" => {
-                assert!(matches!(sections[0].ops[2], CascadeOp::IndexAssign(..)));
+                assert!(matches!(
+                    sections.clone().next().unwrap().ops().nth(2).unwrap(),
+                    CascadeOp::IndexAssign(..)
+                ));
             }
             _ => {}
         }
@@ -801,26 +953,25 @@ fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
     // `C(): g = (() => b) {}` — the trailing `{}` is the constructor body, so the
     // `(...)` is a parenthesized expression, not a lambda parameter list. The
     // `(...) {` shape used to be mis-detected as a function literal.
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = (() => b) {} }");
+    let source = "class C { var g; C(): g = (() => b) {} }";
+    let parsed = parse("class C { var g; C(): g = (() => b) {} }");
+    let errors = &parsed.errors;
+    let prog = parsed.tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let class = only_class(&prog);
+    let class = only_class(prog);
     let ctor = class
-        .members
-        .iter()
+        .members()
         .find_map(|m| match m {
             ClassMember::Constructor(c) => Some(c),
             _ => None,
         })
         .expect("constructor present");
-    assert!(matches!(ctor.body, Some(FunctionBody::Block(_))));
-    match &ctor.initializers[0] {
-        ConstructorInitializer::FieldInit { value, .. } => {
+    assert!(matches!(ctor.body(), Some(FunctionBody::Block(_))));
+    match ctor.initializers().next().unwrap() {
+        ConstructorInitializer::FieldInit(node) => {
+            let value = node.value();
             assert!(
-                matches!(value.unparenthesized(), Expr::FuncExpr { .. }),
+                matches!(value.unparenthesized(), Expr::FuncExpr(_)),
                 "value: {value:?}"
             );
         }
@@ -831,11 +982,8 @@ fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
 #[test]
 fn nested_paren_arithmetic_initializer_before_block_body() {
     // The same rollback must cover a plain parenthesized arithmetic expression.
-    let falcon_dart_parser::ParseResult {
-        program: _prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = (((o + 1) << 8) | 1) {} }");
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse("class C { var g; C(): g = (((o + 1) << 8) | 1) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
@@ -845,26 +993,25 @@ fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
     // speculative lambda parse *succeeds*, yet the trailing `{}` is the
     // constructor body: the initializer value is the parenthesized expression
     // `(e)`, not a lambda `(e) {}`.
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = (e) {} }");
+    let source = "class C { var g; C(): g = (e) {} }";
+    let parsed = parse("class C { var g; C(): g = (e) {} }");
+    let errors = &parsed.errors;
+    let prog = parsed.tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let class = only_class(&prog);
+    let class = only_class(prog);
     let ctor = class
-        .members
-        .iter()
+        .members()
         .find_map(|m| match m {
             ClassMember::Constructor(c) => Some(c),
             _ => None,
         })
         .expect("constructor present");
-    assert!(matches!(ctor.body, Some(FunctionBody::Block(_))));
-    match &ctor.initializers[0] {
-        ConstructorInitializer::FieldInit { value, .. } => {
+    assert!(matches!(ctor.body(), Some(FunctionBody::Block(_))));
+    match ctor.initializers().next().unwrap() {
+        ConstructorInitializer::FieldInit(node) => {
+            let value = node.value();
             assert!(
-                !matches!(value, Expr::FuncExpr { .. }),
+                !matches!(value, Expr::FuncExpr(_)),
                 "value should be a parenthesized expr, not a lambda: {value:?}"
             );
         }
@@ -876,11 +1023,8 @@ fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
 fn lambda_in_ctor_init_argument_is_still_a_lambda() {
     // The ctor-body disambiguation must not leak into bracketed sub-parses:
     // `foo((e) {})` inside an initializer is a genuine lambda argument.
-    let falcon_dart_parser::ParseResult {
-        program: _prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = foo((e) {}) {} }");
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse("class C { var g; C(): g = foo((e) {}) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
@@ -899,11 +1043,8 @@ fn bare_block_lambda_conditional_branch_in_ctor_init_matches_sdk_rejection() {
     // `C(): g = c ? () {} : null;` — the SDK parses `c ? ()` (empty record) and then
     // treats `{` as the constructor body, leaving the conditional dangling: a syntax
     // error. `() {}` is *not* accepted as the then-branch closure. Falcon must agree.
-    let falcon_dart_parser::ParseResult {
-        program: _prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = c ? () {} : null; }");
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse("class C { var g; C(): g = c ? () {} : null; }");
     assert!(
         !errors.is_empty(),
         "SDK rejects a bare block closure in a ctor-init conditional branch; \
@@ -915,11 +1056,8 @@ fn bare_block_lambda_conditional_branch_in_ctor_init_matches_sdk_rejection() {
 fn bare_block_lambda_binary_rhs_in_ctor_init_matches_sdk_rejection() {
     // `C(): g = f + () {};` — the SDK parses `f + ()` and takes `{}` as the ctor body,
     // leaving `;` stranded: a syntax error. Not a `f + <closure>` binary expression.
-    let falcon_dart_parser::ParseResult {
-        program: _prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = f + () {}; }");
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse("class C { var g; C(): g = f + () {}; }");
     assert!(
         !errors.is_empty(),
         "SDK rejects a bare block closure on a ctor-init binary RHS; \
@@ -931,11 +1069,8 @@ fn bare_block_lambda_binary_rhs_in_ctor_init_matches_sdk_rejection() {
 fn bare_block_lambda_outermost_in_ctor_init_is_ctor_body_then_stray_semicolon() {
     // `C(): g = () {};` — even outermost, `()` is a record and `{}` is the ctor body,
     // so the trailing `;` is a stray token: the SDK reports a syntax error, as must we.
-    let falcon_dart_parser::ParseResult {
-        program: _prog,
-        errors,
-        ..
-    } = parse("class C { var g; C(): g = () {}; }");
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse("class C { var g; C(): g = () {}; }");
     assert!(
         !errors.is_empty(),
         "SDK treats `() {{}}` as record + ctor body, stranding `;`; \
@@ -946,16 +1081,16 @@ fn bare_block_lambda_outermost_in_ctor_init_is_ctor_body_then_stray_semicolon() 
 #[test]
 fn test_assignment_inside_parens() {
     // `(v = 0)` is an assignment expression, valid as a parenthesised subject.
-    let expr = parse_ok("(v = 0) ?? 0");
+    let (expr_source, parsed) = parse_ok("(v = 0) ?? 0");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Binary {
-            op: BinaryOp::NullCoalesce,
-            left,
-            ..
-        } => assert!(
-            matches!(left.unparenthesized(), Expr::Assign { .. }),
-            "left of ?? should be an assignment, got {left:?}"
-        ),
+        Expr::Binary(node) if matches!(node.op(), BinaryOp::NullCoalesce) => {
+            let left = node.left();
+            assert!(
+                matches!(left.unparenthesized(), Expr::Assign(_)),
+                "left of ?? should be an assignment, got {left:?}"
+            )
+        }
         other => panic!("expected `?? ` binary, got {other:?}"),
     }
 }
@@ -963,35 +1098,24 @@ fn test_assignment_inside_parens() {
 #[test]
 fn test_assignment_in_both_conditional_branches() {
     // `a ? b = c : d = e` — both ternary branches are assignments.
-    let expr = parse_ok("a ? b = c : d = e");
+    let (expr_source, parsed) = parse_ok("a ? b = c : d = e");
+    let expr = initializer(parsed.tree.program(&expr_source));
     match expr {
-        Expr::Conditional {
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            assert!(
-                matches!(*then_expr, Expr::Assign { .. }),
-                "then: {then_expr:?}"
-            );
-            assert!(
-                matches!(*else_expr, Expr::Assign { .. }),
-                "else: {else_expr:?}"
-            );
+        Expr::Conditional(node) => {
+            let then_expr = node.then_expr();
+            let else_expr = node.else_expr();
+            assert!(matches!(then_expr, Expr::Assign(_)), "then: {then_expr:?}");
+            assert!(matches!(else_expr, Expr::Assign(_)), "else: {else_expr:?}");
         }
         other => panic!("expected conditional, got {other:?}"),
     }
 }
 
-/// Parse `void f(o) { <src> }` and return the first statement's expression.
-fn first_stmt_expr(src: &str) -> (Expr, usize) {
-    let falcon_dart_parser::ParseResult {
-        program: prog,
-        errors,
-        ..
-    } = parse(&format!("void f(o) {{ {src} }}"));
-    let expr = common_expr::first_stmt_expr(&prog);
-    (expr, errors.len())
+/// Parse `void f(o) { <src> }` and retain its source and concrete tree.
+fn first_stmt_expr(src: &str) -> (String, falcon_dart_parser::ParseResult) {
+    let source = format!("void f(o) {{ {src} }}");
+    let parsed = parse(&source);
+    (source, parsed)
 }
 
 #[test]
@@ -999,24 +1123,31 @@ fn test_cascade_assign_rhs_excludes_following_cascade_section() {
     // `o..a = 1..b = 2` is TWO sections on `o` (o.a=1; o.b=2), not a single
     // section whose value is a nested cascade `1..b=2`. The assignment RHS is
     // parsed as `expressionWithoutCascade`, so the second `..` reattaches to `o`.
-    let (expr, errors) = first_stmt_expr("o..a = 1..b = 2;");
+    let (source, parsed) = first_stmt_expr("o..a = 1..b = 2;");
+    let expr = common_expr::first_stmt_expr(parsed.tree.program(&source));
+    let errors = parsed.errors.len();
     assert_eq!(errors, 0, "unexpected errors: {expr:?}");
-    let (object, sections) = match &expr {
-        Expr::Cascade {
-            object, sections, ..
-        } => (object, sections),
+    let (object, sections) = match expr {
+        Expr::Cascade(node) => {
+            let object = node.object();
+            let sections = node.sections();
+            (object, sections)
+        }
         other => panic!("expected cascade, got {other:?}"),
     };
-    assert!(matches!(**object, Expr::Ident(ref id) if id.name == "o"));
+    assert!(matches!(object, Expr::Ident(id) if id.name() == "o"));
     assert_eq!(sections.len(), 2, "expected two sections: {sections:?}");
     for section in sections {
-        match &section.ops[0] {
+        match section.ops().next().unwrap() {
             // Each section is a bare `field = intLit` assignment; the RHS must be
             // the int literal, never a nested Cascade.
-            CascadeOp::Assign(_, _, value) => assert!(
-                matches!(**value, Expr::IntLit { .. }),
-                "RHS should be an int literal, got {value:?}"
-            ),
+            CascadeOp::Assign(assignment) => {
+                let value = assignment.value();
+                assert!(
+                    matches!(value, Expr::IntLit(_)),
+                    "RHS should be an int literal, got {value:?}"
+                );
+            }
             other => panic!("expected assign op, got {other:?}"),
         }
     }
@@ -1025,10 +1156,13 @@ fn test_cascade_assign_rhs_excludes_following_cascade_section() {
 #[test]
 fn test_cascade_index_assign_rhs_excludes_following_section() {
     // Same rule for index-selector assignments: `o..[0] = 1..[1] = 2`.
-    let (expr, errors) = first_stmt_expr("o..[0] = 1..[1] = 2;");
+    let (source, parsed) = first_stmt_expr("o..[0] = 1..[1] = 2;");
+    let expr = common_expr::first_stmt_expr(parsed.tree.program(&source));
+    let errors = parsed.errors.len();
     assert_eq!(errors, 0, "unexpected errors: {expr:?}");
-    match &expr {
-        Expr::Cascade { sections, .. } => {
+    match expr {
+        Expr::Cascade(node) => {
+            let sections = node.sections();
             assert_eq!(sections.len(), 2, "expected two sections: {sections:?}")
         }
         other => panic!("expected cascade, got {other:?}"),

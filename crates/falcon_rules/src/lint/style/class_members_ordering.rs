@@ -20,7 +20,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::member_order::{category_rank, check_sequence, read_string_list};
 
@@ -32,7 +32,7 @@ const NAME: &str = "class-members-ordering";
 impl Rule for ClassMembersOrdering {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -50,8 +50,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
             let Some(members) = crate::lint::declarations::members_of(decl) else {
                 return StructuralTraversal::SkipChildren;
             };
@@ -88,16 +88,16 @@ const ORDER_MESSAGE: &str = "Class member is out of the configured order";
 // 7: public method
 // 8: private getter
 // 9: private method/setter/operator
-fn member_category(member: &ClassMember) -> u8 {
+fn member_category(member: ClassMember<'_>) -> u8 {
     match member {
         ClassMember::Field(f) => {
-            if f.is_static && f.keyword == falcon_syntax::ast::VarKeyword::Const {
+            if f.is_static() && f.keyword() == VarKeyword::Const {
                 0
-            } else if f.is_static && f.keyword == falcon_syntax::ast::VarKeyword::Final {
+            } else if f.is_static() && f.keyword() == VarKeyword::Final {
                 1
-            } else if f.is_static {
+            } else if f.is_static() {
                 2
-            } else if f.keyword == falcon_syntax::ast::VarKeyword::Final {
+            } else if f.keyword() == VarKeyword::Final {
                 3
             } else {
                 4
@@ -105,21 +105,21 @@ fn member_category(member: &ClassMember) -> u8 {
         }
         ClassMember::Constructor(_) | ClassMember::PrimaryConstructorBody(_) => 5,
         ClassMember::Getter(g) => {
-            if g.name.name.starts_with('_') {
+            if g.name().name().starts_with('_') {
                 8
             } else {
                 6
             }
         }
         ClassMember::Setter(s) => {
-            if s.name.name.starts_with('_') {
+            if s.name().name().starts_with('_') {
                 9
             } else {
                 6
             }
         }
         ClassMember::Method(m) => {
-            if m.name.name.starts_with('_') {
+            if m.name().name().starts_with('_') {
                 9
             } else {
                 7
@@ -130,26 +130,31 @@ fn member_category(member: &ClassMember) -> u8 {
     }
 }
 
-fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let categories: Vec<u8> = members.iter().map(member_category).collect();
-    let mut min_right: Vec<u8> = vec![u8::MAX; members.len()];
-    let mut max_left: Vec<u8> = vec![0; members.len()];
+fn check_members(
+    members: AstChildren<'_, ClassMember<'_>>,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
+    let categories: Vec<u8> = members.clone().map(member_category).collect();
+    let count = categories.len();
+    let mut min_right: Vec<u8> = vec![u8::MAX; count];
+    let mut max_left: Vec<u8> = vec![0; count];
 
-    for i in (0..members.len()).rev() {
-        if i + 1 < members.len() {
+    for i in (0..count).rev() {
+        if i + 1 < count {
             min_right[i] = std::cmp::min(categories[i + 1], min_right[i + 1]);
         } else {
             min_right[i] = u8::MAX;
         }
     }
 
-    for i in 0..members.len() {
+    for i in 0..count {
         if i > 0 {
             max_left[i] = std::cmp::max(max_left[i - 1], categories[i - 1]);
         }
     }
 
-    for (i, member) in members.iter().enumerate() {
+    for (i, member) in members.enumerate() {
         let cat = categories[i];
         if cat == u8::MAX {
             continue;
@@ -158,7 +163,7 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         let before_larger = i > 3 && cat < max_left[i];
         if after_smaller || before_larger {
             let span = member.span();
-            diags.push(ctx.diagnostic(NAME, "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members", *span));
+            diags.push(ctx.diagnostic(NAME, "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members", span));
         }
     }
 }

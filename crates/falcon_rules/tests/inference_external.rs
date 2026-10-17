@@ -269,12 +269,12 @@ void shadowed() {
 "#;
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;
@@ -282,13 +282,13 @@ void shadowed() {
     });
     let external = ExternalLibraries::load(
         &environment,
-        &[(path.as_path(), &program, source)],
+        &[(path.as_path(), program, source)],
         |candidate| candidate == path,
     );
     let identities = IdentityIndex::build(
         &[IdentitySource {
             path: &path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[source],
@@ -302,7 +302,7 @@ void shadowed() {
         [(
             path.as_path(),
             LibrarySource {
-                program: &program,
+                program,
                 has_parse_errors: false,
                 has_unresolved_parts: false,
             },
@@ -311,18 +311,18 @@ void shadowed() {
     );
     types.add_external(&external, &identities);
     let signatures = SignatureIndex::build(
-        &[(path.clone(), &program)],
+        &[(path.clone(), parsed.clone())],
         Some(&external),
         &identities,
         &types,
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config, &syntax)
+    let context = AnalyzeContext::new(&path, &config, &parsed)
         .with_environment(Some(&environment))
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
-    let diagnostics = UseTestThrowsMatchers.analyze(&program, &context);
+    let diagnostics = UseTestThrowsMatchers.analyze(program, &context);
     inference::assert_diagnostics(source, "use-test-throws-matchers", &diagnostics, 2);
 }
 

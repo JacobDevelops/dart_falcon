@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryStringEscapes;
@@ -18,7 +18,7 @@ pub struct UnnecessaryStringEscapes;
 impl Rule for UnnecessaryStringEscapes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -99,12 +99,12 @@ impl Collector<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
+    fn visit_string_lit(&mut self, node: StringLitNode<'a>) -> StructuralTraversal {
         for (lit, span) in interpolated_literals(node) {
             let mut offset = 0;
             for part in literal_parts(&lit) {

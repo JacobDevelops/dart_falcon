@@ -10,7 +10,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::complexity::join_return_with_assignment::same_element;
 use crate::lint::expressions::null_check;
@@ -22,7 +22,7 @@ pub struct PreferConditionalAssignment;
 impl Rule for PreferConditionalAssignment {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -38,32 +38,32 @@ struct Collector<'s> {
 }
 
 /// The single statement of a `then` branch, unwrapping a one-statement block.
-fn single_stmt(stmt: &Stmt) -> Option<&Stmt> {
+fn single_stmt(stmt: Stmt<'_>) -> Option<Stmt<'_>> {
     match stmt {
-        Stmt::Block(b) if b.stmts.len() == 1 => single_stmt(&b.stmts[0]),
+        Stmt::Block(b) if b.stmts().len() == 1 => single_stmt(b.stmts().first()?),
         Stmt::Block(_) => None,
         other => Some(other),
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         if let Stmt::If(if_stmt) = node
-            && if_stmt.else_branch.is_none()
-            && let IfCondition::Expr(cond) = &if_stmt.condition
+            && if_stmt.else_branch().is_none()
+            && let IfCondition::Expr(cond) = if_stmt.condition()
             && let Some((checked, true)) = null_check(cond)
-            && let Some(Stmt::Expr(es)) = single_stmt(&if_stmt.then_branch)
-            && let Expr::Assign { target, .. } = &es.expr
-            && same_element(target, true, checked, false, state)
+            && let Some(Stmt::Expr(es)) = single_stmt(if_stmt.then_branch())
+            && let Expr::Assign(assign) = es.expr()
+            && same_element(assign.target(), true, checked, false, state)
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-conditional-assignment",
                 "Prefer using a conditional assignment '??='.",
-                if_stmt.span,
+                if_stmt.span(),
             ));
         }
     }

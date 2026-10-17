@@ -20,8 +20,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use super::collection_checks::lacks_collection_member;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -31,7 +30,7 @@ pub struct PreferIterableWhereType;
 impl Rule for PreferIterableWhereType {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -45,53 +44,52 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Call { callee, args, .. } = node else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Call(call) = node else {
             return;
         };
-        let Expr::Field { object, field, .. } = callee.unparenthesized() else {
+        let Expr::Field(field) = call.callee().unparenthesized() else {
             return;
         };
-        if field.name == "where"
-            && args.named.is_empty()
-            && args.positional.len() == 1
-            && is_is_check_closure(&args.positional[0])
-            && !lacks_collection_member(self.ctx, object, state, "whereType", &["Iterable"])
+        if field.field().name() == "where"
+            && call.args().named().is_empty()
+            && call.args().positional().len() == 1
+            && is_is_check_closure(call.args().positional().first().unwrap())
+            && !lacks_collection_member(self.ctx, field.object(), state, "whereType", &["Iterable"])
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-iterable-where-type",
                 "Use 'whereType<T>()' instead of 'where' with an 'is' check.",
-                field.span,
+                field.field().span(),
             ));
         }
     }
 }
 
-fn is_is_check_closure(expr: &Expr) -> bool {
-    let Expr::FuncExpr { params, body, .. } = expr.unparenthesized() else {
+fn is_is_check_closure(expr: Expr<'_>) -> bool {
+    let Expr::FuncExpr(function) = expr.unparenthesized() else {
         return false;
     };
-    let [param] = params.params.as_slice() else {
-        return false;
-    };
-    if param.kind != falcon_syntax::ast::ParamKind::Positional {
+    let params = function.params().params();
+    if params.len() != 1 {
         return false;
     }
-    let param_name = &param.name.name;
-    if let FunctionBody::Arrow(inner, _) = &**body
-        && let Expr::Is {
-            expr: tested,
-            negated: false,
-            ..
-        } = inner.unparenthesized()
-        && let Expr::Ident(id) = tested.unparenthesized()
+    let param = params.first().unwrap();
+    if param.kind() != ParamKind::Positional {
+        return false;
+    }
+    let param_name = param.name().name();
+    if let FunctionBody::Arrow(body) = function.body()
+        && let Expr::Is(test) = body.expr().unparenthesized()
+        && !test.negated()
+        && let Expr::Ident(id) = test.expr().unparenthesized()
     {
-        return &id.name == param_name;
+        return id.name() == param_name;
     }
     false
 }

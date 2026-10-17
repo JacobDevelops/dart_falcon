@@ -1,14 +1,11 @@
 //! Span-independent syntax retained for analyzer `defaultValueCode` equality.
 
-use std::{
-    mem::{Discriminant, discriminant},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use falcon_dart_parser::lexer::Lexer;
-use falcon_syntax::{
-    ast::*,
-    visitor::{self, Visitor},
+use falcon_syntax::cst::{
+    visit::{self as visitor, Visitor},
+    *,
 };
 
 /// An exact syntax key, computed once when ingesting a parameter default.
@@ -32,12 +29,12 @@ impl Eq for DefaultSyntaxKey {}
 
 #[derive(Debug, PartialEq, Eq)]
 enum Token {
-    Expr(Discriminant<Expr>),
+    Expr(NodeKind),
     Parenthesized,
     Annotation,
-    Type(Discriminant<DartType>),
-    Element(Discriminant<CollectionElement>),
-    MapElement(Discriminant<MapElement>),
+    Type(NodeKind),
+    Element(NodeKind),
+    MapElement(NodeKind),
     Text(Box<str>),
     Count(usize),
     Flag(bool),
@@ -48,7 +45,7 @@ enum Token {
     End,
 }
 
-pub fn default_syntax_key(expr: &Expr) -> DefaultSyntaxKey {
+pub fn default_syntax_key(expr: Expr<'_>) -> DefaultSyntaxKey {
     let mut key = SyntaxCollector {
         tokens: Vec::new(),
         complete: true,
@@ -78,27 +75,28 @@ impl SyntaxCollector {
         self.tokens.push(Token::Flag(flag));
     }
 
-    fn name(&mut self, name: Option<&Identifier>) {
+    fn name(&mut self, name: Option<Identifier<'_>>) {
         self.flag(name.is_some());
         if let Some(name) = name {
-            self.text(&name.name);
+            self.text(name.name());
         }
     }
 
-    fn args(&mut self, args: &ArgList) {
-        self.count(args.positional.len());
-        self.count(args.named.len());
-        for arg in &args.named {
+    fn args(&mut self, args: ArgList<'_>) {
+        self.count(args.positional().len());
+        self.count(args.named().len());
+        for arg in args.named() {
             // Shared traversal groups arguments by kind; retain their source order.
             self.count(
-                args.positional
-                    .partition_point(|value| value.span().start < arg.span.start),
+                args.positional()
+                    .take_while(|value| value.span().start < arg.span().start)
+                    .count(),
             );
-            self.text(&arg.name.name);
+            self.text(arg.name().name());
         }
     }
 
-    fn condition(&mut self, condition: &IfCondition) {
+    fn condition(&mut self, condition: IfCondition<'_>) {
         // Pattern conditions cannot occur in a constant collection default.
         if !matches!(condition, IfCondition::Expr(_)) {
             self.complete = false;
@@ -106,160 +104,137 @@ impl SyntaxCollector {
     }
 }
 
-impl Visitor for SyntaxCollector {
-    fn visit_annotation(&mut self, annotation: &Annotation) {
+impl<'a> Visitor<'a> for SyntaxCollector {
+    fn visit_annotation(&mut self, annotation: Annotation<'a>) {
         self.tokens.push(Token::Annotation);
-        self.count(annotation.name.len());
-        self.count(annotation.type_args.len());
-        self.flag(annotation.constructor_name.is_some());
-        self.flag(annotation.args.is_some());
-        if let Some(args) = &annotation.args {
+        self.count(annotation.name().count());
+        self.count(annotation.type_args().len());
+        self.flag(annotation.constructor_name().is_some());
+        self.flag(annotation.args().is_some());
+        if let Some(args) = annotation.args() {
             self.args(args);
         }
         visitor::walk_annotation(self, annotation);
         self.tokens.push(Token::End);
     }
 
-    fn visit_expr(&mut self, expr: &Expr) {
+    fn visit_expr(&mut self, expr: Expr<'a>) {
         // Analyzer toSource omits record `const` and trailing commas, so a
         // one-positional-field record has the same spelling as parentheses.
-        let parenthesized = matches!(expr, Expr::Paren { .. })
-            || matches!(expr, Expr::Record { fields, .. }
-                if fields.len() == 1 && fields[0].name.is_none());
+        let parenthesized = matches!(expr, Expr::Paren(_))
+            || matches!(expr, Expr::Record(record)
+                if record.fields().len() == 1
+                    && record.fields().next().unwrap().name().is_none());
         self.tokens.push(if parenthesized {
             Token::Parenthesized
         } else {
-            Token::Expr(discriminant(expr))
+            Token::Expr(match expr {
+                Expr::StringLit(_) => NodeKind::StringLitNode,
+                _ => expr.syntax().kind(),
+            })
         });
         match expr {
-            Expr::IntLit { value, .. } | Expr::DoubleLit { value, .. } => self.text(value),
-            Expr::BoolLit { value, .. } => self.flag(*value),
-            Expr::Unary { op, .. } => self.tokens.push(Token::Unary(*op)),
-            Expr::PostfixIncDec { op, .. } => self.tokens.push(Token::Postfix(*op)),
-            Expr::Binary { op, .. } => self.tokens.push(Token::Binary(*op)),
-            Expr::Assign { op, .. } => self.tokens.push(Token::Assign(*op)),
-            Expr::Is { negated, .. } => self.flag(*negated),
-            Expr::Field {
-                field,
-                is_null_safe,
-                ..
-            } => {
-                self.text(&field.name);
-                self.flag(*is_null_safe);
+            Expr::IntLit(value) => self.text(value.value()),
+            Expr::DoubleLit(value) => self.text(value.value()),
+            Expr::BoolLit(value) => self.flag(value.value()),
+            Expr::Unary(value) => self.tokens.push(Token::Unary(value.op())),
+            Expr::PostfixIncDec(value) => self.tokens.push(Token::Postfix(value.op())),
+            Expr::Binary(value) => self.tokens.push(Token::Binary(value.op())),
+            Expr::Assign(value) => self.tokens.push(Token::Assign(value.op())),
+            Expr::Is(value) => self.flag(value.negated()),
+            Expr::Field(value) => {
+                self.text(value.field().name());
+                self.flag(value.is_null_safe());
             }
-            Expr::Index { is_null_safe, .. } => self.flag(*is_null_safe),
-            Expr::Call {
-                type_args, args, ..
-            } => {
-                self.count(type_args.len());
-                self.args(args);
+            Expr::Index(value) => self.flag(value.is_null_safe()),
+            Expr::Call(value) => {
+                self.count(value.type_args().len());
+                self.args(value.args());
             }
-            Expr::List {
-                is_const,
-                type_arg,
-                elements,
-                ..
+            Expr::List(value) => {
+                self.flag(value.is_const());
+                self.flag(value.type_arg().is_some());
+                self.count(value.elements().len());
             }
-            | Expr::Set {
-                is_const,
-                type_arg,
-                elements,
-                ..
-            } => {
-                self.flag(*is_const);
-                self.flag(type_arg.is_some());
-                self.count(elements.len());
+            Expr::Set(value) => {
+                self.flag(value.is_const());
+                self.flag(value.type_arg().is_some());
+                self.count(value.elements().len());
             }
-            Expr::Map {
-                is_const,
-                type_args,
-                elements,
-                ..
-            } => {
-                self.flag(*is_const);
-                self.count(type_args.len());
-                self.count(elements.len());
+            Expr::Map(value) => {
+                self.flag(value.is_const());
+                self.count(value.type_args().len());
+                self.count(value.elements().len());
             }
-            Expr::Record { fields, .. } => {
+            Expr::Record(value) => {
                 if !parenthesized {
-                    self.count(fields.len());
-                    for field in fields {
-                        self.name(field.name.as_ref());
+                    self.count(value.fields().len());
+                    for field in value.fields() {
+                        self.name(field.name());
                     }
                 }
             }
-            Expr::New {
-                is_const,
-                constructor_name,
-                args,
-                ..
-            } => {
-                self.flag(*is_const);
-                self.name(constructor_name.as_ref());
-                self.args(args);
+            Expr::New(value) => {
+                self.flag(value.is_const());
+                self.name(value.constructor_name());
+                self.args(value.args());
             }
-            Expr::DotShorthand { is_const, name, .. } => {
-                self.flag(*is_const);
-                self.text(&name.name);
+            Expr::DotShorthand(value) => {
+                self.flag(value.is_const());
+                self.text(value.name().name());
             }
-            Expr::SymbolLit { raw, .. } => {
+            Expr::SymbolLit(value) => {
+                let raw = value.raw();
                 for token in Lexer::new(raw).tokenize() {
                     if !token.is_trivia() && !token.is_empty() {
                         self.text(token.text(raw));
                     }
                 }
             }
-            Expr::GenericInstantiation { type_args, .. } => self.count(type_args.len()),
-            Expr::Error { .. }
-            | Expr::FuncExpr { .. }
-            | Expr::Cascade { .. }
-            | Expr::Switch { .. } => {
+            Expr::GenericInstantiation(value) => self.count(value.type_args().len()),
+            Expr::Error(_) | Expr::FuncExpr(_) | Expr::Cascade(_) | Expr::Switch(_) => {
                 self.complete = false;
                 return;
             }
             Expr::StringLit(_)
-            | Expr::NullLit { .. }
+            | Expr::NullLit(_)
             | Expr::Ident(_)
-            | Expr::Paren { .. }
-            | Expr::This { .. }
-            | Expr::Super { .. }
-            | Expr::Conditional { .. }
-            | Expr::As { .. }
-            | Expr::Await { .. }
-            | Expr::Throw { .. }
-            | Expr::NullAssert { .. } => {}
+            | Expr::Paren(_)
+            | Expr::This(_)
+            | Expr::Super(_)
+            | Expr::Conditional(_)
+            | Expr::As(_)
+            | Expr::Await(_)
+            | Expr::Throw(_)
+            | Expr::NullAssert(_) => {}
         }
         visitor::walk_expr(self, expr);
         self.tokens.push(Token::End);
     }
 
-    fn visit_identifier(&mut self, identifier: &Identifier) {
-        self.text(&identifier.name);
+    fn visit_identifier(&mut self, identifier: Identifier<'a>) {
+        self.text(identifier.name());
     }
 
-    fn visit_string_lit(&mut self, string: &StringLitNode) {
-        // Adjacent segment spans map absolute interpolation positions into the
-        // concatenated raw spelling without retaining trivia between literals.
-        let mut raw_offset = 0;
-        let spans = if string.segment_spans.is_empty() {
-            std::slice::from_ref(&string.span)
-        } else {
-            &string.segment_spans
-        };
-        self.count(spans.len());
-        for span in spans {
-            let length = span.end - span.start;
-            let Some(raw) = string.raw.get(raw_offset..raw_offset + length) else {
+    fn visit_string_lit(&mut self, string: StringLitNode<'a>) {
+        // Retain each literal's spelling without trivia between adjacent literals.
+        let spans = string.segment_spans();
+        let single = spans.clone().next().is_none().then_some(string.span());
+        self.count(spans.clone().count() + usize::from(single.is_some()));
+        let source = string.syntax().source();
+        for span in spans.chain(single) {
+            let Some(raw) = source.get(span.start..span.end) else {
                 self.complete = false;
                 return;
             };
             let mut cursor = 0;
-            for interpolation in &string.interpolations {
-                if interpolation.span.start < span.start || interpolation.span.end > span.end {
+            for interpolation in string.interpolations() {
+                let interpolation = interpolation.span();
+                if interpolation.start < span.start || interpolation.end > span.end {
                     continue;
                 }
-                let start = interpolation.span.start - span.start;
-                let end = interpolation.span.end - span.start;
+                let start = interpolation.start - span.start;
+                let end = interpolation.end - span.start;
                 let Some(fragment) = raw.get(cursor..start) else {
                     self.complete = false;
                     return;
@@ -272,93 +247,90 @@ impl Visitor for SyntaxCollector {
                 return;
             };
             self.text(fragment);
-            raw_offset += length;
         }
     }
 
-    fn visit_dart_type(&mut self, dart_type: &DartType) {
-        self.tokens.push(Token::Type(discriminant(dart_type)));
+    fn visit_dart_type(&mut self, dart_type: DartType<'a>) {
+        self.tokens.push(Token::Type(match dart_type {
+            DartType::Function(_) => NodeKind::FunctionType,
+            _ => dart_type.syntax().kind(),
+        }));
         match dart_type {
             DartType::Named(named) => {
-                self.flag(named.is_nullable);
-                self.count(named.segments.len());
-                for segment in &named.segments {
-                    self.text(&segment.name);
+                self.flag(named.is_nullable());
+                self.count(named.segments().count());
+                for segment in named.segments() {
+                    self.text(segment.name());
                 }
-                self.count(named.type_args.len());
+                self.count(named.type_args().len());
             }
             DartType::Function(function) => {
-                self.flag(function.is_nullable);
-                self.flag(function.return_type.is_some());
-                self.count(function.type_params.len());
-                for param in &function.type_params {
-                    self.text(&param.name.name);
-                    self.flag(param.bound.is_some());
-                    if !param.annotations.is_empty() {
+                self.flag(function.is_nullable());
+                self.flag(function.return_type().is_some());
+                self.count(function.type_params().len());
+                for param in function.type_params() {
+                    self.text(param.name().name());
+                    self.flag(param.bound().is_some());
+                    if !param.annotations().is_empty() {
                         self.complete = false;
                     }
                 }
-                self.count(function.params.len());
-                for param in &function.params {
-                    self.count(param.annotations.len());
-                    self.name(param.name.as_ref());
-                    self.flag(param.is_named);
-                    self.flag(param.is_required);
+                self.count(function.params().len());
+                for param in function.params() {
+                    self.count(param.annotations().len());
+                    self.name(param.name());
+                    self.flag(param.is_named());
+                    self.flag(param.is_required());
                 }
             }
             DartType::Record(record) => {
-                self.flag(record.is_nullable);
-                self.count(record.positional.len());
-                self.count(record.named.len());
-                for name in &record.positional_names {
-                    self.name(name.as_ref());
+                self.flag(record.is_nullable());
+                self.count(record.positional().len());
+                self.count(record.named().len());
+                for name in record.positional_names() {
+                    self.name(name);
                 }
-                for field in &record.named {
-                    self.text(&field.name.name);
+                for field in record.named() {
+                    self.text(field.name().name());
                 }
             }
-            DartType::Void { .. } | DartType::Dynamic { .. } => {}
+            DartType::Void(_) | DartType::Dynamic(_) => {}
         }
         visitor::walk_dart_type(self, dart_type);
         self.tokens.push(Token::End);
     }
 
-    fn visit_collection_element(&mut self, element: &CollectionElement) {
-        self.tokens.push(Token::Element(discriminant(element)));
+    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
+        self.tokens.push(Token::Element(match element {
+            CollectionElement::Expr(_) => NodeKind::Identifier,
+            _ => element.syntax().kind(),
+        }));
         match element {
-            CollectionElement::Spread { is_null_aware, .. } => self.flag(*is_null_aware),
-            CollectionElement::If {
-                condition,
-                else_elem,
-                ..
-            } => {
-                self.condition(condition);
-                self.flag(else_elem.is_some());
+            CollectionElement::Spread(value) => self.flag(value.is_null_aware()),
+            CollectionElement::If(value) => {
+                self.condition(value.condition());
+                self.flag(value.else_elem().is_some());
             }
-            CollectionElement::For { .. } => self.complete = false,
-            CollectionElement::Expr(_) | CollectionElement::NullAware { .. } => {}
+            CollectionElement::For(_) => self.complete = false,
+            CollectionElement::Expr(_) | CollectionElement::NullAware(_) => {}
         }
         visitor::walk_collection_element(self, element);
         self.tokens.push(Token::End);
     }
 
-    fn visit_map_element(&mut self, element: &MapElement) {
-        self.tokens.push(Token::MapElement(discriminant(element)));
+    fn visit_map_element(&mut self, element: MapElement<'a>) {
+        self.tokens.push(Token::MapElement(element.syntax().kind()));
         match element {
             MapElement::Entry(entry) => {
-                self.flag(entry.key_null_aware);
-                self.flag(entry.value_null_aware);
+                self.flag(entry.key_null_aware());
+                self.flag(entry.value_null_aware());
             }
-            MapElement::Spread { is_null_aware, .. } => self.flag(*is_null_aware),
-            MapElement::If {
-                condition,
-                else_entry,
-                ..
-            } => {
-                self.condition(condition);
-                self.flag(else_entry.is_some());
+            MapElement::Spread(value) => self.flag(value.is_null_aware()),
+            MapElement::If(value) => {
+                self.condition(value.condition());
+                self.flag(value.else_entry().is_some());
             }
-            MapElement::For { .. } => self.complete = false,
+            MapElement::For(_) => self.complete = false,
         }
         visitor::walk_map_element(self, element);
         self.tokens.push(Token::End);
@@ -373,14 +345,22 @@ mod tests {
     fn key(source: &str) -> DefaultSyntaxKey {
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let program = parsed.program;
-        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let program = parsed.program();
+        let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
             panic!("expected function");
         };
         default_syntax_key(
-            function.params().unwrap().params[0]
-                .default_value
-                .as_ref()
+            function
+                .params()
+                .unwrap()
+                .params()
+                .next()
+                .unwrap()
+                .default_value()
                 .unwrap(),
         )
     }
@@ -481,11 +461,20 @@ mod tests {
 
     #[test]
     fn recovery_never_equates_separately_ingested_defaults() {
-        let expression = Expr::Error {
-            span: Span::new(0, 0),
-        };
-        let first = default_syntax_key(&expression);
+        let source = "void f([Object? value = ;]) {}";
+        let parsed = parse(source);
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let expression = parsed
+            .tree
+            .root(&parsed.source)
+            .descendants()
+            .find_map(|node| Expr::cast(node).filter(|expr| matches!(expr, Expr::Error(_))))
+            .expect("expected recovered expression");
+        let first = default_syntax_key(expression);
         assert_eq!(first, first.clone());
-        assert_ne!(first, default_syntax_key(&expression));
+        assert_ne!(first, default_syntax_key(expression));
     }
 }

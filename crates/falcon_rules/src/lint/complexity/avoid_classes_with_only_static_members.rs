@@ -28,7 +28,7 @@ use falcon_analyze::{
     StructuralTraversal, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidClassesWithOnlyStaticMembers;
@@ -36,54 +36,54 @@ pub struct AvoidClassesWithOnlyStaticMembers;
 impl Rule for AvoidClassesWithOnlyStaticMembers {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             program,
             ctx,
             diags: Vec::new(),
-            model: ctx
-                .identities
-                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+            model: ctx.identities.map(|identities| {
+                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            }),
         }))
     }
 }
 
 struct Collector<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
     model: Option<SemanticModel<'a>>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let program = self.program;
         let model = self.model.as_ref();
         let diagnostic = (|| {
                     let (name, sealed, extends, with_clause, implements, members) = match decl {
                         TopLevelDecl::Class(class) => (
-                            &class.name,
-                            class.modifiers.restriction == Some(ClassRestriction::Sealed),
-                            class.extends.as_ref(),
-                            &class.with_clause[..],
-                            &class.implements[..],
-                            &class.members[..],
+                            class.name(),
+                            class.modifiers().restriction == Some(ClassRestriction::Sealed),
+                            class.extends(),
+                            class.with_clause(),
+                            class.implements(),
+                            class.members(),
                         ),
                         TopLevelDecl::MixinClass(class) => (
-                            &class.name,
+                            class.name(),
                             false,
-                            class.extends.as_ref(),
-                            &class.with_clause[..],
-                            &class.implements[..],
-                            &class.members[..],
+                            class.extends(),
+                            class.with_clause(),
+                            class.implements(),
+                            class.members(),
                         ),
                         _ => return None,
                     };
@@ -93,16 +93,16 @@ impl StructuralRuleVisitor for Collector<'_> {
                         _ => None,
                     };
                     let primary = match decl {
-                        TopLevelDecl::Class(class) => class.primary_constructor.as_ref(),
-                        TopLevelDecl::MixinClass(class) => class.primary_constructor.as_ref(),
+                        TopLevelDecl::Class(class) => class.primary_constructor(),
+                        TopLevelDecl::MixinClass(class) => class.primary_constructor(),
                         _ => None,
                     };
                     if elements.is_some_and(|elements| elements.declaring_params().next().is_some())
                         || primary.is_some_and(|primary| {
-                            primary.constructor_name.is_some()
-                                || primary.params.params.iter().any(|param| {
+                            primary.constructor_name().is_some()
+                                || primary.params().params().any(|param| {
                                     !matches!(
-                                        param.kind,
+                                        param.kind(),
                                         ParamKind::OptionalPositional
                                             | ParamKind::Named { required: false }
                                     )
@@ -120,13 +120,13 @@ impl StructuralRuleVisitor for Collector<'_> {
                     if has_supertypes {
                         let inherits = match (model, ctx.signatures) {
                             (Some(model), Some(signatures)) => model
-                                .resolve_name(&*name.name)
+                                .resolve_name(name.name())
                                 .map_or(Truth::Unknown, |identity| {
                                     signatures.inherits_class_instance_member(&identity, model)
                                 }),
                             _ if extends.is_none_or(is_object)
                                 && implements.is_empty()
-                                && with_clause.iter().all(|ty| is_local_mixin(ty, program)) =>
+                                && with_clause.clone().all(|ty| is_local_mixin(ty, program)) =>
                             {
                                 Truth::No
                             }
@@ -139,7 +139,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                     Some(ctx.diagnostic(
                         "avoid-classes-with-only-static-members",
                         "Classes should define instance members.",
-                        name.span,
+                        name.span(),
                     ))
         })();
         self.diags.extend(diagnostic);
@@ -151,7 +151,7 @@ impl StructuralRuleVisitor for Collector<'_> {
 /// Whether the declared members are all static, constructors are default
 /// ones, and there is a static method or a non-const (possibly synthetic)
 /// static field.
-fn only_static_members(members: &[ClassMember]) -> bool {
+fn only_static_members<'a>(members: AstChildren<'a, ClassMember<'a>>) -> bool {
     let mut has_method = false;
     let mut has_non_const_field = false;
     for member in members {
@@ -162,24 +162,29 @@ fn only_static_members(members: &[ClassMember]) -> bool {
                 }
             }
             ClassMember::Method(method) => {
-                if !method.is_static {
+                if !method.is_static() {
                     return false;
                 }
                 has_method = true;
             }
             // Static accessors induce synthetic, non-const fields.
-            ClassMember::Getter(GetterDecl { is_static, .. })
-            | ClassMember::Setter(SetterDecl { is_static, .. }) => {
-                if !is_static {
+            ClassMember::Getter(getter) => {
+                if !getter.is_static() {
+                    return false;
+                }
+                has_non_const_field = true;
+            }
+            ClassMember::Setter(setter) => {
+                if !setter.is_static() {
                     return false;
                 }
                 has_non_const_field = true;
             }
             ClassMember::Field(field) => {
-                if !field.is_static {
+                if !field.is_static() {
                     return false;
                 }
-                has_non_const_field |= field.keyword != VarKeyword::Const;
+                has_non_const_field |= field.keyword() != VarKeyword::Const;
             }
             // A primary constructor body completes a declared constructor.
             ClassMember::Operator(_)
@@ -190,25 +195,33 @@ fn only_static_members(members: &[ClassMember]) -> bool {
     has_method || has_non_const_field
 }
 
-fn is_local_mixin(ty: &DartType, program: &Program) -> bool {
-    matches!(ty, DartType::Named(named) if matches!(named.segments.as_slice(), [name]
-        if program.declarations.iter().any(|decl| matches!(decl,
-            TopLevelDecl::Mixin(mixin) if mixin.name.name == name.name))))
+fn is_local_mixin(ty: DartType<'_>, program: Program<'_>) -> bool {
+    let DartType::Named(named) = ty else {
+        return false;
+    };
+    let mut segments = named.segments();
+    matches!((segments.next(), segments.next()), (Some(name), None)
+        if program.declarations().any(|decl| matches!(decl,
+            TopLevelDecl::Mixin(mixin) if mixin.name().name() == name.name())))
 }
 
 /// `extends Object` adds no supertype members.
-fn is_object(ty: &DartType) -> bool {
-    matches!(ty, DartType::Named(named)
-        if named.type_args.is_empty()
-            && matches!(named.segments.as_slice(), [segment] if segment.name == "Object"))
+fn is_object(ty: DartType<'_>) -> bool {
+    let DartType::Named(named) = ty else {
+        return false;
+    };
+    let mut segments = named.segments();
+    named.type_args().is_empty()
+        && matches!((segments.next(), segments.next()), (Some(segment), None)
+            if segment.name() == "Object")
 }
 
 /// An unnamed constructor whose parameters are all optional.
-fn is_default_constructor(constructor: &ConstructorDecl) -> bool {
-    constructor.constructor_name.is_none()
-        && constructor.params.params.iter().all(|param| {
+fn is_default_constructor(constructor: ConstructorDecl<'_>) -> bool {
+    constructor.constructor_name().is_none()
+        && constructor.params().params().all(|param| {
             matches!(
-                param.kind,
+                param.kind(),
                 ParamKind::OptionalPositional | ParamKind::Named { required: false }
             )
         })

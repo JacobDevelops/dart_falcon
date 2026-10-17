@@ -33,7 +33,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferCollectionLiterals;
@@ -46,7 +46,7 @@ const CONCRETE: [&str; 2] = ["LinkedHashMap", "LinkedHashSet"];
 impl Rule for PreferCollectionLiterals {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -68,14 +68,14 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.contexts.push(self.expected.take());
-        if matches!(node, Expr::Paren { .. }) {
+        if matches!(node, Expr::Paren(_)) {
             return StructuralTraversal::Continue;
         }
         if let Some((span, name)) = default_collection_ctor(node) {
@@ -96,94 +96,94 @@ impl StructuralRuleVisitor for Collector<'_> {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-collection-literals",
                     "Use a collection literal instead of a constructor invocation.",
-                    *span,
+                    span,
                 ));
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.expected = self.contexts.pop().unwrap();
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = node {
-            self.record_decls(&v.var_type, &v.declarators);
+            self.record_decls(v.var_type(), v.declarators());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        self.record_decls(&node.field_type, &node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        self.record_decls(node.field_type(), node.declarators());
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        self.record_decls(&node.var_type, &node.declarators);
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        self.record_decls(node.var_type(), node.declarators());
         StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.enter_return(node.return_type.as_ref());
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.enter_return(node.return_type());
         StructuralTraversal::Continue
     }
 
-    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+    fn exit_function_decl(&mut self, _node: FunctionDecl<'a>) {
         self.expected = self.contexts.pop().unwrap();
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.enter_return(node.return_type.as_ref());
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.enter_return(node.return_type());
         StructuralTraversal::Continue
     }
 
-    fn exit_method_decl(&mut self, _node: &MethodDecl) {
+    fn exit_method_decl(&mut self, _node: MethodDecl<'a>) {
         self.expected = self.contexts.pop().unwrap();
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.enter_return(node.return_type.as_ref());
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        self.enter_return(node.return_type());
         StructuralTraversal::Continue
     }
 
-    fn exit_getter_decl(&mut self, _node: &GetterDecl) {
+    fn exit_getter_decl(&mut self, _node: GetterDecl<'a>) {
         self.expected = self.contexts.pop().unwrap();
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         self.enter_return(match node {
-            ClassMember::Operator(op) => op.return_type.as_ref(),
+            ClassMember::Operator(op) => op.return_type(),
             _ => None,
         });
         StructuralTraversal::Continue
     }
 
-    fn exit_class_member(&mut self, _node: &ClassMember) {
+    fn exit_class_member(&mut self, _node: ClassMember<'a>) {
         self.expected = self.contexts.pop().unwrap();
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.contexts.push(self.expected);
         if let Stmt::LocalFunc(function) = node {
-            self.expected = function.return_type.as_ref().and_then(concrete_context);
+            self.expected = function.return_type().and_then(concrete_context);
         } else if let Stmt::Return(ret) = node
-            && let (Some(value), Some(expected)) = (&ret.value, self.expected)
+            && let (Some(value), Some(expected)) = (ret.value(), self.expected)
         {
             self.record_if_matching(value, expected);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, _node: &Stmt) {
+    fn exit_stmt(&mut self, _node: Stmt<'a>) {
         self.expected = self.contexts.pop().unwrap();
     }
 
-    fn visit_function_body(&mut self, node: &FunctionBody) -> StructuralTraversal {
-        if let FunctionBody::Arrow(expr, _) = node
+    fn visit_function_body(&mut self, node: FunctionBody<'a>) -> StructuralTraversal {
+        if let FunctionBody::Arrow(arrow) = node
             && let Some(expected) = self.expected
         {
-            self.record_if_matching(expr, expected);
+            self.record_if_matching(arrow.expr(), expected);
         }
         StructuralTraversal::Continue
     }
@@ -191,23 +191,27 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 impl Collector<'_> {
-    fn enter_return(&mut self, ty: Option<&DartType>) {
+    fn enter_return(&mut self, ty: Option<DartType<'_>>) {
         self.contexts.push(self.expected);
         self.expected = ty.and_then(concrete_context);
     }
-    fn record_decls(&mut self, ty: &Option<DartType>, decls: &[VarDeclarator]) {
+    fn record_decls<'a>(
+        &mut self,
+        ty: Option<DartType<'a>>,
+        decls: AstChildren<'a, VarDeclarator<'a>>,
+    ) {
         let Some(ty) = ty else { return };
         let Some(expected) = concrete_context(ty) else {
             return;
         };
         for d in decls {
-            if let Some(init) = &d.initializer {
+            if let Some(init) = d.initializer() {
                 self.record_if_matching(init, expected);
             }
         }
     }
 
-    fn record_if_matching(&mut self, expr: &Expr, expected: &str) {
+    fn record_if_matching(&mut self, expr: Expr<'_>, expected: &str) {
         if let Some((span, base)) = default_collection_ctor(expr)
             && base == expected
         {
@@ -216,32 +220,29 @@ impl Collector<'_> {
     }
 }
 
-fn concrete_context(ty: &DartType) -> Option<&'static str> {
+fn concrete_context(ty: DartType<'_>) -> Option<&'static str> {
     if let DartType::Named(nt) = ty
-        && let Some(seg) = nt.segments.last()
-        && CONCRETE.contains(&seg.name.as_str())
+        && let Some(seg) = nt.segments().last()
+        && CONCRETE.contains(&seg.name())
     {
-        return CONCRETE.iter().copied().find(|name| *name == seg.name);
+        return CONCRETE.iter().copied().find(|name| *name == seg.name());
     }
     None
 }
 
-fn default_collection_ctor(expr: &Expr) -> Option<(&Span, &str)> {
+fn default_collection_ctor(expr: Expr<'_>) -> Option<(Span, &str)> {
     match expr.unparenthesized() {
-        Expr::Call {
-            callee, args, span, ..
-        } => {
-            if !args.positional.is_empty() || !args.named.is_empty() {
+        Expr::Call(call) => {
+            let args = call.args();
+            if !args.positional().is_empty() || !args.named().is_empty() {
                 return None;
             }
-            match callee.unparenthesized() {
-                Expr::Ident(id) if NAMES.contains(&id.name.as_str()) => {
-                    Some((span, id.name.as_str()))
-                }
-                Expr::Field { object, field, .. } if field.name == "new" => {
-                    match object.unparenthesized() {
-                        Expr::Ident(id) if NAMES.contains(&id.name.as_str()) => {
-                            Some((span, id.name.as_str()))
+            match call.callee().unparenthesized() {
+                Expr::Ident(id) if NAMES.contains(&id.name()) => Some((call.span(), id.name())),
+                Expr::Field(field) if field.field().name() == "new" => {
+                    match field.object().unparenthesized() {
+                        Expr::Ident(id) if NAMES.contains(&id.name()) => {
+                            Some((call.span(), id.name()))
                         }
                         _ => None,
                     }
@@ -249,23 +250,21 @@ fn default_collection_ctor(expr: &Expr) -> Option<(&Span, &str)> {
                 _ => None,
             }
         }
-        Expr::New {
-            dart_type: DartType::Named(nt),
-            constructor_name,
-            args,
-            span,
-            ..
-        } => {
-            if !args.positional.is_empty() || !args.named.is_empty() {
+        Expr::New(new) => {
+            let DartType::Named(nt) = new.dart_type() else {
+                return None;
+            };
+            let args = new.args();
+            if !args.positional().is_empty() || !args.named().is_empty() {
                 return None;
             }
-            let base = nt.segments.last()?;
-            if !NAMES.contains(&base.name.as_str()) {
+            let base = nt.segments().last()?;
+            if !NAMES.contains(&base.name()) {
                 return None;
             }
-            match constructor_name {
-                None => Some((span, base.name.as_str())),
-                Some(c) if c.name == "new" => Some((span, base.name.as_str())),
+            match new.constructor_name() {
+                None => Some((new.span(), base.name())),
+                Some(c) if c.name() == "new" => Some((new.span(), base.name())),
                 _ => None,
             }
         }
@@ -283,23 +282,27 @@ mod tests {
     use std::path::PathBuf;
 
     fn count_no_types(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            tree: parse(source).tree,
+            source: source.into(),
+        });
+        let program = parsed.program();
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
-        PreferCollectionLiterals.analyze(&program, &ctx).len()
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
+        PreferCollectionLiterals.analyze(program, &ctx).len()
     }
 
     fn count_with_types(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            tree: parse(source).tree,
+            source: source.into(),
+        });
+        let program = parsed.program();
         let identities = falcon_analyze::IdentityIndex::from_project_files(
             &[falcon_analyze::IdentitySource {
                 path: std::path::Path::new("t.dart"),
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
@@ -308,7 +311,7 @@ mod tests {
             [(
                 std::path::Path::new("t.dart"),
                 falcon_analyze::LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -317,10 +320,10 @@ mod tests {
         );
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(&path, &config, &parsed)
             .with_types(&types)
             .with_identities(&identities);
-        PreferCollectionLiterals.analyze(&program, &ctx).len()
+        PreferCollectionLiterals.analyze(program, &ctx).len()
     }
 
     #[test]
@@ -434,18 +437,18 @@ mod tests {
             "part 'missing.dart'; class Map {} void f() { var value = Map(); }",
             "part 'missing.dart'; class Duration {} void f() { var value = Map(); }",
         ] {
-            let falcon_dart_parser::ParseResult {
-                program,
-                errors,
-                syntax,
-                ..
-            } = parse(source);
-            assert!(errors.is_empty());
+            let parsed = parse(source);
+            assert!(parsed.errors.is_empty());
+            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+                tree: parsed.tree,
+                source: source.into(),
+            });
+            let program = parsed.program();
             let path = PathBuf::from("/project/t.dart");
             let identities = IdentityIndex::from_project_files(
                 &[IdentitySource {
                     path: &path,
-                    program: &program,
+                    parsed: &parsed,
                     has_parse_errors: false,
                 }],
                 &[],
@@ -454,7 +457,7 @@ mod tests {
                 [(
                     path.as_path(),
                     LibrarySource {
-                        program: &program,
+                        program,
                         has_parse_errors: false,
                         has_unresolved_parts: true,
                     },
@@ -462,11 +465,11 @@ mod tests {
                 &identities,
             );
             let config = FalconConfig::default();
-            let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
+            let ctx = AnalyzeContext::new(&path, &config, &parsed)
                 .with_types(&types)
                 .with_identities(&identities);
             assert!(
-                PreferCollectionLiterals.analyze(&program, &ctx).is_empty(),
+                PreferCollectionLiterals.analyze(program, &ctx).is_empty(),
                 "{source}"
             );
         }

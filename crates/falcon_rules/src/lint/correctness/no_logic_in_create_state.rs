@@ -10,7 +10,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct NoLogicInCreateState;
@@ -18,13 +18,13 @@ pub struct NoLogicInCreateState;
 impl Rule for NoLogicInCreateState {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let stateful_widget = DeclarationIdentity::flutter("StatefulWidget");
         let state = DeclarationIdentity::flutter("State");
         RulePreparation::Structural(Box::new(Collector {
@@ -48,8 +48,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let model = &self.model;
         let signatures = self.signatures;
@@ -59,7 +59,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         let TopLevelDecl::Class(class) = declaration else {
             return StructuralTraversal::SkipChildren;
         };
-        let Some(identity) = model.resolve_name(&class.name.name) else {
+        let Some(identity) = model.resolve_name(class.name().name()) else {
             return StructuralTraversal::SkipChildren;
         };
         if signatures.is_subtype_of(
@@ -70,14 +70,14 @@ impl StructuralRuleVisitor for Collector<'_> {
         {
             return StructuralTraversal::SkipChildren;
         }
-        for member in &class.members {
+        for member in class.members() {
             let ClassMember::Method(method) = member else {
                 continue;
             };
-            if method.name.name != "createState" {
+            if method.name().name() != "createState" {
                 continue;
             }
-            let Some(return_type) = &method.return_type else {
+            let Some(return_type) = method.return_type() else {
                 continue;
             };
             if signatures.is_subtype_of(&model.resolve_type(return_type), state, model)
@@ -85,7 +85,7 @@ impl StructuralRuleVisitor for Collector<'_> {
             {
                 continue;
             }
-            let Some(body) = &method.body else {
+            let Some(body) = method.body() else {
                 continue;
             };
             if body_result(body, model, signatures, state) != BodyResult::Violation {
@@ -106,19 +106,19 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn violation_span(body: &FunctionBody) -> Span {
+fn violation_span(body: FunctionBody<'_>) -> Span {
     match body {
-        FunctionBody::Arrow(expression, _) => *expression.span(),
-        FunctionBody::Block(block) => match block.stmts.as_slice() {
-            [
-                Stmt::Return(ReturnStmt {
-                    value: Some(expression),
-                    ..
-                }),
-            ] => *expression.span(),
-            _ => *body.span(),
-        },
-        FunctionBody::Native(..) => *body.span(),
+        FunctionBody::Arrow(arrow) => arrow.expr().span(),
+        FunctionBody::Block(block) => {
+            let mut statements = block.stmts();
+            match (statements.next(), statements.next()) {
+                (Some(Stmt::Return(statement)), None) => {
+                    statement.value().map_or(body.span(), Expr::span)
+                }
+                _ => body.span(),
+            }
+        }
+        FunctionBody::Native(_) => body.span(),
     }
 }
 
@@ -130,23 +130,24 @@ enum BodyResult {
 }
 
 fn body_result(
-    body: &FunctionBody,
+    body: FunctionBody<'_>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
     state: &DeclarationIdentity,
 ) -> BodyResult {
     let expression = match body {
-        FunctionBody::Arrow(expression, _) => expression.as_ref(),
-        FunctionBody::Block(block) => match block.stmts.as_slice() {
-            [
-                Stmt::Return(ReturnStmt {
-                    value: Some(expression),
-                    ..
-                }),
-            ] => expression,
-            _ => return BodyResult::Violation,
-        },
-        FunctionBody::Native(..) => return BodyResult::Unknown,
+        FunctionBody::Arrow(arrow) => arrow.expr(),
+        FunctionBody::Block(block) => {
+            let mut statements = block.stmts();
+            match (statements.next(), statements.next()) {
+                (Some(Stmt::Return(statement)), None) => match statement.value() {
+                    Some(expression) => expression,
+                    None => return BodyResult::Violation,
+                },
+                _ => return BodyResult::Violation,
+            }
+        }
+        FunctionBody::Native(_) => return BodyResult::Unknown,
     };
     let Some((constructed, args)) = crate::lint::flutter::construction(expression, model) else {
         return if looks_like_unresolved_construction(expression) {
@@ -156,14 +157,16 @@ fn body_result(
         };
     };
     match signatures.is_subtype_of(&constructed, state, model) {
-        Truth::Yes if args.positional.is_empty() && args.named.is_empty() => BodyResult::Trivial,
+        Truth::Yes if args.positional().is_empty() && args.named().is_empty() => {
+            BodyResult::Trivial
+        }
         Truth::Yes => BodyResult::Violation,
         Truth::No => BodyResult::Violation,
         Truth::Unknown => BodyResult::Unknown,
     }
 }
 
-fn looks_like_unresolved_construction(expression: &Expr) -> bool {
-    matches!(expression.unparenthesized(), Expr::Call { callee, .. }
-        if falcon_analyze::expression_segments(callee, false).is_some())
+fn looks_like_unresolved_construction(expression: Expr<'_>) -> bool {
+    matches!(expression.unparenthesized(), Expr::Call(call)
+        if falcon_analyze::expression_segments(call.callee(), false).is_some())
 }

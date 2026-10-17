@@ -29,9 +29,10 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
+use falcon_syntax::cst::{
+    visit::{Visitor, walk_expr, walk_stmt},
+    *,
+};
 
 use crate::lint::expressions::identifier_name;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
@@ -47,7 +48,7 @@ pub struct NullCheckOnNullableTypeParameter;
 impl Rule for NullCheckOnNullableTypeParameter {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -67,29 +68,28 @@ fn key(span: &Span) -> (usize, usize) {
 }
 
 /// The `x!` of `x!` or `await x!`, with whether it is awaited.
-fn asserted(expression: &Expr) -> Option<(&Expr, bool)> {
+fn asserted(expression: Expr<'_>) -> Option<(Expr<'_>, bool)> {
     let expression = expression.unparenthesized();
     match expression {
-        Expr::NullAssert { .. } => Some((expression, false)),
-        Expr::Await { expr, .. } if matches!(expr.as_ref(), Expr::NullAssert { .. }) => {
-            Some((expr.as_ref(), true))
+        Expr::NullAssert(_) => Some((expression, false)),
+        Expr::Await(awaited) if matches!(awaited.expr(), Expr::NullAssert(_)) => {
+            Some((awaited.expr(), true))
         }
         _ => None,
     }
 }
 
-fn map_entry_asserts(element: &MapElement) -> bool {
+fn map_entry_asserts(element: MapElement<'_>) -> bool {
     match element {
         MapElement::Entry(entry) => {
-            asserted(&entry.key).is_some() || asserted(&entry.value).is_some()
+            asserted(entry.key()).is_some() || asserted(entry.value()).is_some()
         }
-        MapElement::If {
-            then_entry,
-            else_entry,
-            ..
-        } => map_entry_asserts(then_entry) || else_entry.as_deref().is_some_and(map_entry_asserts),
-        MapElement::For { entry, .. } => map_entry_asserts(entry),
-        MapElement::Spread { .. } => false,
+        MapElement::If(element) => {
+            map_entry_asserts(element.then_entry())
+                || element.else_entry().is_some_and(map_entry_asserts)
+        }
+        MapElement::For(element) => map_entry_asserts(element.entry()),
+        MapElement::Spread(_) => false,
     }
 }
 
@@ -133,14 +133,14 @@ struct Yields<'s, 'a> {
     delegated: bool,
 }
 
-impl Visitor for Yields<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+impl<'a> Visitor<'a> for Yields<'_, 'a> {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
-            Stmt::Yield(statement) if statement.is_star => self.delegated = true,
+            Stmt::Yield(statement) if statement.is_star() => self.delegated = true,
             Stmt::Yield(statement) => {
-                self.types.push(self.state.infer(&statement.value));
-                if let Some((assertion, _)) = asserted(&statement.value) {
-                    self.assertions.push(*assertion.span());
+                self.types.push(self.state.infer(statement.value()));
+                if let Some((assertion, _)) = asserted(statement.value()) {
+                    self.assertions.push(assertion.span());
                 }
             }
             Stmt::LocalFunc(_) => return,
@@ -149,8 +149,8 @@ impl Visitor for Yields<'_, '_> {
         walk_stmt(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if !matches!(node, Expr::FuncExpr { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        if !matches!(node, Expr::FuncExpr(_)) {
             walk_expr(self, node);
         }
     }
@@ -159,7 +159,7 @@ impl Visitor for Yields<'_, '_> {
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies,
+    bodies: FunctionBodies<'a>,
     /// `x!` / `await x!` whose expected type is the walker's context type.
     contextual: HashSet<(usize, usize)>,
     /// `x!` / `await x!` initializing a local or `for` variable.
@@ -168,21 +168,20 @@ struct Collector<'a> {
     expected: HashMap<(usize, usize), ResolvedType>,
 }
 
-impl Collector<'_> {
-    fn mark_contextual(&mut self, expression: &Expr) {
+impl<'a> Collector<'a> {
+    fn mark_contextual(&mut self, expression: Expr<'a>) {
         if asserted(expression).is_some() {
-            self.contextual.insert(key(expression.span()));
+            self.contextual.insert(key(&expression.span()));
         }
     }
 
-    fn mark_initializers(&mut self, declaration: &LocalVarDecl) {
+    fn mark_initializers(&mut self, declaration: LocalVarDecl<'a>) {
         for initializer in declaration
-            .declarators
-            .iter()
-            .filter_map(|declarator| declarator.initializer.as_ref())
+            .declarators()
+            .filter_map(|declarator| declarator.initializer())
         {
             if asserted(initializer).is_some() {
-                self.initializers.insert(key(initializer.span()));
+                self.initializers.insert(key(&initializer.span()));
             }
         }
     }
@@ -190,11 +189,11 @@ impl Collector<'_> {
     /// The declared return (`yielded`: element) type of a function
     /// declaration's body; an awaited or `async` return expects the `Future`
     /// argument.
-    fn returned(&mut self, value: &Expr, yielded: bool, state: &SemanticState<'_>) {
+    fn returned(&mut self, value: Expr<'a>, yielded: bool, state: &SemanticState<'a>) {
         let Some((assertion, awaited)) = asserted(value) else {
             return;
         };
-        let Some(body) = self.bodies.enclosing(value.span()) else {
+        let Some(body) = self.bodies.enclosing(&value.span()) else {
             return;
         };
         if !matches!(
@@ -203,7 +202,7 @@ impl Collector<'_> {
         ) {
             return;
         }
-        let Some(return_type) = &body.return_type else {
+        let Some(return_type) = body.return_type else {
             return;
         };
         let ty = state
@@ -221,7 +220,7 @@ impl Collector<'_> {
             Some(ty)
         };
         if let Some(element) = element {
-            self.expected.insert(key(assertion.span()), element);
+            self.expected.insert(key(&assertion.span()), element);
         }
     }
 
@@ -230,22 +229,22 @@ impl Collector<'_> {
     /// least upper bound of its returned or yielded values.
     fn inferred_returns(
         &mut self,
-        body: &FunctionBody,
+        body: FunctionBody<'a>,
         async_marker: AsyncMarker,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         let (types, assertions) = match async_marker {
             AsyncMarker::Sync | AsyncMarker::Async => {
                 let returns = returned_expressions(body);
                 let assertions: Vec<_> = returns
                     .iter()
-                    .filter_map(|value| asserted(value))
-                    .map(|(assertion, _)| *assertion.span())
+                    .filter_map(|value| asserted(*value))
+                    .map(|(assertion, _)| assertion.span())
                     .collect();
                 if assertions.is_empty() {
                     return;
                 }
-                let types: Vec<_> = returns.iter().map(|value| state.infer(value)).collect();
+                let types: Vec<_> = returns.iter().map(|value| state.infer(*value)).collect();
                 (types, assertions)
             }
             AsyncMarker::SyncStar | AsyncMarker::AsyncStar => {
@@ -273,81 +272,83 @@ impl Collector<'_> {
     }
 
     /// Elements of a collection literal expect its element type.
-    fn collection(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let asserts = match node {
-            Expr::List { elements, .. } | Expr::Set { elements, .. } => elements.iter().any(
-                |item| matches!(item, CollectionElement::Expr(expression) if asserted(expression).is_some()),
-            ),
-            Expr::Map { elements, .. } => elements.iter().any(map_entry_asserts),
-            _ => false,
+    fn collection(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let elements = match node {
+            Expr::List(literal) => Some(literal.elements()),
+            Expr::Set(literal) => Some(literal.elements()),
+            _ => None,
+        };
+        let asserts = if let Some(mut elements) = elements.clone() {
+            elements.any(|item| matches!(item, CollectionElement::Expr(expression) if asserted(expression).is_some()))
+        } else if let Expr::Map(literal) = node {
+            literal.elements().any(map_entry_asserts)
+        } else {
+            false
         };
         if !asserts {
             return;
         }
         let literal = state.infer_with_context(node, state.expected());
-        match node {
-            Expr::List { elements, .. } | Expr::Set { elements, .. } => {
-                let Some(element) = literal.type_argument(0) else {
-                    return;
-                };
-                for item in elements {
-                    if let CollectionElement::Expr(expression) = item
-                        && let Some((assertion, _)) = asserted(expression)
-                    {
-                        self.expected.insert(key(assertion.span()), element.clone());
-                    }
-                }
-            }
-            Expr::Map { elements, .. } => {
-                if literal.arguments().len() == 2
-                    && let (Some(key_type), Some(value_type)) =
-                        (literal.type_argument(0), literal.type_argument(1))
+        if let Some(elements) = elements {
+            let Some(element) = literal.type_argument(0) else {
+                return;
+            };
+            for item in elements {
+                if let CollectionElement::Expr(expression) = item
+                    && let Some((assertion, _)) = asserted(expression)
                 {
-                    for element in elements {
-                        self.map_entry(element, &key_type, &value_type);
-                    }
+                    self.expected
+                        .insert(key(&assertion.span()), element.clone());
                 }
             }
-            _ => {}
+        } else if let Expr::Map(map) = node
+            && literal.arguments().len() == 2
+            && let (Some(key_type), Some(value_type)) =
+                (literal.type_argument(0), literal.type_argument(1))
+        {
+            for element in map.elements() {
+                self.map_entry(element, &key_type, &value_type);
+            }
         }
     }
 
     /// The analyzer compares an entry's key with the asserted node itself, so
     /// an awaited or parenthesized key takes the value type.
-    fn map_entry(&mut self, element: &MapElement, key_type: &ResolvedType, value: &ResolvedType) {
+    fn map_entry(
+        &mut self,
+        element: MapElement<'a>,
+        key_type: &ResolvedType,
+        value: &ResolvedType,
+    ) {
         match element {
             MapElement::Entry(entry) => {
-                if let Some((assertion, awaited)) = asserted(&entry.key) {
-                    let ty = if awaited || matches!(entry.key, Expr::Paren { .. }) {
+                if let Some((assertion, awaited)) = asserted(entry.key()) {
+                    let ty = if awaited || matches!(entry.key(), Expr::Paren(_)) {
                         value
                     } else {
                         key_type
                     };
-                    self.expected.insert(key(assertion.span()), ty.clone());
+                    self.expected.insert(key(&assertion.span()), ty.clone());
                 }
-                if let Some((assertion, _)) = asserted(&entry.value) {
-                    self.expected.insert(key(assertion.span()), value.clone());
+                if let Some((assertion, _)) = asserted(entry.value()) {
+                    self.expected.insert(key(&assertion.span()), value.clone());
                 }
             }
-            MapElement::If {
-                then_entry,
-                else_entry,
-                ..
-            } => {
-                self.map_entry(then_entry, key_type, value);
-                if let Some(entry) = else_entry {
+            MapElement::If(element) => {
+                self.map_entry(element.then_entry(), key_type, value);
+                if let Some(entry) = element.else_entry() {
                     self.map_entry(entry, key_type, value);
                 }
             }
-            MapElement::For { entry, .. } => self.map_entry(entry, key_type, value),
-            MapElement::Spread { .. } => {}
+            MapElement::For(element) => self.map_entry(element.entry(), key_type, value),
+            MapElement::Spread(_) => {}
         }
     }
 
     /// Record the walker's context of a contextual position, or for an
     /// untyped local the type inferred from `x!`.
-    fn record_context(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let span = key(node.span());
+    fn record_context(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let span = key(&node.span());
         let initializer = self.initializers.contains(&span);
         if !initializer && !self.contextual.contains(&span) {
             return;
@@ -357,54 +358,56 @@ impl Collector<'_> {
         };
         let expected = match (state.expected(), assertion) {
             (Some(expected), _) => Some(expected.clone()),
-            (None, Expr::NullAssert { operand, .. }) if initializer => {
-                Some(state.infer(operand).non_null())
+            (None, Expr::NullAssert(assertion)) if initializer => {
+                Some(state.infer(assertion.operand()).non_null())
             }
             _ => None,
         };
         if let Some(expected) = expected {
-            self.expected.insert(key(assertion.span()), expected);
+            self.expected.insert(key(&assertion.span()), expected);
         }
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
     fn visit_call_arguments(
         &mut self,
-        args: &ArgList,
+        args: ArgList<'a>,
         _positional: &[ResolvedType],
         _named: &HashMap<String, ResolvedType>,
-        _state: &SemanticState<'_>,
+        _state: &SemanticState<'a>,
     ) {
         // An awaited positional argument has no corresponding parameter; a
         // named one keeps its name's parameter.
         // Grouping does not change a positional assertion's parameter context.
-        for argument in &args.positional {
-            if matches!(argument.unparenthesized(), Expr::NullAssert { .. }) {
+        for argument in args.positional() {
+            if matches!(argument.unparenthesized(), Expr::NullAssert(_)) {
                 self.mark_contextual(argument);
             }
         }
-        for argument in &args.named {
-            self.mark_contextual(&argument.value);
+        for argument in args.named() {
+            self.mark_contextual(argument.value());
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         match node {
-            Stmt::Return(ReturnStmt {
-                value: Some(value), ..
-            }) => self.returned(value, false, state),
-            Stmt::Yield(statement) => self.returned(&statement.value, true, state),
+            Stmt::Return(statement) => {
+                if let Some(value) = statement.value() {
+                    self.returned(value, false, state);
+                }
+            }
+            Stmt::Yield(statement) => self.returned(statement.value(), true, state),
             Stmt::LocalVar(declaration) => self.mark_initializers(declaration),
-            Stmt::LocalFunc(function) if function.return_type.is_none() => {
-                self.inferred_returns(&function.body, function.async_marker, state);
+            Stmt::LocalFunc(function) if function.return_type().is_none() => {
+                self.inferred_returns(function.body(), function.async_marker(), state);
             }
             Stmt::For(statement) => {
-                if let Some(ForInit::VarDecl(declaration)) = &statement.header.init {
+                if let Some(ForInit::VarDecl(declaration)) = statement.header().init() {
                     self.mark_initializers(declaration);
                 }
             }
@@ -412,19 +415,20 @@ impl SemanticRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if asserted(node).is_some()
             && self
                 .bodies
-                .enclosing(node.span())
-                .is_some_and(|body| body.arrow_expression == Some(*node.span()))
+                .enclosing(&node.span())
+                .is_some_and(|body| body.arrow_expression == Some(node.span()))
         {
             self.returned(node, false, state);
         }
         self.record_context(node, state);
         match node {
-            Expr::NullAssert { operand, span } => {
-                let Some(expected) = self.expected.get(&key(span)) else {
+            Expr::NullAssert(assertion) => {
+                let span = assertion.span();
+                let Some(expected) = self.expected.get(&key(&span)) else {
                     return;
                 };
                 // An inferred `T & Object` stands for its demoted `T`.
@@ -439,7 +443,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                 };
                 if let Some((expected_id, potentially_nullable)) = expected
                     && potentially_nullable
-                    && matches!(state.infer(operand), ResolvedType::TypeParameter {
+                    && matches!(state.infer(assertion.operand()), ResolvedType::TypeParameter {
                         id, nullable: true, ..
                     } if id == *expected_id)
                 {
@@ -450,39 +454,38 @@ impl SemanticRuleVisitor for Collector<'_> {
                     ));
                 }
             }
-            Expr::Assign {
-                target,
-                op: AssignOp::Eq,
-                value,
-                ..
-            } => {
+            Expr::Assign(assignment) if assignment.op() == AssignOp::Eq => {
                 // `x = x!` / `a.b = a.b!` has no expected type.
-                let same_name = match asserted(value) {
-                    Some((Expr::NullAssert { operand, .. }, _)) => identifier_name(target)
-                        .is_some_and(|name| identifier_name(operand) == Some(name)),
+                let same_name = match asserted(assignment.value()) {
+                    Some((Expr::NullAssert(assertion), _)) => identifier_name(assignment.target())
+                        .is_some_and(|name| identifier_name(assertion.operand()) == Some(name)),
                     _ => false,
                 };
                 if !same_name {
-                    self.mark_contextual(value);
+                    self.mark_contextual(assignment.value());
                 }
             }
-            Expr::Binary { op, right, .. }
-                if !matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce)
-                    && matches!(right.as_ref(), Expr::NullAssert { .. }) =>
+            Expr::Binary(binary)
+                if !matches!(
+                    binary.op(),
+                    BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
+                ) && matches!(binary.right(), Expr::NullAssert(_)) =>
             {
-                self.mark_contextual(right);
+                self.mark_contextual(binary.right());
             }
-            Expr::Cascade { sections, .. } => {
-                for operation in sections.iter().flat_map(|section| &section.ops) {
-                    if let CascadeOp::Assign(_, AssignOp::Eq, value) = operation {
-                        self.mark_contextual(value);
+            Expr::Cascade(cascade) => {
+                for operation in cascade.sections().flat_map(|section| section.ops()) {
+                    if let CascadeOp::Assign(assignment) = operation
+                        && assignment.op() == AssignOp::Eq
+                    {
+                        self.mark_contextual(assignment.value());
                     }
                 }
             }
-            Expr::FuncExpr {
-                body, async_marker, ..
-            } => self.inferred_returns(body, *async_marker, state),
-            Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. } => {
+            Expr::FuncExpr(function) => {
+                self.inferred_returns(function.body(), function.async_marker(), state);
+            }
+            Expr::List(_) | Expr::Set(_) | Expr::Map(_) => {
                 self.collection(node, state);
             }
             _ => {}
@@ -491,11 +494,11 @@ impl SemanticRuleVisitor for Collector<'_> {
 
     fn visit_pattern(
         &mut self,
-        node: &Pattern,
+        node: Pattern<'a>,
         matched: Option<&ResolvedType>,
-        _state: &SemanticState<'_>,
+        _state: &SemanticState<'a>,
     ) {
-        if let Pattern::NullAssert { span, .. } = node
+        if let Pattern::NullAssert(assertion) = node
             && matches!(
                 matched,
                 Some(ResolvedType::TypeParameter { nullable: true, .. })
@@ -504,7 +507,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 RULE,
                 MESSAGE,
-                Span::new(span.end - 1, span.end),
+                Span::new(assertion.span().end - 1, assertion.span().end),
             ));
         }
     }

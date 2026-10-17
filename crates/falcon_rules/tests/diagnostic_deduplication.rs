@@ -9,14 +9,14 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, RuleRegistry};
 use falcon_config::FalconConfig;
 use falcon_rules::all_rules;
 use falcon_rules::lint::performance::noop_primitive_operations::NoopPrimitiveOperations;
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 struct RegisteredRules(RuleRegistry);
 
 impl Rule for RegisteredRules {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         context: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(self.0.run_all(program, context))

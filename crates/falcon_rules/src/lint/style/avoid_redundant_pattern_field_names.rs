@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
 #[derive(Default)]
@@ -19,7 +19,7 @@ pub struct AvoidRedundantPatternFieldNames;
 impl Rule for AvoidRedundantPatternFieldNames {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -36,31 +36,31 @@ struct Collector<'s> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
         match node {
             Pattern::Object(obj) => {
-                for field in &obj.fields {
-                    if field.source_name().is_some() && is_redundant_field(self.ctx, field.span) {
+                for field in obj.fields() {
+                    if field.source_name().is_some() && is_redundant_field(self.ctx, field.span()) {
                         self.diags.push(self.ctx.diagnostic(
                             "avoid-redundant-pattern-field-names",
                             "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
-                            field.span,
+                            field.span(),
                         ));
                     }
                 }
             }
             Pattern::Record(rec) => {
-                for field in &rec.fields {
-                    if field.source_name().is_some() && is_redundant_field(self.ctx, field.span) {
+                for field in rec.fields() {
+                    if field.source_name().is_some() && is_redundant_field(self.ctx, field.span()) {
                         self.diags.push(self.ctx.diagnostic(
                             "avoid-redundant-pattern-field-names",
                             "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
-                            field.span,
+                            field.span(),
                         ));
                     }
                 }
@@ -74,17 +74,17 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 fn is_redundant_field(ctx: &AnalyzeContext, span: Span) -> bool {
     let mut tokens = ctx
-        .syntax
-        .tokens_in(span)
-        .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline));
+        .tree()
+        .tokens_in(ctx.source, span)
+        .filter(|token| !matches!(token.kind(), TokenKind::Whitespace | TokenKind::Newline));
     let (Some(left), Some(colon), Some(right)) = (tokens.next(), tokens.next(), tokens.next())
     else {
         return false;
     };
-    colon.kind == TokenKind::Colon
+    colon.kind() == TokenKind::Colon
         && tokens.next().is_none()
-        && left.text(ctx.source) == right.text(ctx.source)
-        && left.kind.is_identifier_like()
-        && left.text(ctx.source).is_ascii()
-        && !left.text(ctx.source).contains('$')
+        && left.text() == right.text()
+        && left.kind().is_identifier_like()
+        && left.text().is_ascii()
+        && !left.text().contains('$')
 }

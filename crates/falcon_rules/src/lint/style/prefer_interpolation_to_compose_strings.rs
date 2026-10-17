@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -27,7 +27,7 @@ pub struct PreferInterpolationToComposeStrings;
 impl Rule for PreferInterpolationToComposeStrings {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -48,11 +48,11 @@ struct Collector<'a> {
 /// One operand of a `+` chain.
 #[derive(Clone, Copy)]
 struct Operand<'a> {
-    expr: &'a Expr,
+    expr: Expr<'a>,
 }
 
 impl<'a> Operand<'a> {
-    fn string_literal(self) -> Option<&'a StringLitNode> {
+    fn string_literal(self) -> Option<StringLitNode<'a>> {
         match self.expr {
             Expr::StringLit(string) => Some(string),
             _ => None,
@@ -61,49 +61,45 @@ impl<'a> Operand<'a> {
 
     /// `x.toString(...)` or `toString(...)` with arguments.
     fn to_string_with_arguments(self) -> bool {
-        matches!(self.expr, Expr::Call { callee, args, .. }
-            if !(args.positional.is_empty() && args.named.is_empty())
-                && matches!(callee.as_ref(),
-                    Expr::Field { field: name, .. } | Expr::Ident(name) if name.name == "toString"))
+        matches!(self.expr, Expr::Call(call)
+        if !(call.args().positional().is_empty() && call.args().named().is_empty())
+            && match call.callee() {
+                Expr::Field(field) => field.field().name() == "toString",
+                Expr::Ident(name) => name.name() == "toString",
+                _ => false,
+            })
     }
 }
 
 /// The operands of the `+` chain `node` (flattened through unparenthesized
 /// left operands); a non-`+` binary left operand contributes none.
-fn chained_additions<'a>(node: &'a Expr) -> Vec<Operand<'a>> {
+fn chained_additions<'a>(node: Expr<'a>) -> Vec<Operand<'a>> {
     let mut operands = Vec::new();
     collect_chain(node, &mut operands);
     operands
 }
 
-fn collect_chain<'a>(node: &'a Expr, operands: &mut Vec<Operand<'a>>) {
-    let Expr::Binary {
-        op, left, right, ..
-    } = node
-    else {
+fn collect_chain<'a>(node: Expr<'a>, operands: &mut Vec<Operand<'a>>) {
+    let Expr::Binary(binary) = node else {
         operands.push(Operand { expr: node });
         return;
     };
-    if *op != BinaryOp::Add {
+    if binary.op() != BinaryOp::Add {
         return;
     }
-    collect_chain(left, operands);
-    operands.push(Operand { expr: right });
+    collect_chain(binary.left(), operands);
+    operands.push(Operand {
+        expr: binary.right(),
+    });
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if !matches!(
-            node,
-            Expr::Binary {
-                op: BinaryOp::Add,
-                ..
-            }
-        ) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if !matches!(node, Expr::Binary(binary) if binary.op() == BinaryOp::Add) {
             return;
         }
         let operands = chained_additions(node);
@@ -112,8 +108,8 @@ impl SemanticRuleVisitor for Collector<'_> {
             let (left, right) = (operands[index], operands[index + 1]);
             index += 1;
             let (left_literal, right_literal) = (left.string_literal(), right.string_literal());
-            let raw = |literal: Option<&StringLitNode>| {
-                literal.is_some_and(|string| string.has_raw_segment && !string.is_adjacent)
+            let raw = |literal: Option<StringLitNode<'a>>| {
+                literal.is_some_and(|string| string.has_raw_segment() && !string.is_adjacent())
             };
             if left_literal.is_some() == right_literal.is_some()
                 || raw(left_literal)

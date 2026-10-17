@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferDedicatedMediaQueryMethods;
@@ -19,7 +19,7 @@ pub struct PreferDedicatedMediaQueryMethods;
 impl Rule for PreferDedicatedMediaQueryMethods {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -30,13 +30,13 @@ impl Rule for PreferDedicatedMediaQueryMethods {
     }
 }
 fn check_media_query_size_field(
-    object: &Expr,
-    field: &Identifier,
+    object: Expr<'_>,
+    field: Identifier<'_>,
     span: &Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if (field.name == "width" || field.name == "height") && is_media_query_size(object) {
+    if (field.name() == "width" || field.name() == "height") && is_media_query_size(object) {
         diags.push(ctx.diagnostic(
             "prefer-dedicated-media-query-methods",
             "Use MediaQuery.sizeOf(context) instead of MediaQuery.of(context).size.",
@@ -45,18 +45,16 @@ fn check_media_query_size_field(
     }
 }
 
-fn is_media_query_size(expr: &Expr) -> bool {
-    if let Expr::Field { object, field, .. } = expr.unparenthesized()
-        && field.name == "size"
-        && let Expr::Call { callee, args, .. } = object.unparenthesized()
-        && let Expr::Field {
-            object: mq_obj,
-            field: method,
-            ..
-        } = callee.unparenthesized()
-        && let Expr::Ident(ident) = mq_obj.unparenthesized()
+fn is_media_query_size(expr: Expr<'_>) -> bool {
+    if let Expr::Field(field) = expr.unparenthesized()
+        && field.field().name() == "size"
+        && let Expr::Call(call) = field.object().unparenthesized()
+        && let Expr::Field(method) = call.callee().unparenthesized()
+        && let Expr::Ident(ident) = method.object().unparenthesized()
     {
-        return ident.name == "MediaQuery" && method.name == "of" && args.positional.len() == 1;
+        return ident.name() == "MediaQuery"
+            && method.field().name() == "of"
+            && call.args().positional().len() == 1;
     }
     false
 }
@@ -69,20 +67,15 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Field {
-            object,
-            field,
-            span,
-            ..
-        } = node
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Field(field) = node
         {
-            check_media_query_size_field(object, field, span, &mut self.diags, self.ctx);
+            check_media_query_size_field(field.object(), field.field(), &field.span(), &mut self.diags, self.ctx);
         }
         StructuralTraversal::Continue
     }

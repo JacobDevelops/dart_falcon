@@ -16,7 +16,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::doc_comments::{
     DocLookup, DocResolver, DocScopes, keyword_references, references,
@@ -31,7 +31,7 @@ pub struct CommentReferences;
 impl Rule for CommentReferences {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
@@ -59,14 +59,14 @@ impl Rule for CommentReferences {
                 },
             ));
         };
-        for block in ctx.syntax.doc_blocks(ctx.source) {
+        for block in ctx.tree().doc_blocks(ctx.source) {
             let Some(scope) = scopes.scope_for(&block) else {
                 continue;
             };
-            for (offset, keyword) in keyword_references(ctx.source, &block) {
+            for (offset, keyword) in keyword_references(&block) {
                 report(offset, keyword);
             }
-            let (found, definitions) = references(ctx.source, &block);
+            let (found, definitions) = references(&block);
             for reference in found {
                 let Some(parsed) = reference.parse() else {
                     continue;

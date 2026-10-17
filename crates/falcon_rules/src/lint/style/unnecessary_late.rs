@@ -11,8 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryLate;
@@ -20,7 +19,7 @@ pub struct UnnecessaryLate;
 impl Rule for UnnecessaryLate {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -36,13 +35,13 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let diags = &mut self.diags;
         match decl {
-            TopLevelDecl::Variable(var) if var.is_late => {
-                flag_initialized(&var.declarators, ctx, diags);
+            TopLevelDecl::Variable(var) if var.is_late() => {
+                flag_initialized(var.declarators(), ctx, diags);
             }
             _ => {
                 if let Some(members) = crate::lint::declarations::members_of(decl) {
@@ -59,28 +58,32 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn static_late_fields(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
+fn static_late_fields<'a>(
+    members: AstChildren<'a, ClassMember<'a>>,
+    ctx: &AnalyzeContext,
+    diags: &mut Vec<Diagnostic>,
+) {
     for member in members {
         if let ClassMember::Field(field) = member
-            && field.is_static
-            && field.is_late
+            && field.is_static()
+            && field.is_late()
         {
-            flag_initialized(&field.declarators, ctx, diags);
+            flag_initialized(field.declarators(), ctx, diags);
         }
     }
 }
 
-fn flag_initialized(
-    declarators: &[VarDeclarator],
+fn flag_initialized<'a>(
+    declarators: AstChildren<'a, VarDeclarator<'a>>,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
     for decl in declarators {
-        if decl.initializer.is_some() {
+        if decl.initializer().is_some() {
             diags.push(ctx.diagnostic(
                 "unnecessary-late",
                 "Unnecessary 'late' on an already-lazy static or top-level variable.".to_string(),
-                decl.name.span,
+                decl.name().span(),
             ));
         }
     }

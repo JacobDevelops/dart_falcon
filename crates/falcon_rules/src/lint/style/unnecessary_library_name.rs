@@ -9,7 +9,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 use falcon_syntax::language_version::Feature;
 
 #[derive(Default)]
@@ -18,22 +18,22 @@ pub struct UnnecessaryLibraryName;
 impl Rule for UnnecessaryLibraryName {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if !ctx.language_version().supports(Feature::UnnamedLibraries) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let mut diags = Vec::new();
-        if let Some(lib) = &program.library_directive
-            && let (Some(first), Some(last)) = (lib.name.first(), lib.name.last())
+        if let Some(lib) = program.library_directive()
+            && let (Some(first), Some(last)) = (lib.name().next(), lib.name().last())
         {
             diags.push(ctx.diagnostic(
                 "unnecessary-library-name",
                 "Library names are not necessary.",
                 DiagSpan {
-                    start: first.span.start,
-                    end: last.span.end,
+                    start: first.span().start,
+                    end: last.span().end,
                 },
             ));
         }

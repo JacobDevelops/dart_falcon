@@ -19,7 +19,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct MaximumNestingLevel;
@@ -27,7 +27,7 @@ pub struct MaximumNestingLevel;
 impl Rule for MaximumNestingLevel {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Nesting {
@@ -66,22 +66,22 @@ struct Nesting<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Nesting<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Nesting<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.name = node.body.as_ref().map(|_| node.name.span);
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.name = node.body().map(|_| node.name().span());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
-        self.name = falcon_syntax::visitor::declared_member_name(node, self.ctx.source);
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
+        self.name = falcon_syntax::cst::visit::declared_member_name(node, self.ctx.source);
         if self.name.is_some() { StructuralTraversal::Continue } else { StructuralTraversal::SkipChildren }
     }
 
-    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+    fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
         match parent {
             StructuralNode::FunctionDecl(_) | StructuralNode::MethodDecl(_)
             | StructuralNode::ConstructorDecl(_) | StructuralNode::GetterDecl(_)
@@ -91,7 +91,7 @@ impl StructuralRuleVisitor for Nesting<'_> {
         }
     }
 
-    fn visit_function_body(&mut self, _node: &FunctionBody) -> StructuralTraversal {
+    fn visit_function_body(&mut self, _node: FunctionBody<'a>) -> StructuralTraversal {
         if self.name.is_none() {
             return StructuralTraversal::SkipChildren;
         }
@@ -104,7 +104,7 @@ impl StructuralRuleVisitor for Nesting<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_function_body(&mut self, _node: &FunctionBody) {
+    fn exit_function_body(&mut self, _node: FunctionBody<'a>) {
         if self.name.is_none() {
             return;
         }
@@ -123,7 +123,7 @@ impl StructuralRuleVisitor for Nesting<'_> {
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.statements.push((self.depth, self.else_if));
         if matches!(node, Stmt::LocalFunc(_)) {
             self.depth = 0;
@@ -136,34 +136,34 @@ impl StructuralRuleVisitor for Nesting<'_> {
                 | Stmt::Switch(_)
                 | Stmt::TryCatch(_)
         ) {
-            if !matches!(node, Stmt::If(n) if self.else_if == Some(n.span.start)) {
+            if !matches!(node, Stmt::If(n) if self.else_if == Some(n.span().start)) {
                 self.depth += 1;
             }
             self.max = self.max.max(self.depth);
         }
         if let Stmt::If(n) = node {
             // Else-if chains share the outer if's level.
-            self.else_if = n.else_branch.as_deref().and_then(|branch| match branch {
-                Stmt::If(n) => Some(n.span.start),
+            self.else_if = n.else_branch().and_then(|branch| match branch {
+                Stmt::If(n) => Some(n.span().start),
                 _ => None,
             });
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, _node: &Stmt) {
+    fn exit_stmt(&mut self, _node: Stmt<'a>) {
         (self.depth, self.else_if) = self.statements.pop().unwrap();
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.expressions.push(self.depth);
-        if matches!(node, Expr::FuncExpr { .. }) {
+        if matches!(node, Expr::FuncExpr(_)) {
             self.depth = 0;
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.depth = self.expressions.pop().unwrap();
     }
 }

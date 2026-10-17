@@ -8,16 +8,15 @@ use tracing::info;
 use clap::{Args, ValueEnum};
 use falcon_analyze::environment::{DartSdk, PackageConfig};
 use falcon_analyze::{
-    AnalysisEnvironment, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
+    AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
 };
 use falcon_config::{load_config, load_or_default};
-use falcon_dart_parser::lex_syntax;
+use falcon_dart_parser::lex_tree;
 use falcon_diagnostics::{Diagnostic, LineIndex};
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, package_identities,
     requires_resolution, run_cross_file,
 };
-use falcon_syntax::{Program, ast::Span};
 
 use crate::file_walker::{walk_files, walk_pubspecs};
 use crate::output;
@@ -174,22 +173,14 @@ pub fn collect_check_with_sdk_locator(
     );
     let total_files = files.len() + manifests.len();
     if collect_programs {
-        let empty_program = Program {
-            library_directive: None,
-            part_of_directive: None,
-            part_directives: Vec::new(),
-            imports: Vec::new(),
-            exports: Vec::new(),
-            declarations: Vec::new(),
-            span: Span::new(0, 0),
-        };
         project_files.extend(manifests.drain(..).map(|(path, source)| {
-            let syntax = lex_syntax(&source);
+            let tree = lex_tree(&source);
             ProjectFile {
                 path,
-                source,
-                program: empty_program.clone(),
-                syntax,
+                parsed: std::sync::Arc::new(ParsedFile {
+                    source: source.into_boxed_str(),
+                    tree,
+                }),
                 has_parse_errors: false,
             }
         }));
@@ -219,7 +210,7 @@ pub fn collect_check_with_sdk_locator(
     let sources: HashMap<Cow<'_, str>, &str> = if collect_programs {
         project_files
             .iter()
-            .map(|file| (file.path.to_string_lossy(), file.source.as_str()))
+            .map(|file| (file.path.to_string_lossy(), file.source()))
             .collect()
     } else {
         files

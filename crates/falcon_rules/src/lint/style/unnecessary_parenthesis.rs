@@ -48,9 +48,8 @@ use falcon_analyze::{
     StructuralTraversal, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_expr;
+use falcon_syntax::cst::visit::for_each_expr;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 
@@ -60,14 +59,14 @@ pub struct UnnecessaryParenthesis;
 impl Rule for UnnecessaryParenthesis {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
             ctx,
-            model: ctx
-                .identities
-                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+            model: ctx.identities.map(|identities| {
+                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            }),
             nullable_extension_members: nullable_extension_members(program),
             field_init_values: HashSet::new(),
             in_cascade: vec![false],
@@ -82,21 +81,21 @@ impl Rule for UnnecessaryParenthesis {
 }
 
 /// Members of extensions in this file whose extended type is nullable.
-fn nullable_extension_members(program: &Program) -> HashSet<String> {
+fn nullable_extension_members(program: Program<'_>) -> HashSet<&str> {
     let mut names = HashSet::new();
-    for declaration in &program.declarations {
+    for declaration in program.declarations() {
         let TopLevelDecl::Extension(extension) = declaration else {
             continue;
         };
-        if !(extension.on_type.is_nullable()
-            || matches!(extension.on_type, DartType::Dynamic { .. }))
+        if !(extension.on_type().is_nullable()
+            || matches!(extension.on_type(), DartType::Dynamic(_)))
         {
             continue;
         }
-        for member in &extension.members {
+        for member in extension.members() {
             let name = match member {
-                ClassMember::Method(method) => &method.name,
-                ClassMember::Getter(getter) => &getter.name,
+                ClassMember::Method(method) => method.name(),
+                ClassMember::Getter(getter) => getter.name(),
                 ClassMember::Field(_)
                 | ClassMember::Constructor(_)
                 | ClassMember::PrimaryConstructorBody(_)
@@ -104,7 +103,7 @@ fn nullable_extension_members(program: &Program) -> HashSet<String> {
                 | ClassMember::Operator(_)
                 | ClassMember::Error(_) => continue,
             };
-            names.insert(name.name.clone());
+            names.insert(name.name());
         }
     }
     names
@@ -194,14 +193,14 @@ impl Parent<'_> {
 /// parentheses) another parenthesized expression.
 #[derive(Clone, Copy)]
 enum Inner<'a> {
-    Expr(&'a Expr),
+    Expr(Expr<'a>),
     Parenthesized,
 }
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: Option<SemanticModel<'a>>,
-    nullable_extension_members: HashSet<String>,
+    nullable_extension_members: HashSet<&'a str>,
     /// Spans of constructor field initializer values.
     field_init_values: HashSet<(usize, usize)>,
     /// Whether the nearest statement-or-cascade ancestor is a cascade.
@@ -220,11 +219,11 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
-fn key(span: &Span) -> (usize, usize) {
+fn key(span: Span) -> (usize, usize) {
     (span.start, span.end)
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
         self.diagnostics.push(self.ctx.diagnostic(
             "unnecessary-parenthesis",
@@ -234,16 +233,16 @@ impl Collector<'_> {
     }
 
     /// Check explicit grouping; surrounding grammar delimiters are not nodes.
-    fn check(&mut self, child: &Expr, parent: Parent<'_>) {
-        let Expr::Paren { expr, span } = child else {
+    fn check(&mut self, child: Expr<'a>, parent: Parent<'_>) {
+        let Expr::Paren(paren) = child else {
             return;
         };
-        let outer = *span;
-        let mut child = expr.as_ref();
+        let outer = paren.span();
+        let mut child = paren.expr();
         let mut nested = false;
-        while let Expr::Paren { expr, span } = child {
-            self.report(*span);
-            child = expr;
+        while let Expr::Paren(paren) = child {
+            self.report(paren.span());
+            child = paren.expr();
             nested = true;
         }
         let inner = if nested {
@@ -263,7 +262,7 @@ impl Collector<'_> {
         };
         // `(int,) r = (3);`: a record missing its trailing comma.
         if let Parent::VariableInitializer { record_typed: true } = parent
-            && !matches!(expression, Some(Expr::Record { .. }))
+            && !matches!(expression, Some(Expr::Record(_)))
         {
             return false;
         }
@@ -274,7 +273,7 @@ impl Collector<'_> {
             return true;
         }
         if let Some(expression) = expression {
-            if matches!(expression, Expr::Conditional { .. })
+            if matches!(expression, Expr::Conditional(_))
                 || is_type_literal(expression, self.model.as_ref())
             {
                 return false;
@@ -301,10 +300,10 @@ impl Collector<'_> {
                 return self.one_token_or_null_aware(expression, null_aware, parent);
             }
             // Bare or instantiated constructor tear-offs.
-            if let Expr::Field { object, field, .. } = expression
-                && (field.name == "new"
-                    || matches!(object.as_ref(), Expr::GenericInstantiation { target, .. }
-                        if matches!(target.as_ref(), Expr::Ident(_))))
+            if let Expr::Field(field) = expression
+                && (field.field().name() == "new"
+                    || matches!(field.object(), Expr::GenericInstantiation(target)
+                        if matches!(target.target(), Expr::Ident(_))))
                 && !matches!(
                     parent,
                     Parent::InvokedFunction {
@@ -316,7 +315,7 @@ impl Collector<'_> {
             }
         }
         // `a..b = (c..d)` and anything inside a cascade.
-        if matches!(expression, Some(Expr::Cascade { .. }))
+        if matches!(expression, Some(Expr::Cascade(_)))
             || self.in_cascade.last().copied().unwrap_or(false)
         {
             return false;
@@ -324,10 +323,8 @@ impl Collector<'_> {
         if self.bare_in_field_initializer(parent) && contains_function_expression(expression) {
             return false;
         }
-        if let Some(Expr::Binary {
-            op: BinaryOp::EqEq | BinaryOp::NotEq,
-            ..
-        }) = expression
+        if let Some(Expr::Binary(binary)) = expression
+            && matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)
             && matches!(
                 parent,
                 Parent::AssignedValue
@@ -340,7 +337,7 @@ impl Collector<'_> {
             return false;
         }
         if matches!(parent, Parent::ExpressionStatement)
-            && matches!(expression, Some(Expr::Switch { .. }))
+            && matches!(expression, Some(Expr::Switch(_)))
         {
             return false;
         }
@@ -375,11 +372,7 @@ impl Collector<'_> {
                     }
                     if matches!(
                         expression,
-                        Some(
-                            Expr::PostfixIncDec { .. }
-                                | Expr::NullAssert { .. }
-                                | Expr::Unary { .. }
-                        )
+                        Some(Expr::PostfixIncDec(_) | Expr::NullAssert(_) | Expr::Unary(_))
                     ) {
                         return false;
                     }
@@ -387,7 +380,7 @@ impl Collector<'_> {
                 _ => {}
             }
             // `({1, 2, 3}).forEach(print);` would parse as a block.
-            if matches!(expression, Some(Expr::Set { .. } | Expr::Map { .. }))
+            if matches!(expression, Some(Expr::Set(_) | Expr::Map(_)))
                 && self.statement_start.last().copied().flatten() == Some(node.start)
             {
                 return false;
@@ -398,7 +391,7 @@ impl Collector<'_> {
 
     fn one_token_or_null_aware(
         &self,
-        expression: &Expr,
+        expression: Expr<'_>,
         null_aware: bool,
         parent: Parent<'_>,
     ) -> bool {
@@ -426,10 +419,7 @@ impl Collector<'_> {
             Parent::Conditional { then_branch: true } | Parent::MapKey
                 if matches!(
                     expression,
-                    Expr::Index {
-                        is_null_safe: true,
-                        ..
-                    }
+                    Expr::Index(index) if index.is_null_safe()
                 ) =>
             {
                 false
@@ -442,42 +432,46 @@ impl Collector<'_> {
         matches!(parent, Parent::FieldInitializer) || self.bare.last().copied().unwrap_or(false)
     }
 
-    fn check_args(&mut self, args: &ArgList) {
-        let sole = args.positional.len() + args.named.len() == 1;
-        for argument in &args.positional {
+    fn check_args(&mut self, args: ArgList<'a>) {
+        let sole = args.positional().len() + args.named().len() == 1;
+        for argument in args.positional() {
             if sole {
                 self.check(argument, Parent::SoleArgument);
             } else {
                 self.check(argument, Parent::Argument);
             }
         }
-        for argument in &args.named {
-            self.check(&argument.value, Parent::NamedArgument);
+        for argument in args.named() {
+            self.check(argument.value(), Parent::NamedArgument);
         }
     }
 
-    fn check_body(&mut self, body: Option<&FunctionBody>) {
-        if let Some(FunctionBody::Arrow(expression, _)) = body {
-            self.check(expression, Parent::ExpressionBody);
+    fn check_body(&mut self, body: Option<FunctionBody<'a>>) {
+        if let Some(FunctionBody::Arrow(body)) = body {
+            self.check(body.expr(), Parent::ExpressionBody);
         }
     }
 
-    fn check_condition(&mut self, condition: &IfCondition) {
+    fn check_condition(&mut self, condition: IfCondition<'a>) {
         match condition {
             IfCondition::Expr(expression) => self.check(expression, Parent::Condition),
-            IfCondition::Case(subject, _, guard) => {
-                self.check(subject, Parent::Condition);
-                if let Some(guard) = guard {
+            IfCondition::Case(condition) => {
+                self.check(condition.expr(), Parent::Condition);
+                if let Some(guard) = condition.guard() {
                     self.check(guard, Parent::OtherNode);
                 }
             }
         }
     }
 
-    fn check_declarators(&mut self, declared: Option<&DartType>, declarators: &[VarDeclarator]) {
+    fn check_declarators(
+        &mut self,
+        declared: Option<DartType<'a>>,
+        declarators: AstChildren<'a, VarDeclarator<'a>>,
+    ) {
         let record_typed = matches!(declared, Some(DartType::Record(_)));
         for declarator in declarators {
-            if let Some(initializer) = &declarator.initializer {
+            if let Some(initializer) = declarator.initializer() {
                 self.check(initializer, Parent::VariableInitializer { record_typed });
             }
         }
@@ -485,340 +479,315 @@ impl Collector<'_> {
 
     /// Checks the elements of a list or set literal, including those nested in
     /// `if` and `for` elements.
-    fn check_elements(&mut self, elements: &[CollectionElement]) {
-        let mut pending: Vec<&CollectionElement> = elements.iter().rev().collect();
+    fn check_elements(&mut self, elements: AstChildren<'a, CollectionElement<'a>>) {
+        let mut pending: Vec<CollectionElement<'a>> = elements.rev().collect();
         while let Some(element) = pending.pop() {
             match element {
                 CollectionElement::Expr(expression) => {
                     self.check(expression, Parent::OtherExpression);
                 }
-                CollectionElement::NullAware { .. } | CollectionElement::Spread { .. } => {}
-                CollectionElement::If {
-                    condition,
-                    then_elem,
-                    else_elem,
-                    ..
-                } => {
-                    self.check_condition(condition);
-                    if let Some(else_elem) = else_elem {
+                CollectionElement::NullAware(_) | CollectionElement::Spread(_) => {}
+                CollectionElement::If(element) => {
+                    self.check_condition(element.condition());
+                    if let Some(else_elem) = element.else_elem() {
                         pending.push(else_elem);
                     }
-                    pending.push(then_elem);
+                    pending.push(element.then_elem());
                 }
-                CollectionElement::For { element, .. } => pending.push(element),
+                CollectionElement::For(element) => pending.push(element.element()),
             }
         }
     }
 
     /// Checks the entries of a map literal, including those nested in `if` and
     /// `for` elements.
-    fn check_entries(&mut self, elements: &[MapElement]) {
-        let mut pending: Vec<&MapElement> = elements.iter().rev().collect();
+    fn check_entries(&mut self, elements: AstChildren<'a, MapElement<'a>>) {
+        let mut pending: Vec<MapElement<'a>> = elements.rev().collect();
         while let Some(element) = pending.pop() {
             match element {
                 MapElement::Entry(entry) => {
-                    if !entry.key_null_aware {
-                        self.check(&entry.key, Parent::MapKey);
+                    if !entry.key_null_aware() {
+                        self.check(entry.key(), Parent::MapKey);
                     }
-                    if !entry.value_null_aware {
-                        self.check(&entry.value, Parent::OtherNode);
+                    if !entry.value_null_aware() {
+                        self.check(entry.value(), Parent::OtherNode);
                     }
                 }
-                MapElement::Spread { .. } => {}
-                MapElement::If {
-                    condition,
-                    then_entry,
-                    else_entry,
-                    ..
-                } => {
-                    self.check_condition(condition);
-                    if let Some(else_entry) = else_entry {
+                MapElement::Spread(_) => {}
+                MapElement::If(element) => {
+                    self.check_condition(element.condition());
+                    if let Some(else_entry) = element.else_entry() {
                         pending.push(else_entry);
                     }
-                    pending.push(then_entry);
+                    pending.push(element.then_entry());
                 }
-                MapElement::For { entry, .. } => pending.push(entry),
+                MapElement::For(element) => pending.push(element.entry()),
             }
         }
     }
 
     /// Checks the direct sub-expressions of `node`.
-    fn check_children(&mut self, node: &Expr) {
+    fn check_children(&mut self, node: Expr<'a>) {
         match node {
-            Expr::Unary { operand, .. } => {
-                if let Expr::Field { span, .. } | Expr::Call { span, .. } = operand.as_ref() {
-                    self.under_prefix.insert(key(span));
+            Expr::Unary(unary) => {
+                let operand = unary.operand();
+                if matches!(operand, Expr::Field(_) | Expr::Call(_)) {
+                    self.under_prefix.insert(key(operand.span()));
                 }
                 self.check(operand, Parent::Prefix);
             }
-            Expr::PostfixIncDec { operand, .. } => {
-                self.check(operand, Parent::OtherExpression);
+            Expr::PostfixIncDec(unary) => self.check(unary.operand(), Parent::OtherExpression),
+            Expr::NullAssert(unary) => self.check(unary.operand(), Parent::NullAssert),
+            Expr::Binary(binary) => {
+                self.check(binary.left(), Parent::Binary);
+                self.check(binary.right(), Parent::Binary);
             }
-            Expr::NullAssert { operand, .. } => self.check(operand, Parent::NullAssert),
-            Expr::Binary { left, right, .. } => {
-                self.check(left, Parent::Binary);
-                self.check(right, Parent::Binary);
+            Expr::Assign(assign) => self.check(assign.value(), Parent::AssignedValue),
+            Expr::Conditional(conditional) => {
+                self.check(
+                    conditional.condition(),
+                    Parent::Conditional { then_branch: false },
+                );
+                self.check(
+                    conditional.then_expr(),
+                    Parent::Conditional { then_branch: true },
+                );
+                self.check(
+                    conditional.else_expr(),
+                    Parent::Conditional { then_branch: false },
+                );
             }
-            Expr::Assign { value, .. } => self.check(value, Parent::AssignedValue),
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                self.check(condition, Parent::Conditional { then_branch: false });
-                self.check(then_expr, Parent::Conditional { then_branch: true });
-                self.check(else_expr, Parent::Conditional { then_branch: false });
-            }
-            Expr::Is { expr, .. } => self.check(expr, Parent::Is),
-            Expr::As { expr, .. } => self.check(expr, Parent::As),
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                span,
-            } if !self.method_callees.contains(&key(span)) => {
+            Expr::Is(expression) => self.check(expression.expr(), Parent::Is),
+            Expr::As(expression) => self.check(expression.expr(), Parent::As),
+            Expr::Field(field) if !self.method_callees.contains(&key(field.span())) => {
                 let parent = Parent::MemberTarget {
-                    name: &field.name,
+                    name: field.field().name(),
                     is_method: false,
-                    under_prefix: self.under_prefix.contains(&key(span)),
-                    null_aware: *is_null_safe,
+                    under_prefix: self.under_prefix.contains(&key(field.span())),
+                    null_aware: field.is_null_safe(),
                 };
-                self.check(object, parent);
+                self.check(field.object(), parent);
             }
-            Expr::Field { .. } => {}
-            Expr::Index { object, index, .. } => {
-                self.check(object, Parent::OtherExpression);
-                self.check(index, Parent::OtherExpression);
+            Expr::Field(_) => {}
+            Expr::Index(index) => {
+                self.check(index.object(), Parent::OtherExpression);
+                self.check(index.index(), Parent::OtherExpression);
             }
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                span,
-            } => {
+            Expr::Call(call) => {
+                let callee = call.callee();
                 // A wrapped callee is a function-expression invocation.
                 let parenthesized = is_parenthesized(callee);
-                match callee.as_ref() {
-                    Expr::Field {
-                        object,
-                        field,
-                        is_null_safe,
-                        span: callee_span,
-                    } if !parenthesized => {
-                        self.method_callees.insert(key(callee_span));
+                match callee {
+                    Expr::Field(field) if !parenthesized => {
+                        self.method_callees.insert(key(field.span()));
                         let parent = Parent::MemberTarget {
-                            name: &field.name,
+                            name: field.field().name(),
                             is_method: true,
-                            under_prefix: self.under_prefix.contains(&key(span)),
-                            null_aware: *is_null_safe,
+                            under_prefix: self.under_prefix.contains(&key(call.span())),
+                            null_aware: field.is_null_safe(),
                         };
-                        self.check(object, parent);
+                        self.check(field.object(), parent);
                     }
                     Expr::Ident(_) if !parenthesized => {}
                     callee => self.check(
                         callee,
                         Parent::InvokedFunction {
-                            has_type_arguments: !type_args.is_empty(),
+                            has_type_arguments: !call.type_args().is_empty(),
                         },
                     ),
                 }
-                self.check_args(args);
+                self.check_args(call.args());
             }
-            Expr::New { args, .. } => self.check_args(args),
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                self.check(object, Parent::CascadeTarget);
-                for section in sections {
-                    for op in &section.ops {
+            Expr::New(expression) => self.check_args(expression.args()),
+            Expr::Cascade(cascade) => {
+                self.check(cascade.object(), Parent::CascadeTarget);
+                for section in cascade.sections() {
+                    for op in section.ops() {
                         match op {
-                            CascadeOp::Field { .. } | CascadeOp::NullAssert { .. } => {}
-                            CascadeOp::Index { index, .. } => {
-                                self.check(index, Parent::OtherExpression);
+                            CascadeOp::Field(_) | CascadeOp::NullAssert(_) => {}
+                            CascadeOp::Index(index) => {
+                                self.check(index.index(), Parent::OtherExpression)
                             }
-                            CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) => {
-                                self.check_args(args);
+                            CascadeOp::Call(call) => self.check_args(call.args()),
+                            CascadeOp::Invoke(call) => self.check_args(call.args()),
+                            CascadeOp::Assign(assign) => {
+                                self.check(assign.value(), Parent::AssignedValue)
                             }
-                            CascadeOp::Assign(_, _, value)
-                            | CascadeOp::IndexAssign(_, _, value) => {
-                                self.check(value, Parent::AssignedValue);
+                            CascadeOp::IndexAssign(assign) => {
+                                self.check(assign.value(), Parent::AssignedValue)
                             }
                         }
                     }
                 }
             }
-            Expr::List { elements, .. } | Expr::Set { elements, .. } => {
-                self.check_elements(elements);
-            }
-            Expr::Map { elements, .. } => self.check_entries(elements),
-            Expr::Record { fields, .. } => {
-                for field in fields.iter().filter(|field| field.name.is_none()) {
-                    self.check(&field.value, Parent::RecordField);
+            Expr::List(list) => self.check_elements(list.elements()),
+            Expr::Set(set) => self.check_elements(set.elements()),
+            Expr::Map(map) => self.check_entries(map.elements()),
+            Expr::Record(record) => {
+                for field in record.fields().filter(|field| field.name().is_none()) {
+                    self.check(field.value(), Parent::RecordField);
                 }
             }
-            Expr::FuncExpr { body, .. } => self.check_body(Some(body)),
-            Expr::Await { expr, .. } | Expr::Throw { expr, .. } => {
-                self.check(expr, Parent::OtherExpression);
+            Expr::FuncExpr(function) => self.check_body(Some(function.body())),
+            Expr::Await(expression) => self.check(expression.expr(), Parent::OtherExpression),
+            Expr::Throw(expression) => self.check(expression.expr(), Parent::OtherExpression),
+            Expr::GenericInstantiation(expression) => {
+                self.check(expression.target(), Parent::OtherExpression)
             }
-            Expr::GenericInstantiation { target, .. } => {
-                self.check(target, Parent::OtherExpression);
-            }
-            Expr::Switch { subject, arms, .. } => {
-                self.check(subject, Parent::Condition);
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
+            Expr::Switch(expression) => {
+                self.check(expression.subject(), Parent::Condition);
+                for arm in expression.arms() {
+                    if let Some(guard) = arm.guard() {
                         self.check(guard, Parent::OtherNode);
                     }
-                    self.check(&arm.body, Parent::OtherNode);
+                    self.check(arm.body(), Parent::OtherNode);
                 }
             }
             Expr::StringLit(string) => {
-                for interpolation in &string.interpolations {
-                    self.check(&interpolation.expr, Parent::Interpolation);
+                for interpolation in string.interpolations() {
+                    self.check(interpolation.expr(), Parent::Interpolation);
                 }
             }
-            Expr::Paren { .. } => {}
-            Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
+            Expr::Paren(_) => {}
+            Expr::IntLit(_)
+            | Expr::DoubleLit(_)
+            | Expr::BoolLit(_)
+            | Expr::NullLit(_)
             | Expr::Ident(_)
-            | Expr::This { .. }
-            | Expr::Super { .. }
-            | Expr::DotShorthand { .. }
-            | Expr::SymbolLit { .. }
-            | Expr::Error { .. } => {}
+            | Expr::This(_)
+            | Expr::Super(_)
+            | Expr::DotShorthand(_)
+            | Expr::SymbolLit(_)
+            | Expr::Error(_) => {}
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
-    fn visit_switch_case(&mut self, node: &SwitchCase) -> StructuralTraversal {
-        for case in &node.cases {
+    fn visit_switch_case(&mut self, node: SwitchCase<'a>) -> StructuralTraversal {
+        for case in node.cases() {
             if let SwitchCaseKind::Expr(expression) = case {
-                self.check(expression, Parent::OtherNode);
+                self.check(expression.expr(), Parent::OtherNode);
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(variable) = node {
-            self.check_declarators(variable.var_type.as_ref(), &variable.declarators);
+            self.check_declarators(variable.var_type(), variable.declarators());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        self.check_declarators(node.field_type.as_ref(), &node.declarators);
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        self.check_declarators(node.field_type(), node.declarators());
         StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        self.check_body(node.body.as_ref());
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            self.check_body(operator.body.as_ref());
+            self.check_body(operator.body());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) -> StructuralTraversal {
-        for initializer in &node.initializers {
+    fn visit_constructor_decl(&mut self, node: ConstructorDecl<'a>) -> StructuralTraversal {
+        for initializer in node.initializers() {
             match initializer {
-                ConstructorInitializer::SuperCall { args, .. }
-                | ConstructorInitializer::ThisCall { args, .. } => self.check_args(args),
-                ConstructorInitializer::FieldInit { value, .. } => {
+                ConstructorInitializer::SuperCall(call) => self.check_args(call.args()),
+                ConstructorInitializer::ThisCall(call) => self.check_args(call.args()),
+                ConstructorInitializer::FieldInit(initializer) => {
+                    let value = initializer.value();
                     self.field_init_values.insert(key(value.span()));
                     self.check(value, Parent::FieldInitializer);
                 }
-                ConstructorInitializer::Assert {
-                    condition, message, ..
-                } => {
-                    self.check(condition, Parent::OtherNode);
-                    if let Some(message) = message {
+                ConstructorInitializer::Assert(assert) => {
+                    self.check(assert.condition(), Parent::OtherNode);
+                    if let Some(message) = assert.message() {
                         self.check(message, Parent::OtherNode);
                     }
                 }
             }
         }
-        self.check_body(node.body.as_ref());
+        self.check_body(node.body());
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         // A statement is the nearest statement-or-cascade ancestor of everything
         // inside it, including its own direct expressions.
         self.in_cascade.push(false);
         self.bare.push(false);
         match node {
             Stmt::Expr(statement) => {
-                self.statement_start.push(Some(statement.span.start));
-                self.check(&statement.expr, Parent::ExpressionStatement);
+                self.statement_start.push(Some(statement.span().start));
+                self.check(statement.expr(), Parent::ExpressionStatement);
             }
             _ => self.statement_start.push(None),
         }
         match node {
-            Stmt::If(statement) => self.check_condition(&statement.condition),
-            Stmt::While(statement) => self.check(&statement.condition, Parent::Condition),
-            Stmt::DoWhile(statement) => self.check(&statement.condition, Parent::Condition),
-            Stmt::Switch(statement) => self.check(&statement.subject, Parent::Condition),
+            Stmt::If(statement) => self.check_condition(statement.condition()),
+            Stmt::While(statement) => self.check(statement.condition(), Parent::Condition),
+            Stmt::DoWhile(statement) => self.check(statement.condition(), Parent::Condition),
+            Stmt::Switch(statement) => self.check(statement.subject(), Parent::Condition),
             Stmt::Return(statement) => {
-                if let Some(value) = &statement.value {
+                if let Some(value) = statement.value() {
                     self.check(value, Parent::Return);
                 }
             }
-            Stmt::Yield(statement) => self.check(&statement.value, Parent::Yield),
-            Stmt::Throw(statement) => self.check(&statement.value, Parent::OtherExpression),
+            Stmt::Yield(statement) => self.check(statement.value(), Parent::Yield),
+            Stmt::Throw(statement) => self.check(statement.value(), Parent::OtherExpression),
             Stmt::LocalVar(declaration) => {
-                self.check_declarators(declaration.var_type.as_ref(), &declaration.declarators);
+                self.check_declarators(declaration.var_type(), declaration.declarators());
             }
             Stmt::PatternDecl(declaration) => {
                 // Pattern declarations are not ordinary variable declarations:
                 // retain the non-expression-parent whitespace exemptions.
-                self.check(&declaration.init, Parent::OtherNode);
+                self.check(declaration.init(), Parent::OtherNode);
             }
             Stmt::Assert(statement) => {
-                self.check(&statement.condition, Parent::OtherNode);
-                if let Some(message) = &statement.message {
+                self.check(statement.condition(), Parent::OtherNode);
+                if let Some(message) = statement.message() {
                     self.check(message, Parent::OtherNode);
                 }
             }
-            Stmt::LocalFunc(function) => self.check_body(Some(&function.body)),
+            Stmt::LocalFunc(function) => self.check_body(Some(function.body())),
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, _node: &Stmt) {
+    fn exit_stmt(&mut self, _node: Stmt<'a>) {
         self.bare.pop();
         self.in_cascade.pop();
         self.statement_start.pop();
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         let bare = if self.field_init_values.contains(&key(node.span())) {
             true
         } else if is_function_boundary(node) {
@@ -826,7 +795,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         } else {
             self.bare.last().copied().unwrap_or(false)
         };
-        let in_cascade = matches!(node, Expr::Cascade { .. })
+        let in_cascade = matches!(node, Expr::Cascade(_))
             || self.in_cascade.last().copied().unwrap_or(false);
         self.bare.push(bare);
         self.in_cascade.push(in_cascade);
@@ -834,7 +803,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.in_cascade.pop();
         self.bare.pop();
     }
@@ -844,12 +813,12 @@ impl StructuralRuleVisitor for Collector<'_> {
 /// A function expression, or a method invocation (whose argument parentheses
 /// delimit any `=>` inside them). A call of a capitalized name may be an
 /// instance creation, which does not delimit.
-fn is_function_boundary(node: &Expr) -> bool {
+fn is_function_boundary(node: Expr<'_>) -> bool {
     match node {
-        Expr::FuncExpr { .. } => true,
-        Expr::Call { callee, .. } => match callee.as_ref() {
-            Expr::Ident(identifier) => !starts_uppercase(&identifier.name),
-            Expr::Field { .. } => true,
+        Expr::FuncExpr(_) => true,
+        Expr::Call(call) => match call.callee() {
+            Expr::Ident(identifier) => !starts_uppercase(identifier.name()),
+            Expr::Field(_) => true,
             _ => false,
         },
         _ => false,
@@ -865,65 +834,50 @@ fn starts_uppercase(name: &str) -> bool {
 
 /// A written type literal; resolve lowercase type names (`int`) as well as
 /// generic types. Capitalization is only a fallback without resolved identity.
-fn is_type_literal(expression: &Expr, model: Option<&SemanticModel<'_>>) -> bool {
-    let is_type_name = |identifier: &Identifier| match model {
-        Some(model) => model.resolve_name(identifier.name.as_str()).is_some(),
-        None => starts_uppercase(&identifier.name),
+fn is_type_literal(expression: Expr<'_>, model: Option<&SemanticModel<'_>>) -> bool {
+    let is_type_name = |identifier: Identifier<'_>| match model {
+        Some(model) => model.resolve_name(identifier.name()).is_some(),
+        None => starts_uppercase(identifier.name()),
     };
     match expression {
         Expr::Ident(identifier) => is_type_name(identifier),
-        Expr::GenericInstantiation { target, .. } => {
-            matches!(target.as_ref(), Expr::Ident(identifier) if is_type_name(identifier))
+        Expr::GenericInstantiation(instantiation) => {
+            matches!(instantiation.target(), Expr::Ident(identifier) if is_type_name(identifier))
         }
         _ => false,
     }
 }
 
-fn is_one_token(expression: &Expr) -> bool {
+fn is_one_token(expression: Expr<'_>) -> bool {
     matches!(
         expression,
         Expr::Ident(_)
             | Expr::StringLit(_)
-            | Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::BoolLit { .. }
+            | Expr::IntLit(_)
+            | Expr::DoubleLit(_)
+            | Expr::NullLit(_)
+            | Expr::BoolLit(_)
     )
 }
 
-fn is_prefixed_identifier(expression: Option<&Expr>) -> bool {
+fn is_prefixed_identifier(expression: Option<Expr<'_>>) -> bool {
     matches!(
         expression,
-        Some(Expr::Field {
-            object,
-            is_null_safe: false,
-            ..
-        }) if matches!(object.as_ref(), Expr::Ident(_))
+        Some(Expr::Field(field))
+            if !field.is_null_safe() && matches!(field.object(), Expr::Ident(_))
     )
 }
 
 /// Whether a property access, method invocation, or index chain contains a
 /// null-aware link (`?.` or `?[`).
-fn contains_null_aware_invocation(expression: &Expr) -> bool {
+fn contains_null_aware_invocation(expression: Expr<'_>) -> bool {
     let mut current = expression;
     loop {
         let (null_aware, target) = match current {
-            Expr::Field {
-                object,
-                is_null_safe,
-                ..
-            }
-            | Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => (*is_null_safe, object),
-            Expr::Call { callee, .. } => match callee.as_ref() {
-                Expr::Field {
-                    object,
-                    is_null_safe,
-                    ..
-                } => (*is_null_safe, object),
+            Expr::Field(field) => (field.is_null_safe(), field.object()),
+            Expr::Index(index) => (index.is_null_safe(), index.object()),
+            Expr::Call(call) => match call.callee() {
+                Expr::Field(field) => (field.is_null_safe(), field.object()),
                 _ => return false,
             },
             _ => return false,
@@ -936,24 +890,24 @@ fn contains_null_aware_invocation(expression: &Expr) -> bool {
 }
 
 /// The analyzer's `directlyContainsWhitespace`.
-fn directly_contains_whitespace(expression: &Expr) -> bool {
+fn directly_contains_whitespace(expression: Expr<'_>) -> bool {
     let mut current = expression;
     loop {
         match current {
-            Expr::As { .. }
-            | Expr::Assign { .. }
-            | Expr::Await { .. }
-            | Expr::Binary { .. }
-            | Expr::FuncExpr { .. }
-            | Expr::Is { .. }
-            | Expr::Switch { .. } => return true,
-            Expr::New { .. } => return true,
-            Expr::List { is_const, .. }
-            | Expr::Map { is_const, .. }
-            | Expr::Set { is_const, .. } => return *is_const,
-            Expr::Field { object, .. } => current = object,
-            Expr::Call { callee, .. } => match callee.as_ref() {
-                Expr::Field { object, .. } => current = object,
+            Expr::As(_)
+            | Expr::Assign(_)
+            | Expr::Await(_)
+            | Expr::Binary(_)
+            | Expr::FuncExpr(_)
+            | Expr::Is(_)
+            | Expr::Switch(_) => return true,
+            Expr::New(_) => return true,
+            Expr::List(list) => return list.is_const(),
+            Expr::Map(map) => return map.is_const(),
+            Expr::Set(set) => return set.is_const(),
+            Expr::Field(field) => current = field.object(),
+            Expr::Call(call) => match call.callee() {
+                Expr::Field(field) => current = field.object(),
                 _ => return false,
             },
             _ => return false,
@@ -961,14 +915,14 @@ fn directly_contains_whitespace(expression: &Expr) -> bool {
     }
 }
 
-fn contains_function_expression(expression: Option<&Expr>) -> bool {
+fn contains_function_expression(expression: Option<Expr<'_>>) -> bool {
     let Some(expression) = expression else {
         // Nested parentheses: the caller's child is checked separately.
         return false;
     };
     let mut found = false;
     for_each_expr(expression, &mut |node| {
-        found |= matches!(node, Expr::FuncExpr { .. });
+        found |= matches!(node, Expr::FuncExpr(_));
     });
     found
 }

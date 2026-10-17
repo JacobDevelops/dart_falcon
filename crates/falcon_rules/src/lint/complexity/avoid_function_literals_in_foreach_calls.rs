@@ -9,7 +9,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -19,7 +19,7 @@ pub struct AvoidFunctionLiteralsInForeachCalls;
 impl Rule for AvoidFunctionLiteralsInForeachCalls {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -36,49 +36,46 @@ struct Collector<'a> {
 
 /// Follow property selectors, not arbitrary descendants: calls in an index or
 /// constructor argument do not make the receiver a method chain.
-fn has_method_chain(mut receiver: &Expr, state: &SemanticState<'_>) -> bool {
+fn has_method_chain<'a>(mut receiver: Expr<'a>, state: &SemanticState<'a>) -> bool {
     loop {
         match receiver {
-            Expr::Field { object, .. } => receiver = object,
-            Expr::Call { callee, .. } => {
-                return !state.is_function_expression_invocation(callee)
-                    && !state.is_constructor_invocation(callee);
+            Expr::Field(field) => receiver = field.object(),
+            Expr::Call(call) => {
+                return !state.is_function_expression_invocation(call.callee())
+                    && !state.is_constructor_invocation(call.callee());
             }
             _ => return false,
         }
     }
 }
 
-fn has_null_aware_chain(mut receiver: &Expr, state: &SemanticState<'_>) -> bool {
+fn has_null_aware_chain<'a>(mut receiver: Expr<'a>, state: &SemanticState<'a>) -> bool {
     loop {
         match receiver {
-            Expr::Field {
-                object,
-                is_null_safe,
-                ..
-            }
-            | Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => {
-                if *is_null_safe {
+            Expr::Field(field) => {
+                if field.is_null_safe() {
                     return true;
                 }
-                receiver = object;
+                receiver = field.object();
             }
-            Expr::Call { callee, .. } => {
-                if state.is_function_expression_invocation(callee) {
+            Expr::Index(index) => {
+                if index.is_null_safe() {
+                    return true;
+                }
+                receiver = index.object();
+            }
+            Expr::Call(call) => {
+                if state.is_function_expression_invocation(call.callee()) {
                     return false;
                 }
-                receiver = callee;
+                receiver = call.callee();
             }
             _ => return false,
         }
     }
 }
 
-fn is_iterable(receiver: &Expr, state: &SemanticState<'_>) -> bool {
+fn is_iterable<'a>(receiver: Expr<'a>, state: &SemanticState<'a>) -> bool {
     let inferred = state.infer(receiver);
     let mut ty = &inferred;
     while let ResolvedType::TypeParameter { bound, .. }
@@ -107,31 +104,27 @@ fn is_iterable(receiver: &Expr, state: &SemanticState<'_>) -> bool {
     ) == Truth::Yes
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Expr::Call { callee, args, .. } = node
-            && let Expr::Field {
-                object,
-                field,
-                is_null_safe: false,
-                ..
-            } = callee.as_ref()
-            && field.name == "forEach"
-            && matches!(args.positional.first(), Some(Expr::FuncExpr { .. }))
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Expr::Call(call) = node
+            && let Expr::Field(field) = call.callee()
+            && !field.is_null_safe()
+            && field.field().name() == "forEach"
+            && matches!(call.args().positional().next(), Some(Expr::FuncExpr(_)))
             && !state.inside_cascade
-            && !state.is_function_expression_invocation(callee)
-            && !has_method_chain(object, state)
-            && !has_null_aware_chain(object, state)
-            && is_iterable(object, state)
+            && !state.is_function_expression_invocation(call.callee())
+            && !has_method_chain(field.object(), state)
+            && !has_null_aware_chain(field.object(), state)
+            && is_iterable(field.object(), state)
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-function-literals-in-foreach-calls",
                 "Avoid using a function literal in a 'forEach' call; use a for-in loop instead.",
-                field.span,
+                field.field().span(),
             ));
         }
     }

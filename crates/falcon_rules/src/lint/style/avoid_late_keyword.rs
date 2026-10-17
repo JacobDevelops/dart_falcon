@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidLateKeyword;
@@ -19,7 +19,7 @@ pub struct AvoidLateKeyword;
 impl Rule for AvoidLateKeyword {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -36,27 +36,27 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(var) = node
-            && var.is_late
+            && var.is_late()
         {
-            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", var.span));
+            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", var.span()));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
-        if node.is_late {
-            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", node.span));
+    fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
+        if node.is_late() {
+            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", node.span()));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
-        if local.is_late {
+    fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
+        if local.is_late() {
             self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", local.full_range()));
         }
         StructuralTraversal::Continue

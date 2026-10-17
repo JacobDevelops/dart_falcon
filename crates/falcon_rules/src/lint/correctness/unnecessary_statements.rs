@@ -38,8 +38,7 @@ use falcon_analyze::{
     AnalyzeContext, MemberKind, MemberResult, ResolvedType, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -52,7 +51,7 @@ pub struct UnnecessaryStatements;
 impl Rule for UnnecessaryStatements {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -100,56 +99,58 @@ struct Member {
 }
 
 /// Top-level and type-member declarations of the current file.
-struct Declarations {
-    top_level: HashMap<String, Effect>,
-    types: HashMap<String, HashMap<String, Member>>,
+struct Declarations<'a> {
+    top_level: HashMap<&'a str, Effect>,
+    types: HashMap<&'a str, HashMap<&'a str, Member>>,
 }
-impl Declarations {
-    fn new(program: &Program) -> Self {
+impl<'a> Declarations<'a> {
+    fn new(program: Program<'a>) -> Self {
         let mut top_level = HashMap::new();
         let mut types = HashMap::new();
-        for declaration in &program.declarations {
-            let (name, members, values): (&Identifier, &[ClassMember], &[EnumVariant]) =
-                match declaration {
-                    TopLevelDecl::Variable(variable) => {
-                        for declarator in &variable.declarators {
-                            top_level.insert(declarator.name.name.clone(), Effect::None);
-                        }
-                        continue;
+        for declaration in program.declarations() {
+            let (name, members, values): (
+                Identifier<'_>,
+                AstChildren<'_, ClassMember<'_>>,
+                Option<AstChildren<'_, EnumVariant<'_>>>,
+            ) = match declaration {
+                TopLevelDecl::Variable(variable) => {
+                    for declarator in variable.declarators() {
+                        top_level.insert(declarator.name().name(), Effect::None);
                     }
-                    TopLevelDecl::Function(function) => {
-                        let effect = match function.kind {
-                            FunctionKind::Function(_) => Effect::None,
-                            FunctionKind::Getter => Effect::Getter,
-                            FunctionKind::Setter(_) => continue,
-                        };
-                        let existing = top_level.get(&function.name.name).copied();
-                        top_level
-                            .insert(function.name.name.clone(), Effect::merge(existing, effect));
-                        continue;
-                    }
-                    TopLevelDecl::TypeAlias(alias) => {
-                        top_level.insert(alias.name.name.clone(), Effect::None);
-                        continue;
-                    }
-                    TopLevelDecl::ClassTypeAlias(alias) => {
-                        top_level.insert(alias.name.name.clone(), Effect::None);
-                        continue;
-                    }
-                    TopLevelDecl::Class(class) => (&class.name, &class.members, &[]),
-                    TopLevelDecl::MixinClass(class) => (&class.name, &class.members, &[]),
-                    TopLevelDecl::Mixin(mixin) => (&mixin.name, &mixin.members, &[]),
-                    TopLevelDecl::Enum(enumeration) => (
-                        &enumeration.name,
-                        &enumeration.members,
-                        &enumeration.variants,
-                    ),
-                    TopLevelDecl::ExtensionType(extension) => {
-                        (&extension.name, &extension.members, &[])
-                    }
-                    TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => continue,
-                };
-            top_level.insert(name.name.clone(), Effect::None);
+                    continue;
+                }
+                TopLevelDecl::Function(function) => {
+                    let effect = match function.kind() {
+                        FunctionKind::Function(_) => Effect::None,
+                        FunctionKind::Getter => Effect::Getter,
+                        FunctionKind::Setter(_) => continue,
+                    };
+                    let existing = top_level.get(function.name().name()).copied();
+                    top_level.insert(function.name().name(), Effect::merge(existing, effect));
+                    continue;
+                }
+                TopLevelDecl::TypeAlias(alias) => {
+                    top_level.insert(alias.name().name(), Effect::None);
+                    continue;
+                }
+                TopLevelDecl::ClassTypeAlias(alias) => {
+                    top_level.insert(alias.name().name(), Effect::None);
+                    continue;
+                }
+                TopLevelDecl::Class(class) => (class.name(), class.members(), None),
+                TopLevelDecl::MixinClass(class) => (class.name(), class.members(), None),
+                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members(), None),
+                TopLevelDecl::Enum(enumeration) => (
+                    enumeration.name(),
+                    enumeration.members(),
+                    Some(enumeration.variants()),
+                ),
+                TopLevelDecl::ExtensionType(extension) => {
+                    (extension.name(), extension.members(), None)
+                }
+                TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => continue,
+            };
+            top_level.insert(name.name(), Effect::None);
             let primary = match declaration {
                 TopLevelDecl::Class(class) => Some(class.element_members()),
                 TopLevelDecl::MixinClass(class) => Some(class.element_members()),
@@ -157,12 +158,14 @@ impl Declarations {
                 TopLevelDecl::ExtensionType(extension) => Some(extension.element_members()),
                 _ => None,
             };
-            let additional_fields = primary.map_or(0, |primary| primary.declaring_params().count());
+            let additional_fields = primary
+                .as_ref()
+                .map_or(0, |primary| primary.declaring_params().count());
             let mut members = type_members(members, values, additional_fields);
             if let Some(primary) = primary {
                 for param in primary.declaring_params() {
                     members.insert(
-                        param.name.name.clone(),
+                        param.name().name(),
                         Member {
                             effect: Effect::None,
                             is_static: false,
@@ -170,21 +173,23 @@ impl Declarations {
                     );
                 }
             }
-            types.insert(name.name.clone(), members);
+            types.insert(name.name(), members);
         }
         Self { top_level, types }
     }
 }
 
-fn type_members(
-    members: &[ClassMember],
-    values: &[EnumVariant],
+fn type_members<'a>(
+    members: AstChildren<'a, ClassMember<'a>>,
+    values: Option<AstChildren<'a, EnumVariant<'a>>>,
     additional_fields: usize,
-) -> HashMap<String, Member> {
-    let mut map = HashMap::with_capacity(members.len() + values.len() + additional_fields);
-    for value in values {
+) -> HashMap<&'a str, Member> {
+    let mut map = HashMap::with_capacity(
+        members.len() + values.as_ref().map_or(0, AstChildren::len) + additional_fields,
+    );
+    for value in values.into_iter().flatten() {
         map.insert(
-            value.name.name.clone(),
+            value.name().name(),
             Member {
                 effect: Effect::None,
                 is_static: true,
@@ -194,21 +199,21 @@ fn type_members(
     for member in members {
         let (name, effect, is_static) = match member {
             ClassMember::Field(field) => {
-                for declarator in &field.declarators {
+                for declarator in field.declarators() {
                     map.insert(
-                        declarator.name.name.clone(),
+                        declarator.name().name(),
                         Member {
                             effect: Effect::None,
-                            is_static: field.is_static,
+                            is_static: field.is_static(),
                         },
                     );
                 }
                 continue;
             }
-            ClassMember::Method(method) => (&method.name, Effect::None, method.is_static),
-            ClassMember::Getter(getter) => (&getter.name, Effect::Getter, getter.is_static),
+            ClassMember::Method(method) => (method.name(), Effect::None, method.is_static()),
+            ClassMember::Getter(getter) => (getter.name(), Effect::Getter, getter.is_static()),
             // Named constructors tear off a function without invoking it.
-            ClassMember::Constructor(constructor) => match &constructor.constructor_name {
+            ClassMember::Constructor(constructor) => match constructor.constructor_name() {
                 Some(name) => (name, Effect::None, true),
                 None => continue,
             },
@@ -217,9 +222,9 @@ fn type_members(
             | ClassMember::Operator(_)
             | ClassMember::Error(_) => continue,
         };
-        let existing = map.get(&name.name).map(|member: &Member| member.effect);
+        let existing = map.get(name.name()).map(|member: &Member| member.effect);
         map.insert(
-            name.name.clone(),
+            name.name(),
             Member {
                 effect: Effect::merge(existing, effect),
                 is_static,
@@ -231,27 +236,27 @@ fn type_members(
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: Declarations,
+    declarations: Declarations<'a>,
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'_>) {
         match node {
-            Stmt::Expr(statement) => self.check(&statement.expr, state),
+            Stmt::Expr(statement) => self.check(statement.expr(), state),
             Stmt::For(statement)
-                if matches!(statement.header.init, None | Some(ForInit::Exprs(_))) =>
+                if matches!(statement.header().init(), None | Some(ForInit::Exprs(_))) =>
             {
-                if let Some(ForInit::Exprs(initializers)) = &statement.header.init {
-                    for initializer in initializers {
+                if let Some(ForInit::Exprs(initializers)) = statement.header().init() {
+                    for initializer in initializers.exprs() {
                         self.check(initializer, state);
                     }
                 }
-                for update in &statement.header.updates {
+                for update in statement.header().updates() {
                     self.check(update, state);
                 }
             }
@@ -259,23 +264,26 @@ impl SemanticRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Cascade {
-            object, sections, ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'_>) {
+        let Expr::Cascade(cascade) = node else {
             return;
         };
-        let target = state.infer(object);
-        for section in sections {
-            let [CascadeOp::Field { name, .. }] = section.ops.as_slice() else {
+        let target = state.infer(cascade.object());
+        for section in cascade.sections() {
+            let mut operations = section.ops();
+            let Some(CascadeOp::Field(field)) = operations.next() else {
                 continue;
             };
-            let facts =
-                state
-                    .signatures
-                    .resolved_interface_member_facts(&target, &name.name, &state.model);
-            let is_method = (name.name == "call"
+            if operations.next().is_some() {
+                continue;
+            }
+            let name = field.name();
+            let facts = state.signatures.resolved_interface_member_facts(
+                &target,
+                name.name(),
+                &state.model,
+            );
+            let is_method = (name.name() == "call"
                 && matches!(target, ResolvedType::Function { .. }))
                 || facts.is_some_and(|facts| {
                     facts
@@ -283,18 +291,18 @@ impl SemanticRuleVisitor for Collector<'_> {
                         .all(|fact| matches!(fact.kind, MemberKind::Method))
                 })
                 || (facts.is_none()
-                    && self.index_member(&target, &name.name) == Some(MemberKind::Method));
+                    && self.index_member(&target, name.name()) == Some(MemberKind::Method));
             let is_function_value = state
                 .signatures
-                .resolved_field(&target, &name.name, &state.model)
+                .resolved_field(&target, name.name(), &state.model)
                 .or_else(|| {
                     state
                         .signatures
-                        .resolved_extension_getter(&target, &name.name, &state.model)
+                        .resolved_extension_getter(&target, name.name(), &state.model)
                 })
                 .is_some_and(|(ty, _)| matches!(ty, ResolvedType::Function { .. }));
             if is_method || is_function_value {
-                self.report(section.span);
+                self.report(section.span());
             }
         }
     }
@@ -308,67 +316,66 @@ impl Collector<'_> {
 
     /// Reports `root` and, through `&&`/`||`/`??` right operands and
     /// conditional branches, the sub-expressions that have no clear effect.
-    fn check(&mut self, root: &Expr, state: &SemanticState<'_>) {
+    fn check(&mut self, root: Expr<'_>, state: &SemanticState<'_>) {
         let mut pending = vec![root];
         while let Some(expression) = pending.pop() {
             let report = match expression {
-                Expr::As { .. }
-                | Expr::Assign { .. }
-                | Expr::Await { .. }
-                | Expr::Cascade { .. }
-                | Expr::Call { .. }
-                | Expr::New { .. }
-                | Expr::PostfixIncDec { .. }
-                | Expr::NullAssert { .. }
-                | Expr::Throw { .. }
-                | Expr::DotShorthand { .. }
-                | Expr::Error { .. } => false,
-                Expr::Binary {
-                    op: BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce,
-                    right,
-                    ..
-                } => {
-                    pending.push(right);
+                Expr::As(_)
+                | Expr::Assign(_)
+                | Expr::Await(_)
+                | Expr::Cascade(_)
+                | Expr::Call(_)
+                | Expr::New(_)
+                | Expr::PostfixIncDec(_)
+                | Expr::NullAssert(_)
+                | Expr::Throw(_)
+                | Expr::DotShorthand(_)
+                | Expr::Error(_) => false,
+                Expr::Binary(binary)
+                    if matches!(
+                        binary.op(),
+                        BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
+                    ) =>
+                {
+                    pending.push(binary.right());
                     false
                 }
-                Expr::Conditional {
-                    then_expr,
-                    else_expr,
-                    ..
-                } => {
-                    pending.push(else_expr);
-                    pending.push(then_expr);
+                Expr::Conditional(conditional) => {
+                    pending.push(conditional.else_expr());
+                    pending.push(conditional.then_expr());
                     false
                 }
-                Expr::Unary { op, .. } => !matches!(op, UnaryOp::PlusPlus | UnaryOp::MinusMinus),
+                Expr::Unary(unary) => {
+                    !matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus)
+                }
                 Expr::Ident(identifier) => {
-                    self.identifier(&identifier.name, state) != Some(Effect::Getter)
+                    self.identifier(identifier.name(), state) != Some(Effect::Getter)
                 }
-                Expr::Field { object, field, .. } => {
-                    self.property(object, &field.name, state) == Some(Effect::None)
+                Expr::Field(field) => {
+                    self.property(field.object(), field.field().name(), state) == Some(Effect::None)
                 }
-                Expr::Binary { .. }
-                | Expr::Paren { .. }
-                | Expr::IntLit { .. }
-                | Expr::DoubleLit { .. }
+                Expr::Binary(_)
+                | Expr::Paren(_)
+                | Expr::IntLit(_)
+                | Expr::DoubleLit(_)
                 | Expr::StringLit(_)
-                | Expr::BoolLit { .. }
-                | Expr::NullLit { .. }
-                | Expr::SymbolLit { .. }
-                | Expr::GenericInstantiation { .. }
-                | Expr::This { .. }
-                | Expr::Super { .. }
-                | Expr::Is { .. }
-                | Expr::Index { .. }
-                | Expr::List { .. }
-                | Expr::Map { .. }
-                | Expr::Set { .. }
-                | Expr::Record { .. }
-                | Expr::FuncExpr { .. }
-                | Expr::Switch { .. } => true,
+                | Expr::BoolLit(_)
+                | Expr::NullLit(_)
+                | Expr::SymbolLit(_)
+                | Expr::GenericInstantiation(_)
+                | Expr::This(_)
+                | Expr::Super(_)
+                | Expr::Is(_)
+                | Expr::Index(_)
+                | Expr::List(_)
+                | Expr::Map(_)
+                | Expr::Set(_)
+                | Expr::Record(_)
+                | Expr::FuncExpr(_)
+                | Expr::Switch(_) => true,
             };
             if report {
-                self.report(*expression.span());
+                self.report(expression.span());
             }
         }
     }
@@ -394,23 +401,23 @@ impl Collector<'_> {
         self.member_effect(enclosing, name, state)
     }
 
-    /// What `object.name` denotes.
-    fn property(&self, object: &Expr, name: &str, state: &SemanticState<'_>) -> Option<Effect> {
+    /// What `object.name()` denotes.
+    fn property(&self, object: Expr<'_>, name: &str, state: &SemanticState<'_>) -> Option<Effect> {
         // `C<T>.named` is a constructor reference, not a getter.
-        if let Expr::GenericInstantiation { target, .. } = object
-            && let Expr::Ident(identifier) = target.as_ref()
-            && !state.environment.is_bound(&identifier.name)
-            && (self.declarations.types.contains_key(&identifier.name)
-                || state.model.resolve_name(&identifier.name).is_some())
+        if let Expr::GenericInstantiation(instantiation) = object
+            && let Expr::Ident(identifier) = instantiation.target()
+            && !state.environment.is_bound(identifier.name())
+            && (self.declarations.types.contains_key(identifier.name())
+                || state.model.resolve_name(identifier.name()).is_some())
         {
             return Some(Effect::None);
         }
         if let Expr::Ident(identifier) = object
-            && !state.environment.is_bound(&identifier.name)
+            && !state.environment.is_bound(identifier.name())
         {
             // A resolved type or import prefix can denote a static member.
-            if self.declarations.top_level.get(&identifier.name) == Some(&Effect::None)
-                && let Some(members) = self.declarations.types.get(&identifier.name)
+            if self.declarations.top_level.get(identifier.name()) == Some(&Effect::None)
+                && let Some(members) = self.declarations.types.get(identifier.name())
             {
                 if name == "new" {
                     return Some(Effect::None);
@@ -420,12 +427,12 @@ impl Collector<'_> {
                     .filter(|member| member.is_static)
                     .map(|member| member.effect);
             }
-            if let Some(identity) = state.model.resolve_name(&identifier.name)
+            if let Some(identity) = state.model.resolve_name(identifier.name())
                 && (name == "new" || state.signatures.constructor(&identity, name).is_some())
             {
                 return Some(Effect::None);
             }
-            if let Some(identity) = state.model.resolve_name(&identifier.name) {
+            if let Some(identity) = state.model.resolve_name(identifier.name()) {
                 let receiver = ResolvedType::interface_identity(identity);
                 if let Some(facts) =
                     state
@@ -439,9 +446,10 @@ impl Collector<'_> {
                         .fold(None, |effect, next| Some(Effect::merge(effect, next)));
                 }
             }
-            let is_value = self.declarations.top_level.get(&identifier.name) == Some(&Effect::None)
-                && !self.declarations.types.contains_key(&identifier.name);
-            if !is_value && state.model.resolve_name(&identifier.name).is_none() {
+            let is_value = self.declarations.top_level.get(identifier.name())
+                == Some(&Effect::None)
+                && !self.declarations.types.contains_key(identifier.name());
+            if !is_value && state.model.resolve_name(identifier.name()).is_none() {
                 return Some(Effect::None);
             }
         }
@@ -513,7 +521,7 @@ impl Collector<'_> {
     }
 
     /// Members declared in this file by the enclosing type.
-    fn own_members(&self, enclosing: &ResolvedType) -> Option<&HashMap<String, Member>> {
+    fn own_members(&self, enclosing: &ResolvedType) -> Option<&HashMap<&str, Member>> {
         let ResolvedType::Interface { identity, .. } = enclosing else {
             return None;
         };

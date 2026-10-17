@@ -29,7 +29,7 @@ use falcon_analyze::{
     StructuralTraversal, Truth, has_immutable_annotation,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::first_token_after_annotations;
 
@@ -39,7 +39,7 @@ pub struct AvoidEqualsAndHashCodeOnMutableClasses;
 impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -51,38 +51,38 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
 }
 
 struct Collector<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
             let (name, annotations, members, has_supertypes) = match decl {
                 TopLevelDecl::Class(class) => (
-                    &class.name.name,
-                    &class.annotations,
-                    &class.members,
-                    class.extends.is_some()
-                        || !class.with_clause.is_empty()
-                        || !class.implements.is_empty(),
+                    class.name().name(),
+                    class.annotations(),
+                    class.members(),
+                    class.extends().is_some()
+                        || !class.with_clause().is_empty()
+                        || !class.implements().is_empty(),
                 ),
                 TopLevelDecl::MixinClass(class) => (
-                    &class.name.name,
-                    &class.annotations,
-                    &class.members,
-                    class.extends.is_some()
-                        || !class.with_clause.is_empty()
-                        || !class.implements.is_empty(),
+                    class.name().name(),
+                    class.annotations(),
+                    class.members(),
+                    class.extends().is_some()
+                        || !class.with_clause().is_empty()
+                        || !class.implements().is_empty(),
                 ),
                 _ => return StructuralTraversal::SkipChildren,
             };
             let immutable = match (ctx.identities, ctx.signatures) {
                 (Some(identities), Some(signatures)) => {
-                    SemanticModel::new(ctx.file_path, identities, ctx.types)
-                        .resolve_name(&**name)
+                    SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+                        .resolve_name(name)
                         .map_or(Truth::Unknown, |identity| {
                             signatures.has_immutable_supertype(&identity, false)
                         })
@@ -96,16 +96,16 @@ impl StructuralRuleVisitor for Collector<'_> {
             }
             for member in members {
                 let (member_name, annotations, span) = match member {
-                    ClassMember::Operator(op) if op.op == "==" => ("==", &op.annotations, op.span),
-                    ClassMember::Getter(getter) if getter.name.name == "hashCode" => {
-                        ("hashCode", &getter.annotations, getter.span)
+                    ClassMember::Operator(op) if op.op() == "==" => ("==", op.annotations(), op.span()),
+                    ClassMember::Getter(getter) if getter.name().name() == "hashCode" => {
+                        ("hashCode", getter.annotations(), getter.span())
                     }
-                    ClassMember::Method(method) if method.name.name == "hashCode" => {
-                        ("hashCode", &method.annotations, method.span)
+                    ClassMember::Method(method) if method.name().name() == "hashCode" => {
+                        ("hashCode", method.annotations(), method.span())
                     }
                     _ => continue,
                 };
-                let start = first_token_after_annotations(annotations, span, ctx.syntax);
+                let start = first_token_after_annotations(annotations, span, ctx.tree(), ctx.source);
                 self.diags.push(ctx.diagnostic(
             "avoid-equals-and-hash-code-on-mutable-classes",
             format!(
@@ -113,8 +113,8 @@ impl StructuralRuleVisitor for Collector<'_> {
             ),
             Span::new(
                 start,
-                ctx.syntax
-                    .tokens_in(Span::new(start, span.end))
+                ctx.tree()
+                    .tokens_in(ctx.source, Span::new(start, span.end))
                     .next()
                     .map_or(start, |token| token.offset() + token.len()),
             ),
@@ -149,9 +149,14 @@ class Mutable {
 ";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = AvoidEqualsAndHashCodeOnMutableClasses.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics =
+            AvoidEqualsAndHashCodeOnMutableClasses.analyze(parsed.tree.program(source), &ctx);
         assert_eq!(diagnostics.len(), 2);
         for (diagnostic, expected) in diagnostics.iter().zip(["bool", "int"]) {
             assert_eq!(diagnostic.span.start, source.find(expected).unwrap());

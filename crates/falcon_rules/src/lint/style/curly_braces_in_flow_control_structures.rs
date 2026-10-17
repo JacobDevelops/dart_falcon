@@ -13,7 +13,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct CurlyBracesInFlowControlStructures;
@@ -21,7 +21,7 @@ pub struct CurlyBracesInFlowControlStructures;
 impl Rule for CurlyBracesInFlowControlStructures {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -42,73 +42,73 @@ struct Collector<'s> {
 impl Collector<'_> {
     /// True when the body begins on the same source line as the condition's
     /// closing `)`, mirroring the official single-line `if` exemption.
-    fn on_condition_line(&self, statement: &IfStmt) -> bool {
-        let start = statement.then_branch.span().start;
+    fn on_condition_line(&self, statement: IfStmt<'_>) -> bool {
+        let start = statement.then_branch().span().start;
         let close = self
             .ctx
-            .syntax
-            .tokens_in(Span::new(statement.span.start, start))
+            .tree()
+            .tokens_in(self.source, Span::new(statement.span().start, start))
             .rev()
-            .find(|token| token.kind == TokenKind::RParen);
+            .find(|token| token.kind() == TokenKind::RParen);
         close.is_none_or(|token| !self.source[token.offset()..start].contains('\n'))
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         match node {
-            Stmt::If(i) => match &i.else_branch {
+            Stmt::If(i) => match i.else_branch() {
                 None => {
-                    if !matches!(&*i.then_branch, Stmt::Block(_)) && !self.on_condition_line(i) {
+                    if !matches!(i.then_branch(), Stmt::Block(_)) && !self.on_condition_line(i) {
                         self.diags.push(self.ctx.diagnostic(
                             "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",
-                            *i.then_branch.span(),
+                            i.then_branch().span(),
                         ));
                     }
                 }
                 Some(eb) => {
-                    if !matches!(&*i.then_branch, Stmt::Block(_)) {
+                    if !matches!(i.then_branch(), Stmt::Block(_)) {
                         self.diags.push(self.ctx.diagnostic(
                             "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",
-                            *i.then_branch.span(),
+                            i.then_branch().span(),
                         ));
                     }
                     // An `else if` chain is fine; any other non-block else is not.
-                    if !matches!(&**eb, Stmt::Block(_) | Stmt::If(_)) {
+                    if !matches!(eb, Stmt::Block(_) | Stmt::If(_)) {
                         self.diags.push(self.ctx.diagnostic(
                             "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",
-                            *eb.span(),
+                            eb.span(),
                         ));
                     }
                 }
             },
-            Stmt::For(f) if !matches!(&*f.body, Stmt::Block(_)) => {
+            Stmt::For(f) if !matches!(f.body(), Stmt::Block(_)) => {
                 self.diags.push(self.ctx.diagnostic(
                     "curly-braces-in-flow-control-structures",
                     "Use curly braces around the body of this flow-control statement",
-                    *f.body.span(),
+                    f.body().span(),
                 ))
             }
-            Stmt::While(w) if !matches!(&*w.body, Stmt::Block(_)) => {
+            Stmt::While(w) if !matches!(w.body(), Stmt::Block(_)) => {
                 self.diags.push(self.ctx.diagnostic(
                     "curly-braces-in-flow-control-structures",
                     "Use curly braces around the body of this flow-control statement",
-                    *w.body.span(),
+                    w.body().span(),
                 ))
             }
-            Stmt::DoWhile(d) if !matches!(&*d.body, Stmt::Block(_)) => {
+            Stmt::DoWhile(d) if !matches!(d.body(), Stmt::Block(_)) => {
                 self.diags.push(self.ctx.diagnostic(
                     "curly-braces-in-flow-control-structures",
                     "Use curly braces around the body of this flow-control statement",
-                    *d.body.span(),
+                    d.body().span(),
                 ))
             }
             _ => {}

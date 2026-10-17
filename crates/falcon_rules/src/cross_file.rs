@@ -21,7 +21,7 @@ use std::time::SystemTime;
 
 use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::ast::{ExportDirective, ImportDirective, PartDirective, Program};
+use falcon_syntax::cst::Program;
 use marked_yaml::{Node as MarkedNode, parse_yaml};
 use serde_yaml::Value;
 
@@ -315,19 +315,14 @@ pub fn resolve_directive_uri(
 }
 
 /// Conditional alternatives also keep platform-specific files reachable.
-fn program_reference_uris(program: &Program) -> impl Iterator<Item = &str> {
-    let imports = program.imports.iter().flat_map(|i: &ImportDirective| {
-        std::iter::once(i.uri.value.as_str())
-            .chain(i.configurable_uris.iter().map(|c| c.uri.value.as_str()))
+fn program_reference_uris(program: Program<'_>) -> impl Iterator<Item = std::borrow::Cow<'_, str>> {
+    let imports = program.imports().flat_map(|i| {
+        std::iter::once(i.uri().value()).chain(i.configurable_uris().map(|c| c.uri().value()))
     });
-    let exports = program.exports.iter().flat_map(|e: &ExportDirective| {
-        std::iter::once(e.uri.value.as_str())
-            .chain(e.configurable_uris.iter().map(|c| c.uri.value.as_str()))
+    let exports = program.exports().flat_map(|e| {
+        std::iter::once(e.uri().value()).chain(e.configurable_uris().map(|c| c.uri().value()))
     });
-    let parts = program
-        .part_directives
-        .iter()
-        .map(|p: &PartDirective| p.uri.value.as_str());
+    let parts = program.part_directives().map(|p| p.uri().value());
     imports.chain(exports).chain(parts)
 }
 
@@ -475,8 +470,8 @@ pub fn build_reference_graph(
 
     let mut adj = vec![Vec::new(); files.len()];
     for (i, f) in files.iter().enumerate() {
-        for uri in program_reference_uris(&f.program) {
-            match resolve_directive_uri(&canons[i], uri, pkg) {
+        for uri in program_reference_uris(f.program()) {
+            match resolve_directive_uri(&canons[i], &uri, pkg) {
                 Some(ResolvedRef::Path(p)) => {
                     if let Some(&j) = by_path.get(p.as_path()) {
                         adj[i].push(j);
@@ -540,16 +535,21 @@ pub(crate) fn assert_project_fixture(rule_name: &str, rule: &dyn falcon_analyze:
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).unwrap();
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = falcon_dart_parser::parser::parse(&source);
-        let ctx = falcon_analyze::AnalyzeContext::new(&path, &source, &config, &syntax)
+        let falcon_dart_parser::ParseResult { tree, .. } =
+            falcon_dart_parser::parser::parse(&source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into_boxed_str(),
+            tree,
+        });
+        let source = parsed.source.as_ref();
+        let program = parsed.program();
+        let ctx = falcon_analyze::AnalyzeContext::new(&path, &config, &parsed)
             .with_environment(Some(&environment));
         let line_of = |offset: usize| source[..offset].matches('\n').count() + 1;
         let diagnostics = if inference::requires_sdk(&path) {
-            inference::analyze(rule, &path, &source, &config)
+            inference::analyze(rule, &path, source, &config)
         } else {
-            rule.analyze(&program, &ctx)
+            rule.analyze(program, &ctx)
         };
         let mut actual: Vec<usize> = diagnostics
             .iter()
@@ -735,18 +735,14 @@ mod tests {
         std::fs::create_dir(&sources).unwrap();
         std::fs::write(package_root.join("pubspec.yaml"), "name: 'pkg' # comment\n").unwrap();
         std::os::unix::fs::symlink(&sources, package_root.join("lib")).unwrap();
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse("");
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse("");
         assert!(errors.is_empty());
         let package = detect_package(&[ProjectFile {
             path: package_root.join("test.dart"),
-            source: String::new(),
-            program,
-            syntax,
+            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: "".into(),
+                tree,
+            }),
             has_parse_errors: false,
         }]);
         let expected_root = canonical_or_lexical(&sources);
@@ -759,25 +755,32 @@ mod tests {
     #[test]
     fn program_reference_uris_yields_configurable_uris() {
         let src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';";
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(src);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
         assert!(errors.is_empty(), "{errors:?}");
-        let uris: Vec<&str> = program_reference_uris(&program).collect();
+        let uris: Vec<_> = program_reference_uris(tree.program(src)).collect();
         assert!(
-            uris.contains(&"src/impl_stub.dart"),
+            uris.iter().any(|uri| uri == "src/impl_stub.dart"),
             "default uri: {uris:?}"
         );
-        assert!(uris.contains(&"src/impl_io.dart"), "io branch: {uris:?}");
-        assert!(uris.contains(&"src/impl_web.dart"), "web branch: {uris:?}");
+        assert!(
+            uris.iter().any(|uri| uri == "src/impl_io.dart"),
+            "io branch: {uris:?}"
+        );
+        assert!(
+            uris.iter().any(|uri| uri == "src/impl_web.dart"),
+            "web branch: {uris:?}"
+        );
     }
 
     #[test]
     fn conditional_import_uris_are_collected_too() {
         let src = "import 'src/stub.dart' if (dart.library.io) 'src/io.dart';";
-        let falcon_dart_parser::ParseResult { program, .. } = parse(src);
-        let uris: Vec<&str> = program_reference_uris(&program).collect();
-        assert!(uris.contains(&"src/io.dart"), "import branch: {uris:?}");
+        let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
+        let uris: Vec<_> = program_reference_uris(tree.program(src)).collect();
+        assert!(
+            uris.iter().any(|uri| uri == "src/io.dart"),
+            "import branch: {uris:?}"
+        );
     }
 
     #[test]

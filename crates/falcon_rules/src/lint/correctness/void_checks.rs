@@ -29,8 +29,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
@@ -44,7 +43,7 @@ pub struct VoidChecks;
 impl Rule for VoidChecks {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -67,11 +66,11 @@ struct Collector<'a> {
     /// function literal with its inferred return type, or a local function
     /// declaration (`None`), whose returns use the walker's return type.
     functions: Vec<(Span, Option<ResolvedType>)>,
-    bodies: FunctionBodies,
+    bodies: FunctionBodies<'a>,
     pattern_assignments: Vec<Span>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn enter_function(&mut self, span: Span, return_type: Option<ResolvedType>) {
         self.functions
             .retain(|(enclosing, _)| enclosing.start <= span.start && span.end <= enclosing.end);
@@ -102,8 +101,8 @@ impl Collector<'_> {
     fn check_value(
         &mut self,
         expected: &ResolvedType,
-        value: &Expr,
-        state: &SemanticState<'_>,
+        value: Expr<'a>,
+        state: &SemanticState<'a>,
         reported_span: Span,
         return_statement: bool,
     ) {
@@ -111,8 +110,8 @@ impl Collector<'_> {
             && !(expected.interface("dart:async", "FutureOr")
                 && matches!(expected.arguments().first(), Some(ResolvedType::Void)))
             && !(matches!(expected, ResolvedType::Function { .. })
-                && matches!(value, Expr::FuncExpr { body, .. }
-                    if matches!(body.as_ref(), FunctionBody::Block(_))))
+                && matches!(value, Expr::FuncExpr(function)
+                    if matches!(function.body(), FunctionBody::Block(_))))
         {
             return;
         }
@@ -127,8 +126,8 @@ impl Collector<'_> {
         if acceptable(
             expected,
             &actual,
-            matches!(value, Expr::FuncExpr { body, .. }
-                if matches!(body.as_ref(), FunctionBody::Block(_))),
+            matches!(value, Expr::FuncExpr(function)
+                if matches!(function.body(), FunctionBody::Block(_))),
             return_statement,
         ) == Truth::No
         {
@@ -144,19 +143,19 @@ impl Collector<'_> {
         &mut self,
         positional: &[ResolvedType],
         named: &std::collections::HashMap<String, ResolvedType>,
-        args: &ArgList,
-        state: &SemanticState<'_>,
+        args: ArgList<'a>,
+        state: &SemanticState<'a>,
     ) {
-        for (argument, expected) in args.positional.iter().zip(positional) {
-            self.check_value(expected, argument, state, *argument.span(), false);
+        for (argument, expected) in args.positional().zip(positional) {
+            self.check_value(expected, argument, state, argument.span(), false);
         }
-        for argument in &args.named {
-            if let Some(expected) = named.get(&argument.name.name) {
+        for argument in args.named() {
+            if let Some(expected) = named.get(argument.name().name()) {
                 self.check_value(
                     expected,
-                    &argument.value,
+                    argument.value(),
                     state,
-                    *argument.value.span(),
+                    argument.value().span(),
                     false,
                 );
             }
@@ -165,28 +164,28 @@ impl Collector<'_> {
 
     fn check_call(
         &mut self,
-        callee: &Expr,
-        type_args: &[DartType],
-        args: &ArgList,
-        state: &SemanticState<'_>,
+        callee: Expr<'a>,
+        type_args: AstChildren<'a, DartType<'a>>,
+        args: ArgList<'a>,
+        state: &SemanticState<'a>,
     ) {
         // Function-expression invocations have no MethodInvocation visitor in
         // the official rule. An explicit `.call(...)` is still a method call.
         if is_parenthesized(callee)
             || match callee {
                 Expr::Ident(name) => {
-                    if state.environment.is_bound(&name.name) {
-                        !state.environment.is_local_function(&name.name)
+                    if state.environment.is_bound(name.name()) {
+                        !state.environment.is_local_function(name.name())
                     } else {
-                        state.is_variable_read(&name.name)
+                        state.is_variable_read(name.name())
                             || state
                                 .model
-                                .resolve_value(&name.name)
+                                .resolve_value(name.name())
                                 .is_some_and(|identity| state.signatures.is_value_getter(&identity))
                             || state.enclosing_type.as_ref().is_some_and(|receiver| {
                                 state
                                     .signatures
-                                    .resolved_member_facts(receiver, &name.name, &state.model)
+                                    .resolved_member_facts(receiver, name.name(), &state.model)
                                     .is_some_and(|facts| {
                                         facts.iter().any(|fact| {
                                             fact.kind == falcon_analyze::MemberKind::Getter
@@ -195,22 +194,27 @@ impl Collector<'_> {
                             })
                     }
                 }
-                Expr::Field { object, field, .. } => {
+                Expr::Field(field) => {
+                    let object = field.object();
                     let receiver = state.infer_receiver(object);
                     state
                         .signatures
-                        .resolved_field(&receiver, &field.name, &state.model)
+                        .resolved_field(&receiver, field.field().name(), &state.model)
                         .is_some()
                         || state
                             .signatures
-                            .resolved_extension_getter(&receiver, &field.name, &state.model)
+                            .resolved_extension_getter(
+                                &receiver,
+                                field.field().name(),
+                                &state.model,
+                            )
                             .is_some()
                         || falcon_analyze::expression_segments(object, true)
                             .and_then(|segments| state.model.resolve_dotted(&segments))
                             .is_some_and(|identity| {
                                 state
                                     .signatures
-                                    .declared_member_facts(&identity, &field.name)
+                                    .declared_member_facts(&identity, field.field().name())
                                     .iter()
                                     .any(|fact| {
                                         matches!(
@@ -220,10 +224,10 @@ impl Collector<'_> {
                                         )
                                     })
                             })
-                        || matches!(object.as_ref(), Expr::Ident(prefix)
-                        if !state.environment.is_bound(&prefix.name)
+                        || matches!(object, Expr::Ident(prefix)
+                        if !state.environment.is_bound(prefix.name())
                             && state.model.resolve_value(
-                                falcon_analyze::QualifiedName::prefixed(&prefix.name, &field.name),
+                                falcon_analyze::QualifiedName::prefixed(prefix.name(), field.field().name()),
                             ).is_some_and(|identity| {
                                 state.signatures.value_type(&identity).is_some()
                             }))
@@ -239,49 +243,53 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
     fn visit_cascade_operation(
         &mut self,
-        operation: &CascadeOp,
+        operation: CascadeOp<'a>,
         receiver: &ResolvedType,
         _section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         // Invoking a preceding selector's result is a FunctionExpressionInvocation,
         // not one of the MethodInvocation nodes visited by the official lint.
-        let CascadeOp::Call(name, type_args, args) = operation else {
+        let CascadeOp::Call(call) = operation else {
             return;
         };
+        let name = call.name();
+        let type_args = call.type_args();
+        let args = call.args();
         if let Some((signature, owner)) =
             state
                 .signatures
-                .resolved_member(receiver, &name.name, &state.model)
+                .resolved_member(receiver, name.name(), &state.model)
         {
             let substitutions =
                 state.signature_substitutions(signature, &owner, type_args, args, None);
             let (positional, named) = state.substituted_parameters(signature, &substitutions);
             self.check_arguments(&positional, &named, args, state);
-        } else if name.name == "call"
+        } else if name.name() == "call"
             && let ResolvedType::Function {
                 positional, named, ..
             } = receiver
         {
-            for (argument, expected) in args.positional.iter().zip(positional.iter()) {
-                self.check_value(expected, argument, state, *argument.span(), false);
+            for (argument, expected) in args.positional().zip(positional.iter()) {
+                self.check_value(expected, argument, state, argument.span(), false);
             }
-            for argument in &args.named {
-                if let Some((_, expected)) =
-                    named.iter().find(|(name, _)| name == &argument.name.name)
+            for argument in args.named() {
+                if let Some((_, expected)) = named
+                    .iter()
+                    .find(|(name, _)| name == argument.name().name())
                 {
                     self.check_value(
                         expected,
-                        &argument.value,
+                        argument.value(),
                         state,
-                        *argument.value.span(),
+                        argument.value().span(),
                         false,
                     );
                 }
@@ -291,10 +299,10 @@ impl SemanticRuleVisitor for Collector<'_> {
 
     fn visit_cascade_assignment(
         &mut self,
-        assignment: CascadeAssignment<'_>,
+        assignment: CascadeAssignment<'a>,
         receiver: &ResolvedType,
         section: Span,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
         let expected = if assignment.indexed {
             state
@@ -309,7 +317,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         } else if let Expr::Ident(name) = assignment.target {
             state
                 .signatures
-                .resolved_writable_field(receiver, &name.name, &state.model)
+                .resolved_writable_field(receiver, name.name(), &state.model)
                 .map(|(ty, owner)| state.model.substitute(&ty, &owner))
         } else {
             None
@@ -319,40 +327,31 @@ impl SemanticRuleVisitor for Collector<'_> {
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Some((value_span, return_span)) = self.pending_return.take()
-            && value_span == *node.span()
+            && value_span == node.span()
             && let Some(expected) = self.return_type(return_span, state)
         {
             self.check_value(&expected, node, state, return_span, true);
         }
         match node {
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => {
-                if let Expr::GenericInstantiation {
-                    target,
-                    type_args: instantiated,
-                    ..
-                } = callee.as_ref()
-                {
-                    self.check_call(target, instantiated, args, state);
+            Expr::Call(call) => {
+                if let Expr::GenericInstantiation(instantiation) = call.callee() {
+                    self.check_call(
+                        instantiation.target(),
+                        instantiation.type_args(),
+                        call.args(),
+                        state,
+                    );
                 } else {
-                    self.check_call(callee, type_args, args, state);
+                    self.check_call(call.callee(), call.type_args(), call.args(), state);
                 }
             }
-            Expr::New {
-                dart_type,
-                constructor_name,
-                args,
-                ..
-            } => {
+            Expr::New(new) => {
+                let args = new.args();
                 let constructor = falcon_analyze::resolve_new_constructor(
-                    dart_type,
-                    constructor_name.as_ref(),
+                    new.dart_type(),
+                    new.constructor_name(),
                     &state.model,
                 );
                 let resolved = state.infer_with_context(node, state.expected());
@@ -381,16 +380,12 @@ impl SemanticRuleVisitor for Collector<'_> {
                     self.check_arguments(&signature.positional, &signature.named, args, state);
                 }
             }
-            Expr::Assign {
-                target,
-                op: AssignOp::Eq,
-                value,
-                ..
-            } => {
-                let expected = if let Expr::Index { object, .. } = target.as_ref() {
+            Expr::Assign(assignment) if assignment.op() == AssignOp::Eq => {
+                let target = assignment.target();
+                let expected = if let Expr::Index(index) = target {
                     state
                         .signatures
-                        .resolved_member(&state.infer(object), "[]=", &state.model)
+                        .resolved_member(&state.infer(index.object()), "[]=", &state.model)
                         .and_then(|(signature, substitutions)| {
                             signature
                                 .positional
@@ -401,27 +396,29 @@ impl SemanticRuleVisitor for Collector<'_> {
                 } else {
                     state.writable_type(target)
                 };
-                self.check_value(&expected, value, state, *node.span(), false);
+                self.check_value(&expected, assignment.value(), state, node.span(), false);
             }
-            Expr::FuncExpr { body, .. } if matches!(body.as_ref(), FunctionBody::Block(_)) => {
+            Expr::FuncExpr(function) if matches!(function.body(), FunctionBody::Block(_)) => {
                 let return_type = state
                     .infer_with_context(node, state.expected())
                     .function_return_type()
                     .unwrap_or(ResolvedType::Unknown);
-                self.enter_function(*node.span(), Some(return_type));
+                self.enter_function(node.span(), Some(return_type));
             }
             _ => {}
         }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, _state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, _state: &SemanticState<'a>) {
         match node {
-            Stmt::Return(ReturnStmt {
-                value: Some(value), ..
-            }) => self.pending_return = Some((*value.span(), *node.span())),
-            Stmt::LocalFunc(_) => self.enter_function(*node.span(), None),
+            Stmt::Return(statement) => {
+                if let Some(value) = statement.value() {
+                    self.pending_return = Some((value.span(), node.span()));
+                }
+            }
+            Stmt::LocalFunc(_) => self.enter_function(node.span(), None),
             Stmt::PatternAssign(assignment) => {
-                self.pattern_assignments.push(*assignment.pattern.span());
+                self.pattern_assignments.push(assignment.pattern().span());
             }
             _ => {}
         }
@@ -429,22 +426,22 @@ impl SemanticRuleVisitor for Collector<'_> {
 
     fn visit_pattern(
         &mut self,
-        node: &Pattern,
+        node: Pattern<'a>,
         matched: Option<&ResolvedType>,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
-        if let Pattern::Variable { name, .. } = node
+        if let Pattern::Variable(variable) = node
             && self.pattern_assignments.iter().any(|assignment| {
                 assignment.start <= node.span().start && node.span().end <= assignment.end
             })
             && let Some(actual) = matched
         {
-            let expected = state.environment.declared_type(&name.name);
+            let expected = state.environment.declared_type(variable.name().name());
             if acceptable(&expected, actual, false, false) == Truth::No {
                 self.diagnostics.push(self.ctx.diagnostic(
                     "void-checks",
                     "This value is not valid for a generic type instantiated with void.",
-                    *node.span(),
+                    node.span(),
                 ));
             }
         }
@@ -513,11 +510,12 @@ fn acceptable_for_future_or_void(actual: &ResolvedType) -> Truth {
 mod tests {
     use super::*;
     use falcon_analyze::{
-        IdentityIndex, IdentitySource, RuleAnalysis, SemanticModel, SignatureIndex,
+        IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, SemanticModel, SignatureIndex,
     };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn grouped_generic_callees_are_not_direct_invocations() {
@@ -533,28 +531,28 @@ void use(Value value) {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = VoidChecks.analyze(&program, &ctx);
+        let diagnostics = VoidChecks.analyze(program, &ctx);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
 
@@ -580,35 +578,33 @@ void use() {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
         struct ContextProbe(usize);
-        impl SemanticRuleVisitor for ContextProbe {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                if let Expr::Call {
-                    callee, type_args, ..
-                } = node
-                    && type_args.is_empty()
-                    && matches!(callee.as_ref(), Expr::Ident(name) if name.name == "make")
+        impl<'a> SemanticRuleVisitor<'a> for ContextProbe {
+            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+                if let Expr::Call(call) = node
+                    && call.type_args().is_empty()
+                    && matches!(call.callee(), Expr::Ident(name) if name.name() == "make")
                 {
                     let inferred = state.infer_with_context(node, state.expected());
                     assert_eq!(inferred.type_argument(0), Some(ResolvedType::Void));
@@ -619,11 +615,11 @@ void use() {
         let mut probe = ContextProbe(0);
         visit_program(
             &mut probe,
-            &program,
-            SemanticState::new(&program, &ctx).unwrap(),
+            program,
+            SemanticState::new(program, &ctx).unwrap(),
         );
         assert_eq!(probe.0, 1);
-        let diagnostics = VoidChecks.analyze(&program, &ctx);
+        let diagnostics = VoidChecks.analyze(program, &ctx);
         let mut actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -694,13 +690,13 @@ void use() {
 ";
         std::fs::write(&path, source).unwrap();
         let path = falcon_analyze::canonical_or_lexical(&path);
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
                 let root = config?.flutter_root.as_ref()?;
@@ -708,14 +704,14 @@ void use() {
             });
         let external = ExternalLibraries::load(
             &environment,
-            &[(path.as_path(), &program, source)],
+            &[(path.as_path(), program, source)],
             |candidate| candidate == path.as_path(),
         );
         assert!(!external.is_empty());
         let identities = IdentityIndex::build(
             &[IdentitySource {
                 path: &path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[source],
@@ -729,7 +725,7 @@ void use() {
             [(
                 path.as_path(),
                 LibrarySource {
-                    program: &program,
+                    program,
                     has_parse_errors: false,
                     has_unresolved_parts: false,
                 },
@@ -738,17 +734,17 @@ void use() {
         );
         types.add_external(&external, &identities);
         let signatures = SignatureIndex::build(
-            &[(path.clone(), &program)],
+            &[(path.clone(), Arc::clone(&parsed))],
             Some(&external),
             &identities,
             &types,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = VoidChecks.analyze(&program, &ctx);
+        let diagnostics = VoidChecks.analyze(program, &ctx);
         let mut actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
@@ -783,30 +779,30 @@ void cases(Factory owner, Object value) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+        let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("void-checks", Box::new(VoidChecks));
-        let diagnostics = registry.run_all(&program, &ctx);
+        let diagnostics = registry.run_all(program, &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))

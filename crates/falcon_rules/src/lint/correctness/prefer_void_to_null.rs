@@ -28,7 +28,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, QualifiedName, ResolvedType, Rule,
     RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferVoidToNull;
@@ -36,13 +36,13 @@ pub struct PreferVoidToNull;
 impl Rule for PreferVoidToNull {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         let finder = NullTypes {
             model,
             signatures,
@@ -75,21 +75,21 @@ struct NullTypes<'a> {
 
 impl<'a> NullTypes<'a> {
     /// The `Null` name token, if `ty` is the `dart:core` `Null` type.
-    fn null_name(&self, ty: &DartType) -> Option<Span> {
+    fn null_name(&self, ty: DartType<'a>) -> Option<Span> {
         let DartType::Named(named) = ty else {
             return None;
         };
-        let last = named.segments.last()?;
-        if last.name != "Null" {
+        let last = named.segments().last()?;
+        if last.name() != "Null" {
             return None;
         }
         let identity = self
             .model
-            .resolve_name(QualifiedName::from_identifiers(&named.segments)?)?;
-        identity.is_sdk("dart:core", "Null").then_some(last.span)
+            .resolve_name(QualifiedName::from_identifiers(named.segments())?)?;
+        identity.is_sdk("dart:core", "Null").then_some(last.span())
     }
 
-    fn exempt(&mut self, ty: Option<&DartType>) {
+    fn exempt(&mut self, ty: Option<DartType<'a>>) {
         if let Some(ty) = ty {
             self.exempt.insert(ty.span().start);
         }
@@ -138,7 +138,7 @@ impl<'a> NullTypes<'a> {
 
 fn resolve_all<'t>(
     model: &SemanticModel<'_>,
-    types: impl Iterator<Item = &'t DartType>,
+    types: impl Iterator<Item = DartType<'t>>,
 ) -> Vec<ResolvedType> {
     types.map(|ty| model.resolve_type(ty)).collect()
 }
@@ -160,7 +160,7 @@ fn is_void_like(ty: &ResolvedType) -> bool {
 }
 
 falcon_analyze::structural_visitor! {
-impl<'a> StructuralRuleVisitor for NullTypes<'a> {
+impl<'a> StructuralRuleVisitor<'a> for NullTypes<'a> {
     fn finish(self: Box<Self>) -> Vec<falcon_diagnostics::Diagnostic> {
         self.spans.into_iter().map(|span| self.ctx.diagnostic(
             "prefer-void-to-null",
@@ -169,74 +169,73 @@ impl<'a> StructuralRuleVisitor for NullTypes<'a> {
         )).collect()
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.enclosing_stack.push(self.enclosing.take());
         let model = self.model;
-        let owner = |name: &Identifier| model.resolve_name(name.name.as_str());
+        let owner = |name: Identifier<'a>| model.resolve_name(name.name());
         match node {
             TopLevelDecl::Variable(variable) => {
-                self.exempt(variable.var_type.as_ref());
+                self.exempt(variable.var_type());
             }
             TopLevelDecl::Extension(extension) => {
-                self.exempt(Some(&extension.on_type));
+                self.exempt(Some(extension.on_type()));
                 self.enclosing = None;
             }
             TopLevelDecl::ExtensionType(extension_type) => {
                 self.exempt(
                     extension_type
                         .representation()
-                        .and_then(|representation| representation.param_type.as_ref()),
+                        .and_then(|representation| representation.param_type()),
                 );
                 let enclosing = Enclosing {
-                    owner: owner(&extension_type.name),
-                    supertypes: resolve_all(&model, extension_type.implements.iter()),
+                    owner: owner(extension_type.name()),
+                    supertypes: resolve_all(&model, extension_type.implements()),
                 };
                 self.enclosing = Some(enclosing);
             }
             TopLevelDecl::Class(class) => {
                 let enclosing = Enclosing {
-                    owner: owner(&class.name),
+                    owner: owner(class.name()),
                     supertypes: resolve_all(
                         &model,
                         class
-                            .extends
-                            .iter()
-                            .chain(&class.with_clause)
-                            .chain(&class.implements),
+                            .extends()
+                            .into_iter()
+                            .chain(class.with_clause())
+                            .chain(class.implements()),
                     ),
                 };
                 self.enclosing = Some(enclosing);
             }
             TopLevelDecl::MixinClass(class) => {
                 let enclosing = Enclosing {
-                    owner: owner(&class.name),
+                    owner: owner(class.name()),
                     supertypes: resolve_all(
                         &model,
                         class
-                            .extends
-                            .iter()
-                            .chain(&class.with_clause)
-                            .chain(&class.implements),
+                            .extends()
+                            .into_iter()
+                            .chain(class.with_clause())
+                            .chain(class.implements()),
                     ),
                 };
                 self.enclosing = Some(enclosing);
             }
             TopLevelDecl::Mixin(mixin) => {
                 let enclosing = Enclosing {
-                    owner: owner(&mixin.name),
-                    supertypes: resolve_all(&model, mixin.on_clause.iter().chain(&mixin.implements)),
+                    owner: owner(mixin.name()),
+                    supertypes: resolve_all(&model, mixin.on_clause().chain(mixin.implements())),
                 };
                 self.enclosing = Some(enclosing);
             }
             TopLevelDecl::Enum(enumeration) => {
                 let enclosing = Enclosing {
-                    owner: owner(&enumeration.name),
+                    owner: owner(enumeration.name()),
                     supertypes: resolve_all(
                         &model,
                         enumeration
-                            .with_clause
-                            .iter()
-                            .chain(&enumeration.implements),
+                            .with_clause()
+                            .chain(enumeration.implements()),
                     ),
                 };
                 self.enclosing = Some(enclosing);
@@ -249,50 +248,46 @@ impl<'a> StructuralRuleVisitor for NullTypes<'a> {
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+    fn exit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) {
         self.enclosing = self.enclosing_stack.pop().unwrap();
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        if let Some(return_type) = &node.return_type
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        if let Some(return_type) = node.return_type()
             && self.null_name(return_type).is_some()
-            && self.incompatible_override(&node.name.name, false)
+            && self.incompatible_override(node.name().name(), false)
         {
             self.exempt(Some(return_type));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        if let Some(return_type) = &node.return_type
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        if let Some(return_type) = node.return_type()
             && self.null_name(return_type).is_some()
-            && self.incompatible_override(&node.name.name, true)
+            && self.incompatible_override(node.name().name(), true)
         {
             self.exempt(Some(return_type));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
-        self.exempt(node.var_type.as_ref());
+    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
+        self.exempt(node.var_type());
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::As { dart_type, .. } => self.exempt(Some(dart_type)),
-            Expr::List {
-                type_arg, elements, ..
+            Expr::As(expression) => self.exempt(Some(expression.dart_type())),
+            Expr::List(expression) if expression.elements().is_empty() => {
+                self.exempt(expression.type_arg());
             }
-            | Expr::Set {
-                type_arg, elements, ..
-            } if elements.is_empty() => self.exempt(type_arg.as_ref()),
-            Expr::Map {
-                type_args,
-                elements,
-                ..
-            } if elements.is_empty() => {
-                for type_arg in type_args {
+            Expr::Set(expression) if expression.elements().is_empty() => {
+                self.exempt(expression.type_arg());
+            }
+            Expr::Map(expression) if expression.elements().is_empty() => {
+                for type_arg in expression.type_args() {
                     self.exempt(Some(type_arg));
                 }
             }
@@ -301,25 +296,25 @@ impl<'a> StructuralRuleVisitor for NullTypes<'a> {
         StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
-        if let Pattern::Cast { cast_type, .. } = node {
-            self.exempt(Some(cast_type));
+    fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
+        if let Pattern::Cast(pattern) = node {
+            self.exempt(Some(pattern.cast_type()));
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let Some(span) = self.null_name(node)
             && !self.exempt.contains(&node.span().start)
         {
             self.spans.push(span);
         }
         if let DartType::Function(function) = node {
-            if let Some(return_type) = &function.return_type {
+            if let Some(return_type) = function.return_type() {
                 self.exempt(Some(return_type));
             }
-            for param in &function.params {
-                self.exempt(Some(&param.param_type));
+            for param in function.params() {
+                self.exempt(Some(param.param_type()));
             }
         }
         StructuralTraversal::Continue

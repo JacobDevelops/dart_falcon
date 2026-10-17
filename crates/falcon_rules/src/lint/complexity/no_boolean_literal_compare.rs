@@ -2,8 +2,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::{BinaryOp, Expr};
+use falcon_syntax::cst::{BinaryOp, Expr, Program};
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -13,7 +12,7 @@ pub struct NoBooleanLiteralCompare;
 impl Rule for NoBooleanLiteralCompare {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -28,24 +27,23 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op: BinaryOp::EqEq | BinaryOp::NotEq,
-            left,
-            right,
-            span,
-            ..
-        } = node
-        else {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::Binary(binary) = node else {
             return;
         };
-        let operand = match (left.unparenthesized(), right.unparenthesized()) {
-            (Expr::BoolLit { .. }, operand) | (operand, Expr::BoolLit { .. }) => operand,
+        if !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) {
+            return;
+        }
+        let operand = match (
+            binary.left().unparenthesized(),
+            binary.right().unparenthesized(),
+        ) {
+            (Expr::BoolLit(_), operand) | (operand, Expr::BoolLit(_)) => operand,
             _ => return,
         };
         let ty = state.infer(operand);
@@ -53,7 +51,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             self.diags.push(self.ctx.diagnostic(
                 "no-boolean-literal-compare",
                 "Avoid comparing boolean values to boolean literals",
-                *span,
+                binary.span(),
             ));
         }
     }

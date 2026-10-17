@@ -18,11 +18,14 @@ pub mod suppressions;
 pub use constant_value::{
     ConstantDeclaration, ConstantType, ConstantValue, Construction, evaluate_constant,
     evaluate_constant_in_library, evaluate_constant_in_member_context,
-    evaluate_constant_with_local_values, evaluate_construction,
-    evaluate_construction_with_local_values, invocation_type_args, parse_int,
+    evaluate_constant_name_with_local_values, evaluate_constant_with_local_values,
+    evaluate_construction, evaluate_construction_with_local_values, evaluate_pattern_constant,
+    invocation_type_args, parse_int,
 };
 pub use context::AnalyzeContext;
-pub use cross_file::{CrossFileRule, CrossFileRuleRegistry, ProjectFile, SemanticIndexes};
+pub use cross_file::{
+    CrossFileRule, CrossFileRuleRegistry, NodeRef, ParsedFile, ProjectFile, SemanticIndexes,
+};
 pub use environment::{
     AnalysisEnvironment, ExternalLibraries, ExternalOrigin, Feature, LanguageVersion,
     PackageConfig, percent_decode,

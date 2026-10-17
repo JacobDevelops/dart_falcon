@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidInvertedBooleanExpressions;
@@ -19,7 +19,7 @@ pub struct AvoidInvertedBooleanExpressions;
 impl Rule for AvoidInvertedBooleanExpressions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -42,47 +42,38 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.chain_contexts.push(self.skipping_chain);
-        if self.skipping_chain && (is_bang_unary(node) || matches!(node, Expr::Paren { .. })) {
+        if self.skipping_chain && (is_bang_unary(node) || matches!(node, Expr::Paren(_))) {
             return StructuralTraversal::Continue;
         }
         self.skipping_chain = false;
-        if let Expr::Unary {
-            op: UnaryOp::Bang,
-            operand,
-            span,
-        } = node
-            && is_bang_unary(operand)
+        if let Expr::Unary(unary) = node
+            && unary.op() == UnaryOp::Bang
+            && is_bang_unary(unary.operand())
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-inverted-boolean-expressions",
                 "Avoid inverted boolean expressions. Simplify the double negation.",
-                *span,
+                unary.span(),
             ));
             self.skipping_chain = true;
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.skipping_chain = self.chain_contexts.pop().unwrap();
     }
 }
 }
 
 /// True for a `!`-prefixed expression — the inner half of a `!!` double negation.
-fn is_bang_unary(expr: &Expr) -> bool {
-    matches!(
-        expr.unparenthesized(),
-        Expr::Unary {
-            op: UnaryOp::Bang,
-            ..
-        }
-    )
+fn is_bang_unary(expr: Expr<'_>) -> bool {
+    matches!(expr.unparenthesized(), Expr::Unary(unary) if unary.op() == UnaryOp::Bang)
 }

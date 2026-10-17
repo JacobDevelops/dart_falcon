@@ -10,7 +10,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnintendedHtmlInDocComment;
@@ -18,7 +18,7 @@ pub struct UnintendedHtmlInDocComment;
 impl Rule for UnintendedHtmlInDocComment {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
@@ -229,14 +229,16 @@ mod tests {
     /// Text each diagnostic actually spans, sliced back out of the source. A
     /// wrong byte offset yields wrong text, so this checks spans, not just count.
     fn spanned(source: &str) -> Vec<&str> {
-        let falcon_dart_parser::ParseResult {
-            program, syntax, ..
-        } = parse(source);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parse(source).tree,
+        });
+        let program = parsed.program();
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
+        let ctx = AnalyzeContext::new(&path, &config, &parsed);
         UnintendedHtmlInDocComment
-            .analyze(&program, &ctx)
+            .analyze(program, &ctx)
             .into_iter()
             .map(|d| &source[d.span.start..d.span.end])
             .collect()

@@ -10,8 +10,8 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::{Program, TokenKind};
+use falcon_syntax::TokenKind;
+use falcon_syntax::cst::{self, FunctionKind, Span};
 
 #[derive(Default)]
 pub struct AvoidReturnTypesOnSetters;
@@ -19,7 +19,7 @@ pub struct AvoidReturnTypesOnSetters;
 impl Rule for AvoidReturnTypesOnSetters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -36,51 +36,51 @@ struct Collector<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, _node: cst::Expr<'_>) -> StructuralTraversal {
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: cst::TopLevelDecl<'_>) -> StructuralTraversal {
         match decl {
-            TopLevelDecl::Function(_)
-            | TopLevelDecl::Class(_)
-            | TopLevelDecl::Mixin(_)
-            | TopLevelDecl::MixinClass(_)
-            | TopLevelDecl::Enum(_)
-            | TopLevelDecl::Extension(_)
-            | TopLevelDecl::ExtensionType(_) => StructuralTraversal::Continue,
+            cst::TopLevelDecl::Function(_)
+            | cst::TopLevelDecl::Class(_)
+            | cst::TopLevelDecl::Mixin(_)
+            | cst::TopLevelDecl::MixinClass(_)
+            | cst::TopLevelDecl::Enum(_)
+            | cst::TopLevelDecl::Extension(_)
+            | cst::TopLevelDecl::ExtensionType(_) => StructuralTraversal::Continue,
             _ => StructuralTraversal::SkipChildren,
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
-        if matches!(member, ClassMember::Setter(_)) {
+    fn visit_class_member(&mut self, member: cst::ClassMember<'_>) -> StructuralTraversal {
+        if matches!(member, cst::ClassMember::Setter(_)) {
             StructuralTraversal::Continue
         } else {
             StructuralTraversal::SkipChildren
         }
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        if matches!(node.kind, FunctionKind::Setter(_)) && node.return_type.is_some() {
+    fn visit_function_decl(&mut self, node: cst::FunctionDecl<'_>) -> StructuralTraversal {
+        if matches!(node.kind(), FunctionKind::Setter(_)) && node.return_type().is_some() {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
                 "Avoid return types on setters.",
-                node.name.span,
+                node.name().span(),
             ));
         }
         StructuralTraversal::SkipChildren
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        if setter_has_return_type(node, self.ctx.syntax) {
+    fn visit_setter_decl(&mut self, node: cst::SetterDecl<'_>) -> StructuralTraversal {
+        if setter_has_return_type(node, self.ctx.tree(), self.ctx.source) {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
                 "Avoid return types on setters.",
-                node.name.span,
+                node.name().span(),
             ));
         }
         StructuralTraversal::SkipChildren
@@ -88,20 +88,22 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
 }
 }
 
-fn setter_has_return_type(setter: &SetterDecl, syntax: &falcon_syntax::SyntaxStore) -> bool {
+fn setter_has_return_type(
+    setter: cst::SetterDecl<'_>,
+    tree: &cst::SyntaxTree,
+    source: &str,
+) -> bool {
     let ann_end = setter
-        .annotations
-        .iter()
-        .map(|a| a.span.end)
+        .annotations()
+        .map(|a| a.span().end)
         .max()
-        .unwrap_or(setter.span.start)
-        .max(setter.span.start);
-    syntax
-        .tokens_in(Span::new(ann_end, setter.name.span.start))
+        .unwrap_or(setter.span().start)
+        .max(setter.span().start);
+    tree.tokens_in(source, Span::new(ann_end, setter.name().span().start))
         .any(|token| {
             !token.is_trivia()
                 && !matches!(
-                    token.kind,
+                    token.kind(),
                     TokenKind::Static | TokenKind::External | TokenKind::Set
                 )
         })

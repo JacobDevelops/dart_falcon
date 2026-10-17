@@ -1,7 +1,7 @@
 //! Doc-comment scanning and resolution shared by the rules that read
 //! `[reference]`s.
 //!
-//! The retained syntax store supplies doc-comment blocks; scanning finds bracketed
+//! The syntax tree supplies doc-comment blocks; scanning finds bracketed
 //! references in them as the analyzer's doc-comment parser does, skipping
 //! code spans, fenced and indented code blocks, Markdown links and
 //! link-reference definitions. Resolution follows the analyzer's
@@ -27,8 +27,7 @@ use falcon_analyze::{
     DeclarationIdentity, DocName, MemberFacts, MemberKind, MemberSelector, MemberSelectorKind,
     NameIdentity, ResolvedType, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope,
 };
-use falcon_syntax::ast::*;
-use falcon_syntax::token::DocBlock;
+use falcon_syntax::cst::*;
 
 /// A `[reference]` in a doc comment: its text and source offset.
 pub(crate) struct Reference<'s> {
@@ -96,10 +95,7 @@ fn leading_whitespace(content: &str) -> usize {
 /// Mirrors the analyzer's `DocCommentBuilder`: indented code blocks (four
 /// columns of whitespace after a blank line), backtick-fenced code blocks,
 /// dartdoc directive, `@docImport` and `@nodoc` lines carry no references.
-pub(crate) fn references<'s>(
-    source: &'s str,
-    block: &DocBlock<'_>,
-) -> (Vec<Reference<'s>>, HashSet<&'s str>) {
+pub(crate) fn references<'s>(block: &DocBlock<'s>) -> (Vec<Reference<'s>>, HashSet<&'s str>) {
     let mut found = Vec::new();
     let mut definitions = HashSet::new();
     let mut previous_empty = true;
@@ -107,7 +103,7 @@ pub(crate) fn references<'s>(
     let mut fence: Option<usize> = None;
     for token in block.tokens() {
         let start = token.offset();
-        let lexeme = token.text(source);
+        let lexeme = token.text();
         if let Some(left) = lexeme.find('[')
             && let Some(length) = lexeme[left..].find(']')
             && lexeme[..left].trim_end().starts_with("///")
@@ -161,14 +157,11 @@ pub(crate) fn references<'s>(
 /// `[this]`, `[null]`, `[true]` and `[false]` anywhere in the block's tokens
 /// (code spans included), as the `comment_references` lint scans each token
 /// from one `[` to the next `]`; with their offsets.
-pub(crate) fn keyword_references<'s>(
-    source: &'s str,
-    block: &DocBlock<'_>,
-) -> Vec<(usize, &'s str)> {
+pub(crate) fn keyword_references<'s>(block: &DocBlock<'s>) -> Vec<(usize, &'s str)> {
     let mut found = Vec::new();
     for token in block.tokens() {
         let start = token.offset();
-        let lexeme = token.text(source);
+        let lexeme = token.text();
         let mut from = 0;
         while let Some(left) = lexeme[from..].find('[').map(|left| from + left)
             && let Some(right) = lexeme[left..].find(']').map(|right| left + right)
@@ -517,40 +510,43 @@ pub(crate) struct DocScopes {
     extensions: HashMap<String, HashMap<String, bool>>,
 }
 
-fn declaration_start(span: &Span, annotations: &[Annotation]) -> usize {
-    annotations.first().map_or(span.start, |annotation| {
-        annotation.span.start.min(span.start)
+fn declaration_start<'a>(
+    span: &Span,
+    mut annotations: impl Iterator<Item = Annotation<'a>>,
+) -> usize {
+    annotations.next().map_or(span.start, |annotation| {
+        annotation.span().start.min(span.start)
     })
 }
 
-fn type_names(types: &[TypeParam]) -> impl Iterator<Item = String> + '_ {
-    types.iter().map(|param| param.name.name.clone())
+fn type_names<'a>(types: AstChildren<'a, TypeParam<'a>>) -> impl Iterator<Item = String> + 'a {
+    types.map(|param| param.name().name().to_owned())
 }
 
-fn param_names(params: &FormalParamList) -> impl Iterator<Item = String> + '_ {
-    params.params.iter().map(|param| param.name.name.clone())
+fn param_names<'a>(params: FormalParamList<'a>) -> impl Iterator<Item = String> + 'a {
+    params.params().map(|param| param.name().name().to_owned())
 }
 
 fn declared_members(members: EffectiveMembers<'_>) -> HashMap<String, bool> {
     let mut names = HashMap::new();
-    for member in members.declared {
+    for member in members.declared.clone() {
         match member {
             ClassMember::Field(field) => {
-                for declarator in &field.declarators {
-                    names.insert(declarator.name.name.clone(), field.is_static);
+                for declarator in field.declarators() {
+                    names.insert(declarator.name().name().to_owned(), field.is_static());
                 }
             }
             ClassMember::Method(method) => {
-                names.insert(method.name.name.clone(), method.is_static);
+                names.insert(method.name().name().to_owned(), method.is_static());
             }
             ClassMember::Getter(getter) => {
-                names.insert(getter.name.name.clone(), getter.is_static);
+                names.insert(getter.name().name().to_owned(), getter.is_static());
             }
             ClassMember::Setter(setter) => {
-                names.insert(setter.name.name.clone(), setter.is_static);
+                names.insert(setter.name().name().to_owned(), setter.is_static());
             }
             ClassMember::Operator(operator) => {
-                names.insert(operator.op.clone(), false);
+                names.insert(operator.op().to_owned(), false);
             }
             ClassMember::Constructor(_)
             | ClassMember::PrimaryConstructorBody(_)
@@ -560,53 +556,50 @@ fn declared_members(members: EffectiveMembers<'_>) -> HashMap<String, bool> {
     names.extend(
         members
             .declaring_params()
-            .map(|param| (param.name.name.clone(), false)),
+            .map(|param| (param.name().name().to_owned(), false)),
     );
     names
 }
 
 impl DocScopes {
-    pub(crate) fn new(program: &Program, model: &SemanticModel<'_>, source: &str) -> Self {
+    pub(crate) fn new(program: Program<'_>, model: &SemanticModel<'_>, source: &str) -> Self {
         let mut scopes = Self {
             scopes: Vec::new(),
             extensions: HashMap::new(),
         };
         let none = std::rc::Rc::new(Enclosing::None);
         let directives = program
-            .library_directive
-            .iter()
-            .map(|node| (node.span, node.annotations.as_slice()))
+            .library_directive()
+            .into_iter()
+            .map(|node| (node.span(), node.annotations()))
             .chain(
                 program
-                    .imports
-                    .iter()
-                    .map(|node| (node.span, node.annotations.as_slice())),
+                    .imports()
+                    .map(|node| (node.span(), node.annotations())),
             )
             .chain(
                 program
-                    .exports
-                    .iter()
-                    .map(|node| (node.span, node.annotations.as_slice())),
+                    .exports()
+                    .map(|node| (node.span(), node.annotations())),
             )
             .chain(
                 program
-                    .part_directives
-                    .iter()
-                    .map(|node| (node.span, node.annotations.as_slice())),
+                    .part_directives()
+                    .map(|node| (node.span(), node.annotations())),
             );
         for (span, annotations) in directives {
             scopes.push(span, annotations, Vec::new(), &none);
         }
-        for declaration in &program.declarations {
+        for declaration in program.declarations() {
             scopes.declaration(declaration, model, source, &none);
         }
         scopes
     }
 
-    fn push(
+    fn push<'a>(
         &mut self,
         span: Span,
-        annotations: &[Annotation],
+        annotations: impl Iterator<Item = Annotation<'a>>,
         locals: Vec<String>,
         enclosing: &std::rc::Rc<Enclosing>,
     ) {
@@ -621,137 +614,161 @@ impl DocScopes {
 
     fn declaration(
         &mut self,
-        declaration: &TopLevelDecl,
+        declaration: TopLevelDecl<'_>,
         model: &SemanticModel<'_>,
         source: &str,
         none: &std::rc::Rc<Enclosing>,
     ) {
-        let span = *declaration.span();
+        let span = declaration.span();
         let (name, annotations, type_params, members) = match declaration {
-            TopLevelDecl::Class(n) => {
-                (&n.name, &n.annotations, &n.type_params, n.element_members())
-            }
-            TopLevelDecl::MixinClass(n) => {
-                (&n.name, &n.annotations, &n.type_params, n.element_members())
-            }
-            TopLevelDecl::Mixin(n) => (
-                &n.name,
-                &n.annotations,
-                &n.type_params,
-                EffectiveMembers::declared(&n.members),
+            TopLevelDecl::Class(n) => (
+                n.name(),
+                n.annotations(),
+                n.type_params(),
+                n.element_members(),
             ),
-            TopLevelDecl::Enum(n) => (&n.name, &n.annotations, &n.type_params, n.element_members()),
-            TopLevelDecl::ExtensionType(n) => {
-                (&n.name, &n.annotations, &n.type_params, n.element_members())
-            }
+            TopLevelDecl::MixinClass(n) => (
+                n.name(),
+                n.annotations(),
+                n.type_params(),
+                n.element_members(),
+            ),
+            TopLevelDecl::Mixin(n) => (
+                n.name(),
+                n.annotations(),
+                n.type_params(),
+                EffectiveMembers::declared(n.members()),
+            ),
+            TopLevelDecl::Enum(n) => (
+                n.name(),
+                n.annotations(),
+                n.type_params(),
+                n.element_members(),
+            ),
+            TopLevelDecl::ExtensionType(n) => (
+                n.name(),
+                n.annotations(),
+                n.type_params(),
+                n.element_members(),
+            ),
             TopLevelDecl::Extension(extension) => {
                 let mut parameters = TypeParameterScope::default();
-                parameters.push(&extension.type_params, model);
-                let members = declared_members(EffectiveMembers::declared(&extension.members));
-                if let Some(name) = &extension.name {
-                    self.extensions.insert(name.name.clone(), members.clone());
+                parameters.push(extension.type_params(), model);
+                let members = declared_members(EffectiveMembers::declared(extension.members()));
+                if let Some(name) = extension.name() {
+                    self.extensions
+                        .insert(name.name().to_owned(), members.clone());
                 }
                 let enclosing = std::rc::Rc::new(Enclosing::Extension {
-                    on_type: model.resolve_type_in(&extension.on_type, &parameters),
+                    on_type: model.resolve_type_in(extension.on_type(), &parameters),
                     members,
                 });
-                let locals: Vec<_> = type_names(&extension.type_params).collect();
-                self.push(span, &extension.annotations, locals.clone(), &enclosing);
-                self.members(&extension.members, &locals, &enclosing);
+                let locals: Vec<_> = type_names(extension.type_params()).collect();
+                self.push(span, extension.annotations(), locals.clone(), &enclosing);
+                self.members(extension.members(), &locals, &enclosing);
                 return;
             }
             TopLevelDecl::ClassTypeAlias(n) => {
                 let enclosing = std::rc::Rc::new(Enclosing::Type {
-                    identity: model.resolve_name(&n.name.name),
+                    identity: model.resolve_name(n.name().name()),
                     members: HashMap::new(),
                 });
                 self.push(
                     span,
-                    &n.annotations,
-                    type_names(&n.type_params).collect(),
+                    n.annotations(),
+                    type_names(n.type_params()).collect(),
                     &enclosing,
                 );
                 return;
             }
             TopLevelDecl::Function(function) => {
-                let mut locals: Vec<_> = type_names(&function.type_params).collect();
+                let mut locals: Vec<_> = type_names(function.type_params()).collect();
                 locals.extend(function.params().into_iter().flat_map(param_names));
                 if let Some(params) = function.params() {
                     self.params(params, &locals, none);
                 }
-                self.push(span, &function.annotations, locals, none);
-                if let (Some(identity), Some(params)) =
-                    (model.resolve_value(&function.name.name), function.params())
-                    && let Some(scope) = self.scopes.last_mut()
+                self.push(span, function.annotations(), locals, none);
+                if let (Some(identity), Some(params)) = (
+                    model.resolve_value(function.name().name()),
+                    function.params(),
+                ) && let Some(scope) = self.scopes.last_mut()
                 {
                     scope.function = Some((identity, param_names(params).collect()));
                 }
                 return;
             }
             TopLevelDecl::Variable(variable) => {
-                self.push(span, &variable.annotations, Vec::new(), none);
+                self.push(span, variable.annotations(), Vec::new(), none);
                 return;
             }
             TopLevelDecl::TypeAlias(alias) => {
                 // A function-type alias also scopes the function type's own
                 // type parameters and named parameters.
-                let mut locals: Vec<_> = type_names(&alias.type_params).collect();
-                if let DartType::Function(function) = &alias.aliased {
-                    locals.extend(type_names(&function.type_params));
+                let mut locals: Vec<_> = type_names(alias.type_params()).collect();
+                if let DartType::Function(function) = alias.aliased() {
+                    locals.extend(type_names(function.type_params()));
                     locals.extend(
                         function
-                            .params
-                            .iter()
-                            .filter_map(|param| param.name.as_ref())
-                            .map(|name| name.name.clone()),
+                            .params()
+                            .filter_map(|param| param.name())
+                            .map(|name| name.name().to_owned()),
                     );
                 }
-                if let DartType::Function(function) = &alias.aliased {
-                    for param in &function.params {
+                if let DartType::Function(function) = alias.aliased() {
+                    for param in function.params() {
                         // A `required` modifier precedes the parameter type.
-                        let ty = param.param_type.span();
+                        let ty = param.param_type().span();
                         let before = source[..ty.start].trim_end();
-                        let start = if param.is_required && before.ends_with("required") {
+                        let start = if param.is_required() && before.ends_with("required") {
                             before.len() - "required".len()
                         } else {
                             ty.start
                         };
-                        let end = param.name.as_ref().map_or(ty.end, |name| name.span.end);
-                        self.push(Span::new(start, end), &[], locals.clone(), none);
+                        let end = param.name().map_or(ty.end, |name| name.span().end);
+                        self.push(
+                            Span::new(start, end),
+                            std::iter::empty(),
+                            locals.clone(),
+                            none,
+                        );
                     }
                 }
-                self.push(span, &alias.annotations, locals, none);
+                self.push(span, alias.annotations(), locals, none);
                 return;
             }
             TopLevelDecl::Error(_) => return,
         };
-        let mut declared = declared_members(members);
+        let mut declared = declared_members(members.clone());
         if let TopLevelDecl::Enum(enumeration) = declaration {
             declared.extend(
                 enumeration
-                    .variants
-                    .iter()
-                    .map(|variant| (variant.name.name.clone(), true)),
+                    .variants()
+                    .map(|variant| (variant.name().name().to_owned(), true)),
             );
             declared.insert("values".to_owned(), true);
         }
         let enclosing = std::rc::Rc::new(Enclosing::Type {
-            identity: model.resolve_name(&name.name),
+            identity: model.resolve_name(name.name()),
             members: declared,
         });
         let locals: Vec<_> = type_names(type_params).collect();
         let mut header_locals = locals.clone();
         if let Some(primary) = members.primary {
-            header_locals.extend(param_names(&primary.params));
-            self.params(&primary.params, &header_locals, &enclosing);
-            self.push(primary.span, &[], header_locals.clone(), &enclosing);
+            header_locals.extend(param_names(primary.params()));
+            self.params(primary.params(), &header_locals, &enclosing);
+            self.push(
+                primary.span(),
+                std::iter::empty(),
+                header_locals.clone(),
+                &enclosing,
+            );
         }
         self.push(span, annotations, header_locals, &enclosing);
         if let TopLevelDecl::Enum(enumeration) = declaration {
-            for variant in &enumeration.variants {
+            for variant in enumeration.variants() {
                 self.push(
-                    variant.span,
-                    &variant.annotations,
+                    variant.span(),
+                    variant.annotations(),
                     locals.clone(),
                     &enclosing,
                 );
@@ -760,37 +777,41 @@ impl DocScopes {
         self.members(members.declared, &locals, &enclosing);
     }
 
-    fn members(
+    fn members<'a>(
         &mut self,
-        members: &[ClassMember],
+        members: AstChildren<'a, ClassMember<'a>>,
         owner_locals: &[String],
         enclosing: &std::rc::Rc<Enclosing>,
     ) {
         for member in members {
             let mut locals = owner_locals.to_vec();
             let (span, annotations, params) = match member {
-                ClassMember::Field(field) => (field.span, &field.annotations, None),
+                ClassMember::Field(field) => (field.span(), field.annotations(), None),
                 ClassMember::Constructor(constructor) => {
-                    locals.extend(param_names(&constructor.params));
+                    locals.extend(param_names(constructor.params()));
                     (
-                        constructor.span,
-                        &constructor.annotations,
-                        Some(&constructor.params),
+                        constructor.span(),
+                        constructor.annotations(),
+                        Some(constructor.params()),
                     )
                 }
                 ClassMember::Method(method) => {
-                    locals.extend(type_names(&method.type_params));
-                    locals.extend(param_names(&method.params));
-                    (method.span, &method.annotations, Some(&method.params))
+                    locals.extend(type_names(method.type_params()));
+                    locals.extend(param_names(method.params()));
+                    (method.span(), method.annotations(), Some(method.params()))
                 }
-                ClassMember::Getter(getter) => (getter.span, &getter.annotations, None),
+                ClassMember::Getter(getter) => (getter.span(), getter.annotations(), None),
                 ClassMember::Setter(setter) => {
-                    locals.push(setter.param.name.clone());
-                    (setter.span, &setter.annotations, None)
+                    locals.push(setter.param().name().to_owned());
+                    (setter.span(), setter.annotations(), None)
                 }
                 ClassMember::Operator(operator) => {
-                    locals.extend(param_names(&operator.params));
-                    (operator.span, &operator.annotations, Some(&operator.params))
+                    locals.extend(param_names(operator.params()));
+                    (
+                        operator.span(),
+                        operator.annotations(),
+                        Some(operator.params()),
+                    )
                 }
                 // The header owns the constructor's name and parameters;
                 // `this` supplies only its implementation, not another declaration.
@@ -806,12 +827,17 @@ impl DocScopes {
     /// Scopes for the doc comments of `params`, which see `locals`.
     fn params(
         &mut self,
-        params: &FormalParamList,
+        params: FormalParamList<'_>,
         locals: &[String],
         enclosing: &std::rc::Rc<Enclosing>,
     ) {
-        for param in &params.params {
-            self.push(param.span, &param.annotations, locals.to_vec(), enclosing);
+        for param in params.params() {
+            self.push(
+                param.span(),
+                param.annotations(),
+                locals.to_vec(),
+                enclosing,
+            );
         }
     }
 
@@ -837,7 +863,7 @@ pub(crate) struct DocResolver<'r, 'a> {
 
 impl<'r, 'a> DocResolver<'r, 'a> {
     pub(crate) fn new(
-        program: &Program,
+        program: Program<'_>,
         model: &'r SemanticModel<'a>,
         signatures: &'r SignatureIndex,
         scopes: &'r DocScopes,
@@ -849,9 +875,8 @@ impl<'r, 'a> DocResolver<'r, 'a> {
             scopes,
             sdk_loaded,
             implicit_core: !program
-                .imports
-                .iter()
-                .any(|import| import.uri.value == "dart:core"),
+                .imports()
+                .any(|import| import.uri().value() == "dart:core"),
         }
     }
 
@@ -1200,22 +1225,25 @@ mod tests {
 
     fn with_resolver(source: &str, check: impl FnOnce(&DocResolver<'_, '_>, &DocScopes)) {
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &program,
+                parsed: &parsed,
                 has_parse_errors: false,
             }],
             &[],
         );
-        let model = SemanticModel::new(path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
-        let scopes = DocScopes::new(&program, &model, source);
-        let resolver = DocResolver::new(&program, &model, &signatures, &scopes, false);
+        let model = SemanticModel::new(path, &parsed, &identities, None);
+        let signatures = SignatureIndex::from_program(program, &model);
+        let scopes = DocScopes::new(program, &model, source);
+        let resolver = DocResolver::new(program, &model, &signatures, &scopes, false);
         check(&resolver, &scopes);
     }
 

@@ -31,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
 
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use super::Truth;
 use super::{DeclarationIdentity, FileId, IdentityIndex, QualifiedName};
@@ -60,13 +60,13 @@ pub enum MemberKind {
 
 impl MemberKind {
     /// Includes the implicit setter of an uninitialized `late final` declarator.
-    pub fn field(field: &FieldDecl, declarator: &VarDeclarator) -> Self {
+    pub fn field(field: FieldDecl<'_>, declarator: VarDeclarator<'_>) -> Self {
         Self::Field {
-            writable: field.keyword == VarKeyword::Var
-                || (field.is_late
-                    && field.keyword == VarKeyword::Final
-                    && declarator.initializer.is_none()),
-            covariant: field.is_covariant,
+            writable: field.keyword() == VarKeyword::Var
+                || (field.is_late()
+                    && field.keyword() == VarKeyword::Final
+                    && declarator.initializer().is_none()),
+            covariant: field.is_covariant(),
         }
     }
 
@@ -146,7 +146,7 @@ enum Resolved<'a> {
 /// types soundly: whether the parse failed (declarations are then untrustworthy
 /// and skipped) and whether its declaring library has an unresolved part.
 pub struct LibrarySource<'a> {
-    pub program: &'a Program,
+    pub program: Program<'a>,
     pub has_parse_errors: bool,
     pub has_unresolved_parts: bool,
 }
@@ -205,7 +205,7 @@ impl TypeIndex {
     fn add_resolved_program(
         &mut self,
         file: Option<FileId>,
-        program: &Program,
+        program: Program<'_>,
         has_parse_errors: bool,
         has_unresolved_parts: bool,
         identities: &IdentityIndex,
@@ -220,33 +220,29 @@ impl TypeIndex {
         let mut local = Self::default();
         local.add_program(program, has_unresolved_parts, false);
         self.declarations.reserve(local.types.len());
-        let resolve = |ty: &DartType| match ty {
-            DartType::Named(named) => QualifiedName::from_identifiers(&named.segments)
+        let resolve = |ty: DartType<'_>| match ty {
+            DartType::Named(named) => QualifiedName::from_identifiers(named.segments())
                 .and_then(|name| identities.resolve_declaration(library, name)),
             _ => None,
         };
-        for declaration in &program.declarations {
-            let (name, superclass, first, second): (
-                &str,
-                Option<&DartType>,
-                &[DartType],
-                &[DartType],
-            ) = match declaration {
+        for declaration in program.declarations() {
+            let empty = || AstChildren::new(program.syntax());
+            let (name, superclass, first, second) = match declaration {
                 TopLevelDecl::Class(c) => (
-                    &c.name.name,
-                    c.extends.as_ref(),
-                    &c.with_clause,
-                    &c.implements,
+                    c.name().name(),
+                    c.extends(),
+                    c.with_clause(),
+                    c.implements(),
                 ),
-                TopLevelDecl::Mixin(c) => (&c.name.name, None, &c.on_clause, &c.implements),
+                TopLevelDecl::Mixin(c) => (c.name().name(), None, c.on_clause(), c.implements()),
                 TopLevelDecl::MixinClass(c) => (
-                    &c.name.name,
-                    c.extends.as_ref(),
-                    &c.with_clause,
-                    &c.implements,
+                    c.name().name(),
+                    c.extends(),
+                    c.with_clause(),
+                    c.implements(),
                 ),
-                TopLevelDecl::Enum(c) => (&c.name.name, None, &c.with_clause, &c.implements),
-                TopLevelDecl::ExtensionType(c) => (&c.name.name, None, &[], &c.implements),
+                TopLevelDecl::Enum(c) => (c.name().name(), None, c.with_clause(), c.implements()),
+                TopLevelDecl::ExtensionType(c) => (c.name().name(), None, empty(), c.implements()),
                 _ => continue,
             };
             if !identities.is_authoritative_declaration(library, name) {
@@ -258,15 +254,15 @@ impl TypeIndex {
             let Some(Slot::Unique(mut shape)) = local.types.remove(name) else {
                 continue;
             };
-            let annotations: &[Annotation] = match declaration {
-                TopLevelDecl::Class(class) => &class.annotations,
-                TopLevelDecl::MixinClass(class) => &class.annotations,
-                _ => &[],
+            let annotations = match declaration {
+                TopLevelDecl::Class(class) => class.annotations(),
+                TopLevelDecl::MixinClass(class) => class.annotations(),
+                _ => AstChildren::new(program.syntax()),
             };
             let mut annotations_unknown = false;
             shape.is_immutable = false;
             for annotation in annotations {
-                match QualifiedName::from_identifiers(&annotation.name).and_then(|name| {
+                match QualifiedName::from_identifiers(annotation.name()).and_then(|name| {
                     identities
                         .resolve_imported_member(library, name)
                         .or_else(|| identities.resolve_declaration(library, name))
@@ -283,9 +279,9 @@ impl TypeIndex {
                     }
                     None => {
                         annotations_unknown |= annotation
-                            .name
+                            .name()
                             .last()
-                            .is_some_and(|name| matches!(&*name.name, "immutable" | "Immutable"))
+                            .is_some_and(|name| matches!(name.name(), "immutable" | "Immutable"))
                     }
                 }
             }
@@ -511,7 +507,7 @@ impl TypeIndex {
             for (ordinal, file) in library.files.iter().enumerate() {
                 self.add_resolved_program(
                     identities.external_file(instance, ordinal),
-                    &file.facts,
+                    file.program(),
                     file.has_parse_errors,
                     library.has_unresolved_parts,
                     identities,
@@ -523,8 +519,9 @@ impl TypeIndex {
     /// Build a degraded, single-file index. A file that declares (or is) a `part`
     /// is treated as having unresolved parts, since the sibling files that could
     /// complete its types are not available in single-file mode.
-    pub fn from_program(program: &Program) -> Self {
-        let unresolved = !program.part_directives.is_empty() || program.part_of_directive.is_some();
+    pub fn from_program(program: Program<'_>) -> Self {
+        let unresolved =
+            !program.part_directives().is_empty() || program.part_of_directive().is_some();
         let mut index = Self::default();
         index.add_program(program, unresolved, true);
         index
@@ -720,173 +717,98 @@ impl TypeIndex {
     }
 
     /// Harvest every named-type declaration in a program.
-    fn add_program(&mut self, program: &Program, has_unresolved_parts: bool, syntactic: bool) {
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Class(c) => {
-                    let element_members = c.element_members();
-                    let supertypes = if syntactic {
-                        supertype_names(
-                            c.extends
-                                .as_ref()
-                                .into_iter()
-                                .chain(&c.with_clause)
-                                .chain(&c.implements),
-                        )
-                    } else {
-                        Vec::new()
-                    };
-                    self.add_type(
-                        &c.name.name,
-                        TypeEntry {
-                            kind: TypeKind::Class,
-                            supertypes,
-                            members: collect_members(element_members),
-                            is_immutable: syntactic
-                                && has_immutable_annotation(&c.annotations, program),
-                            superclass: if syntactic {
-                                c.extends.as_ref().and_then(last_segment)
-                            } else {
-                                None
-                            },
-                            constructors: if syntactic {
-                                collect_constructors(element_members)
-                            } else {
-                                HashMap::new()
-                            },
-                            all_instance_fields_final: syntactic
-                                && all_instance_fields_final(element_members),
-                            has_unresolved_parts,
-                        },
-                    );
-                }
-                TopLevelDecl::Mixin(m) => {
-                    let supertypes = if syntactic {
-                        supertype_names(m.on_clause.iter().chain(&m.implements))
-                    } else {
-                        Vec::new()
-                    };
-                    self.add_type(
-                        &m.name.name,
-                        TypeEntry {
-                            kind: TypeKind::Mixin,
-                            supertypes,
-                            members: collect_members(EffectiveMembers::declared(&m.members)),
-                            is_immutable: false,
-                            superclass: None,
-                            constructors: HashMap::new(),
-                            all_instance_fields_final: syntactic
-                                && all_instance_fields_final(EffectiveMembers::declared(
-                                    &m.members,
-                                )),
-                            has_unresolved_parts,
-                        },
-                    );
-                }
-                TopLevelDecl::MixinClass(m) => {
-                    let element_members = m.element_members();
-                    let supertypes = if syntactic {
-                        supertype_names(
-                            m.extends
-                                .as_ref()
-                                .into_iter()
-                                .chain(&m.with_clause)
-                                .chain(&m.implements),
-                        )
-                    } else {
-                        Vec::new()
-                    };
-                    self.add_type(
-                        &m.name.name,
-                        TypeEntry {
-                            kind: TypeKind::MixinClass,
-                            supertypes,
-                            members: collect_members(element_members),
-                            is_immutable: syntactic
-                                && has_immutable_annotation(&m.annotations, program),
-                            superclass: if syntactic {
-                                m.extends.as_ref().and_then(last_segment)
-                            } else {
-                                None
-                            },
-                            constructors: if syntactic {
-                                collect_constructors(element_members)
-                            } else {
-                                HashMap::new()
-                            },
-                            all_instance_fields_final: syntactic
-                                && all_instance_fields_final(element_members),
-                            has_unresolved_parts,
-                        },
-                    );
-                }
-                TopLevelDecl::Enum(e) => {
-                    let element_members = e.element_members();
-                    let supertypes = if syntactic {
-                        let mut names = supertype_names(e.with_clause.iter().chain(&e.implements));
-                        // Every enum is a subtype of `Enum` (source of `index` / `name`).
-                        names.push("Enum".to_string());
-                        names
-                    } else {
-                        Vec::new()
-                    };
-                    let mut members = collect_members(element_members);
-                    // Enum constants are accessible names on the type.
-                    for v in &e.variants {
-                        members
-                            .entry(v.name.name.clone())
-                            .or_insert(MemberKind::Field {
-                                writable: false,
-                                covariant: false,
-                            });
-                    }
-                    self.add_type(
-                        &e.name.name,
-                        TypeEntry {
-                            kind: TypeKind::Enum,
-                            supertypes,
-                            members,
-                            is_immutable: false,
-                            superclass: None,
-                            constructors: if syntactic {
-                                collect_constructors(element_members)
-                            } else {
-                                HashMap::new()
-                            },
-                            all_instance_fields_final: syntactic
-                                && all_instance_fields_final(element_members),
-                            has_unresolved_parts,
-                        },
-                    );
-                }
-                TopLevelDecl::ExtensionType(e) => {
-                    let element_members = e.element_members();
-                    let supertypes = if syntactic {
-                        supertype_names(e.implements.iter())
-                    } else {
-                        Vec::new()
-                    };
-                    self.add_type(
-                        &e.name.name,
-                        TypeEntry {
-                            kind: TypeKind::ExtensionType,
-                            supertypes,
-                            members: collect_members(element_members),
-                            is_immutable: false,
-                            superclass: None,
-                            constructors: if syntactic {
-                                collect_constructors(element_members)
-                            } else {
-                                HashMap::new()
-                            },
-                            all_instance_fields_final: syntactic
-                                && all_instance_fields_final(element_members),
-                            has_unresolved_parts,
-                        },
-                    );
-                }
-                _ => {}
+    fn add_program(&mut self, program: Program<'_>, has_unresolved_parts: bool, syntactic: bool) {
+        for decl in program.declarations() {
+            let empty = || AstChildren::new(program.syntax());
+            let (name, kind, element_members, superclass, first, second, annotations) = match decl {
+                TopLevelDecl::Class(c) => (
+                    c.name().name(),
+                    TypeKind::Class,
+                    c.element_members(),
+                    c.extends(),
+                    c.with_clause(),
+                    c.implements(),
+                    c.annotations(),
+                ),
+                TopLevelDecl::Mixin(c) => (
+                    c.name().name(),
+                    TypeKind::Mixin,
+                    EffectiveMembers::declared(c.members()),
+                    None,
+                    c.on_clause(),
+                    c.implements(),
+                    AstChildren::new(program.syntax()),
+                ),
+                TopLevelDecl::MixinClass(c) => (
+                    c.name().name(),
+                    TypeKind::MixinClass,
+                    c.element_members(),
+                    c.extends(),
+                    c.with_clause(),
+                    c.implements(),
+                    c.annotations(),
+                ),
+                TopLevelDecl::Enum(c) => (
+                    c.name().name(),
+                    TypeKind::Enum,
+                    c.element_members(),
+                    None,
+                    c.with_clause(),
+                    c.implements(),
+                    AstChildren::new(program.syntax()),
+                ),
+                TopLevelDecl::ExtensionType(c) => (
+                    c.name().name(),
+                    TypeKind::ExtensionType,
+                    c.element_members(),
+                    None,
+                    empty(),
+                    c.implements(),
+                    AstChildren::new(program.syntax()),
+                ),
+                _ => continue,
+            };
+            let mut supertypes = if syntactic {
+                supertype_names(superclass.into_iter().chain(first).chain(second))
+            } else {
+                Vec::new()
+            };
+            if syntactic && kind == TypeKind::Enum {
+                supertypes.push("Enum".to_string());
             }
+            let mut members = collect_members(element_members.clone());
+            if let TopLevelDecl::Enum(e) = decl {
+                for variant in e.variants() {
+                    members
+                        .entry(variant.name().name().to_owned())
+                        .or_insert(MemberKind::Field {
+                            writable: false,
+                            covariant: false,
+                        });
+                }
+            }
+            self.add_type(
+                name,
+                TypeEntry {
+                    kind,
+                    supertypes,
+                    members,
+                    is_immutable: syntactic && has_immutable_annotation(annotations, program),
+                    superclass: if syntactic {
+                        superclass.and_then(last_segment)
+                    } else {
+                        None
+                    },
+                    constructors: if syntactic {
+                        collect_constructors(element_members.clone())
+                    } else {
+                        HashMap::new()
+                    },
+                    all_instance_fields_final: syntactic
+                        && all_instance_fields_final(element_members),
+                    has_unresolved_parts,
+                },
+            );
         }
     }
 
@@ -920,14 +842,14 @@ fn push_ancestors<'a>(
 
 /// The last segment (`prefix.Type` → `Type`) of every *named* supertype; record,
 /// function, void/dynamic/never supertypes contribute no name.
-fn supertype_names<'a>(tys: impl Iterator<Item = &'a DartType>) -> Vec<String> {
+fn supertype_names<'a>(tys: impl Iterator<Item = DartType<'a>>) -> Vec<String> {
     tys.filter_map(last_segment).collect()
 }
 
 /// The last name segment of a named type, or `None` for non-named types.
-fn last_segment(ty: &DartType) -> Option<String> {
+fn last_segment(ty: DartType<'_>) -> Option<String> {
     match ty {
-        DartType::Named(n) => n.segments.last().map(|id| id.name.clone()),
+        DartType::Named(n) => n.segments().last().map(|id| id.name().to_owned()),
         _ => None,
     }
 }
@@ -935,27 +857,32 @@ fn last_segment(ty: &DartType) -> Option<String> {
 /// Whether `annotations` include package:meta's `@immutable` (imported, possibly
 /// with a prefix, from meta or a Flutter library re-exporting it) or
 /// `@Immutable(...)` (imported from meta).
-pub fn has_immutable_annotation(annotations: &[Annotation], program: &Program) -> bool {
-    annotations.iter().any(|annotation| {
-        let Some(last) = annotation.name.last() else {
+pub fn has_immutable_annotation<'a>(
+    mut annotations: AstChildren<'a, Annotation<'a>>,
+    program: Program<'a>,
+) -> bool {
+    annotations.any(|annotation| {
+        let Some(last) = annotation.name().last() else {
             return false;
         };
-        let flutter_reexports = match &*last.name {
+        let flutter_reexports = match last.name() {
             "immutable" => true,
             "Immutable" => false,
             _ => return false,
         };
-        let prefix = (annotation.name.len() > 1).then(|| annotation.name[0].name.as_str());
-        program.imports.iter().any(|import| {
-            (import.uri.value == "package:meta/meta.dart"
+        let mut names = annotation.name();
+        let first = names.next();
+        let prefix = names.next().and(first).map(|name| name.name());
+        program.imports().any(|import| {
+            (import.uri().value() == "package:meta/meta.dart"
                 || flutter_reexports
                     && matches!(
-                        import.uri.value.as_str(),
+                        import.uri().value().as_ref(),
                         "package:flutter/foundation.dart"
                             | "package:flutter/widgets.dart"
                             | "package:flutter/material.dart"
                     ))
-                && import.as_name.as_ref().map(|name| name.name.as_str()) == prefix
+                && import.as_name().map(|name| name.name()) == prefix
         })
     })
 }
@@ -967,7 +894,7 @@ fn collect_constructors(members: EffectiveMembers<'_>) -> HashMap<String, bool> 
             (
                 constructor
                     .constructor_name
-                    .map(|name| name.name.clone())
+                    .map(|name| name.name().to_owned())
                     .unwrap_or_else(|| "new".to_string()),
                 constructor.is_const,
             )
@@ -976,31 +903,32 @@ fn collect_constructors(members: EffectiveMembers<'_>) -> HashMap<String, bool> 
 }
 
 fn all_instance_fields_final(members: EffectiveMembers<'_>) -> bool {
-    members.declared.iter().all(|member| {
-        !matches!(member, ClassMember::Field(field) if !field.is_static && field.keyword == VarKeyword::Var)
-    }) && members.declaring_params().all(|param| members.representation || param.is_final)
+    members.declared.clone().all(|member| {
+        !matches!(member, ClassMember::Field(field) if !field.is_static() && field.keyword() == VarKeyword::Var)
+    }) && members.declaring_params().all(|param| members.representation || param.is_final())
 }
 
 fn collect_members(members: EffectiveMembers<'_>) -> HashMap<String, MemberKind> {
     let mut map = HashMap::new();
-    for member in members.declared {
+    for member in members.declared.clone() {
         match member {
             ClassMember::Field(f) => {
-                for d in &f.declarators {
-                    map.insert(d.name.name.clone(), MemberKind::field(f, d));
+                for d in f.declarators() {
+                    map.insert(d.name().name().to_owned(), MemberKind::field(f, d));
                 }
             }
             ClassMember::Method(m) => {
-                map.insert(m.name.name.clone(), MemberKind::Method);
+                map.insert(m.name().name().to_owned(), MemberKind::Method);
             }
             ClassMember::Getter(g) => {
-                map.insert(g.name.name.clone(), MemberKind::Getter);
+                map.insert(g.name().name().to_owned(), MemberKind::Getter);
             }
             ClassMember::Setter(s) => {
-                map.entry(s.name.name.clone()).or_insert(MemberKind::Setter);
+                map.entry(s.name().name().to_owned())
+                    .or_insert(MemberKind::Setter);
             }
             ClassMember::Operator(o) => {
-                map.insert(o.op.clone(), MemberKind::Operator);
+                map.insert(o.op().to_owned(), MemberKind::Operator);
             }
             ClassMember::Constructor(_)
             | ClassMember::PrimaryConstructorBody(_)
@@ -1009,10 +937,10 @@ fn collect_members(members: EffectiveMembers<'_>) -> HashMap<String, MemberKind>
     }
     for param in members.declaring_params() {
         map.insert(
-            param.name.name.clone(),
+            param.name().name().to_owned(),
             MemberKind::Field {
-                writable: !members.representation && !param.is_final,
-                covariant: param.is_covariant,
+                writable: !members.representation && !param.is_final(),
+                covariant: param.is_covariant(),
             },
         );
     }
@@ -1328,19 +1256,22 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ParsedFile;
     use falcon_dart_parser::parse;
+    use std::sync::Arc;
 
-    fn program(src: &str) -> Program {
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(src);
+    fn program(src: &str) -> Arc<ParsedFile> {
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(src);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
-        program
+        Arc::new(ParsedFile {
+            source: src.into(),
+            tree,
+        })
     }
 
     fn annotation_packages<'a>(
-        meta: &'a Program,
-        flutter: &'a Program,
+        meta: &'a Arc<ParsedFile>,
+        flutter: &'a Arc<ParsedFile>,
     ) -> (
         Vec<super::super::IdentitySource<'a>>,
         [super::super::PackageIdentity; 2],
@@ -1353,9 +1284,9 @@ mod tests {
             ("/packages/flutter/lib/material.dart", flutter),
         ]
         .into_iter()
-        .map(|(path, program)| IdentitySource {
+        .map(|(path, parsed)| IdentitySource {
             path: Path::new(path),
-            program,
+            parsed,
             has_parse_errors: false,
         })
         .collect();
@@ -1373,7 +1304,8 @@ mod tests {
     }
 
     fn index(src: &str) -> TypeIndex {
-        TypeIndex::from_program(&program(src))
+        let parsed = program(src);
+        TypeIndex::from_program(parsed.tree.program(&parsed.source))
     }
 
     // ── Recording ───────────────────────────────────────────────────────────────
@@ -1625,11 +1557,15 @@ mod tests {
     fn parse_error_declarations_have_no_resolved_shape() {
         use super::super::IdentitySource;
         let path = Path::new("/project/bad.dart");
-        let falcon_dart_parser::ParseResult { program: bad, .. } = parse("class Bad extends {");
+        let source = "class Bad extends {";
+        let bad = Arc::new(ParsedFile {
+            source: source.into(),
+            tree: parse(source).tree,
+        });
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
-                program: &bad,
+                parsed: &bad,
                 has_parse_errors: true,
             }],
             &[],
@@ -1638,7 +1574,7 @@ mod tests {
             [(
                 path,
                 LibrarySource {
-                    program: &bad,
+                    program: bad.tree.program(&bad.source),
                     has_parse_errors: true,
                     has_unresolved_parts: false,
                 },
@@ -1664,7 +1600,7 @@ mod tests {
     #[test]
     fn no_parse_errors_leaves_index_complete() {
         let good = program("class Good { void m() {} }");
-        let idx = TypeIndex::from_program(&good);
+        let idx = TypeIndex::from_program(good.tree.program(&good.source));
         assert_eq!(
             idx.member_lookup("Good", "m"),
             MemberResult::Found(MemberKind::Method)
@@ -1718,12 +1654,12 @@ mod tests {
         let sources = [
             IdentitySource {
                 path: a_path,
-                program: &a,
+                parsed: &a,
                 has_parse_errors: false,
             },
             IdentitySource {
                 path: b_path,
-                program: &b,
+                parsed: &b,
                 has_parse_errors: false,
             },
         ];
@@ -1733,7 +1669,7 @@ mod tests {
                 (
                     source.path,
                     LibrarySource {
-                        program: source.program,
+                        program: source.parsed.tree.program(&source.parsed.source),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -1779,19 +1715,19 @@ mod tests {
         let files = [(left_path, &left), (right_path, &right), (app_path, &app)];
         let sources: Vec<_> = files
             .iter()
-            .map(|(path, program)| IdentitySource {
+            .map(|(path, parsed)| IdentitySource {
                 path,
-                program,
+                parsed,
                 has_parse_errors: false,
             })
             .collect();
         let identities = IdentityIndex::from_project_files(&sources, &[]);
         let index = TypeIndex::from_resolved_files(
-            files.iter().map(|(path, program)| {
+            files.iter().map(|(path, parsed)| {
                 (
                     *path,
                     LibrarySource {
-                        program,
+                        program: parsed.tree.program(&parsed.source),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -1801,7 +1737,7 @@ mod tests {
         );
         let signature_files: Vec<_> = files
             .iter()
-            .map(|(path, program)| (path.to_path_buf(), *program))
+            .map(|(path, parsed)| (path.to_path_buf(), Arc::clone(parsed)))
             .collect();
         let signatures = SignatureIndex::from_project_files(&signature_files, &identities, &index);
         let resolve = |path, name: QualifiedName<'_>| {
@@ -1854,12 +1790,12 @@ mod tests {
             &[
                 IdentitySource {
                     path: good_path,
-                    program: &good,
+                    parsed: &good,
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: bad_path,
-                    program: &bad,
+                    parsed: &bad,
                     has_parse_errors: true,
                 },
             ],
@@ -1870,7 +1806,7 @@ mod tests {
                 (
                     good_path,
                     LibrarySource {
-                        program: &good,
+                        program: good.tree.program(&good.source),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -1878,7 +1814,7 @@ mod tests {
                 (
                     bad_path,
                     LibrarySource {
-                        program: &bad,
+                        program: bad.tree.program(&bad.source),
                         has_parse_errors: true,
                         has_unresolved_parts: false,
                     },
@@ -1967,7 +1903,7 @@ mod tests {
             let (mut sources, packages) = annotation_packages(&meta, &flutter);
             sources.push(IdentitySource {
                 path,
-                program: &program,
+                parsed: &program,
                 has_parse_errors: false,
             });
             let identities = IdentityIndex::from_project_files(&sources, &packages);
@@ -1975,7 +1911,7 @@ mod tests {
                 [(
                     path,
                     LibrarySource {
-                        program: &program,
+                        program: program.tree.program(&program.source),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -2020,22 +1956,22 @@ mod tests {
             let sources = [
                 IdentitySource {
                     path: bad_path,
-                    program: &bad,
+                    parsed: &bad,
                     has_parse_errors: parse_error,
                 },
                 IdentitySource {
                     path: facade_path,
-                    program: &facade,
+                    parsed: &facade,
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: app_path,
-                    program: &app,
+                    parsed: &app,
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: clean_path,
-                    program: &clean,
+                    parsed: &clean,
                     has_parse_errors: false,
                 },
             ];
@@ -2045,7 +1981,7 @@ mod tests {
                     (
                         source.path,
                         LibrarySource {
-                            program: source.program,
+                            program: source.parsed.tree.program(&source.parsed.source),
                             has_parse_errors: source.has_parse_errors,
                             has_unresolved_parts: source.path == bad_path && !parse_error,
                         },
@@ -2103,12 +2039,12 @@ mod tests {
             sources.extend([
                 IdentitySource {
                     path: facade_path,
-                    program: &facade,
+                    parsed: &facade,
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: app_path,
-                    program: &app,
+                    parsed: &app,
                     has_parse_errors: false,
                 },
             ]);
@@ -2118,7 +2054,7 @@ mod tests {
                     (
                         source.path,
                         LibrarySource {
-                            program: source.program,
+                            program: source.parsed.tree.program(&source.parsed.source),
                             has_parse_errors: false,
                             has_unresolved_parts: false,
                         },

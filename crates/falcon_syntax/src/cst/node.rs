@@ -281,10 +281,20 @@ impl std::iter::FusedIterator for SyntaxElementChildren<'_> {}
 pub struct SyntaxNodeChildren<'a> {
     inner: SyntaxElementChildren<'a>,
 }
+// Hand-rolled loops: every tree walk funnels through these, and nested
+// `find_map` adapters copy each child through several layers in debug builds.
 impl<'a> Iterator for SyntaxNodeChildren<'a> {
     type Item = SyntaxNode<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.find_map(SyntaxElement::into_node)
+        for element in self.inner.elements.by_ref() {
+            if let Some(id) = element.as_node() {
+                return Some(SyntaxNode {
+                    id,
+                    ..self.inner.parent
+                });
+            }
+        }
+        None
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, self.inner.size_hint().1)
@@ -292,7 +302,15 @@ impl<'a> Iterator for SyntaxNodeChildren<'a> {
 }
 impl DoubleEndedIterator for SyntaxNodeChildren<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.by_ref().rev().find_map(SyntaxElement::into_node)
+        while let Some(element) = self.inner.elements.next_back() {
+            if let Some(id) = element.as_node() {
+                return Some(SyntaxNode {
+                    id,
+                    ..self.inner.parent
+                });
+            }
+        }
+        None
     }
 }
 impl std::iter::FusedIterator for SyntaxNodeChildren<'_> {}
@@ -352,6 +370,11 @@ pub struct AstChildren<'a, T> {
     marker: PhantomData<T>,
 }
 impl<'a, T: AstNode<'a>> AstChildren<'a, T> {
+    pub fn empty() -> Self {
+        static EMPTY: std::sync::LazyLock<SyntaxTree> =
+            std::sync::LazyLock::new(|| SyntaxTree::build("", &[], Vec::new()));
+        Self::new(EMPTY.root(""))
+    }
     pub fn new(parent: SyntaxNode<'a>) -> Self {
         Self::from_children(parent.children())
     }
@@ -377,7 +400,12 @@ impl<'a, T: AstNode<'a>> AstChildren<'a, T> {
 impl<'a, T: AstNode<'a>> Iterator for AstChildren<'a, T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
-        self.children.find_map(T::cast)
+        for node in self.children.by_ref() {
+            if let Some(node) = T::cast(node) {
+                return Some(node);
+            }
+        }
+        None
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.children.size_hint()
@@ -385,12 +413,36 @@ impl<'a, T: AstNode<'a>> Iterator for AstChildren<'a, T> {
 }
 impl<'a, T: AstNode<'a>> DoubleEndedIterator for AstChildren<'a, T> {
     fn next_back(&mut self) -> Option<T> {
-        self.children.by_ref().rev().find_map(T::cast)
+        while let Some(node) = self.children.next_back() {
+            if let Some(node) = T::cast(node) {
+                return Some(node);
+            }
+        }
+        None
     }
 }
 impl<'a, T: AstNode<'a>> std::iter::FusedIterator for AstChildren<'a, T> {}
 impl<'a, T: AstNode<'a> + fmt::Debug> fmt::Debug for AstChildren<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AstChildren;
+    use crate::cst::Expr;
+
+    #[test]
+    fn empty_children_are_empty_from_both_ends() {
+        let mut children = AstChildren::<Expr<'_>>::empty();
+        assert!(children.is_empty());
+        assert_eq!(children.len(), 0);
+        assert!(children.first().is_none());
+        assert!(AstChildren::last(&children).is_none());
+        assert!(children.next().is_none());
+        assert!(children.next_back().is_none());
+        assert!(children.next().is_none());
+        assert_eq!(children.clone().count(), 0);
     }
 }

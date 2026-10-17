@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use falcon_analyze::resolve::MemberKind;
 use falcon_analyze::{AnalyzeContext, Feature, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -25,7 +25,7 @@ pub struct PreferInitializingFormals;
 impl Rule for PreferInitializingFormals {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -54,34 +54,34 @@ struct Candidate {
     regions: [Option<Span>; 2],
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn check(
         &mut self,
-        field: &Identifier,
-        value: &Expr,
+        field: Identifier<'a>,
+        value: Expr<'a>,
         anchor: Span,
-        ctor: ConstructorRef<'_>,
-        state: &SemanticState<'_>,
+        ctor: ConstructorRef<'a>,
+        state: &SemanticState<'a>,
     ) {
         let Expr::Ident(value) = value else {
             return;
         };
-        let Some(parameter) = ctor.params.params.iter().find(|parameter| {
-            parameter.name.name == value.name
-                && parameter.initializing.is_none()
-                && !(ctor.is_primary && (parameter.is_final || parameter.is_var))
+        let Some(parameter) = ctor.params.params().find(|parameter| {
+            parameter.name().name() == value.name()
+                && parameter.initializing().is_none()
+                && !(ctor.is_primary && (parameter.is_final() || parameter.is_var()))
         }) else {
             return;
         };
-        if field.name.starts_with('_') {
+        if field.name().starts_with('_') {
             if !self.private_named
-                || !matches!(parameter.kind, ParamKind::Named { .. })
-                || (field.name != parameter.name.name
-                    && field.name.strip_prefix('_') != Some(parameter.name.name.as_str()))
+                || !matches!(parameter.kind(), ParamKind::Named { .. })
+                || (field.name() != parameter.name().name()
+                    && field.name().strip_prefix('_') != Some(parameter.name().name()))
             {
                 return;
             }
-        } else if field.name != parameter.name.name {
+        } else if field.name() != parameter.name().name() {
             return;
         }
         let Some(receiver @ ResolvedType::Interface { identity, .. }) = &state.enclosing_type
@@ -90,7 +90,7 @@ impl Collector<'_> {
         };
         if !state
             .signatures
-            .declared_member_facts(identity, &field.name)
+            .declared_member_facts(identity, field.name())
             .iter()
             .any(|fact| !fact.is_static && matches!(fact.kind, MemberKind::Field { .. }))
         {
@@ -99,12 +99,12 @@ impl Collector<'_> {
         let Some((field_type, substitutions)) =
             state
                 .signatures
-                .resolved_field(receiver, &field.name, &state.model)
+                .resolved_field(receiver, field.name(), &state.model)
         else {
             return;
         };
         let field_type = state.model.substitute(&field_type, &substitutions);
-        let parameter_type = state.environment.declared_type(&parameter.name.name);
+        let parameter_type = state.environment.declared_type(parameter.name().name());
         if state
             .signatures
             .subtype(&parameter_type, &field_type, &state.model)
@@ -112,31 +112,23 @@ impl Collector<'_> {
         {
             return;
         }
-        let initializer_span = |initializer: &ConstructorInitializer| match initializer {
-            ConstructorInitializer::FieldInit { span, .. }
-            | ConstructorInitializer::SuperCall { span, .. }
-            | ConstructorInitializer::ThisCall { span, .. }
-            | ConstructorInitializer::Assert { span, .. } => *span,
-        };
-        let initializers =
-            ctor.initializers
-                .first()
-                .zip(ctor.initializers.last())
-                .map(|(first, last)| {
-                    Span::new(initializer_span(first).start, initializer_span(last).end)
-                });
-        let regions = [initializers, ctor.body.map(|body| *body.span())];
-        self.references.entry(parameter.name.span).or_default();
+        let initializers = ctor
+            .initializers
+            .first()
+            .zip(ctor.initializers.last())
+            .map(|(first, last)| Span::new(first.span().start, last.span().end));
+        let regions = [initializers, ctor.body.map(|body| body.span())];
+        self.references.entry(parameter.name().span()).or_default();
         self.candidates.push(Candidate {
-            parameter: parameter.name.span,
-            reference: value.span.start,
+            parameter: parameter.name().span(),
+            reference: value.span().start,
             anchor,
             regions,
         });
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         let collector = *self;
         let ctx = collector.ctx;
@@ -166,40 +158,44 @@ impl SemanticRuleVisitor for Collector<'_> {
             })
             .collect()
     }
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Expr::Ident(identifier) = node
-            && let Some(binding) = state.environment.binding_declaration(&identifier.name)
+            && let Some(binding) = state.environment.binding_declaration(identifier.name())
             && let Some(references) = self.references.get_mut(&binding)
         {
-            references.push(identifier.span.start);
+            references.push(identifier.span().start);
         }
     }
 
-    fn visit_constructor_ref(&mut self, ctor: ConstructorRef<'_>, state: &SemanticState<'_>) {
+    fn visit_constructor_ref(&mut self, ctor: ConstructorRef<'a>, state: &SemanticState<'a>) {
         if ctor.is_factory {
             return;
         }
-        for initializer in ctor.initializers {
-            if let ConstructorInitializer::FieldInit {
-                field, value, span, ..
-            } = initializer
-            {
-                self.check(field, value, *span, ctor, state);
+        for initializer in ctor.initializers.clone() {
+            if let ConstructorInitializer::FieldInit(initializer) = initializer {
+                self.check(
+                    initializer.field(),
+                    initializer.value(),
+                    initializer.span(),
+                    ctor.clone(),
+                    state,
+                );
             }
         }
         if let Some(FunctionBody::Block(block)) = ctor.body {
-            for statement in &block.stmts {
+            for statement in block.stmts() {
                 if let Stmt::Expr(statement) = statement
-                    && let Expr::Assign {
-                        target,
-                        value,
-                        span,
-                        ..
-                    } = &statement.expr
-                    && let Expr::Field { object, field, .. } = target.as_ref()
-                    && matches!(object.as_ref(), Expr::This { .. })
+                    && let Expr::Assign(assignment) = statement.expr()
+                    && let Expr::Field(field) = assignment.target()
+                    && matches!(field.object(), Expr::This(_))
                 {
-                    self.check(field, value.unparenthesized(), *span, ctor, state);
+                    self.check(
+                        field.field(),
+                        assignment.value().unparenthesized(),
+                        assignment.span(),
+                        ctor.clone(),
+                        state,
+                    );
                 }
             }
         }

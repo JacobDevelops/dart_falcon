@@ -13,7 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferIfElementsToConditionalExpressions;
@@ -21,7 +21,7 @@ pub struct PreferIfElementsToConditionalExpressions;
 impl Rule for PreferIfElementsToConditionalExpressions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,7 +35,7 @@ impl Rule for PreferIfElementsToConditionalExpressions {
 }
 
 struct Branch {
-    else_elem: *const CollectionElement,
+    else_elem: NodeId,
     start: usize,
     else_start: usize,
 }
@@ -50,14 +50,14 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.groups.into_iter().flatten().collect()
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.expressions.push(self.group);
-        self.group = if matches!(node, Expr::List { .. } | Expr::Set { .. }) {
+        self.group = if matches!(node, Expr::List(_) | Expr::Set(_)) {
             let group = self.groups.len();
             self.groups.push(Vec::new());
             Some(group)
@@ -69,35 +69,35 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.group = self.expressions.pop().unwrap();
     }
 
-    fn visit_collection_element(&mut self, node: &CollectionElement) -> StructuralTraversal {
+    fn visit_collection_element(&mut self, node: CollectionElement<'a>) -> StructuralTraversal {
         let Some(group) = self.group else {
             return StructuralTraversal::Continue;
         };
         let diagnostics = &mut self.groups[group];
         if let Some(branch) = self.branches.last_mut()
-            && std::ptr::eq(node, branch.else_elem)
+            && node.syntax().id() == branch.else_elem
         {
             branch.else_start = diagnostics.len();
         }
         match node {
-            CollectionElement::If { else_elem: Some(else_elem), .. } => {
+            CollectionElement::If(element) if element.else_elem().is_some() => {
                 self.branches.push(Branch {
-                    else_elem: else_elem.as_ref(),
+                    else_elem: element.else_elem().unwrap().syntax().id(),
                     start: diagnostics.len(),
                     else_start: diagnostics.len(),
                 });
             }
             CollectionElement::Expr(expr)
-                if matches!(expr.unparenthesized(), Expr::Conditional { .. }) =>
+                if matches!(expr.unparenthesized(), Expr::Conditional(_)) =>
             {
                 diagnostics.push(self.ctx.diagnostic(
                     "prefer-if-elements-to-conditional-expressions",
                     "Use an 'if' element to conditionally add elements.",
-                    *expr.unparenthesized().span(),
+                    expr.unparenthesized().span(),
                 ));
             }
             _ => {}
@@ -105,9 +105,9 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_collection_element(&mut self, node: &CollectionElement) {
+    fn exit_collection_element(&mut self, node: CollectionElement<'a>) {
         if let Some(group) = self.group
-            && matches!(node, CollectionElement::If { else_elem: Some(_), .. })
+            && matches!(node, CollectionElement::If(element) if element.else_elem().is_some())
         {
             let branch = self.branches.pop().unwrap();
             // The legacy pending stack visits else before then; structural traversal
@@ -162,9 +162,13 @@ mod tests {
     fn assert_diagnostic_order(source: &str, expected: &[&str]) {
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = PreferIfElementsToConditionalExpressions.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = PreferIfElementsToConditionalExpressions.analyze(parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

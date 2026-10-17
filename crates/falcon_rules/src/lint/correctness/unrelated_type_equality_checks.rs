@@ -10,8 +10,7 @@
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -21,7 +20,7 @@ pub struct UnrelatedTypeEqualityChecks;
 impl Rule for UnrelatedTypeEqualityChecks {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -74,40 +73,45 @@ fn is_fixnum_int(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
                 .is_some_and(|uri| uri.starts_with("package:fixnum/")))
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Expr::Binary {
-            op: BinaryOp::EqEq | BinaryOp::NotEq,
-            op_span,
-            left,
-            right,
-            ..
-        } = node
-            && !matches!(left.unparenthesized(), Expr::NullLit { .. })
-            && !matches!(right.unparenthesized(), Expr::NullLit { .. })
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'_>) {
+        if let Expr::Binary(binary) = node
+            && matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)
+            && !matches!(binary.left().unparenthesized(), Expr::NullLit(_))
+            && !matches!(binary.right().unparenthesized(), Expr::NullLit(_))
         {
-            self.check(&state.infer(left), &state.infer(right), *op_span, state);
+            self.check(
+                &state.infer(binary.left()),
+                &state.infer(binary.right()),
+                binary.op_span(),
+                state,
+            );
         }
     }
 
     fn visit_pattern(
         &mut self,
-        node: &Pattern,
+        node: Pattern<'a>,
         matched: Option<&ResolvedType>,
         state: &SemanticState<'_>,
     ) {
-        if let Pattern::Relational {
-            op: RelationalPatternOp::Eq | RelationalPatternOp::NotEq,
-            value,
-            span,
-        } = node
+        if let Pattern::Relational(relational) = node
+            && matches!(
+                relational.op(),
+                RelationalPatternOp::Eq | RelationalPatternOp::NotEq
+            )
             && let Some(matched) = matched
         {
-            self.check(matched, &state.infer(value), *span, state);
+            self.check(
+                matched,
+                &state.infer(relational.value()),
+                relational.span(),
+                state,
+            );
         }
     }
 }

@@ -22,7 +22,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_diagnostics::{Diagnostic, Severity, Span};
-use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
+use falcon_syntax::cst::{NodeKind, SyntaxToken, SyntaxTree};
+use falcon_syntax::token::TokenKind;
 
 /// Rule name carried by the diagnostics emitted for malformed suppression
 /// comments. Internal: not registered in `meta.rs`, not configurable, and never
@@ -49,11 +50,10 @@ pub struct FileSuppressions {
 }
 
 impl FileSuppressions {
-    /// Collect directives from the retained primary token stream, validating
-    /// each path against `lookup`. `file_path` is used only to stamp malformed
-    /// suppression diagnostics. Interpolation comments stay inside their string
-    /// literal, preserving file-level suppression semantics.
-    pub fn parse(source: &str, file_path: &str, lookup: RuleLookup, syntax: &SyntaxStore) -> Self {
+    /// Collect directives from the retained tokens outside interpolation bodies,
+    /// validating each path against `lookup`. `file_path` is used only to stamp
+    /// malformed suppression diagnostics.
+    pub fn parse(source: &str, file_path: &str, lookup: RuleLookup, tree: &SyntaxTree) -> Self {
         let mut me = Self {
             all_file: HashSet::new(),
             by_line: HashMap::new(),
@@ -73,17 +73,28 @@ impl FileSuppressions {
         // Standalone directives awaiting the next code line (Biome stacking).
         let mut pending: Vec<String> = Vec::new();
 
-        for token in syntax.tokens() {
-            let line = line_for_offset(&me.line_starts, token.offset());
+        for token in tree.top_level_tokens(source) {
+            // The old root stream represented an interpolated literal as one
+            // token at the opening quote, including for recovered statements.
+            let offset = if token.kind() == TokenKind::StringPart {
+                token
+                    .parent()
+                    .ancestors()
+                    .filter(|node| node.kind() == NodeKind::StringLitNode)
+                    .last()
+                    .map_or(token.offset(), |node| node.span().start)
+            } else {
+                token.offset()
+            };
+            let line = line_for_offset(&me.line_starts, offset);
 
             if token.is_trivia() {
                 // Only line-form comments carry directives: `//`/`///`. Block
                 // comments (`/* */`) and block doc comments (`/** */`) do not,
                 // even though the latter lexes as `DocComment`.
-                let is_line_directive = matches!(token.kind, TokenKind::LineComment)
-                    || (token.kind == TokenKind::DocComment
-                        && token.text(source).starts_with("///"));
-                if is_line_directive && let Some((keyword, rest)) = classify(token.text(source)) {
+                let is_line_directive = matches!(token.kind(), TokenKind::LineComment)
+                    || (token.kind() == TokenKind::DocComment && token.text().starts_with("///"));
+                if is_line_directive && let Some((keyword, rest)) = classify(token.text()) {
                     match validate(keyword, rest, lookup) {
                         Ok(rule) => {
                             if keyword == KW_ALL {
@@ -98,7 +109,7 @@ impl FileSuppressions {
                         }
                         Err(message) => me
                             .diagnostics
-                            .push(malformed_diag(token, source, file_path, message)),
+                            .push(malformed_diag(token, file_path, message)),
                     }
                 }
                 continue;
@@ -229,9 +240,9 @@ fn validate(keyword: &str, rest: &str, lookup: RuleLookup) -> Result<String, Str
 }
 
 /// Build a `malformed-suppression` warning anchored to the offending comment.
-fn malformed_diag(token: &Token, source: &str, file_path: &str, message: String) -> Diagnostic {
+fn malformed_diag(token: SyntaxToken<'_>, file_path: &str, message: String) -> Diagnostic {
     let start = token.offset();
-    let end = start + token.text(source).len();
+    let end = start + token.text().len();
     Diagnostic::new(
         MALFORMED_SUPPRESSION,
         Severity::Warning,
@@ -278,8 +289,8 @@ mod tests {
     }
 
     fn parse(source: &str) -> FileSuppressions {
-        let syntax = falcon_dart_parser::parse(source).syntax;
-        FileSuppressions::parse(source, "test.dart", lookup, &syntax)
+        let tree = falcon_dart_parser::parse(source).tree;
+        FileSuppressions::parse(source, "test.dart", lookup, &tree)
     }
 
     fn diag_rules(s: &FileSuppressions) -> Vec<&str> {
@@ -458,14 +469,22 @@ mod tests {
     #[test]
     fn retained_interpolation_comments_do_not_become_file_directives() {
         let source = "var text = '${1 // falcon-ignore-all lint/suspicious/avoid-dynamic: expression\n}';\ndynamic value;";
-        let syntax = falcon_dart_parser::parse(source).syntax;
+        let tree = falcon_dart_parser::parse(source).tree;
         assert!(
-            syntax
-                .comment_tokens()
-                .any(|token| token.text(source).contains("falcon-ignore"))
+            tree.comment_tokens(source)
+                .any(|token| token.text().contains("falcon-ignore"))
         );
-        let suppressions = FileSuppressions::parse(source, "test.dart", lookup, &syntax);
+        let suppressions = FileSuppressions::parse(source, "test.dart", lookup, &tree);
         assert!(suppressions.is_empty());
+        assert!(suppressions.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn interpolated_string_parts_keep_the_primary_tokens_start_line() {
+        let source = "var text = '''${1}\ntext''' // falcon-ignore lint/suspicious/avoid-dynamic: recovered\ndynamic next;";
+        let suppressions = parse(source);
+        assert!(!suppressions.is_suppressed("avoid-dynamic", 1));
+        assert!(suppressions.is_suppressed("avoid-dynamic", 2));
         assert!(suppressions.diagnostics().is_empty());
     }
 

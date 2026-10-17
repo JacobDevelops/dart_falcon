@@ -28,8 +28,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::{ConstContexts, constant_invocation, deferred_prefixes};
 use falcon_analyze::invocation_type_args;
@@ -41,7 +40,7 @@ pub struct PreferConstConstructors;
 impl Rule for PreferConstConstructors {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -66,43 +65,40 @@ struct Collector<'a> {
 struct Invocation<'a> {
     identity: DeclarationIdentity,
     constructor: &'a str,
-    type_args: &'a [DartType],
-    args: &'a ArgList,
+    type_args: AstChildren<'a, DartType<'a>>,
+    args: ArgList<'a>,
     /// Dot shorthands take their type, and so their type arguments, from the
     /// context; there is nothing for upward inference to change.
     shorthand: bool,
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if let Expr::Assign {
-            op: AssignOp::Eq,
-            value,
-            ..
-        } = node
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Expr::Assign(assignment) = node
+            && assignment.op() == AssignOp::Eq
         {
-            let mut value = value.as_ref();
+            let mut value = assignment.value();
             loop {
                 match value {
-                    Expr::Paren { expr, .. } => value = expr,
+                    Expr::Paren(paren) => value = paren.expr(),
                     // The upstream approximation also climbs cascade targets.
-                    Expr::Cascade { object, .. } => value = object,
+                    Expr::Cascade(cascade) => value = cascade.object(),
                     _ => break,
                 }
             }
-            self.assignment_values.insert(*value.span());
+            self.assignment_values.insert(value.span());
         }
-        if matches!(node, Expr::Paren { .. }) {
+        if matches!(node, Expr::Paren(_)) {
             return;
         }
         let Some(invocation) = self.invocation(node, state) else {
             return;
         };
-        if self.contexts.contains(node.span())
+        if self.contexts.contains(&node.span())
             || invocation.identity == DeclarationIdentity::OBJECT
             || self.is_literal(&invocation, state)
             || self.inference_depends_on_context(node, &invocation, state)
@@ -120,7 +116,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-const-constructors",
                 "Use 'const' with the constructor to improve performance.",
-                *node.span(),
+                node.span(),
             ));
         }
     }
@@ -149,7 +145,7 @@ impl Collector<'_> {
     /// return type. A supertype return context must not be inferred backwards.
     fn inference_depends_on_context(
         &self,
-        node: &Expr,
+        node: Expr<'_>,
         invocation: &Invocation<'_>,
         state: &SemanticState<'_>,
     ) -> bool {
@@ -164,7 +160,7 @@ impl Collector<'_> {
             return false;
         }
         let assignment_type;
-        let context = if self.assignment_values.contains(node.span()) {
+        let context = if self.assignment_values.contains(&node.span()) {
             assignment_type = state.infer_with_context(node, state.expected());
             Some(&assignment_type)
         } else {
@@ -184,50 +180,41 @@ impl Collector<'_> {
             })
     }
 
-    fn invocation<'e>(&self, node: &'e Expr, state: &SemanticState<'_>) -> Option<Invocation<'e>> {
+    fn invocation<'e>(&self, node: Expr<'e>, state: &SemanticState<'_>) -> Option<Invocation<'e>> {
         match node.unparenthesized() {
-            Expr::New {
-                is_const: false,
-                dart_type: dart_type @ DartType::Named(named),
-                constructor_name,
-                args,
-                ..
-            } => {
-                if named.segments.len() > 1 && self.is_deferred(&named.segments[0].name) {
+            Expr::New(new) if !new.is_const() => {
+                let dart_type = new.dart_type();
+                let DartType::Named(named) = dart_type else {
+                    return None;
+                };
+                if named.segments().nth(1).is_some()
+                    && self.is_deferred(named.segments().next()?.name())
+                {
                     return None;
                 }
                 let (identity, constructor) = falcon_analyze::resolve_new_constructor(
                     dart_type,
-                    constructor_name.as_ref(),
+                    new.constructor_name(),
                     &state.model,
                 )?;
                 Some(Invocation {
                     identity: state.model.unaliased(identity),
                     constructor,
-                    type_args: &named.type_args,
-                    args,
+                    type_args: named.type_args(),
+                    args: new.args(),
                     shorthand: false,
                 })
             }
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => match callee.unparenthesized() {
-                Expr::DotShorthand {
-                    is_const: false,
-                    name,
-                    ..
-                } => {
+            Expr::Call(call) => match call.callee().unparenthesized() {
+                Expr::DotShorthand(shorthand) if !shorthand.is_const() => {
                     let Some(ResolvedType::Interface { identity, .. }) = state.expected() else {
                         return None;
                     };
                     Some(Invocation {
                         identity: identity.clone(),
-                        constructor: name.name.as_str(),
-                        type_args,
-                        args,
+                        constructor: shorthand.name().name(),
+                        type_args: call.type_args(),
+                        args: call.args(),
                         shorthand: true,
                     })
                 }
@@ -243,8 +230,8 @@ impl Collector<'_> {
                     Some(Invocation {
                         identity: state.model.unaliased(identity),
                         constructor,
-                        type_args: invocation_type_args(callee, type_args),
-                        args,
+                        type_args: invocation_type_args(callee, call.type_args()),
+                        args: call.args(),
                         shorthand: false,
                     })
                 }

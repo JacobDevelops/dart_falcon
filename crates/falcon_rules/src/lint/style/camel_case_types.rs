@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct CamelCaseTypes;
@@ -19,7 +19,7 @@ pub struct CamelCaseTypes;
 impl Rule for CamelCaseTypes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,17 +35,17 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
         let diags = &mut self.diags;
         match decl {
-            TopLevelDecl::Class(c) => check(&c.name, diags, ctx),
-            TopLevelDecl::MixinClass(c) => check(&c.name, diags, ctx),
-            TopLevelDecl::Mixin(m) => check(&m.name, diags, ctx),
-            TopLevelDecl::Enum(e) => check(&e.name, diags, ctx),
-            TopLevelDecl::ExtensionType(x) => check(&x.name, diags, ctx),
-            TopLevelDecl::TypeAlias(t) => check(&t.name, diags, ctx),
+            TopLevelDecl::Class(c) => check(c.name(), diags, ctx),
+            TopLevelDecl::MixinClass(c) => check(c.name(), diags, ctx),
+            TopLevelDecl::Mixin(m) => check(m.name(), diags, ctx),
+            TopLevelDecl::Enum(e) => check(e.name(), diags, ctx),
+            TopLevelDecl::ExtensionType(x) => check(x.name(), diags, ctx),
+            TopLevelDecl::TypeAlias(t) => check(t.name(), diags, ctx),
             _ => {}
         }
         StructuralTraversal::SkipChildren
@@ -59,8 +59,8 @@ impl StructuralRuleVisitor for Collector<'_> {
 
 const MESSAGE: &str = "Name types using UpperCamelCase.";
 
-fn check(name: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !is_upper_camel_case(&name.name) {
-        diags.push(ctx.diagnostic("camel-case-types", MESSAGE, name.span));
+fn check(name: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    if !is_upper_camel_case(name.name()) {
+        diags.push(ctx.diagnostic("camel-case-types", MESSAGE, name.span()));
     }
 }

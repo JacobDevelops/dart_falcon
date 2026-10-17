@@ -13,8 +13,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferFunctionDeclarationsOverVariables;
@@ -22,7 +21,7 @@ pub struct PreferFunctionDeclarationsOverVariables;
 impl Rule for PreferFunctionDeclarationsOverVariables {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -39,17 +38,17 @@ struct Collector<'a, 'c> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
-    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
-        if local.keyword != falcon_syntax::ast::VarKeyword::Var {
-            for decl in &local.declarators {
-                if let Some(Expr::FuncExpr { .. }) =
-                    decl.initializer.as_ref().map(Expr::unparenthesized)
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
+    fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
+        if local.keyword() != VarKeyword::Var {
+            for decl in local.declarators() {
+                if let Some(Expr::FuncExpr(_)) =
+                    decl.initializer().map(Expr::unparenthesized)
                 {
                     self.diags.push(self.ctx.diagnostic(
                         "prefer-function-declarations-over-variables",
                         "Use a function declaration to bind a function to a name.".to_string(),
-                        decl.name.span,
+                        decl.name().span(),
                     ));
                 }
             }

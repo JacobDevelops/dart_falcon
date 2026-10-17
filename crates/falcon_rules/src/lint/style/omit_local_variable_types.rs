@@ -29,8 +29,7 @@
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::style::always_specify_types::known_type_arity;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -41,7 +40,7 @@ pub struct OmitLocalVariableTypes;
 impl Rule for OmitLocalVariableTypes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -99,7 +98,7 @@ fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
 
 /// The declared type, when it is a candidate for omission at all. Raw generic
 /// types denote their instantiation to bounds.
-fn declared_type(ty: &DartType, state: &SemanticState<'_>) -> Option<ResolvedType> {
+fn declared_type(ty: DartType<'_>, state: &SemanticState<'_>) -> Option<ResolvedType> {
     let declared = state
         .signatures
         .instantiate_to_bounds(&state.model.resolve_type_in(ty, &state.type_parameters));
@@ -109,7 +108,11 @@ fn declared_type(ty: &DartType, state: &SemanticState<'_>) -> Option<ResolvedTyp
 
 /// Whether `initializer`'s static type, inferred under the declared type as
 /// its context, is exactly `declared`.
-fn has_static_type(initializer: &Expr, declared: &ResolvedType, state: &SemanticState<'_>) -> bool {
+fn has_static_type(
+    initializer: Expr<'_>,
+    declared: &ResolvedType,
+    state: &SemanticState<'_>,
+) -> bool {
     state
         .signatures
         .instantiate_to_bounds(&state.infer_with_context(initializer, Some(declared)))
@@ -118,42 +121,42 @@ fn has_static_type(initializer: &Expr, declared: &ResolvedType, state: &Semantic
 
 /// Whether a promoted type parameter acquired an intersection `T & S` that
 /// no written type spells. Removing `?` alone still leaves the spellable `T`.
-fn promoted_type_parameter(initializer: &Expr, state: &SemanticState<'_>) -> bool {
+fn promoted_type_parameter(initializer: Expr<'_>, state: &SemanticState<'_>) -> bool {
     let Expr::Ident(identifier) = initializer.unparenthesized() else {
         return false;
     };
     let environment = &state.environment;
-    let ResolvedType::TypeParameter { id, .. } = environment.declared_type(&identifier.name) else {
+    let ResolvedType::TypeParameter { id, .. } = environment.declared_type(identifier.name())
+    else {
         return false;
     };
-    environment.promotion_chain(&identifier.name).iter().any(
+    environment.promotion_chain(identifier.name()).iter().any(
         |promotion| !matches!(promotion, ResolvedType::TypeParameter { id: promoted, .. } if *promoted == id),
     )
 }
 
 impl Collector<'_> {
-    fn report(&mut self, ty: &DartType) {
+    fn report(&mut self, ty: DartType<'_>) {
         // Parser type spans already end at the last consumed token.
         self.diags.push(self.ctx.diagnostic(
             "omit-local-variable-types",
             "Unnecessary type annotation on a local variable.",
-            *ty.span(),
+            ty.span(),
         ));
     }
 
-    fn check_declaration(&mut self, declaration: &LocalVarDecl, state: &SemanticState<'_>) {
-        let Some(ty) = &declaration.var_type else {
+    fn check_declaration(&mut self, declaration: LocalVarDecl<'_>, state: &SemanticState<'_>) {
+        let Some(ty) = declaration.var_type() else {
             return;
         };
         let Some(declared) = declared_type(ty, state) else {
             return;
         };
-        let all_match = declaration.declarators.iter().all(|declarator| {
-            declarator.initializer.as_ref().is_some_and(|initializer| {
+        let all_match = declaration.declarators().all(|declarator| {
+            declarator.initializer().is_some_and(|initializer| {
                 // Only a bare integer literal (`double d = 1`) keeps its type;
                 // an explicit Expr::Paren is not this syntax exclusion.
-                !(matches!(initializer, Expr::IntLit { .. })
-                    && !declared.interface("dart:core", "int"))
+                !(matches!(initializer, Expr::IntLit(_)) && !declared.interface("dart:core", "int"))
                     && !state.generic_function_returns_type_parameter(initializer)
                     && !promoted_type_parameter(initializer, state)
                     && has_static_type(initializer, &declared, state)
@@ -164,7 +167,7 @@ impl Collector<'_> {
         }
     }
 
-    fn check_for_in(&mut self, ty: &DartType, iterable: &Expr, state: &SemanticState<'_>) {
+    fn check_for_in(&mut self, ty: DartType<'_>, iterable: Expr<'_>, state: &SemanticState<'_>) {
         let Some(declared) = declared_type(ty, state) else {
             return;
         };
@@ -191,21 +194,21 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'_>) {
         match node {
             Stmt::LocalVar(declaration) => self.check_declaration(declaration, state),
-            Stmt::For(statement) => match &statement.header.init {
+            Stmt::For(statement) => match statement.header().init() {
                 Some(ForInit::VarDecl(declaration)) => self.check_declaration(declaration, state),
-                Some(ForInit::ForIn {
-                    var_type: Some(ty),
-                    iterable,
-                    ..
-                }) => self.check_for_in(ty, iterable, state),
+                Some(ForInit::ForIn(init)) => {
+                    if let Some(ty) = init.var_type() {
+                        self.check_for_in(ty, init.iterable(), state);
+                    }
+                }
                 _ => {}
             },
             _ => {}
@@ -223,30 +226,30 @@ mod tests {
     #[test]
     fn annotation_spans_exclude_trailing_comments_and_whitespace() {
         let source = "void f() { List<int> /* named */ a; int Function() /* function */ b; (int, String) /* record */ c; }";
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-            ..
-        } = parse(source);
+        let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
+        let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
             panic!("expected function");
         };
-        let Some(FunctionBody::Block(block)) = &function.body else {
+        let Some(FunctionBody::Block(block)) = function.body() else {
             panic!("expected block");
         };
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let mut collector = Collector {
             diags: Vec::new(),
             ctx: &ctx,
         };
-        for statement in &block.stmts {
+        for statement in block.stmts() {
             let Stmt::LocalVar(declaration) = statement else {
                 panic!("expected local declaration");
             };
-            collector.report(declaration.var_type.as_ref().unwrap());
+            collector.report(declaration.var_type().unwrap());
         }
         let spans: Vec<_> = collector
             .diags

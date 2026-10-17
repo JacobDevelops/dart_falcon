@@ -20,8 +20,8 @@
 use falcon_analyze::resolve::TypeKind;
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
-use falcon_syntax::{Program, TokenKind};
+use falcon_syntax::TokenKind;
+use falcon_syntax::cst::*;
 
 use crate::lint::correctness::exhaustive_cases::is_enum_like;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -32,7 +32,7 @@ pub struct NoDefaultCases;
 impl Rule for NoDefaultCases {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
@@ -64,40 +64,44 @@ impl Collector<'_> {
 
     /// The default member includes its statements, not just its keyword.
     /// Skip any preceding case labels grouped with the same statement body.
-    fn default_member_span(&self, case: &SwitchCase, index: usize) -> Span {
-        let from = case.cases[..index]
-            .iter()
-            .rev()
-            .find_map(|kind| match kind {
-                SwitchCaseKind::Pattern(pattern, guard) => Some(
-                    guard
-                        .as_ref()
-                        .map_or(pattern.span().end, |guard| guard.span().end),
+    fn default_member_span(&self, case: SwitchCase<'_>, index: usize) -> Span {
+        let from = case
+            .cases()
+            .take(index)
+            .filter_map(|kind| match kind {
+                SwitchCaseKind::Pattern(label) => Some(
+                    label
+                        .guard()
+                        .map_or(label.pattern().span().end, |guard| guard.span().end),
                 ),
-                SwitchCaseKind::Expr(expr) => Some(expr.span().end),
-                SwitchCaseKind::Default => None,
+                SwitchCaseKind::Expr(label) => Some(label.expr().span().end),
+                SwitchCaseKind::Default(_) => None,
             })
-            .unwrap_or(case.span.start);
+            .last()
+            .unwrap_or(case.span().start);
         let keyword = self
             .ctx
-            .syntax
-            .keywords_in(Span::new(from, case.span.end), TokenKind::Default)
+            .tree()
+            .keywords_in(
+                self.ctx.source,
+                Span::new(from, case.span().end),
+                TokenKind::Default,
+            )
             .next()
-            .map_or(case.span.start, |token| token.offset());
+            .map_or(case.span().start, |token| token.offset());
         let start = case
-            .labels
-            .iter()
-            .filter(|label| from <= label.span.start && label.span.end <= keyword)
-            .map(|label| label.span.start)
+            .labels()
+            .filter(|label| from <= label.span().start && label.span().end <= keyword)
+            .map(|label| label.span().start)
             .min()
             .unwrap_or(keyword);
-        let end = if index + 1 == case.cases.len() {
-            case.span.end
+        let end = if index + 1 == case.cases().len() {
+            case.span().end
         } else {
             self.ctx
-                .syntax
-                .tokens_in(Span::new(keyword, case.span.end))
-                .find(|token| token.kind == TokenKind::Colon)
+                .tree()
+                .tokens_in(self.ctx.source, Span::new(keyword, case.span().end))
+                .find(|token| token.kind() == TokenKind::Colon)
                 .map_or(keyword + "default:".len(), |token| {
                     token.offset() + token.len()
                 })
@@ -106,19 +110,18 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'_>) {
         let Stmt::Switch(switch) = node else {
             return;
         };
-        let Some((case, index)) = switch.cases.iter().find_map(|case| {
-            case.cases
-                .iter()
-                .position(|kind| matches!(kind, SwitchCaseKind::Default))
+        let Some((case, index)) = switch.cases().find_map(|case| {
+            case.cases()
+                .position(|kind| matches!(kind, SwitchCaseKind::Default(_)))
                 .map(|index| (case, index))
         }) else {
             return;
@@ -129,7 +132,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             identity,
             extension_type: false,
             ..
-        } = state.infer(&switch.subject)
+        } = state.infer(switch.subject())
         else {
             return;
         };

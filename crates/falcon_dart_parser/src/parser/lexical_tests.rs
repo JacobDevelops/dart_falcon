@@ -185,6 +185,49 @@ fn lexer_only_entry_retains_manifest_interpolation_identifiers() {
 }
 
 #[test]
+fn lexical_tree_retains_manifest_interpolation_identifiers() {
+    let source = "name: workspace\nvalue: '$Simple ${Braced} ${\"$Nested\"} ${show} ${get} ${ { 'key': hide } }'\n";
+    let tree = crate::lex_tree(source);
+    assert!(tree.is_lossless(source));
+    assert!(tree.program(source).declarations().is_empty());
+    assert_eq!(
+        tree.identifier_tokens(source)
+            .map(|token| token.text())
+            .collect::<Vec<_>>(),
+        [
+            "name",
+            "workspace",
+            "value",
+            "Simple",
+            "Braced",
+            "Nested",
+            "show",
+            "get",
+            "hide"
+        ]
+    );
+    assert_eq!(tree.tokens(source).last().unwrap().kind(), TokenKind::Eof);
+}
+
+#[test]
+fn lexical_tree_uses_scanned_interpolation_boundaries() {
+    for source in [r"x: '${\{}'", r"x: '${a\}b}'"] {
+        let tree = crate::lex_tree(source);
+        assert!(tree.is_lossless(source));
+        let closing = tree
+            .tokens(source)
+            .find(|token| {
+                token.kind() == TokenKind::RBrace && token.offset() == source.rfind('}').unwrap()
+            })
+            .unwrap();
+        assert_eq!(
+            closing.parent().kind(),
+            falcon_syntax::cst::NodeKind::StringInterpolation
+        );
+    }
+}
+
+#[test]
 fn lexer_only_entry_retains_deep_interpolation_streams() {
     let depth = 512;
     let source = format!("{}Name{}", "'${".repeat(depth), "}'".repeat(depth));

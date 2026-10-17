@@ -1,4 +1,4 @@
-//! SDK-free regressions for grouping and cascade selectors retained in the AST.
+//! SDK-free regressions for grouping and cascade selectors retained in syntax.
 
 use std::path::Path;
 
@@ -19,25 +19,25 @@ use falcon_rules::lint::style::unnecessary_parenthesis::UnnecessaryParenthesis;
 use falcon_rules::lint::suspicious::no_equal_arguments::NoEqualArguments;
 
 fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
-    rule.analyze(&program, &context)
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    rule.analyze(program, &context)
         .into_iter()
         .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_owned())
         .collect()
@@ -247,25 +247,25 @@ void pattern<T>(T? value) {
   if (value case final captured /* ! */ !) {}
 }
 ";
-    let falcon_dart_parser::ParseResult {
-        program,
-        errors,
-        syntax,
-        ..
-    } = parse(source);
+    let falcon_dart_parser::ParseResult { tree, errors, .. } = parse(source);
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
             path,
-            program: &program,
+            parsed: &parsed,
             has_parse_errors: false,
         }],
         &[],
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
-    let diagnostics = NullCheckOnNullableTypeParameter.analyze(&program, &context);
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    let diagnostics = NullCheckOnNullableTypeParameter.analyze(program, &context);
     let positions: Vec<_> = diagnostics
         .iter()
         .map(|diagnostic| {

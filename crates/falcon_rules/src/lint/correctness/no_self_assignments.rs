@@ -23,7 +23,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::identifier_name;
 
@@ -33,7 +33,7 @@ pub struct NoSelfAssignments;
 impl Rule for NoSelfAssignments {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let finder = Finder {
@@ -50,25 +50,22 @@ struct Finder<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Finder<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Finder<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Assign {
-            target,
-            op: AssignOp::Eq,
-            value,
-            span,
-        } = node
-            && let (Some(left), Some(right)) = (identifier_name(target), identifier_name(value))
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Assign(assignment) = node
+            && assignment.op() == AssignOp::Eq
+            && let (Some(left), Some(right)) =
+                (identifier_name(assignment.target()), identifier_name(assignment.value()))
             && left == right
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "no-self-assignments",
                 "The variable or property is being assigned to itself.",
-                *span,
+                assignment.span(),
             ));
         }
         StructuralTraversal::Continue

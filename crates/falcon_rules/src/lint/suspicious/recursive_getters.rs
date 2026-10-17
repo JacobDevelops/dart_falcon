@@ -12,7 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct RecursiveGetters;
@@ -20,7 +20,7 @@ pub struct RecursiveGetters;
 impl Rule for RecursiveGetters {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -36,16 +36,16 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Function(function) = declaration {
-            if matches!(function.kind, FunctionKind::Getter) {
-                check(&function.body, &function.name.name, &mut self.diags, self.ctx);
+            if matches!(function.kind(), FunctionKind::Getter) {
+                check(function.body(), function.name().name(), &mut self.diags, self.ctx);
             }
         } else if let Some(members) = crate::lint::declarations::members_of(declaration) {
             for member in members {
                 if let ClassMember::Getter(getter) = member {
-                    check(&getter.body, &getter.name.name, &mut self.diags, self.ctx);
+                    check(getter.body(), getter.name().name(), &mut self.diags, self.ctx);
                 }
             }
         }
@@ -59,17 +59,20 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 fn check(
-    body: &Option<FunctionBody>,
+    body: Option<FunctionBody<'_>>,
     name: &str,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    let expr = match body.as_ref() {
-        Some(FunctionBody::Arrow(e, _)) => Some(&**e),
-        Some(FunctionBody::Block(b)) => match b.stmts.as_slice() {
-            [Stmt::Return(r)] => r.value.as_ref(),
-            _ => None,
-        },
+    let expr = match body {
+        Some(FunctionBody::Arrow(arrow)) => Some(arrow.expr()),
+        Some(FunctionBody::Block(b)) => {
+            let mut stmts = b.stmts();
+            match (stmts.next(), stmts.next()) {
+                (Some(Stmt::Return(r)), None) => r.value(),
+                _ => None,
+            }
+        }
         _ => None,
     };
     let Some(expr) = expr else { return };
@@ -77,22 +80,20 @@ fn check(
         diags.push(ctx.diagnostic(
             "recursive-getters",
             "Recursive getter — this getter unconditionally returns itself",
-            *span,
+            span,
         ));
     }
 }
 
 /// The span of a direct self-reference (`x` or `this.x`), if `expr` is one.
-fn self_reference<'a>(expr: &'a Expr, name: &str) -> Option<&'a Span> {
+fn self_reference(expr: Expr<'_>, name: &str) -> Option<Span> {
     match expr.unparenthesized() {
-        Expr::Ident(id) if id.name == name => Some(&id.span),
-        Expr::Field {
-            object,
-            field,
-            span,
-            ..
-        } if matches!(object.unparenthesized(), Expr::This { .. }) && field.name == name => {
-            Some(span)
+        Expr::Ident(id) if id.name() == name => Some(id.span()),
+        Expr::Field(field)
+            if matches!(field.object().unparenthesized(), Expr::This(_))
+                && field.field().name() == name =>
+        {
+            Some(field.span())
         }
         _ => None,
     }

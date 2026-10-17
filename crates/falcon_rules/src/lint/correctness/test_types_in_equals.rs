@@ -22,7 +22,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
 
@@ -32,14 +32,14 @@ pub struct TestTypesInEquals;
 impl Rule for TestTypesInEquals {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(ParameterCasts {
             ctx,
             diagnostics: Vec::new(),
-            declarations: program.declarations.iter(),
-            members: [].iter(),
+            declarations: program.declarations(),
+            members: None,
             type_name: "",
             name: None,
         }))
@@ -50,19 +50,19 @@ impl Rule for TestTypesInEquals {
 struct ParameterCasts<'a> {
     ctx: &'a AnalyzeContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    declarations: std::slice::Iter<'a, TopLevelDecl>,
-    members: std::slice::Iter<'a, ClassMember>,
+    declarations: AstChildren<'a, TopLevelDecl<'a>>,
+    members: Option<AstChildren<'a, ClassMember<'a>>>,
     type_name: &'a str,
     name: Option<&'a str>,
 }
 
 falcon_analyze::structural_visitor! {
-impl<'a> StructuralRuleVisitor for ParameterCasts<'a> {
+impl<'a> StructuralRuleVisitor<'a> for ParameterCasts<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_top_level_decl(&mut self, _node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) -> StructuralTraversal {
         // Top-level callbacks follow the program's declaration order.
         let Some(node) = self.declarations.next() else {
             return StructuralTraversal::SkipChildren;
@@ -70,14 +70,14 @@ impl<'a> StructuralRuleVisitor for ParameterCasts<'a> {
         let Some(members) = crate::lint::declarations::members_of(node) else {
             return StructuralTraversal::SkipChildren;
         };
-        self.members = members.iter();
+        self.members = Some(members);
         self.type_name = match node {
-            TopLevelDecl::Class(node) => node.name.name.as_str(),
-            TopLevelDecl::MixinClass(node) => node.name.name.as_str(),
-            TopLevelDecl::Enum(node) => node.name.name.as_str(),
-            TopLevelDecl::Mixin(node) => node.name.name.as_str(),
+            TopLevelDecl::Class(node) => node.name().name(),
+            TopLevelDecl::MixinClass(node) => node.name().name(),
+            TopLevelDecl::Enum(node) => node.name().name(),
+            TopLevelDecl::Mixin(node) => node.name().name(),
             TopLevelDecl::Extension(node) => {
-                let span = node.on_type.span();
+                let span = node.on_type().span();
                 self.ctx.source.get(span.start..span.end).unwrap_or("unknown")
             }
             _ => "unknown",
@@ -85,20 +85,21 @@ impl<'a> StructuralRuleVisitor for ParameterCasts<'a> {
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, _node: &ClassMember) -> StructuralTraversal {
-        if let Some(ClassMember::Operator(op)) = self.members.next()
-            && op.op == "=="
-            && op.body.is_some()
-            && let [param] = op.params.params.as_slice()
+    fn visit_class_member(&mut self, _node: ClassMember<'a>) -> StructuralTraversal {
+        if let Some(ClassMember::Operator(op)) = self.members.as_mut().and_then(Iterator::next)
+            && op.op() == "=="
+            && op.body().is_some()
+            && op.params().params().len() == 1
+            && let Some(param) = op.params().params().first()
         {
-            self.name = Some(param.name.name.as_str());
+            self.name = Some(param.name().name());
             StructuralTraversal::Continue
         } else {
             StructuralTraversal::SkipChildren
         }
     }
 
-    fn exit_class_member(&mut self, _node: &ClassMember) {
+    fn exit_class_member(&mut self, _node: ClassMember<'a>) {
         self.name = None;
     }
 
@@ -109,16 +110,16 @@ impl<'a> StructuralRuleVisitor for ParameterCasts<'a> {
         true
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Some(name) = self.name
-            && let Expr::As { expr, span, .. } = node
-            && matches!(&**expr, Expr::Ident(identifier) if identifier.name == name)
-            && !is_parenthesized(expr)
+            && let Expr::As(cast) = node
+            && matches!(cast.expr(), Expr::Ident(identifier) if identifier.name() == name)
+            && !is_parenthesized(cast.expr())
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "test-types-in-equals",
                 format!("Missing type test for '{}' in '=='.", self.type_name),
-                *span,
+                cast.span(),
             ));
         }
         StructuralTraversal::Continue

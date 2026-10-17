@@ -5,12 +5,11 @@
 //! their enclosing declaration. Bodies nest strictly, so the innermost body
 //! containing a node is the containing entry with the greatest start offset.
 
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
+use falcon_syntax::cst::visit::{
     Visitor, walk_constructor_decl, walk_expr, walk_function_decl, walk_getter_decl,
     walk_method_decl, walk_program, walk_setter_decl, walk_stmt,
 };
+use falcon_syntax::cst::*;
 
 /// The declaration form that owns a function body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,19 +24,19 @@ pub(crate) enum BodyOwner {
     Closure,
 }
 
-pub(crate) struct FunctionBodyInfo {
+pub(crate) struct FunctionBodyInfo<'a> {
     pub(crate) owner: BodyOwner,
     pub(crate) async_marker: AsyncMarker,
     /// The declared return type; closures and constructors never have one.
-    pub(crate) return_type: Option<DartType>,
+    pub(crate) return_type: Option<DartType<'a>>,
     pub(crate) span: Span,
     /// The unparenthesized expression of an `=>` body.
     pub(crate) arrow_expression: Option<Span>,
 }
 
-pub(crate) struct FunctionBodies {
+pub(crate) struct FunctionBodies<'a> {
     /// Sorted by `(start, Reverse(end))`, collection order breaking ties.
-    bodies: Vec<FunctionBodyInfo>,
+    bodies: Vec<FunctionBodyInfo<'a>>,
     body_parents: Vec<Option<usize>>,
     /// Try-statement body and `finally` blocks: the official lints treat a
     /// `Block` whose parent is a `TryStatement` as a boundary. Sorted like
@@ -46,8 +45,8 @@ pub(crate) struct FunctionBodies {
     try_parents: Vec<Option<usize>>,
 }
 
-impl FunctionBodies {
-    pub(crate) fn new(program: &Program) -> Self {
+impl<'a> FunctionBodies<'a> {
+    pub(crate) fn new(program: Program<'a>) -> Self {
         let mut collector = Self {
             bodies: Vec::new(),
             body_parents: Vec::new(),
@@ -67,7 +66,7 @@ impl FunctionBodies {
     }
 
     /// The innermost function body containing `span`.
-    pub(crate) fn enclosing(&self, span: &Span) -> Option<&FunctionBodyInfo> {
+    pub(crate) fn enclosing(&self, span: &Span) -> Option<&FunctionBodyInfo<'a>> {
         innermost(&self.bodies, &self.body_parents, |info| info.span, span)
     }
 
@@ -84,20 +83,18 @@ impl FunctionBodies {
         &mut self,
         owner: BodyOwner,
         async_marker: AsyncMarker,
-        return_type: Option<&DartType>,
-        body: Option<&FunctionBody>,
+        return_type: Option<DartType<'a>>,
+        body: Option<FunctionBody<'a>>,
     ) {
         if let Some(body) = body {
             self.bodies.push(FunctionBodyInfo {
                 owner,
                 async_marker,
-                return_type: return_type.cloned(),
-                span: *body.span(),
+                return_type,
+                span: body.span(),
                 arrow_expression: match body {
-                    FunctionBody::Arrow(expression, _) => {
-                        Some(*expression.unparenthesized().span())
-                    }
-                    FunctionBody::Block(_) | FunctionBody::Native(..) => None,
+                    FunctionBody::Arrow(arrow) => Some(arrow.expr().unparenthesized().span()),
+                    FunctionBody::Block(_) | FunctionBody::Native(_) => None,
                 },
             });
         }
@@ -149,96 +146,76 @@ fn innermost<'a, T>(
     None
 }
 
-impl Visitor for FunctionBodies {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        let owner = match node.kind {
+impl<'a> Visitor<'a> for FunctionBodies<'a> {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
+        let owner = match node.kind() {
             FunctionKind::Function(_) => BodyOwner::TopLevelFunction,
             FunctionKind::Getter => BodyOwner::Getter,
             FunctionKind::Setter(_) => BodyOwner::Setter,
         };
-        self.push(
-            owner,
-            node.async_marker,
-            node.return_type.as_ref(),
-            node.body.as_ref(),
-        );
+        self.push(owner, node.async_marker(), node.return_type(), node.body());
         walk_function_decl(self, node);
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) {
         self.push(
             BodyOwner::Method,
-            node.async_marker,
-            node.return_type.as_ref(),
-            node.body.as_ref(),
+            node.async_marker(),
+            node.return_type(),
+            node.body(),
         );
         walk_method_decl(self, node);
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) {
         self.push(
             BodyOwner::Getter,
-            node.async_marker,
-            node.return_type.as_ref(),
-            node.body.as_ref(),
+            node.async_marker(),
+            node.return_type(),
+            node.body(),
         );
         walk_getter_decl(self, node);
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        self.push(
-            BodyOwner::Setter,
-            AsyncMarker::Sync,
-            None,
-            node.body.as_ref(),
-        );
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) {
+        self.push(BodyOwner::Setter, AsyncMarker::Sync, None, node.body());
         walk_setter_decl(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.push(
-            BodyOwner::Constructor,
-            AsyncMarker::Sync,
-            None,
-            node.body.as_ref(),
-        );
+    fn visit_constructor_decl(&mut self, node: ConstructorDecl<'a>) {
+        self.push(BodyOwner::Constructor, AsyncMarker::Sync, None, node.body());
         walk_constructor_decl(self, node);
     }
 
-    fn visit_primary_constructor_body(&mut self, node: &PrimaryConstructorBody) {
-        self.push(
-            BodyOwner::Constructor,
-            AsyncMarker::Sync,
-            None,
-            node.body.as_ref(),
-        );
-        falcon_syntax::visitor::walk_primary_constructor_body(self, node);
+    fn visit_primary_constructor_body(&mut self, node: PrimaryConstructorBody<'a>) {
+        self.push(BodyOwner::Constructor, AsyncMarker::Sync, None, node.body());
+        falcon_syntax::cst::visit::walk_primary_constructor_body(self, node);
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) {
         if let ClassMember::Operator(operator) = node {
             self.push(
                 BodyOwner::Operator,
-                operator.async_marker,
-                operator.return_type.as_ref(),
-                operator.body.as_ref(),
+                operator.async_marker(),
+                operator.return_type(),
+                operator.body(),
             );
         }
-        falcon_syntax::visitor::walk_class_member(self, node);
+        falcon_syntax::cst::visit::walk_class_member(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
             Stmt::LocalFunc(function) => self.push(
                 BodyOwner::LocalFunction,
-                function.async_marker,
-                function.return_type.as_ref(),
-                Some(&function.body),
+                function.async_marker(),
+                function.return_type(),
+                Some(function.body()),
             ),
             Stmt::TryCatch(statement) => {
-                self.try_blocks.push(statement.body.span);
-                if let Some(finally) = &statement.finally {
-                    self.try_blocks.push(finally.span);
+                self.try_blocks.push(statement.body().span());
+                if let Some(finally) = statement.finally() {
+                    self.try_blocks.push(finally.span());
                 }
             }
             _ => {}
@@ -246,12 +223,14 @@ impl Visitor for FunctionBodies {
         walk_stmt(self, node);
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::FuncExpr {
-            async_marker, body, ..
-        } = node
-        {
-            self.push(BodyOwner::Closure, *async_marker, None, Some(body));
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        if let Expr::FuncExpr(function) = node {
+            self.push(
+                BodyOwner::Closure,
+                function.async_marker(),
+                None,
+                Some(function.body()),
+            );
         }
         walk_expr(self, node);
     }

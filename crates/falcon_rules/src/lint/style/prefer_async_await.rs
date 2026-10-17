@@ -14,7 +14,7 @@ use falcon_analyze::{
     structural_visitor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferAsyncAwait;
@@ -22,7 +22,7 @@ pub struct PreferAsyncAwait;
 impl Rule for PreferAsyncAwait {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -40,80 +40,80 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    fn enter_body(&mut self, body: Option<&FunctionBody>) {
+    fn enter_body(&mut self, body: Option<FunctionBody<'_>>) {
         self.arrow_depth += usize::from(matches!(body, Some(FunctionBody::Arrow(..))));
     }
 
-    fn exit_body(&mut self, body: Option<&FunctionBody>) {
+    fn exit_body(&mut self, body: Option<FunctionBody<'_>>) {
         self.arrow_depth -= usize::from(matches!(body, Some(FunctionBody::Arrow(..))));
     }
 }
 
 structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.enter_body(node.body.as_ref());
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.enter_body(node.body());
         StructuralTraversal::Continue
     }
-    fn exit_function_decl(&mut self, node: &FunctionDecl) { self.exit_body(node.body.as_ref()); }
+    fn exit_function_decl(&mut self, node: FunctionDecl<'a>) { self.exit_body(node.body()); }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) -> StructuralTraversal {
-        self.enter_body(node.body.as_ref());
+    fn visit_constructor_decl(&mut self, node: ConstructorDecl<'a>) -> StructuralTraversal {
+        self.enter_body(node.body());
         StructuralTraversal::Continue
     }
-    fn exit_constructor_decl(&mut self, node: &ConstructorDecl) { self.exit_body(node.body.as_ref()); }
+    fn exit_constructor_decl(&mut self, node: ConstructorDecl<'a>) { self.exit_body(node.body()); }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.enter_body(node.body.as_ref());
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.enter_body(node.body());
         StructuralTraversal::Continue
     }
-    fn exit_method_decl(&mut self, node: &MethodDecl) { self.exit_body(node.body.as_ref()); }
+    fn exit_method_decl(&mut self, node: MethodDecl<'a>) { self.exit_body(node.body()); }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
-        self.enter_body(node.body.as_ref());
+    fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
+        self.enter_body(node.body());
         StructuralTraversal::Continue
     }
-    fn exit_getter_decl(&mut self, node: &GetterDecl) { self.exit_body(node.body.as_ref()); }
+    fn exit_getter_decl(&mut self, node: GetterDecl<'a>) { self.exit_body(node.body()); }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        self.enter_body(node.body.as_ref());
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        self.enter_body(node.body());
         StructuralTraversal::Continue
     }
-    fn exit_setter_decl(&mut self, node: &SetterDecl) { self.exit_body(node.body.as_ref()); }
+    fn exit_setter_decl(&mut self, node: SetterDecl<'a>) { self.exit_body(node.body()); }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            self.enter_body(operator.body.as_ref());
+            self.enter_body(operator.body());
         }
         StructuralTraversal::Continue
     }
-    fn exit_class_member(&mut self, node: &ClassMember) {
-        if let ClassMember::Operator(operator) = node { self.exit_body(operator.body.as_ref()); }
+    fn exit_class_member(&mut self, node: ClassMember<'a>) {
+        if let ClassMember::Operator(operator) = node { self.exit_body(operator.body()); }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::LocalFunc(local) = node { self.enter_body(Some(&local.body)); }
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
+        if let Stmt::LocalFunc(local) = node { self.enter_body(Some(local.body())); }
         StructuralTraversal::Continue
     }
-    fn exit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalFunc(local) = node { self.exit_body(Some(&local.body)); }
+    fn exit_stmt(&mut self, node: Stmt<'a>) {
+        if let Stmt::LocalFunc(local) = node { self.exit_body(Some(local.body())); }
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if matches!(node, Expr::FuncExpr { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if matches!(node, Expr::FuncExpr(_)) {
             return StructuralTraversal::SkipChildren;
         }
         if self.arrow_depth == 0
-            && let Expr::Call { callee, span, .. } = node
-            && let Expr::Field { field, .. } = callee.unparenthesized()
-            && field.name == "then"
+            && let Expr::Call(call) = node
+            && let Expr::Field(field) = call.callee().unparenthesized()
+            && field.field().name() == "then"
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-async-await",
                 "Prefer async/await over .then() chains",
-                *span,
+                call.span(),
             ));
         }
         StructuralTraversal::Continue

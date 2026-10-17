@@ -21,7 +21,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct ThrowInFinally;
@@ -29,7 +29,7 @@ pub struct ThrowInFinally;
 impl Rule for ThrowInFinally {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let finder = Finder {
@@ -66,19 +66,19 @@ impl Finder<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Finder<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Finder<'_, '_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.states.push(self.in_finally);
         match node {
             Stmt::TryCatch(try_catch) => {
-                self.finally_blocks.push(try_catch.finally.as_ref().map(|block| block.span));
+                self.finally_blocks.push(try_catch.finally().map(|block| block.span()));
                 self.in_finally = false;
             }
             Stmt::Throw(throw) => self.report(Span {
-                start: throw.span.start,
-                end: throw.value.span().end,
+                start: throw.span().start,
+                end: throw.value().span().end,
             }),
             Stmt::LocalFunc(_) => self.in_finally = false,
             _ => {}
@@ -86,34 +86,34 @@ impl StructuralRuleVisitor for Finder<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, node: &Stmt) {
+    fn exit_stmt(&mut self, node: Stmt<'a>) {
         if matches!(node, Stmt::TryCatch(_)) { self.finally_blocks.pop(); }
         self.in_finally = self.states.pop().unwrap();
     }
 
-    fn visit_block(&mut self, node: &Block) -> StructuralTraversal {
+    fn visit_block(&mut self, node: Block<'a>) -> StructuralTraversal {
         self.states.push(self.in_finally);
-        if self.finally_blocks.last() == Some(&Some(node.span)) {
+        if self.finally_blocks.last() == Some(&Some(node.span())) {
             self.in_finally = true;
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_block(&mut self, _node: &Block) {
+    fn exit_block(&mut self, _node: Block<'a>) {
         self.in_finally = self.states.pop().unwrap();
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.states.push(self.in_finally);
         match node {
-            Expr::Throw { span, .. } => self.report(*span),
-            Expr::FuncExpr { .. } => self.in_finally = false,
+            Expr::Throw(throw) => self.report(throw.span()),
+            Expr::FuncExpr(_) => self.in_finally = false,
             _ => {}
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.in_finally = self.states.pop().unwrap();
     }
 }

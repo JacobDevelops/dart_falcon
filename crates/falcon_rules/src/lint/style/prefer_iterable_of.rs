@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferIterableOf;
@@ -19,7 +19,7 @@ pub struct PreferIterableOf;
 impl Rule for PreferIterableOf {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -40,41 +40,44 @@ fn is_iterable_base(name: &str) -> bool {
 ///   * `dart_type = List`, `constructor_name = Some("from")`, or
 ///   * the `.from` is folded into the qualified type name, giving
 ///     `dart_type = Named { segments: [.., "List", "from"] }`, `constructor_name = None`.
-fn is_from_constructor(dart_type: &DartType, constructor_name: &Option<Identifier>) -> bool {
+fn is_from_constructor(dart_type: DartType<'_>, constructor_name: Option<Identifier<'_>>) -> bool {
     let DartType::Named(nt) = dart_type else {
         return false;
     };
     // Case A: `.from` kept as a separate named constructor.
     if let Some(ctor) = constructor_name
-        && ctor.name == "from"
-        && let Some(last) = nt.segments.last()
+        && ctor.name() == "from"
+        && let Some(last) = nt.segments().last()
     {
-        return is_iterable_base(&last.name);
+        return is_iterable_base(last.name());
     }
     // Case B: `.from` folded into the qualified type name -> [.., base, "from"].
-    let segs = &nt.segments;
-    segs.len() >= 2
-        && segs.last().is_some_and(|s| s.name == "from")
-        && is_iterable_base(&segs[segs.len() - 2].name)
+    let mut segments = nt.segments().rev();
+    segments
+        .next()
+        .is_some_and(|segment| segment.name() == "from")
+        && segments
+            .next()
+            .is_some_and(|segment| is_iterable_base(segment.name()))
 }
 
 /// Resolve the base type name of a receiver expression.
 /// `List`            -> `Expr::Ident("List")`
 /// `List<int>`       -> `Expr::GenericInstantiation { target: Ident("List"), type_args: [int], .. }`
-fn base_type_name(expr: &Expr) -> Option<&str> {
+fn base_type_name<'a>(expr: Expr<'a>) -> Option<&'a str> {
     match expr.unparenthesized() {
-        Expr::Ident(id) => Some(id.name.as_str()),
-        Expr::Call { callee, .. } => base_type_name(callee),
-        Expr::GenericInstantiation { target, .. } => base_type_name(target),
+        Expr::Ident(id) => Some(id.name()),
+        Expr::Call(call) => base_type_name(call.callee()),
+        Expr::GenericInstantiation(instantiation) => base_type_name(instantiation.target()),
         _ => None,
     }
 }
 
 /// True for `List.from(...)` / `List<int>.from(...)` parsed as `Call(Field(receiver, "from"), args)`.
-fn is_from_static_call(callee: &Expr) -> bool {
-    if let Expr::Field { object, field, .. } = callee.unparenthesized()
-        && field.name == "from"
-        && let Some(base) = base_type_name(object)
+fn is_from_static_call(callee: Expr<'_>) -> bool {
+    if let Expr::Field(field) = callee.unparenthesized()
+        && field.field().name() == "from"
+        && let Some(base) = base_type_name(field.object())
     {
         return is_iterable_base(base);
     }
@@ -89,30 +92,25 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::New {
-                dart_type,
-                constructor_name,
-                span,
-                ..
-            } if is_from_constructor(dart_type, constructor_name) => {
+            Expr::New(construction) if is_from_constructor(construction.dart_type(), construction.constructor_name()) => {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-iterable-of",
                     "Prefer using the 'of' constructor instead of 'from'.",
-                    *span,
+                    construction.span(),
                 ));
             }
-            Expr::Call { callee, span, .. } if is_from_static_call(callee) => {
+            Expr::Call(call) if is_from_static_call(call.callee()) => {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-iterable-of",
                     "Prefer using the 'of' constructor instead of 'from'.",
-                    *span,
+                    call.span(),
                 ));
             }
             _ => {}

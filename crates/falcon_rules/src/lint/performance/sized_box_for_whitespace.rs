@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct SizedBoxForWhitespace;
@@ -19,7 +19,7 @@ pub struct SizedBoxForWhitespace;
 impl Rule for SizedBoxForWhitespace {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -36,21 +36,19 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Some((name, args, _)) = crate::lint::flutter::widget_construction(node)
         && name == "Container"
-        && args.positional.is_empty()
+        && args.positional().is_empty()
         // Only sizing/pass-through args, and at least one dimension set: this
         // Container adds whitespace only, so a SizedBox expresses it directly.
         && args
-            .named
-            .iter()
-            .any(|n| matches!(n.name.name.as_str(), "width" | "height"))
+            .named()
+            .any(|n| matches!(n.name().name(), "width" | "height"))
         && args
-            .named
-            .iter()
-            .all(|n| matches!(n.name.name.as_str(), "width" | "height" | "child" | "key"))
+            .named()
+            .all(|n| matches!(n.name().name(), "width" | "height" | "child" | "key"))
         {
             self.diags.push(self.ctx.diagnostic(
                 "sized-box-for-whitespace",
@@ -86,9 +84,13 @@ void build() {
 ";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = SizedBoxForWhitespace.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = SizedBoxForWhitespace.analyze(parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 3);
         for (diagnostic, invocation) in diagnostics.iter().zip([
             "Container(width:",

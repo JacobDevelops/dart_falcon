@@ -19,7 +19,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct BooleanPrefixes;
@@ -27,7 +27,7 @@ pub struct BooleanPrefixes;
 impl Rule for BooleanPrefixes {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let visitor = Collector {
@@ -58,8 +58,8 @@ fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
     prefixes
 }
 
-fn is_bool_type(ty: Option<&DartType>) -> bool {
-    matches!(ty, Some(DartType::Named(nt)) if nt.segments.len() == 1 && nt.segments[0].name == "bool")
+fn is_bool_type(ty: Option<DartType<'_>>) -> bool {
+    matches!(ty, Some(DartType::Named(nt)) if nt.segments().count() == 1 && nt.segments().next().unwrap().name() == "bool")
 }
 
 use crate::member_order::is_override;
@@ -75,13 +75,13 @@ fn has_valid_boolean_prefix(name: &str, prefixes: &[String]) -> bool {
 }
 
 fn check_name(
-    name: &Identifier,
+    name: Identifier<'_>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     prefixes: &[String],
 ) {
-    if !has_valid_boolean_prefix(&name.name, prefixes) {
-        diags.push(ctx.diagnostic("boolean-prefixes", MESSAGE, name.span));
+    if !has_valid_boolean_prefix(name.name(), prefixes) {
+        diags.push(ctx.diagnostic("boolean-prefixes", MESSAGE, name.span()));
     }
 }
 
@@ -91,56 +91,56 @@ fn check_name(
 /// non-literal expression (`= !kDebugMode`) is out of scope, and the declared
 /// type is irrelevant.
 fn check_declarators(
-    declarators: &[VarDeclarator],
+    declarators: AstChildren<'_, VarDeclarator<'_>>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     prefixes: &[String],
 ) {
     for d in declarators {
         if matches!(
-            d.initializer.as_ref().map(Expr::unparenthesized),
-            Some(Expr::BoolLit { .. })
+            d.initializer().map(Expr::unparenthesized),
+            Some(Expr::BoolLit(_))
         ) {
-            check_name(&d.name, diags, ctx, prefixes);
+            check_name(d.name(), diags, ctx, prefixes);
         }
     }
 }
 
-struct Collector<'a, 'ctx> {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'ctx>,
+    ctx: &'a AnalyzeContext<'a>,
     prefixes: Vec<String>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = decl {
-            check_declarators(&v.declarators, &mut self.diags, self.ctx, &self.prefixes);
+            check_declarators(v.declarators(), &mut self.diags, self.ctx, &self.prefixes);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, f: &FunctionDecl) -> StructuralTraversal {
-        if !matches!(f.kind, FunctionKind::Setter(_)) && is_bool_type(f.return_type.as_ref()) {
-            check_name(&f.name, &mut self.diags, self.ctx, &self.prefixes);
+    fn visit_function_decl(&mut self, f: FunctionDecl<'a>) -> StructuralTraversal {
+        if !matches!(f.kind(), FunctionKind::Setter(_)) && is_bool_type(f.return_type()) {
+            check_name(f.name(), &mut self.diags, self.ctx, &self.prefixes);
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let named_return = match member {
             ClassMember::Field(f) => {
-                check_declarators(&f.declarators, &mut self.diags, self.ctx, &self.prefixes);
+                check_declarators(f.declarators(), &mut self.diags, self.ctx, &self.prefixes);
                 None
             }
-            ClassMember::Method(m) if !is_override(&m.annotations) => {
-                Some((&m.name, m.return_type.as_ref()))
+            ClassMember::Method(m) if !is_override(m.annotations()) => {
+                Some((m.name(), m.return_type()))
             }
-            ClassMember::Getter(g) if !is_override(&g.annotations) => {
-                Some((&g.name, g.return_type.as_ref()))
+            ClassMember::Getter(g) if !is_override(g.annotations()) => {
+                Some((g.name(), g.return_type()))
             }
             _ => None,
         };
@@ -152,9 +152,9 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
+    fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
         check_declarators(
-            &local.declarators,
+            local.declarators(),
             &mut self.diags,
             self.ctx,
             &self.prefixes,

@@ -1,9 +1,10 @@
 //! Subset analysis indexes unopened local libraries and parts without an SDK.
 
 use std::fs;
+use std::sync::Arc;
 
 use falcon_analyze::{
-    AnalysisEnvironment, DeclarationIdentity, MemberKind, MemberResult, RuleRegistry,
+    AnalysisEnvironment, DeclarationIdentity, MemberKind, MemberResult, ParsedFile, RuleRegistry,
     SemanticModel, Workspace, analyze_sequential_collecting_resolving,
 };
 use falcon_config::FalconConfig;
@@ -64,7 +65,12 @@ fn assert_subset_visibility(include_library: bool, configured: bool) {
         "companions must not become lint targets",
     );
     let indexes = indexes.unwrap();
-    let model = SemanticModel::new(&a, &indexes.identities, Some(&indexes.types));
+    let model = SemanticModel::new(
+        &a,
+        &retained[0].parsed,
+        &indexes.identities,
+        Some(&indexes.types),
+    );
     for (name, method) in [("B", "base"), ("C", "child"), ("D", "exported")] {
         let identity = model
             .resolve_name(name)
@@ -123,7 +129,7 @@ fn unopened_local_declarations_retain_deprecation_annotations() {
     fs::write(&a, source).unwrap();
     fs::write(&b, "@Deprecated('old') void old() {}").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([a.as_path()], |_| None);
-    let (_, _, indexes) = analyze_sequential_collecting_resolving(
+    let (_, retained, indexes) = analyze_sequential_collecting_resolving(
         &RuleRegistry::new(),
         &[(a.clone(), source.to_owned())],
         &FalconConfig::default(),
@@ -135,7 +141,12 @@ fn unopened_local_declarations_retain_deprecation_annotations() {
         },
     );
     let indexes = indexes.unwrap();
-    let model = SemanticModel::new(&a, &indexes.identities, Some(&indexes.types));
+    let model = SemanticModel::new(
+        &a,
+        &retained[0].parsed,
+        &indexes.identities,
+        Some(&indexes.types),
+    );
     let identity = model.resolve_value("old").unwrap();
     let (path, annotations) = indexes
         .identities
@@ -146,7 +157,8 @@ fn unopened_local_declarations_retain_deprecation_annotations() {
         .unwrap();
     assert_eq!(path, b);
     assert_eq!(annotations.len(), 1);
-    assert_eq!(annotations[0].name[0].name, "Deprecated");
+    let annotation = annotations[0].cast::<falcon_syntax::cst::Annotation<'_>>();
+    assert_eq!(annotation.name().next().unwrap().name(), "Deprecated");
 }
 
 #[test]
@@ -167,12 +179,19 @@ fn part_only_indexes_uri_owner_siblings_and_imports() {
     fs::write(root.join("dep.dart"), "class Imported {}").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([part.as_path()], |_| None);
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: program_tree,
+        errors,
+        ..
     } = falcon_dart_parser::parse(source);
+    let program_parsed = Arc::new(ParsedFile {
+        source: (source).into(),
+        tree: program_tree,
+    });
+    let program = program_parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let external = falcon_analyze::ExternalLibraries::load(
         &environment,
-        &[(part.as_path(), &program, source)],
+        &[(part.as_path(), program, source)],
         |path| path == part,
     );
     let companions: Vec<_> = external.project_companions().collect();
@@ -199,7 +218,12 @@ fn part_only_indexes_uri_owner_siblings_and_imports() {
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0].path, part);
     let indexes = indexes.unwrap();
-    let model = SemanticModel::new(&part, &indexes.identities, Some(&indexes.types));
+    let model = SemanticModel::new(
+        &part,
+        &retained[0].parsed,
+        &indexes.identities,
+        Some(&indexes.types),
+    );
     for name in ["B", "Buffered", "Sibling", "Imported"] {
         let identity = model
             .resolve_name(name)
@@ -224,22 +248,32 @@ fn requested_parts_are_not_disk_companions_but_their_unopened_parts_are() {
     fs::write(&nested, "part of 'owner.dart'; class Nested {}").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([owner.as_path()], |_| None);
     let falcon_dart_parser::ParseResult {
-        program: owner_program,
+        tree: owner_program_tree,
         errors,
         ..
     } = falcon_dart_parser::parse(owner_source);
+    let owner_program_parsed = Arc::new(ParsedFile {
+        source: (owner_source).into(),
+        tree: owner_program_tree,
+    });
+    let owner_program = owner_program_parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let falcon_dart_parser::ParseResult {
-        program: part_program,
+        tree: part_program_tree,
         errors,
         ..
     } = falcon_dart_parser::parse(part_source);
+    let part_program_parsed = Arc::new(ParsedFile {
+        source: (part_source).into(),
+        tree: part_program_tree,
+    });
+    let part_program = part_program_parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let external = falcon_analyze::ExternalLibraries::load(
         &environment,
         &[
-            (owner.as_path(), &owner_program, owner_source),
-            (part.as_path(), &part_program, part_source),
+            (owner.as_path(), owner_program, owner_source),
+            (part.as_path(), part_program, part_source),
         ],
         |path| path == owner || path == part,
     );
@@ -262,25 +296,37 @@ fn closing_an_unimported_root_removes_its_disk_companions() {
     fs::write(&remaining, "").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([owner.as_path()], |_| None);
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: program_tree,
+        errors,
+        ..
     } = falcon_dart_parser::parse(source);
+    let program_parsed = Arc::new(ParsedFile {
+        source: (source).into(),
+        tree: program_tree,
+    });
+    let program = program_parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let falcon_dart_parser::ParseResult {
-        program: empty,
+        tree: empty_tree,
         errors,
         ..
     } = falcon_dart_parser::parse("");
+    let empty_parsed = Arc::new(ParsedFile {
+        source: ("").into(),
+        tree: empty_tree,
+    });
+    let empty = empty_parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let mut external = falcon_analyze::ExternalLibraries::load(
         &environment,
-        &[(owner.as_path(), &program, source)],
+        &[(owner.as_path(), program, source)],
         |path| path == owner,
     );
     assert_eq!(
         external.project_companions().collect::<Vec<_>>(),
         [part.as_path()],
     );
-    external.extend(&environment, &[(remaining.as_path(), &empty, "")], |path| {
+    external.extend(&environment, &[(remaining.as_path(), empty, "")], |path| {
         path == remaining
     });
     assert_eq!(external.project_companions().count(), 0);
@@ -303,10 +349,17 @@ fn failed_local_import_targets_remain_available_for_file_watches() {
     fs::write(&bridge, "export 'transitive.dart';").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let falcon_dart_parser::ParseResult {
-        program, errors, ..
+        tree: program_tree,
+        errors,
+        ..
     } = falcon_dart_parser::parse(source);
+    let program_parsed = Arc::new(ParsedFile {
+        source: (source).into(),
+        tree: program_tree,
+    });
+    let program = program_parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
-    let roots = [(app.as_path(), &program, source)];
+    let roots = [(app.as_path(), program, source)];
     let external =
         falcon_analyze::ExternalLibraries::load(&environment, &roots, |path| path == app);
     let targets: Vec<_> = external.attempted_project_paths().collect();

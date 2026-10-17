@@ -8,7 +8,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
-use falcon_syntax::Program;
+use falcon_syntax::cst::Program;
 
 #[derive(Default)]
 pub struct FileNames;
@@ -16,7 +16,7 @@ pub struct FileNames;
 impl Rule for FileNames {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(file_name) = ctx.file_path.file_name().and_then(|name| name.to_str()) else {

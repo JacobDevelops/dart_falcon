@@ -16,7 +16,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::inherited_members::{inherited_concrete_member, inheriting_declaration};
 
@@ -26,13 +26,13 @@ pub struct OverriddenFields;
 impl Rule for OverriddenFields {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -50,8 +50,8 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let Some(declaration) = inheriting_declaration(decl) else {
             return StructuralTraversal::SkipChildren;
         };
@@ -59,11 +59,11 @@ impl StructuralRuleVisitor for Collector<'_> {
         let model = &self.model;
         let signatures = self.signatures;
         let diags = &mut self.diags;
-        let Some(owner) = model.resolve_name(&*declaration.name.name) else {
+        let Some(owner) = model.resolve_name(declaration.name.name()) else {
             return StructuralTraversal::SkipChildren;
         };
         for parameter in (EffectiveMembers {
-            declared: declaration.members,
+            declared: declaration.members.clone(),
             primary: declaration.primary_constructor,
             representation: false,
         }
@@ -73,7 +73,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                 model,
                 signatures,
                 &owner,
-                &parameter.name.name,
+                parameter.name().name(),
                 &declaration.source,
             )
             .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }))
@@ -81,7 +81,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                 diags.push(ctx.diagnostic(
                     "overridden-fields",
                     "Don't override inherited fields.",
-                    parameter.name.span,
+                    parameter.name().span(),
                 ));
             }
         }
@@ -89,15 +89,15 @@ impl StructuralRuleVisitor for Collector<'_> {
             let ClassMember::Field(field) = member else {
                 continue;
             };
-            if field.is_static {
+            if field.is_static() {
                 continue;
             }
-            for declarator in &field.declarators {
+            for declarator in field.declarators() {
                 let overrides_field = inherited_concrete_member(
                     model,
                     signatures,
                     &owner,
-                    &declarator.name.name,
+                    declarator.name().name(),
                     &declaration.source,
                 )
                 .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }));
@@ -105,7 +105,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                     diags.push(ctx.diagnostic(
                         "overridden-fields",
                         "Don't override inherited fields.",
-                        declarator.name.span,
+                        declarator.name().span(),
                     ));
                 }
             }

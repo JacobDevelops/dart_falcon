@@ -35,8 +35,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::function_bodies::FunctionBodies;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -47,7 +46,7 @@ pub struct DiscardedFutures;
 impl Rule for DiscardedFutures {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(unused_futures(
@@ -78,10 +77,10 @@ pub(crate) struct UnusedFuturesRule {
 }
 
 pub(crate) fn unused_futures<'a>(
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     rule: &'a UnusedFuturesRule,
-) -> Box<dyn SemanticRuleVisitor + 'a> {
+) -> Box<dyn SemanticRuleVisitor<'a> + 'a> {
     let collector = Collector {
         diagnostics: Vec::new(),
         ctx,
@@ -96,11 +95,11 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     rule: &'a UnusedFuturesRule,
-    bodies: FunctionBodies,
+    bodies: FunctionBodies<'a>,
     annotated_local_functions: HashSet<Span>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn interesting(&self, span: &Span) -> bool {
         self.bodies
             .enclosing(span)
@@ -123,25 +122,23 @@ impl Collector<'_> {
             .push(self.ctx.diagnostic(self.rule.name, message, span));
     }
 
-    fn local_await_not_required(&self, expr: &Expr, state: &SemanticState<'_>) -> bool {
-        let Expr::Call { callee, .. } = expr.unparenthesized() else {
+    fn local_await_not_required(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
+        let Expr::Call(call) = expr.unparenthesized() else {
             return false;
         };
         // `.call` resolves to the function type's member, not this declaration.
-        let Expr::Ident(name) = callee.unparenthesized() else {
+        let Expr::Ident(name) = call.callee().unparenthesized() else {
             return false;
         };
         state
             .environment
-            .binding_declaration(&name.name)
+            .binding_declaration(name.name())
             .is_some_and(|declaration| self.annotated_local_functions.contains(&declaration))
     }
 
-    fn check_expression(&mut self, expr: &Expr, state: &SemanticState<'_>) {
-        if matches!(
-            expr.unparenthesized(),
-            Expr::Assign { .. } | Expr::Await { .. }
-        ) || !self.interesting(expr.span())
+    fn check_expression(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
+        if matches!(expr.unparenthesized(), Expr::Assign(_) | Expr::Await(_))
+            || !self.interesting(&expr.span())
             || invokes_await_not_required(expr, state)
             || self.local_await_not_required(expr, state)
             || future_delayed_with_computation(expr, state)
@@ -154,9 +151,9 @@ impl Collector<'_> {
         }
     }
 
-    fn check_interpolation(&mut self, expr: &Expr, state: &SemanticState<'_>) {
-        if matches!(expr.unparenthesized(), Expr::Assign { .. })
-            || !self.interesting(expr.span())
+    fn check_interpolation(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
+        if matches!(expr.unparenthesized(), Expr::Assign(_))
+            || !self.interesting(&expr.span())
             || invokes_await_not_required(expr, state)
             || self.local_await_not_required(expr, state)
         {
@@ -169,12 +166,12 @@ impl Collector<'_> {
 
     fn check_cascade(
         &mut self,
-        object: &Expr,
-        sections: &[CascadeSection],
+        object: Expr<'a>,
+        sections: AstChildren<'a, CascadeSection<'a>>,
         is_null_aware: bool,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'a>,
     ) {
-        if !self.interesting(object.span()) {
+        if !self.interesting(&object.span()) {
             return;
         }
         let target = state.infer_receiver(object);
@@ -186,58 +183,65 @@ impl Collector<'_> {
         for section in sections {
             let mut receiver = target.clone();
             let mut reported = None;
-            let mut callee_end = section.span.start;
-            for op in &section.ops {
+            let mut callee_end = section.span().start;
+            for op in section.ops() {
                 let previous = std::mem::replace(&mut receiver, ResolvedType::Unknown);
                 (receiver, reported) = match op {
-                    CascadeOp::NullAssert { .. } => (previous.non_null(), reported),
-                    CascadeOp::Call(name, type_args, args) => {
-                        let callable = callable_member(&previous, &name.name, state);
+                    CascadeOp::NullAssert(_) => (previous.non_null(), reported),
+                    CascadeOp::Call(call) => {
+                        let name = call.name();
+                        let callable = callable_member(&previous, name.name(), state);
                         let result = if callable {
                             state.cascade_invoke_return_type(
-                                &field_type(&previous, &name.name, state),
-                                type_args,
-                                args,
+                                &field_type(&previous, name.name(), state),
+                                call.type_args(),
+                                call.args(),
                             )
                         } else {
-                            member_return_type(&previous, &name.name, state)
+                            member_return_type(&previous, name.name(), state)
                         };
                         (
                             result,
                             Some((
-                                member_await_not_required(&previous, &name.name, state),
+                                member_await_not_required(&previous, name.name(), state),
                                 if callable {
-                                    Span::new(section.span.start, name.span.end)
+                                    Span::new(section.span().start, name.span().end)
                                 } else {
-                                    name.span
+                                    name.span()
                                 },
                             )),
                         )
                     }
-                    CascadeOp::Field { name, .. } => (
-                        field_type(&previous, &name.name, state),
+                    CascadeOp::Field(field) => (
+                        field_type(&previous, field.name().name(), state),
                         Some((
-                            member_await_not_required(&previous, &name.name, state),
-                            name.span,
+                            member_await_not_required(&previous, field.name().name(), state),
+                            field.name().span(),
                         )),
                     ),
-                    CascadeOp::Invoke(type_args, args) => (
-                        state.cascade_invoke_return_type(&previous, type_args, args),
+                    CascadeOp::Invoke(invoke) => (
+                        state.cascade_invoke_return_type(
+                            &previous,
+                            invoke.type_args(),
+                            invoke.args(),
+                        ),
                         Some((
                             type_alias_await_not_required(&previous, state),
-                            Span::new(section.span.start, callee_end),
+                            Span::new(section.span().start, callee_end),
                         )),
                     ),
-                    CascadeOp::Index { .. } => (member_return_type(&previous, "[]", state), None),
-                    CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {
+                    CascadeOp::Index(_) => (member_return_type(&previous, "[]", state), None),
+                    CascadeOp::Assign(_) | CascadeOp::IndexAssign(_) => {
                         (ResolvedType::Unknown, None)
                     }
                 };
                 callee_end = match op {
-                    CascadeOp::Field { name, .. } => name.span.end,
-                    CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) => args.span.end,
-                    CascadeOp::Index { span, .. } | CascadeOp::NullAssert { span } => span.end,
-                    CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => section.span.end,
+                    CascadeOp::Field(field) => field.name().span().end,
+                    CascadeOp::Call(call) => call.args().span().end,
+                    CascadeOp::Invoke(invoke) => invoke.args().span().end,
+                    CascadeOp::Index(index) => index.span().end,
+                    CascadeOp::NullAssert(assertion) => assertion.span().end,
+                    CascadeOp::Assign(_) | CascadeOp::IndexAssign(_) => section.span().end,
                 };
             }
             if let Some((await_not_required, span)) = reported
@@ -250,19 +254,22 @@ impl Collector<'_> {
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         match node {
-            Stmt::Expr(statement) => self.check_expression(&statement.expr, state),
+            Stmt::Expr(statement) => self.check_expression(statement.expr(), state),
             Stmt::LocalFunc(function)
-                if function.annotations.iter().any(|annotation| {
-                    let name = match annotation.name.as_slice() {
-                        [name] => QualifiedName::from(&name.name),
-                        [prefix, name] => QualifiedName::prefixed(&prefix.name, &name.name),
+                if function.annotations().any(|annotation| {
+                    let mut segments = annotation.name();
+                    let name = match (segments.next(), segments.next(), segments.next()) {
+                        (Some(name), None, None) => QualifiedName::from(name.name()),
+                        (Some(prefix), Some(name), None) => {
+                            QualifiedName::prefixed(prefix.name(), name.name())
+                        }
                         _ => return false,
                     };
                     state
@@ -271,23 +278,24 @@ impl SemanticRuleVisitor for Collector<'_> {
                         .is_some_and(|identity| is_await_not_required(&identity))
                 }) =>
             {
-                self.annotated_local_functions.insert(function.name.span);
+                self.annotated_local_functions
+                    .insert(function.name().span());
             }
             _ => {}
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
-            Expr::Cascade {
-                object,
-                sections,
-                is_null_aware,
-                ..
-            } => self.check_cascade(object, sections, *is_null_aware, state),
+            Expr::Cascade(cascade) => self.check_cascade(
+                cascade.object(),
+                cascade.sections(),
+                cascade.is_null_aware(),
+                state,
+            ),
             Expr::StringLit(literal) => {
-                for interpolation in &literal.interpolations {
-                    self.check_interpolation(&interpolation.expr, state);
+                for interpolation in literal.interpolations() {
+                    self.check_interpolation(interpolation.expr(), state);
                 }
             }
             _ => {}
@@ -359,11 +367,12 @@ fn type_alias_await_not_required(ty: &ResolvedType, state: &SemanticState<'_>) -
 /// The analyzer's `isAwaitNotRequired`: the invoked top-level function,
 /// static or instance method, or getter (or a supertype declaration it overrides) is annotated
 /// `@awaitNotRequired`.
-fn invokes_await_not_required(expr: &Expr, state: &SemanticState<'_>) -> bool {
-    if let Expr::Call { callee, .. } = expr.unparenthesized() {
-        let explicit_call = matches!(callee.unparenthesized(), Expr::Field { object, field, .. }
-            if field.name == "call"
-                && matches!(state.infer_receiver(object), ResolvedType::Function { .. }));
+fn invokes_await_not_required<'a>(expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
+    if let Expr::Call(call) = expr.unparenthesized() {
+        let callee = call.callee();
+        let explicit_call = matches!(callee.unparenthesized(), Expr::Field(field)
+            if field.field().name() == "call"
+                && matches!(state.infer_receiver(field.object()), ResolvedType::Function { .. }));
         if !explicit_call && type_alias_await_not_required(&state.infer_receiver(callee), state) {
             return true;
         }
@@ -384,24 +393,24 @@ fn invokes_await_not_required(expr: &Expr, state: &SemanticState<'_>) -> bool {
             .iter()
             .any(|fact| fact.is_static && fact.annotations.iter().any(is_await_not_required))
     };
-    let member = |object: &Expr, name: &str, is_null_safe: bool| {
+    let member = |object: Expr<'a>, name: &str, is_null_safe: bool| {
         if let Expr::Ident(prefix) = object.unparenthesized()
-            && !state.environment.is_bound(&prefix.name)
+            && !state.environment.is_bound(prefix.name())
             && state
                 .model
-                .resolve_value(QualifiedName::prefixed(&prefix.name, name))
+                .resolve_value(QualifiedName::prefixed(prefix.name(), name))
                 .is_some()
         {
-            return function(QualifiedName::prefixed(&prefix.name, name));
+            return function(QualifiedName::prefixed(prefix.name(), name));
         }
         if let Expr::Ident(class) = object.unparenthesized()
-            && !state.environment.is_bound(&class.name)
-            && let Some(identity) = state.model.resolve_name(&class.name)
+            && !state.environment.is_bound(class.name())
+            && let Some(identity) = state.model.resolve_name(class.name())
         {
             return static_member(&identity, name);
         }
-        if let Expr::Call { callee, .. } = object.unparenthesized()
-            && let Some(identity) = state.named_extension(callee)
+        if let Expr::Call(call) = object.unparenthesized()
+            && let Some(identity) = state.named_extension(call.callee())
             && state
                 .signatures
                 .extension_member_annotated(&identity, name, is_await_not_required)
@@ -415,36 +424,30 @@ fn invokes_await_not_required(expr: &Expr, state: &SemanticState<'_>) -> bool {
         )
     };
     match expr.unparenthesized() {
-        Expr::Call { callee, .. } => match callee.unparenthesized() {
-            Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {
+        Expr::Call(call) => match call.callee().unparenthesized() {
+            Expr::Ident(identifier) if !state.environment.is_bound(identifier.name()) => {
                 state.enclosing_type.as_ref().is_some_and(|receiver| {
-                    member_await_not_required(receiver, &identifier.name, state)
+                    member_await_not_required(receiver, identifier.name(), state)
                         || matches!(receiver, ResolvedType::Interface { identity, .. }
-                            if static_member(identity, &identifier.name))
-                }) || function(QualifiedName::from(&identifier.name))
+                            if static_member(identity, identifier.name()))
+                }) || function(QualifiedName::from(identifier.name()))
             }
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } => member(object, &field.name, *is_null_safe),
+            Expr::Field(field) => {
+                member(field.object(), field.field().name(), field.is_null_safe())
+            }
             _ => false,
         },
-        Expr::Field {
-            object,
-            field,
-            is_null_safe,
-            ..
-        } => member(object, &field.name, *is_null_safe),
-        Expr::Binary { op, left, .. } => op.method_name().is_some_and(|name| {
-            member_await_not_required(&state.infer_receiver(left), name, state)
+        Expr::Field(field) => member(field.object(), field.field().name(), field.is_null_safe()),
+        Expr::Binary(binary) => binary.op().method_name().is_some_and(|name| {
+            member_await_not_required(&state.infer_receiver(binary.left()), name, state)
         }),
-        Expr::Unary { op, operand, .. } => match op {
+        Expr::Unary(unary) => match unary.op() {
             UnaryOp::Minus => {
-                member_await_not_required(&state.infer_receiver(operand), "unary-", state)
+                member_await_not_required(&state.infer_receiver(unary.operand()), "unary-", state)
             }
-            UnaryOp::Tilde => member_await_not_required(&state.infer_receiver(operand), "~", state),
+            UnaryOp::Tilde => {
+                member_await_not_required(&state.infer_receiver(unary.operand()), "~", state)
+            }
             _ => false,
         },
         _ => false,
@@ -452,9 +455,10 @@ fn invokes_await_not_required(expr: &Expr, state: &SemanticState<'_>) -> bool {
 }
 
 /// Only the SDK `Future.delayed` constructor's computation form is exempt.
-fn future_delayed_with_computation(expr: &Expr, state: &SemanticState<'_>) -> bool {
+fn future_delayed_with_computation<'a>(expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
     let (is_delayed, args) = match expr.unparenthesized() {
-        Expr::Call { callee, args, .. } => {
+        Expr::Call(call) => {
+            let callee = call.callee();
             let constructor = falcon_analyze::expression_segments(callee, true)
                 .filter(|segments| {
                     segments
@@ -466,85 +470,82 @@ fn future_delayed_with_computation(expr: &Expr, state: &SemanticState<'_>) -> bo
                 constructor.is_some_and(|(identity, name)| {
                     identity.is_sdk("dart:async", "Future") && name == "delayed"
                 }),
-                args,
+                call.args(),
             )
         }
-        Expr::New {
-            dart_type,
-            constructor_name: Some(constructor),
-            args,
-            ..
-        } => (
-            constructor.name == "delayed"
+        Expr::New(new) if new.constructor_name().is_some() => (
+            new.constructor_name().unwrap().name() == "delayed"
                 && state
                     .model
-                    .resolve_type(dart_type)
+                    .resolve_type(new.dart_type())
                     .interface("dart:async", "Future"),
-            args,
+            new.args(),
         ),
         _ => return false,
     };
-    is_delayed && args.positional.len() + args.named.len() == 2
+    is_delayed && args.positional().count() + args.named().count() == 2
 }
 
 /// `map.putIfAbsent(...)` on a `dart:core` `Map`: the official lints exempt it.
-fn map_put_if_absent(expr: &Expr, state: &SemanticState<'_>) -> bool {
-    let Expr::Call { callee, .. } = expr.unparenthesized() else {
+fn map_put_if_absent<'a>(expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
+    let Expr::Call(call) = expr.unparenthesized() else {
         return false;
     };
-    let Expr::Field { object, field, .. } = callee.unparenthesized() else {
+    let Expr::Field(field) = call.callee().unparenthesized() else {
         return false;
     };
-    field.name == "putIfAbsent"
+    field.field().name() == "putIfAbsent"
         && state
             .signatures
-            .resolved_member_owner(&state.infer_receiver(object), &field.name, &state.model)
+            .resolved_member_owner(
+                &state.infer_receiver(field.object()),
+                field.field().name(),
+                &state.model,
+            )
             .is_some_and(|owner| owner.is_sdk("dart:core", "Map"))
 }
 
 /// Method invocations report the method name. Function-expression invocations
 /// report their complete callee; constructors report the complete constructor name.
-fn report_span(expr: &Expr, state: &SemanticState<'_>, ctx: &AnalyzeContext<'_>) -> Span {
+fn report_span<'a>(expr: Expr<'a>, state: &SemanticState<'a>, ctx: &AnalyzeContext<'_>) -> Span {
     match expr {
-        Expr::Call { callee, args, .. } => {
+        Expr::Call(call) => {
+            let callee = call.callee();
             if state.is_constructor_invocation(callee) {
                 let end = ctx
-                    .syntax
-                    .tokens_in(Span::new(callee.span().start, args.span.start))
+                    .tree()
+                    .tokens_in(
+                        ctx.source,
+                        Span::new(callee.span().start, call.args().span().start),
+                    )
                     .rfind(|token| !token.is_trivia())
                     .map_or(callee.span().end, |token| token.offset() + token.len());
                 return Span::new(callee.span().start, end);
             }
-            if let Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } = callee.as_ref()
+            if let Expr::Field(field) = callee
                 && !state.is_function_expression_invocation(callee)
                 && !callable_member(
-                    &state.infer_access_receiver(object, &field.name, *is_null_safe),
-                    &field.name,
+                    &state.infer_access_receiver(
+                        field.object(),
+                        field.field().name(),
+                        field.is_null_safe(),
+                    ),
+                    field.field().name(),
                     state,
                 )
             {
-                field.span
+                field.field().span()
             } else {
-                *callee.span()
+                callee.span()
             }
         }
-        Expr::New {
-            dart_type,
-            constructor_name,
-            ..
-        } => Span::new(
-            dart_type.span().start,
-            constructor_name
-                .as_ref()
-                .map_or(dart_type.span().end, |name| name.span.end),
+        Expr::New(new) => Span::new(
+            new.dart_type().span().start,
+            new.constructor_name()
+                .map_or(new.dart_type().span().end, |name| name.span().end),
         ),
-        Expr::Field { field, .. } => field.span,
-        other => *other.span(),
+        Expr::Field(field) => field.field().span(),
+        other => other.span(),
     }
 }
 

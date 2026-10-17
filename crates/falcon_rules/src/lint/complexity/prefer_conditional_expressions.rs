@@ -12,7 +12,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferConditionalExpressions;
@@ -20,7 +20,7 @@ pub struct PreferConditionalExpressions;
 impl Rule for PreferConditionalExpressions {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(ConditionalExpressions {
@@ -32,27 +32,27 @@ impl Rule for PreferConditionalExpressions {
     }
 }
 
-fn unwrap_single(mut stmt: &Stmt) -> &Stmt {
+fn unwrap_single(mut stmt: Stmt<'_>) -> Stmt<'_> {
     while let Stmt::Block(block) = stmt {
-        if block.stmts.len() != 1 {
+        if block.stmts().len() != 1 {
             break;
         }
-        stmt = &block.stmts[0];
+        stmt = block.stmts().first().unwrap();
     }
     stmt
 }
 
-fn is_return(stmt: &Stmt) -> bool {
+fn is_return(stmt: Stmt<'_>) -> bool {
     matches!(unwrap_single(stmt), Stmt::Return(_))
 }
 
 /// The simple-identifier target of a single assignment statement, if any.
-fn assign_target_name(stmt: &Stmt) -> Option<&str> {
+fn assign_target_name(stmt: Stmt<'_>) -> Option<&str> {
     if let Stmt::Expr(e) = unwrap_single(stmt)
-        && let Expr::Assign { target, .. } = e.expr.unparenthesized()
-        && let Expr::Ident(id) = target.unparenthesized()
+        && let Expr::Assign(assign) = e.expr().unparenthesized()
+        && let Expr::Ident(id) = assign.target().unparenthesized()
     {
-        return Some(&id.name);
+        return Some(id.name());
     }
     None
 }
@@ -65,27 +65,27 @@ struct ConditionalExpressions<'a, 'ctx> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for ConditionalExpressions<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for ConditionalExpressions<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::If(n) = node
-            && let Some(else_branch) = &n.else_branch
+            && let Some(else_branch) = n.else_branch()
             && !self.parent_is_if
-            && !matches!(else_branch.as_ref(), Stmt::If(_))
+            && !matches!(else_branch, Stmt::If(_))
         {
-            let both_return = is_return(&n.then_branch) && is_return(else_branch);
+            let both_return = is_return(n.then_branch()) && is_return(else_branch);
             let both_assign = matches!(
-                (assign_target_name(&n.then_branch), assign_target_name(else_branch)),
+                (assign_target_name(n.then_branch()), assign_target_name(else_branch)),
                 (Some(a), Some(b)) if a == b
             );
             if both_return || both_assign {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-conditional-expressions",
                     "Prefer a conditional expression over an if/else with a single statement in each branch",
-                    n.span,
+                    n.span(),
                 ));
             }
         }
@@ -94,17 +94,17 @@ impl StructuralRuleVisitor for ConditionalExpressions<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, _node: &Stmt) {
+    fn exit_stmt(&mut self, _node: Stmt<'a>) {
         self.parent_is_if = self.parents.pop().unwrap();
     }
 
-    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, _node: Expr<'a>) -> StructuralTraversal {
         self.parents.push(self.parent_is_if);
         self.parent_is_if = false;
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.parent_is_if = self.parents.pop().unwrap();
     }
 }

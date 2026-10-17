@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use falcon_syntax::ast::*;
-use falcon_syntax::visitor::bound_names;
+use falcon_syntax::cst::*;
+
 pub(crate) struct NameScopes(Vec<HashSet<String>>);
 
 impl Default for NameScopes {
@@ -30,72 +30,71 @@ impl NameScopes {
         self.0.iter().rev().any(|scope| scope.contains(name))
     }
 
-    pub(crate) fn params(&mut self, params: &FormalParamList) {
-        for param in &params.params {
-            self.declare(&param.name.name);
+    pub(crate) fn params(&mut self, params: FormalParamList<'_>) {
+        for param in params.params() {
+            self.declare(param.name().name());
         }
     }
 
-    pub(crate) fn pattern(&mut self, pattern: &Pattern) {
+    pub(crate) fn pattern(&mut self, pattern: Pattern<'_>) {
         for name in bound_names(pattern) {
-            self.declare(&name.name);
+            self.declare(name.name());
         }
     }
 }
 /// The headers of collection-`for` elements of a literal `node` (looking
 /// through nested `if`/`for` elements, which are not expressions).
-pub(crate) fn collection_for_inits(node: &Expr) -> Vec<&ForInit> {
+pub(crate) fn collection_for_inits<'a>(node: Expr<'a>) -> Vec<ForInit<'a>> {
     let mut out = Vec::new();
-    fn collection_element<'a>(element: &'a CollectionElement, out: &mut Vec<&'a ForInit>) {
+    fn collection_element<'a>(element: CollectionElement<'a>, out: &mut Vec<ForInit<'a>>) {
         match element {
-            CollectionElement::For {
-                header, element, ..
-            } => {
-                out.extend(header.init.as_ref());
-                collection_element(element, out);
+            CollectionElement::For(node) => {
+                out.extend(node.header().init());
+                collection_element(node.element(), out);
             }
-            CollectionElement::If {
-                then_elem,
-                else_elem,
-                ..
-            } => {
-                collection_element(then_elem, out);
-                if let Some(else_elem) = else_elem {
+            CollectionElement::If(node) => {
+                collection_element(node.then_elem(), out);
+                if let Some(else_elem) = node.else_elem() {
                     collection_element(else_elem, out);
                 }
             }
             CollectionElement::Expr(_)
-            | CollectionElement::NullAware { .. }
-            | CollectionElement::Spread { .. } => {}
+            | CollectionElement::NullAware(_)
+            | CollectionElement::Spread(_) => {}
         }
     }
-    fn map_element<'a>(element: &'a MapElement, out: &mut Vec<&'a ForInit>) {
+    fn map_element<'a>(element: MapElement<'a>, out: &mut Vec<ForInit<'a>>) {
         match element {
-            MapElement::For { header, entry, .. } => {
-                out.extend(header.init.as_ref());
-                map_element(entry, out);
+            MapElement::For(node) => {
+                out.extend(node.header().init());
+                map_element(node.entry(), out);
             }
-            MapElement::If {
-                then_entry,
-                else_entry,
-                ..
-            } => {
-                map_element(then_entry, out);
-                if let Some(else_entry) = else_entry {
+            MapElement::If(node) => {
+                map_element(node.then_entry(), out);
+                if let Some(else_entry) = node.else_entry() {
                     map_element(else_entry, out);
                 }
             }
-            MapElement::Entry(_) | MapElement::Spread { .. } => {}
+            MapElement::Entry(_) | MapElement::Spread(_) => {}
         }
     }
-    if let Expr::List { elements, .. } | Expr::Set { elements, .. } = node.unparenthesized() {
-        for element in elements {
-            collection_element(element, &mut out);
+    match node.unparenthesized() {
+        Expr::List(node) => {
+            for element in node.elements() {
+                collection_element(element, &mut out);
+            }
         }
-    } else if let Expr::Map { elements, .. } = node.unparenthesized() {
-        for element in elements {
-            map_element(element, &mut out);
+        Expr::Set(node) => {
+            for element in node.elements() {
+                collection_element(element, &mut out);
+            }
         }
+        Expr::Map(node) => {
+            for element in node.elements() {
+                map_element(element, &mut out);
+            }
+        }
+        _ => {}
     }
     out
 }

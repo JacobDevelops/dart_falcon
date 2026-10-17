@@ -24,7 +24,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::SemanticState;
 
@@ -37,7 +37,7 @@ pub struct AvoidSettersWithoutGetters;
 impl Rule for AvoidSettersWithoutGetters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
@@ -53,20 +53,20 @@ impl Rule for AvoidSettersWithoutGetters {
 }
 
 struct Collector<'a> {
-    program: &'a Program,
+    program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     state: SemanticState<'a>,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
             let (name, members) = match declaration {
-                TopLevelDecl::Class(node) => (&node.name, &node.members),
-                TopLevelDecl::MixinClass(node) => (&node.name, &node.members),
-                TopLevelDecl::Enum(node) => (&node.name, &node.members),
-                TopLevelDecl::ExtensionType(node) => (&node.name, &node.members),
+                TopLevelDecl::Class(node) => (node.name(), node.members()),
+                TopLevelDecl::MixinClass(node) => (node.name(), node.members()),
+                TopLevelDecl::Enum(node) => (node.name(), node.members()),
+                TopLevelDecl::ExtensionType(node) => (node.name(), node.members()),
                 TopLevelDecl::ClassTypeAlias(_)
                 | TopLevelDecl::Mixin(_)
                 | TopLevelDecl::Extension(_)
@@ -76,7 +76,7 @@ impl StructuralRuleVisitor for Collector<'_> {
                 | TopLevelDecl::Error(_) => return StructuralTraversal::SkipChildren,
             };
             check_members(
-                &name.name,
+                name.name(),
                 members,
                 self.program,
                 matches!(declaration, TopLevelDecl::ExtensionType(_)),
@@ -93,13 +93,12 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-fn declares_getter(members: &[ClassMember], name: &str) -> bool {
-    members.iter().any(|member| match member {
-        ClassMember::Getter(getter) => getter.name.name == name,
+fn declares_getter<'a>(mut members: AstChildren<'a, ClassMember<'a>>, name: &str) -> bool {
+    members.any(|member| match member {
+        ClassMember::Getter(getter) => getter.name().name() == name,
         ClassMember::Field(field) => field
-            .declarators
-            .iter()
-            .any(|declarator| declarator.name.name == name),
+            .declarators()
+            .any(|declarator| declarator.name().name() == name),
         ClassMember::Constructor(_)
         | ClassMember::PrimaryConstructorBody(_)
         | ClassMember::Method(_)
@@ -109,26 +108,28 @@ fn declares_getter(members: &[ClassMember], name: &str) -> bool {
     })
 }
 
-fn check_members(
+fn check_members<'a>(
     owner: &str,
-    members: &[ClassMember],
-    program: &Program,
+    members: AstChildren<'a, ClassMember<'a>>,
+    program: Program<'a>,
     extension_type: bool,
     state: &SemanticState<'_>,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
     let owner = state.model.resolve_name(owner);
-    for member in members {
+    for member in members.clone() {
         let ClassMember::Setter(setter) = member else {
             continue;
         };
-        let name = setter.name.name.as_str();
-        let overrides = setter
-            .annotations
-            .iter()
-            .any(|annotation| annotation.name.last().is_some_and(|n| n.name == "override"));
-        if overrides || declares_getter(members, name) || OBJECT_GETTERS.contains(&name) {
+        let name = setter.name().name();
+        let overrides = setter.annotations().any(|annotation| {
+            annotation
+                .name()
+                .last()
+                .is_some_and(|n| n.name() == "override")
+        });
+        if overrides || declares_getter(members.clone(), name) || OBJECT_GETTERS.contains(&name) {
             continue;
         }
         let inherited = owner
@@ -139,25 +140,25 @@ fn check_members(
         let has_inherited = inherited
             .iter()
             .any(|fact| fact.kind.has_setter() || (fact.kind.has_getter() && !fact.is_abstract
-                && !program.declarations.iter().any(|declaration| {
-                    let (declared_name, declared_members) = match declaration {
-                        TopLevelDecl::Class(class) => (&class.name, &class.members),
-                        TopLevelDecl::MixinClass(class) => (&class.name, &class.members),
-                        TopLevelDecl::Mixin(mixin) => (&mixin.name, &mixin.members),
+                && !program.declarations().any(|declaration| {
+                    let (declared_name, mut declared_members) = match declaration {
+                        TopLevelDecl::Class(class) => (class.name(), class.members()),
+                        TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
+                        TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
                         _ => return false,
                     };
                     matches!((owner.as_ref(), &fact.declaring_type),
                         (Some(DeclarationIdentity::Project { library: own_library, .. }),
                          DeclarationIdentity::Project { library, name: declaring_name })
-                            if own_library == library && declaring_name == &declared_name.name)
-                        && declared_members.iter().any(|member| matches!(member,
-                            ClassMember::Getter(getter) if getter.name.name == name && getter.body.is_none()))
+                            if own_library == library && declaring_name == declared_name.name())
+                        && declared_members.any(|member| matches!(member,
+                            ClassMember::Getter(getter) if getter.name().name() == name && getter.body().is_none()))
                 })));
         if !has_inherited {
             diags.push(ctx.diagnostic(
                 "avoid-setters-without-getters",
                 "Setter has no corresponding getter.",
-                setter.name.span,
+                setter.name().span(),
             ));
         }
     }

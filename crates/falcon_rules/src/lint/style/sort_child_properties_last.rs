@@ -4,7 +4,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -14,7 +14,7 @@ pub struct SortChildPropertiesLast;
 impl Rule for SortChildPropertiesLast {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(ChildOrdering {
@@ -29,13 +29,13 @@ struct ChildOrdering<'a, 'ctx> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for ChildOrdering<'_, '_> {
+impl<'a> SemanticRuleVisitor<'a> for ChildOrdering<'_, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics
     }
 
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if !matches!(node, Expr::New { .. } | Expr::Call { .. }) {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if !matches!(node, Expr::New(_) | Expr::Call(_)) {
             return;
         }
         let Some((identity, constructor, args)) =
@@ -52,9 +52,9 @@ impl SemanticRuleVisitor for ChildOrdering<'_, '_> {
         {
             return;
         }
-        let mut children = args.named.iter().enumerate().filter(|(_, argument)| {
-            matches!(argument.name.name.as_str(), "child" | "children")
-                && widget_property(&state.infer(&argument.value), state)
+        let mut children = args.named().enumerate().filter(|(_, argument)| {
+            matches!(argument.name().name(), "child" | "children")
+                && widget_property(&state.infer(argument.value()), state)
         });
         let Some((index, child)) = children.next() else {
             return;
@@ -62,14 +62,15 @@ impl SemanticRuleVisitor for ChildOrdering<'_, '_> {
         if children.next().is_some() {
             return;
         }
-        if args.named[index + 1..]
-            .iter()
-            .any(|argument| !matches!(argument.value, Expr::FuncExpr { .. }))
+        if args
+            .named()
+            .skip(index + 1)
+            .any(|argument| !matches!(argument.value(), Expr::FuncExpr(_)))
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "sort-child-properties-last",
                 "The child/children argument should be last in a widget constructor call.",
-                child.span,
+                child.span(),
             ));
         }
     }

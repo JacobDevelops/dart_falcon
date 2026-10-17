@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct HashAndEquals;
@@ -19,7 +19,7 @@ pub struct HashAndEquals;
 impl Rule for HashAndEquals {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -35,11 +35,11 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let members = match decl {
-            TopLevelDecl::Class(class) => &class.members,
-            TopLevelDecl::MixinClass(class) => &class.members,
+            TopLevelDecl::Class(class) => class.members(),
+            TopLevelDecl::MixinClass(class) => class.members(),
             _ => return StructuralTraversal::SkipChildren,
         };
         check_members(members, self.ctx, &mut self.diags);
@@ -53,10 +53,10 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 
 /// The span of the `==` operator, if the type declares one.
-fn equals_span(members: &[ClassMember], syntax: &falcon_syntax::SyntaxStore) -> Option<Span> {
-    members.iter().find_map(|m| match m {
-        ClassMember::Operator(op) if op.op == "==" => {
-            Some(crate::lint::declarations::operator_token_span(op, syntax))
+fn equals_span<'a>(mut members: AstChildren<'a, ClassMember<'a>>) -> Option<Span> {
+    members.find_map(|m| match m {
+        ClassMember::Operator(op) if op.op() == "==" => {
+            Some(crate::lint::declarations::operator_token_span(op))
         }
         _ => None,
     })
@@ -65,21 +65,26 @@ fn equals_span(members: &[ClassMember], syntax: &falcon_syntax::SyntaxStore) -> 
 /// The span of a `hashCode` override — as a getter, a field, or (defensively) a
 /// method — if the type declares one. A `hashCode` *setter* does not override
 /// `Object.hashCode`, so it does not count.
-fn hashcode_span(members: &[ClassMember]) -> Option<Span> {
-    members.iter().find_map(|m| match m {
-        ClassMember::Getter(g) if g.name.name == "hashCode" => Some(g.name.span),
-        ClassMember::Method(method) if method.name.name == "hashCode" => Some(method.name.span),
+fn hashcode_span<'a>(mut members: AstChildren<'a, ClassMember<'a>>) -> Option<Span> {
+    members.find_map(|m| match m {
+        ClassMember::Getter(g) if g.name().name() == "hashCode" => Some(g.name().span()),
+        ClassMember::Method(method) if method.name().name() == "hashCode" => {
+            Some(method.name().span())
+        }
         ClassMember::Field(field) => field
-            .declarators
-            .iter()
-            .find(|declarator| declarator.name.name == "hashCode")
-            .map(|declarator| declarator.name.span),
+            .declarators()
+            .find(|declarator| declarator.name().name() == "hashCode")
+            .map(|declarator| declarator.name().span()),
         _ => None,
     })
 }
 
-fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let eq = equals_span(members, ctx.syntax);
+fn check_members<'a>(
+    members: AstChildren<'a, ClassMember<'a>>,
+    ctx: &AnalyzeContext,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let eq = equals_span(members.clone());
     let hash = hashcode_span(members);
     let (span, message) = match (eq, hash) {
         (Some(eq), None) => (eq, "Override 'hashCode' if you override the '==' operator."),

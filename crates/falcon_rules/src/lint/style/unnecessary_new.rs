@@ -10,7 +10,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct UnnecessaryNew;
@@ -18,7 +18,7 @@ pub struct UnnecessaryNew;
 impl Rule for UnnecessaryNew {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -34,22 +34,19 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::New {
-            is_const: false,
-            span,
-            ..
-        } = node.unparenthesized()
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::New(expression) = node.unparenthesized()
+            && !expression.is_const()
         {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-new",
                 "Unnecessary `new` keyword; it is optional and can be removed.",
-                *span,
+                expression.span(),
             ));
         }
         StructuralTraversal::Continue

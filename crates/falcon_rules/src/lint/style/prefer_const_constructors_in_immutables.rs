@@ -33,7 +33,7 @@ use falcon_analyze::{
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::initializer_potentially_constant;
 use crate::lint::declarations::{first_token_after_annotations, member_names};
@@ -44,16 +44,16 @@ pub struct PreferConstConstructorsInImmutables;
 impl Rule for PreferConstConstructorsInImmutables {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            declarations: program.declarations.iter(),
+            declarations: program.declarations(),
             scope: None,
             model,
             signatures,
@@ -64,7 +64,7 @@ impl Rule for PreferConstConstructorsInImmutables {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    declarations: AstChildren<'a, TopLevelDecl<'a>>,
     scope: Option<ClassScope<'a>>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
@@ -72,21 +72,21 @@ struct Collector<'a> {
 }
 
 struct ClassScope<'a> {
-    name: &'a Identifier,
+    name: Identifier<'a>,
     members: EffectiveMembers<'a>,
-    extends: Option<&'a DartType>,
+    extends: Option<DartType<'a>>,
     representation_const: Option<bool>,
     owner: DeclarationIdentity,
-    shadowed: HashSet<String>,
-    fields: HashMap<&'a str, &'a Expr>,
+    shadowed: HashSet<&'a str>,
+    fields: HashMap<&'a str, Expr<'a>>,
 }
 
-impl ClassScope<'_> {
-    fn checker<'a>(
-        &'a self,
-        model: &'a SemanticModel<'a>,
-        signatures: &'a SignatureIndex,
-    ) -> ClassChecker<'a> {
+impl<'a> ClassScope<'a> {
+    fn checker<'s>(
+        &'s self,
+        model: &'s SemanticModel<'a>,
+        signatures: &'s SignatureIndex,
+    ) -> ClassChecker<'s, 'a> {
         ClassChecker {
             extends: self.extends,
             representation_const: self.representation_const,
@@ -100,33 +100,33 @@ impl ClassScope<'_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
         let decl = self.declarations.next().expect("shared declaration order");
-        debug_assert!(std::ptr::eq(decl, declaration));
+        debug_assert_eq!(decl.syntax().id(), declaration.syntax().id());
         self.scope = None;
         let (name, type_params, members, extends) = match decl {
-            TopLevelDecl::Class(class) if class.with_clause.is_empty() => (
-                &class.name,
-                class.type_params.as_slice(),
+            TopLevelDecl::Class(class) if class.with_clause().is_empty() => (
+                class.name(),
+                class.type_params(),
                 class.element_members(),
-                class.extends.as_ref(),
+                class.extends(),
             ),
-            TopLevelDecl::MixinClass(class) if class.with_clause.is_empty() => (
-                &class.name,
-                class.type_params.as_slice(),
+            TopLevelDecl::MixinClass(class) if class.with_clause().is_empty() => (
+                class.name(),
+                class.type_params(),
                 class.element_members(),
-                class.extends.as_ref(),
+                class.extends(),
             ),
             TopLevelDecl::ExtensionType(extension) => (
-                &extension.name,
-                extension.type_params.as_slice(),
+                extension.name(),
+                extension.type_params(),
                 extension.element_members(),
                 None,
             ),
             _ => return StructuralTraversal::SkipChildren,
         };
-        let Some(owner) = self.model.resolve_name(&name.name) else {
+        let Some(owner) = self.model.resolve_name(name.name()) else {
             return StructuralTraversal::SkipChildren;
         };
         if self.signatures.has_immutable_supertype(&owner, true) != Truth::Yes {
@@ -134,43 +134,44 @@ impl StructuralRuleVisitor for Collector<'_> {
         }
         self.scope = Some(ClassScope {
             name,
-            members,
             extends,
             representation_const: members.primary
                 .filter(|_| members.representation)
-                .map(|primary| primary.is_const),
+                .map(|primary| primary.is_const()),
             owner,
-            shadowed: class_lexical_value_names(type_params, members),
-            fields: class_field_initializers(members.declared),
+            shadowed: class_lexical_value_names(type_params, members.clone()),
+            fields: class_field_initializers(members.declared.clone()),
+            members,
         });
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let ClassMember::Constructor(constructor) = member else {
             return StructuralTraversal::SkipChildren;
         };
         let Some(scope) = &self.scope else {
             return StructuralTraversal::SkipChildren;
         };
-        if constructor.is_const || constructor.body.is_some() {
+        if constructor.is_const() || constructor.body().is_some() {
             return StructuralTraversal::SkipChildren;
         }
         let checker = scope.checker(&self.model, self.signatures);
-        let reportable = if constructor.is_factory {
+        let reportable = if constructor.is_factory() {
             checker.redirects_to_const(constructor)
         } else {
-            checker.delegates_to_const(&constructor.initializers)
-                && checker.can_be_const(&constructor.params, &constructor.initializers)
+            checker.delegates_to_const(constructor.initializers())
+                && checker.can_be_const(constructor.params(), constructor.initializers())
         };
         if reportable {
             let start = first_token_after_annotations(
-                &constructor.annotations,
-                constructor.span,
-                self.ctx.syntax,
+                constructor.annotations(),
+                constructor.span(),
+                self.ctx.tree(),
+                self.ctx.source,
             );
-            let end = self.ctx.syntax
-                .tokens_in(Span::new(start, constructor.span.end))
+            let end = self.ctx.tree()
+                .tokens_in(self.ctx.source, Span::new(start, constructor.span().end))
                 .next()
                 .map_or(start, |token| token.offset() + token.len());
             self.diagnostics.push(self.ctx.diagnostic(
@@ -182,15 +183,15 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::SkipChildren
     }
 
-    fn exit_top_level_decl(&mut self, _decl: &TopLevelDecl) {
+    fn exit_top_level_decl(&mut self, _decl: TopLevelDecl<'a>) {
         let Some(scope) = self.scope.take() else {
             return;
         };
         let Some(primary) = scope.members.primary else {
             return;
         };
-        let has_body = scope.members.declared.iter().any(|member| {
-            matches!(member, ClassMember::PrimaryConstructorBody(body) if body.body.is_some())
+        let has_body = scope.members.declared.clone().any(|member| {
+            matches!(member, ClassMember::PrimaryConstructorBody(body) if body.body().is_some())
         });
         let constructor = scope.members.constructors()
             .find(|constructor| constructor.is_primary)
@@ -206,9 +207,9 @@ impl StructuralRuleVisitor for Collector<'_> {
                 "prefer-const-constructors-in-immutables",
                 "Declare a const constructor in an immutable class.",
                 Span::new(
-                    scope.name.span.start,
-                    primary.constructor_name.as_ref()
-                        .map_or(scope.name.span.end, |name| name.span.end),
+                    scope.name.span().start,
+                    primary.constructor_name()
+                        .map_or(scope.name.span().end, |name| name.span().end),
                 ),
             ));
         }
@@ -220,36 +221,32 @@ impl StructuralRuleVisitor for Collector<'_> {
 }
 }
 
-struct ClassChecker<'a> {
-    extends: Option<&'a DartType>,
+struct ClassChecker<'s, 'a> {
+    extends: Option<DartType<'a>>,
     representation_const: Option<bool>,
-    owner: &'a DeclarationIdentity,
-    model: &'a SemanticModel<'a>,
-    signatures: &'a SignatureIndex,
+    owner: &'s DeclarationIdentity,
+    model: &'s SemanticModel<'a>,
+    signatures: &'s SignatureIndex,
     /// Type parameters and member names, which shadow top-level names.
-    shadowed: &'a HashSet<String>,
-    fields: &'a HashMap<&'a str, &'a Expr>,
+    shadowed: &'s HashSet<&'a str>,
+    fields: &'s HashMap<&'a str, Expr<'a>>,
 }
 
-impl ClassChecker<'_> {
+impl<'a> ClassChecker<'_, 'a> {
     /// `factory C() = D;` where `D`'s constructor is `const`.
-    fn redirects_to_const(&self, constructor: &ConstructorDecl) -> bool {
-        let Some(redirect) = &constructor.redirect else {
+    fn redirects_to_const(&self, constructor: ConstructorDecl<'a>) -> bool {
+        let Some(redirect) = constructor.redirect() else {
             return false;
         };
-        if let Some(name) = &redirect.constructor_name {
+        if let Some(name) = redirect.constructor_name() {
             return self
-                .is_const_constructor(&self.model.resolve_type(&redirect.type_), &name.name);
+                .is_const_constructor(&self.model.resolve_type(redirect.type_()), name.name());
         }
         // `= D.named` parses as a prefixed type name.
-        let DartType::Named(named) = &redirect.type_ else {
+        let DartType::Named(named) = redirect.type_() else {
             return false;
         };
-        let segments: Vec<&str> = named
-            .segments
-            .iter()
-            .map(|segment| segment.name.as_str())
-            .collect();
+        let segments: Vec<&str> = named.segments().map(|segment| segment.name()).collect();
         if let Some(identity) = self.model.resolve_dotted(&segments) {
             return self.is_const_identity(&identity, "new");
         }
@@ -262,7 +259,10 @@ impl ClassChecker<'_> {
     }
 
     /// Whether the constructor this one delegates to is `const`.
-    fn delegates_to_const(&self, initializers: &[ConstructorInitializer]) -> bool {
+    fn delegates_to_const(
+        &self,
+        initializers: AstChildren<'a, ConstructorInitializer<'a>>,
+    ) -> bool {
         let superclass = || {
             self.extends.map_or_else(
                 || self.model.core_type("Object", false),
@@ -271,16 +271,15 @@ impl ClassChecker<'_> {
         };
         for initializer in initializers {
             match initializer {
-                ConstructorInitializer::SuperCall { call_name, .. } => {
-                    return self.is_const_constructor(&superclass(), delegate(call_name));
+                ConstructorInitializer::SuperCall(call) => {
+                    return self.is_const_constructor(&superclass(), delegate(call.call_name()));
                 }
-                ConstructorInitializer::ThisCall { call_name, .. } => {
+                ConstructorInitializer::ThisCall(call) => {
                     return self
                         .signatures
-                        .is_const_constructor(self.owner, delegate(call_name));
+                        .is_const_constructor(self.owner, delegate(call.call_name()));
                 }
-                ConstructorInitializer::FieldInit { .. }
-                | ConstructorInitializer::Assert { .. } => {}
+                ConstructorInitializer::FieldInit(_) | ConstructorInitializer::Assert(_) => {}
             }
         }
         self.representation_const
@@ -303,8 +302,8 @@ impl ClassChecker<'_> {
     /// constant-verifier error once the constructor is made `const`.
     fn can_be_const(
         &self,
-        params: &FormalParamList,
-        initializers: &[ConstructorInitializer],
+        params: FormalParamList<'a>,
+        mut initializers: AstChildren<'a, ConstructorInitializer<'a>>,
     ) -> bool {
         if self.signatures.has_non_final_field(self.owner) != Some(false) {
             return false;
@@ -312,7 +311,7 @@ impl ClassChecker<'_> {
         let no_parameters = HashSet::new();
         let field_initializers_constant = self.fields.values().all(|initializer| {
             initializer_potentially_constant(
-                initializer,
+                *initializer,
                 &no_parameters,
                 self.shadowed,
                 self.owner,
@@ -324,14 +323,13 @@ impl ClassChecker<'_> {
         if !field_initializers_constant {
             return false;
         }
-        let parameters: HashSet<String> = params
-            .params
-            .iter()
-            .map(|parameter| parameter.name.name.clone())
+        let parameters: HashSet<&str> = params
+            .params()
+            .map(|parameter| parameter.name().name())
             .collect();
         let mut shadowed = (*self.shadowed).clone();
-        shadowed.extend(parameters.iter().cloned());
-        let constant = |expr: &Expr| {
+        shadowed.extend(parameters.iter().copied());
+        let constant = |expr: Expr<'a>| {
             initializer_potentially_constant(
                 expr,
                 &parameters,
@@ -342,61 +340,61 @@ impl ClassChecker<'_> {
                 self.signatures,
             )
         };
-        initializers.iter().all(|initializer| match initializer {
-            ConstructorInitializer::FieldInit { value, .. } => constant(value),
-            ConstructorInitializer::Assert {
-                condition, message, ..
-            } => constant(condition) && message.as_ref().is_none_or(constant),
-            ConstructorInitializer::SuperCall { args, .. }
-            | ConstructorInitializer::ThisCall { args, .. } => args
-                .positional
-                .iter()
-                .chain(args.named.iter().map(|argument| &argument.value))
+        initializers.all(|initializer| match initializer {
+            ConstructorInitializer::FieldInit(field) => constant(field.value()),
+            ConstructorInitializer::Assert(assertion) => {
+                constant(assertion.condition()) && assertion.message().is_none_or(constant)
+            }
+            ConstructorInitializer::SuperCall(call) => call
+                .args()
+                .positional()
+                .chain(call.args().named().map(|argument| argument.value()))
+                .all(constant),
+            ConstructorInitializer::ThisCall(call) => call
+                .args()
+                .positional()
+                .chain(call.args().named().map(|argument| argument.value()))
                 .all(constant),
         })
     }
 }
 
-fn class_lexical_value_names(
-    type_params: &[TypeParam],
-    members: EffectiveMembers<'_>,
-) -> HashSet<String> {
-    let mut names = member_names(members.declared);
-    names.extend(
-        type_params
-            .iter()
-            .map(|parameter| parameter.name.name.clone()),
-    );
+fn class_lexical_value_names<'a>(
+    type_params: AstChildren<'a, TypeParam<'a>>,
+    members: EffectiveMembers<'a>,
+) -> HashSet<&'a str> {
+    let mut names = member_names(members.declared.clone());
+    names.extend(type_params.map(|parameter| parameter.name().name()));
     names.extend(
         members
             .declaring_params()
-            .map(|parameter| parameter.name.name.clone()),
+            .map(|parameter| parameter.name().name()),
     );
     names
 }
 
 /// Initializers of the class's instance fields.
-fn class_field_initializers(members: &[ClassMember]) -> HashMap<&str, &Expr> {
+fn class_field_initializers<'a>(
+    members: AstChildren<'a, ClassMember<'a>>,
+) -> HashMap<&'a str, Expr<'a>> {
     members
-        .iter()
         .filter_map(|member| match member {
-            ClassMember::Field(field) if !field.is_static => Some(field),
+            ClassMember::Field(field) if !field.is_static() => Some(field),
             _ => None,
         })
         .flat_map(|field| {
-            field.declarators.iter().filter_map(|declarator| {
+            field.declarators().filter_map(|declarator| {
                 declarator
-                    .initializer
-                    .as_ref()
-                    .map(|initializer| (declarator.name.name.as_str(), initializer))
+                    .initializer()
+                    .map(|initializer| (declarator.name().name(), initializer))
             })
         })
         .collect()
 }
 
 /// The constructor a `super`/`this` call names; the unnamed one is `new`.
-fn delegate(name: &Option<Identifier>) -> &str {
-    name.as_ref().map_or("new", |name| name.name.as_str())
+fn delegate(name: Option<Identifier<'_>>) -> &str {
+    name.map_or("new", |name| name.name())
 }
 
 #[cfg(test)]

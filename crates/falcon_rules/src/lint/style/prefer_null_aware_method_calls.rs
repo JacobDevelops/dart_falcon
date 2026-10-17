@@ -15,7 +15,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 use crate::lint::expressions::{equivalent, is_parenthesized};
 
@@ -25,7 +25,7 @@ pub struct PreferNullAwareMethodCalls;
 impl Rule for PreferNullAwareMethodCalls {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -41,81 +41,73 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     /// The tested expression of `<expr> != null`, without a wrapped null.
-    fn not_null_operand<'e>(&self, condition: &'e Expr) -> Option<&'e Expr> {
+    fn not_null_operand(&self, condition: Expr<'a>) -> Option<Expr<'a>> {
         match condition {
-            Expr::Binary {
-                op: BinaryOp::NotEq,
-                left,
-                right,
-                ..
-            } if matches!(right.as_ref(), Expr::NullLit { .. }) && !is_parenthesized(right) => {
-                Some(left)
+            Expr::Binary(binary)
+                if binary.op() == BinaryOp::NotEq
+                    && matches!(binary.right(), Expr::NullLit(_))
+                    && !is_parenthesized(binary.right()) =>
+            {
+                Some(binary.left())
             }
             _ => None,
         }
     }
-    fn check(&mut self, call: &Expr, tested: &Expr) {
+    fn check(&mut self, call: Expr<'a>, tested: Expr<'a>) {
         if is_parenthesized(call) {
             return;
         }
-        let Expr::Call { callee, span, .. } = call else {
+        let Expr::Call(invocation) = call else {
             return;
         };
-        let Expr::NullAssert { operand, .. } = callee.as_ref() else {
+        let callee = invocation.callee();
+        let Expr::NullAssert(assertion) = callee else {
             return;
         };
-        if !is_parenthesized(callee) && equivalent(operand, tested, self.ctx) {
+        if !is_parenthesized(callee) && equivalent(assertion.operand(), tested, self.ctx) {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-null-aware-method-calls",
                 "Use a null-aware invocation of the 'call' method rather than explicitly testing for null.",
-                *span,
+                invocation.span(),
             ));
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
-        if let Stmt::If(IfStmt {
-            condition: IfCondition::Expr(condition),
-            then_branch,
-            else_branch: None,
-            ..
-        }) = node
-            && !matches!(condition, Expr::Paren { .. })
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
+        if let Stmt::If(statement) = node
+            && statement.else_branch().is_none()
+            && let IfCondition::Expr(condition) = statement.condition()
+            && !matches!(condition, Expr::Paren(_))
             && let Some(tested) = self.not_null_operand(condition)
         {
-            let then = match then_branch.as_ref() {
-                Stmt::Block(block) if block.stmts.len() == 1 => &block.stmts[0],
+            let then = match statement.then_branch() {
+                Stmt::Block(block) if block.stmts().len() == 1 => block.stmts().first().unwrap(),
                 other => other,
             };
             if let Stmt::Expr(statement) = then {
-                self.check(&statement.expr, tested);
+                self.check(statement.expr(), tested);
             }
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } = node
-            && matches!(else_expr.as_ref(), Expr::NullLit { .. })
-            && !is_parenthesized(else_expr)
-            && !is_parenthesized(condition)
-            && let Some(tested) = self.not_null_operand(condition)
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Conditional(conditional) = node
+            && matches!(conditional.else_expr(), Expr::NullLit(_))
+            && !is_parenthesized(conditional.else_expr())
+            && !is_parenthesized(conditional.condition())
+            && let Some(tested) = self.not_null_operand(conditional.condition())
         {
-            self.check(then_expr, tested);
+            self.check(conditional.then_expr(), tested);
         }
         StructuralTraversal::Continue
     }

@@ -6,7 +6,7 @@ use falcon_analyze::{
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidTypesAsParameterNames;
@@ -14,7 +14,7 @@ pub struct AvoidTypesAsParameterNames;
 impl Rule for AvoidTypesAsParameterNames {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some((identities, file)) = ctx
@@ -48,7 +48,7 @@ struct Collector<'a> {
     scopes: Vec<(usize, bool, bool)>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn save_scope(&mut self) {
         self.scopes.push((
             self.type_names.len(),
@@ -88,43 +88,41 @@ impl Collector<'_> {
         (name != "_" && self.type_names.contains(&name)) || self.resolves_to_library_type(name)
     }
 
-    fn enter_types(&mut self, params: &[TypeParam], method: bool) {
-        for param in params {
-            if self.resolves_to_library_type(&param.name.name)
-                || (!method && self.type_names.contains(&param.name.name.as_str()))
+    fn enter_types(&mut self, params: AstChildren<'a, TypeParam<'a>>, method: bool) {
+        for param in params.clone() {
+            if self.resolves_to_library_type(param.name().name())
+                || (!method && self.type_names.contains(&param.name().name()))
             {
                 self.diags.push(self.ctx.diagnostic(
                     "avoid-types-as-parameter-names",
                     "Avoid using an existing type as a type parameter name.",
-                    param.name.span,
+                    param.name().span(),
                 ));
             }
         }
         self.type_names.extend(
             params
-                .iter()
-                .filter(|param| param.name.name != "_")
-                .filter_map(|param| self.ctx.syntax.tokens_in(param.name.span).next())
-                .map(|token| token.text(self.ctx.source)),
+                .map(|param| param.name().name())
+                .filter(|name| *name != "_"),
         );
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.save_scope();
         let params = match node {
-            TopLevelDecl::Class(node) => &node.type_params,
-            TopLevelDecl::ClassTypeAlias(node) => &node.type_params,
-            TopLevelDecl::MixinClass(node) => &node.type_params,
-            TopLevelDecl::Mixin(node) => &node.type_params,
-            TopLevelDecl::Enum(node) => &node.type_params,
-            TopLevelDecl::Extension(node) => &node.type_params,
-            TopLevelDecl::ExtensionType(node) => &node.type_params,
-            TopLevelDecl::TypeAlias(node) => &node.type_params,
+            TopLevelDecl::Class(node) => node.type_params(),
+            TopLevelDecl::ClassTypeAlias(node) => node.type_params(),
+            TopLevelDecl::MixinClass(node) => node.type_params(),
+            TopLevelDecl::Mixin(node) => node.type_params(),
+            TopLevelDecl::Enum(node) => node.type_params(),
+            TopLevelDecl::Extension(node) => node.type_params(),
+            TopLevelDecl::ExtensionType(node) => node.type_params(),
+            TopLevelDecl::TypeAlias(node) => node.type_params(),
             _ => return StructuralTraversal::Continue,
         };
         self.enter_types(params, false);
@@ -132,102 +130,102 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+    fn exit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) {
         self.restore_scope();
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         self.save_scope();
-        self.enter_types(&node.type_params, false);
+        self.enter_types(node.type_params(), false);
         StructuralTraversal::Continue
     }
 
-    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+    fn exit_function_decl(&mut self, _node: FunctionDecl<'a>) {
         self.restore_scope();
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
         self.save_scope();
-        self.enter_types(&node.type_params, true);
+        self.enter_types(node.type_params(), true);
         StructuralTraversal::Continue
     }
 
-    fn exit_method_decl(&mut self, _node: &MethodDecl) {
+    fn exit_method_decl(&mut self, _node: MethodDecl<'a>) {
         self.restore_scope();
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.save_scope();
-        if let Expr::FuncExpr { type_params, .. } = node {
-            self.enter_types(type_params, false);
+        if let Expr::FuncExpr(function) = node {
+            self.enter_types(function.type_params(), false);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_expr(&mut self, _node: &Expr) {
+    fn exit_expr(&mut self, _node: Expr<'a>) {
         self.restore_scope();
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         self.save_scope();
         if let DartType::Function(node) = node {
-            self.enter_types(&node.type_params, false);
+            self.enter_types(node.type_params(), false);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_dart_type(&mut self, _node: &DartType) {
+    fn exit_dart_type(&mut self, _node: DartType<'a>) {
         self.restore_scope();
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.save_scope();
         if let Stmt::TryCatch(statement) = node {
-            for clause in &statement.catches {
-                if let Some(name) = &clause.exception_var
-                    && self.resolves_to_type(&name.name)
+            for clause in statement.catches() {
+                if let Some(name) = clause.exception_var()
+                    && self.resolves_to_type(name.name())
                 {
                     self.diags.push(self.ctx.diagnostic(
                         "avoid-types-as-parameter-names",
                         "Avoid using an existing type as a parameter name.",
-                        name.span,
+                        name.span(),
                     ));
                 }
             }
         }
         if let Stmt::LocalFunc(function) = node {
-            self.enter_types(&function.type_params, false);
+            self.enter_types(function.type_params(), false);
         }
         StructuralTraversal::Continue
     }
 
-    fn exit_stmt(&mut self, _node: &Stmt) {
+    fn exit_stmt(&mut self, _node: Stmt<'a>) {
         self.restore_scope();
     }
 
-    fn visit_primary_constructor(&mut self, _node: &PrimaryConstructor) -> StructuralTraversal {
+    fn visit_primary_constructor(&mut self, _node: PrimaryConstructor<'a>) -> StructuralTraversal {
         self.save_scope();
         self.primary_parameter = true;
         StructuralTraversal::Continue
     }
 
-    fn exit_primary_constructor(&mut self, _node: &PrimaryConstructor) {
+    fn exit_primary_constructor(&mut self, _node: PrimaryConstructor<'a>) {
         self.restore_scope();
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
         self.save_scope();
-        if node.param_type.is_none()
-            && node.function_params.is_none()
-            && node.initializing != Some(InitializingFormal::This)
+        if node.param_type().is_none()
+            && node.function_params().is_none()
+            && node.initializing() != Some(InitializingFormal::This)
             && !(self.primary_parameter
-                && (self.representation_constructor || node.is_final || node.is_var))
-            && self.resolves_to_type(&node.name.name)
+                && (self.representation_constructor || node.is_final() || node.is_var()))
+            && self.resolves_to_type(node.name().name())
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-types-as-parameter-names",
                 "Avoid using an existing type as a parameter name.",
-                node.name.span,
+                node.name().span(),
             ));
         }
         // Nested function parameters and default expressions are not declaring
@@ -236,7 +234,7 @@ impl StructuralRuleVisitor for Collector<'_> {
         StructuralTraversal::Continue
     }
 
-    fn exit_formal_param(&mut self, _node: &FormalParam) {
+    fn exit_formal_param(&mut self, _node: FormalParam<'a>) {
         self.restore_scope();
     }
 }

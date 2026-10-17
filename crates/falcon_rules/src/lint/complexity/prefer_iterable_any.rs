@@ -9,7 +9,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferIterableAny;
@@ -17,7 +17,7 @@ pub struct PreferIterableAny;
 impl Rule for PreferIterableAny {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -28,24 +28,15 @@ impl Rule for PreferIterableAny {
     }
 }
 
-fn is_where_is_not_empty(expr: &Expr) -> Option<Span> {
+fn is_where_is_not_empty(expr: Expr<'_>) -> Option<Span> {
     // Match: something.where(...).isNotEmpty
-    if let Expr::Field {
-        object,
-        field,
-        span,
-        ..
-    } = expr.unparenthesized()
-        && field.name == "isNotEmpty"
-        && let Expr::Call { callee, .. } = object.unparenthesized()
-        && let Expr::Field {
-            object: _where_object,
-            field: where_field,
-            ..
-        } = callee.unparenthesized()
-        && where_field.name == "where"
+    if let Expr::Field(field) = expr.unparenthesized()
+        && field.field().name() == "isNotEmpty"
+        && let Expr::Call(call) = field.object().unparenthesized()
+        && let Expr::Field(where_field) = call.callee().unparenthesized()
+        && where_field.field().name() == "where"
     {
-        return Some(*span);
+        return Some(field.span());
     }
     None
 }
@@ -58,9 +49,9 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if matches!(node, Expr::Paren { .. }) {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if matches!(node, Expr::Paren(_)) {
             return StructuralTraversal::Continue;
         }
         if let Some(span) = is_where_is_not_empty(node) {

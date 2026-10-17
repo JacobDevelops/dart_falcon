@@ -11,7 +11,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferCorrectEdgeInsetsConstructor;
@@ -19,7 +19,7 @@ pub struct PreferCorrectEdgeInsetsConstructor;
 impl Rule for PreferCorrectEdgeInsetsConstructor {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let collector = Collector {
@@ -30,16 +30,16 @@ impl Rule for PreferCorrectEdgeInsetsConstructor {
     }
 }
 fn check_edge_insets_only_call(
-    callee: &Expr,
-    args: &ArgList,
-    span: &Span,
+    callee: Expr<'_>,
+    args: ArgList<'_>,
+    span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if let Expr::Field { object, field, .. } = callee.unparenthesized()
-        && let Expr::Ident(ident) = object.unparenthesized()
-        && ident.name == "EdgeInsets"
-        && field.name == "only"
+    if let Expr::Field(field) = callee.unparenthesized()
+        && let Expr::Ident(ident) = field.object().unparenthesized()
+        && ident.name() == "EdgeInsets"
+        && field.field().name() == "only"
     {
         let should_flag = should_use_better_constructor(args);
         if should_flag {
@@ -48,7 +48,7 @@ fn check_edge_insets_only_call(
             let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
             let report_span = if start_line == end_line {
-                *span
+                span
             } else {
                 let opening_line_end = source[span.start..]
                     .find('\n')
@@ -79,36 +79,36 @@ fn check_edge_insets_only_call(
 }
 
 fn check_edge_insets_only(
-    dart_type: &DartType,
-    args: &ArgList,
-    span: &Span,
+    dart_type: DartType<'_>,
+    args: ArgList<'_>,
+    span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
     if let DartType::Named(nt) = dart_type
-        && nt.segments.len() == 1
-        && nt.segments[0].name == "EdgeInsets"
+        && nt.segments().count() == 1
+        && nt.segments().next().unwrap().name() == "EdgeInsets"
     {
         let should_flag = should_use_better_constructor(args);
         if should_flag {
             diags.push(ctx.diagnostic(
                 "prefer-correct-edge-insets-constructor",
                 "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
-                *span,
+                span,
             ));
         }
     }
 }
 
-fn should_use_better_constructor(args: &ArgList) -> bool {
+fn should_use_better_constructor(args: ArgList<'_>) -> bool {
     let mut left = None;
     let mut right = None;
     let mut top = None;
     let mut bottom = None;
 
-    for named in &args.named {
-        let value_str = scalar_text(&named.value);
-        match named.name.name.as_str() {
+    for named in args.named() {
+        let value_str = scalar_text(named.value());
+        match named.name().name() {
             "left" => left = value_str,
             "right" => right = value_str,
             "top" => top = value_str,
@@ -154,22 +154,15 @@ struct Collector<'a> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
-            Expr::New {
-                dart_type,
-                args,
-                span,
-                ..
-            } => check_edge_insets_only(dart_type, args, span, &mut self.diags, self.ctx),
-            Expr::Call {
-                callee, args, span, ..
-            } => check_edge_insets_only_call(callee, args, span, &mut self.diags, self.ctx),
+            Expr::New(construction) => check_edge_insets_only(construction.dart_type(), construction.args(), construction.span(), &mut self.diags, self.ctx),
+            Expr::Call(call) => check_edge_insets_only_call(call.callee(), call.args(), call.span(), &mut self.diags, self.ctx),
             _ => {}
         }
         StructuralTraversal::Continue

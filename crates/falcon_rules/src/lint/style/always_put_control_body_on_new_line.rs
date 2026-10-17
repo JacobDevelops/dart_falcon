@@ -21,8 +21,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::ast::*;
-use falcon_syntax::token::Token;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AlwaysPutControlBodyOnNewLine;
@@ -30,15 +29,11 @@ pub struct AlwaysPutControlBodyOnNewLine;
 impl Rule for AlwaysPutControlBodyOnNewLine {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let tokens: Vec<Token> = ctx
-            .tokens()
-            .iter()
-            .copied()
-            .filter(|token| !token.is_trivia())
-            .collect();
+        let tokens: Vec<SyntaxToken<'a>> =
+            ctx.tokens().filter(|token| !token.is_trivia()).collect();
         let collector = Collector {
             ctx,
             tokens,
@@ -50,16 +45,16 @@ impl Rule for AlwaysPutControlBodyOnNewLine {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    tokens: Vec<Token>,
+    tokens: Vec<SyntaxToken<'ctx>>,
     diags: Vec<Diagnostic>,
 }
 
 impl Collector<'_, '_> {
     /// Reports `body` when its first statement shares a line with the token
     /// that ends the control clause (`)`, `do`, or `else`).
-    fn check(&mut self, body: &Stmt) {
+    fn check(&mut self, body: Stmt<'_>) {
         let first = match body {
-            Stmt::Block(block) => match block.stmts.first() {
+            Stmt::Block(block) => match block.stmts().first() {
                 Some(statement) => statement.span().start,
                 None => return,
             },
@@ -93,22 +88,22 @@ impl Collector<'_, '_> {
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         match node {
             Stmt::If(stmt) => {
-                self.check(&stmt.then_branch);
-                if let Some(else_branch) = &stmt.else_branch
-                    && !matches!(**else_branch, Stmt::If(_))
+                self.check(stmt.then_branch());
+                if let Some(else_branch) = stmt.else_branch()
+                    && !matches!(else_branch, Stmt::If(_))
                 {
                     self.check(else_branch);
                 }
             }
-            Stmt::For(stmt) => self.check(&stmt.body),
-            Stmt::While(stmt) => self.check(&stmt.body),
-            Stmt::DoWhile(stmt) => self.check(&stmt.body),
+            Stmt::For(stmt) => self.check(stmt.body()),
+            Stmt::While(stmt) => self.check(stmt.body()),
+            Stmt::DoWhile(stmt) => self.check(stmt.body()),
             _ => {}
         }
         StructuralTraversal::Continue

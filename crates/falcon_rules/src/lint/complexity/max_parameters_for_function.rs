@@ -15,7 +15,7 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::ast::*;
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct MaxParametersForFunction;
@@ -23,7 +23,7 @@ pub struct MaxParametersForFunction;
 impl Rule for MaxParametersForFunction {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -60,70 +60,70 @@ impl Collector<'_> {
         ));
     }
 
-    fn check_formals(&mut self, params: &FormalParamList, span: &Span) {
-        self.check(params.params.len(), span);
+    fn check_formals(&mut self, params: FormalParamList<'_>, span: &Span) {
+        self.check(params.params().len(), span);
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         if let Some(params) = node.params() {
-            self.check_formals(params, &node.span);
+            self.check_formals(params, &node.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         self.check_formals(node.params, &node.span);
         StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
-        self.check_formals(&node.params, &node.span);
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.check_formals(node.params(), &node.span());
         StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
-        self.check(1, &node.span);
+    fn visit_setter_decl(&mut self, node: SetterDecl<'a>) -> StructuralTraversal {
+        self.check(1, &node.span());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            self.check_formals(&operator.params, &operator.span);
+            self.check_formals(operator.params(), &operator.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+    fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node {
-            self.check(function.params.len(), &function.span);
+            self.check(function.params().len(), &function.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
-        if let Some(params) = &node.function_params {
-            self.check_formals(params, &node.span);
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        if let Some(params) = node.function_params() {
+            self.check_formals(params, &node.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
-            self.check_formals(&function.params, &function.span);
+            self.check_formals(function.params(), &function.span());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::FuncExpr { params, span, .. } = node {
-            self.check_formals(params, span);
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::FuncExpr(function) = node {
+            self.check_formals(function.params(), &function.span());
         }
         StructuralTraversal::Continue
     }

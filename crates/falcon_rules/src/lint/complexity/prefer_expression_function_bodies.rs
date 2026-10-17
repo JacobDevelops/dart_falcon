@@ -15,8 +15,8 @@ use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
-use falcon_syntax::ast::*;
+
+use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct PreferExpressionFunctionBodies;
@@ -24,7 +24,7 @@ pub struct PreferExpressionFunctionBodies;
 impl Rule for PreferExpressionFunctionBodies {
     fn prepare<'a>(
         &self,
-        _program: &'a Program,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
@@ -40,29 +40,30 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    fn check(&mut self, body: Option<&FunctionBody>, async_marker: AsyncMarker) {
+    fn check(&mut self, body: Option<FunctionBody<'_>>, async_marker: AsyncMarker) {
         if let Some(FunctionBody::Block(block)) = body
-            && let [Stmt::Return(ReturnStmt { value: Some(_), .. })] = block.stmts.as_slice()
+            && block.stmts().len() == 1
+            && matches!(block.stmts().first(), Some(Stmt::Return(ret)) if ret.value().is_some())
         {
             // The analyzer's function body includes its async/generator modifier.
-            let tokens = self.ctx.tokens();
-            let before = tokens.partition_point(|token| token.offset() < block.span.start);
-            let mut preceding = tokens[..before]
-                .iter()
+            let mut preceding = self
+                .ctx
+                .tree()
+                .tokens_in(self.ctx.source, Span::new(0, block.span().start))
                 .rev()
                 .filter(|token| !token.is_trivia());
-            let mut start = block.span.start;
+            let mut start = block.span().start;
             if async_marker != AsyncMarker::Sync
                 && let Some(token) = preceding.next()
             {
                 use falcon_syntax::TokenKind;
-                let marker = if token.kind == TokenKind::Star {
+                let marker = if token.kind() == TokenKind::Star {
                     preceding.next()
                 } else {
                     Some(token)
                 };
                 if let Some(marker) = marker
-                    && matches!(marker.kind, TokenKind::Async | TokenKind::Sync)
+                    && matches!(marker.kind(), TokenKind::Async | TokenKind::Sync)
                 {
                     start = marker.offset();
                 }
@@ -70,32 +71,32 @@ impl Collector<'_, '_> {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-expression-function-bodies",
                 "Unnecessary use of a block function body.",
-                Span::new(start, block.span.end),
+                Span::new(start, block.span().end),
             ));
         }
     }
 }
 
 falcon_analyze::structural_visitor! {
-impl StructuralRuleVisitor for Collector<'_, '_> {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
-        self.check(node.body.as_ref(), node.async_marker);
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        self.check(node.body(), node.async_marker());
         StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         let (body, marker) = match node {
-            ClassMember::Method(member) => (member.body.as_ref(), member.async_marker),
-            ClassMember::Getter(member) => (member.body.as_ref(), member.async_marker),
-            ClassMember::Setter(member) => (member.body.as_ref(), AsyncMarker::Sync),
-            ClassMember::Operator(member) => (member.body.as_ref(), member.async_marker),
-            ClassMember::Constructor(member) => (member.body.as_ref(), AsyncMarker::Sync),
+            ClassMember::Method(member) => (member.body(), member.async_marker()),
+            ClassMember::Getter(member) => (member.body(), member.async_marker()),
+            ClassMember::Setter(member) => (member.body(), AsyncMarker::Sync),
+            ClassMember::Operator(member) => (member.body(), member.async_marker()),
+            ClassMember::Constructor(member) => (member.body(), AsyncMarker::Sync),
             ClassMember::PrimaryConstructorBody(member) => {
-                (member.body.as_ref(), AsyncMarker::Sync)
+                (member.body(), AsyncMarker::Sync)
             }
             ClassMember::Field(_) | ClassMember::Error(_) => (None, AsyncMarker::Sync),
         };
@@ -103,19 +104,17 @@ impl StructuralRuleVisitor for Collector<'_, '_> {
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
-            self.check(Some(&function.body), function.async_marker);
+            self.check(Some(function.body()), function.async_marker());
         }
         StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
-        if let Expr::FuncExpr {
-            body, async_marker, ..
-        } = node
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::FuncExpr(function) = node
         {
-            self.check(Some(body), *async_marker);
+            self.check(Some(function.body()), function.async_marker());
         }
         StructuralTraversal::Continue
     }
@@ -135,9 +134,13 @@ mod tests {
         let source = "int f() { return 1; } Future<int> g() async /* body */ { return 2; } void h() { final cb = () async { return 3; }; }";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = PreferExpressionFunctionBodies.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = PreferExpressionFunctionBodies.analyze(parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -157,9 +160,13 @@ mod tests {
         let source = "class C { int get async { return 1; } int get sync { return 2; } }";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
-        let diagnostics = PreferExpressionFunctionBodies.analyze(&parsed.program, &ctx);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let diagnostics = PreferExpressionFunctionBodies.analyze(parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
