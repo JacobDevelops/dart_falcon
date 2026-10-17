@@ -18,15 +18,15 @@ jobs:
     env:
       INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
       # zig is the cross-linker: aarch64 musl links cleanly on the x86_64 runner.
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.13.0
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-zigbuild
       - name: Build and package
@@ -46,7 +46,7 @@ jobs:
             install -m755 "target/$target/release/falcon" stage/falcon
             tar -C stage -czf "dist/falcon-${VERSION}-$(archive_platform "$target").tar.gz" falcon
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tarballs-linux
           path: dist/*.tar.gz
@@ -58,8 +58,8 @@ jobs:
     env:
       INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build and package
@@ -80,7 +80,7 @@ jobs:
             install -m755 "target/$target/release/falcon" stage/falcon
             tar -C stage -czf "dist/falcon-${VERSION}-$(archive_platform "$target").tar.gz" falcon
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tarballs-darwin
           path: dist/*.tar.gz
@@ -95,8 +95,8 @@ jobs:
     env:
       INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: tarballs-*
           merge-multiple: true
@@ -111,7 +111,7 @@ jobs:
             echo "tag v$VERSION does not match Cargo.toml version $CARGO_VERSION" >&2
             exit 1
           fi
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           generate_release_notes: true
