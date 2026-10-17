@@ -1,0 +1,37 @@
+name: mbx setup
+description: Install mise tools and restore the newest main compiler snapshot for one CI job.
+
+inputs:
+  tools:
+    description: Space-separated mise tools to install.
+    required: true
+  snapshot:
+    description: Snapshot name; jobs that build the same artifacts share one.
+    required: true
+
+outputs:
+  cache-hit:
+    description: Whether the exact snapshot key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  key:
+    description: Primary key to save the snapshot under.
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      with:
+        install_args: ${{ inputs.tools }}
+        cache: true
+    - id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/mbx
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: mbx-v1-${{ inputs.snapshot }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+        restore-keys: |
+          mbx-v1-${{ inputs.snapshot }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+          mbx-v1-${{ inputs.snapshot }}-${{ runner.arch }}-
