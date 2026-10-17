@@ -409,7 +409,7 @@ fn constructs_controller(expression: &Expr, model: &SemanticModel<'_>) -> bool {
     };
     matches!(
         identity,
-        Some(DeclarationIdentity::Package { package, name })
+        Some(DeclarationIdentity::Package { package, name, .. })
             if package.as_str() == "flutter" && matches!(name.as_str(),
                 "TextEditingController" | "ScrollController" | "PageController"
                 | "TabController" | "AnimationController")

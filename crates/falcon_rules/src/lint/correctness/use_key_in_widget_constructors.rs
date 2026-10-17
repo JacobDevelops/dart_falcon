@@ -73,7 +73,7 @@ impl Collector<'_> {
             let Some(superclass) = self.signatures.superclass(identity) else {
                 break false;
             };
-            if matches!(superclass, ResolvedType::Interface { identity, .. } if *identity == widget)
+            if matches!(superclass, ResolvedType::Interface { identity, .. } if identity.matches(&widget))
             {
                 break true;
             }

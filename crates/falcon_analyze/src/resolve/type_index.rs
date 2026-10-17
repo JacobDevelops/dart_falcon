@@ -357,7 +357,7 @@ impl TypeIndex {
         if self.declarations.is_empty() && !self.types.is_empty() {
             return self.is_subtype(sub.name(), super_.name());
         }
-        self.supertype_matches_identity(sub, |identity| identity == super_)
+        self.supertype_matches_identity(sub, |identity| identity.matches(super_))
     }
 
     /// Whether `sub` or any of its supertypes satisfies `matches`; `No` only

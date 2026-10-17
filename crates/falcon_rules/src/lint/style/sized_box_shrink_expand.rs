@@ -52,7 +52,7 @@ impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::scoped_constructor_invocation(node, state)
-            && identity == self.sized_box
+            && identity.matches(&self.sized_box)
             && !matches!(node, Expr::Call { callee, .. }
                 if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "new"))
             && !matches!(node, Expr::New { dart_type: DartType::Named(named), constructor_name, .. }

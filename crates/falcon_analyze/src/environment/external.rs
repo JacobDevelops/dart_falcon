@@ -357,16 +357,26 @@ impl ExternalLibraries {
         self.libraries.is_empty()
     }
 
+    /// The configured package whose library directory holds a loaded file, in
+    /// the file's loading context.
+    pub(crate) fn package_library<'a>(
+        &self,
+        environment: &'a AnalysisEnvironment,
+        path: &Path,
+    ) -> Option<&'a super::ConfiguredPackage> {
+        let context = *self.contexts.get(path)?;
+        environment
+            .config_in(context)?
+            .package_library_containing(path)
+    }
+
     /// The logical package URI of a loaded defining file in its loading context.
     pub(crate) fn package_uri(
         &self,
         environment: &AnalysisEnvironment,
         path: &Path,
     ) -> Option<String> {
-        let context = *self.contexts.get(path)?;
-        let package = environment
-            .config_in(context)?
-            .package_library_containing(path)?;
+        let package = self.package_library(environment, path)?;
         let relative = path.strip_prefix(&package.lib_root).ok()?;
         let mut uri = format!("package:{}", package.name);
         for component in relative.components() {

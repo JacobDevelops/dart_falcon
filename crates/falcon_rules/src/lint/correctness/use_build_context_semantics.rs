@@ -109,9 +109,9 @@ fn mounted_kind(receiver: &ResolvedType, state: &SemanticState<'_>) -> Option<bo
         .signatures
         .resolved_member_owner(receiver, "mounted", &state.model)
     {
-        return if owner == DeclarationIdentity::flutter("State") {
+        return if owner.is_package("flutter", "State") {
             Some(true)
-        } else if owner == DeclarationIdentity::flutter("BuildContext") {
+        } else if owner.is_package("flutter", "BuildContext") {
             Some(false)
         } else {
             None
@@ -273,7 +273,7 @@ fn context_member_kind(
 
 fn is_context(ty: &ResolvedType, skip_nullable: bool) -> bool {
     matches!(ty, ResolvedType::Interface { identity, nullable, .. }
-        if *identity == DeclarationIdentity::flutter("BuildContext")
+        if identity.is_package("flutter", "BuildContext")
             && (!skip_nullable || !nullable))
 }
 

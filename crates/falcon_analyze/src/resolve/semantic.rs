@@ -8378,7 +8378,7 @@ impl SignatureIndex {
     ) -> Option<ResolvedType> {
         self.instantiated_matching(
             ty,
-            &|identity| identity == target,
+            &|identity| identity.matches(target),
             model,
             &mut FxHashSet::default(),
         )
@@ -9957,9 +9957,17 @@ fn same_library(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool
     ) || matches!(
         (left, right),
         (
-            DeclarationIdentity::Package { package: left, .. },
-            DeclarationIdentity::Package { package: right, .. }
-        ) if left == right
+            DeclarationIdentity::Package {
+                package: left,
+                copy: left_copy,
+                ..
+            },
+            DeclarationIdentity::Package {
+                package: right,
+                copy: right_copy,
+                ..
+            }
+        ) if left == right && left_copy == right_copy
     )
 }
 
@@ -14417,7 +14425,7 @@ fn fixnum_and_int(fixnum: &ResolvedType, int: &ResolvedType) -> bool {
     matches!(
         fixnum,
         ResolvedType::Interface {
-            identity: DeclarationIdentity::Package { package, name },
+            identity: DeclarationIdentity::Package { package, name, .. },
             ..
         } if package.as_str() == "fixnum" && matches!(name.as_str(), "Int32" | "Int64")
     ) && int.interface("dart:core", "int")
@@ -14435,7 +14443,7 @@ mod tests {
     #[test]
     fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path();
+        let root = &directory.path().canonicalize().unwrap();
         let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
         let embedded = root.join("embedder/lib");
         std::fs::create_dir_all(&sdk).unwrap();

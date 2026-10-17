@@ -11,7 +11,7 @@
 //! repeated accessors and collisions with other declarations remain ambiguous.
 
 use crate::InternedString;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -139,6 +139,8 @@ struct Library {
     /// `package:<name>/<path>` of the defining file when it lies inside a known
     /// package's `lib` directory.
     uri: Option<String>,
+    /// The package copy; see [`DeclarationIdentity::Package`].
+    copy: Option<u32>,
     named: bool,
 }
 
@@ -170,6 +172,9 @@ pub enum DeclarationIdentity {
     Package {
         package: InternedString,
         name: InternedString,
+        /// Which physical copy of the package this is, by library-root path
+        /// order, when package contexts load several; `None` when only one is.
+        copy: Option<u32>,
     },
 }
 
@@ -187,6 +192,7 @@ impl DeclarationIdentity {
         Self::Package {
             package: InternedString::Static(package),
             name: InternedString::Static(name),
+            copy: None,
         }
     }
 
@@ -207,8 +213,21 @@ impl DeclarationIdentity {
     }
 
     pub fn is_package(&self, package: &str, name: &str) -> bool {
-        matches!(self, Self::Package { package: found_package, name: found_name }
+        matches!(self, Self::Package { package: found_package, name: found_name, .. }
             if *found_package == package && *found_name == name)
+    }
+
+    /// Whether `self` is `target`; a package `target` without a copy names
+    /// the declaration in whichever copy of its package `self` is from.
+    pub fn matches(&self, target: &Self) -> bool {
+        match target {
+            Self::Package {
+                package,
+                name,
+                copy: None,
+            } => self.is_package(package, name),
+            _ => self == target,
+        }
     }
 
     /// The analyzer's `ElementAnnotation.isImmutable`: meta's `immutable`
@@ -308,9 +327,9 @@ pub struct IdentityIndex {
     source_annotations: SourceAnnotations,
     /// The loaded `dart:core`, when external libraries are indexed.
     core: Option<LibraryId>,
-    /// Names declared by multiple libraries within one package origin;
-    /// these require library-scoped identities instead of package-wide ones.
-    colliding: FxHashMap<ExternalOrigin, FxHashSet<InternedString>>,
+    /// Names declared by multiple libraries within one copy of a package
+    /// origin; these require library-scoped identities instead of package-wide ones.
+    colliding: FxHashMap<ExternalOrigin, FxHashMap<Option<u32>, FxHashSet<InternedString>>>,
     /// Every indexed `typedef`, by the identity of its name.
     aliases: HashMap<DeclarationIdentity, TypeAlias>,
     /// Reverse source context for uniquely identified external declarations.
@@ -482,6 +501,7 @@ impl IdentityIndex {
                         doc_imports: Vec::new(),
                         extensions: HashSet::new(),
                         uri: None,
+                        copy: None,
                         named: false,
                     });
                     LibraryId(libraries.len() - 1)
@@ -494,6 +514,7 @@ impl IdentityIndex {
             .map(|file| (file.path, file.program, file.has_parse_errors))
             .collect();
         let mut core = base.as_ref().and_then(|index| index.core);
+        let mut package_copies = Vec::new();
         for library in external
             .iter()
             .filter(|_| base.is_none())
@@ -516,15 +537,42 @@ impl IdentityIndex {
                         .libraries
                         .package_uri(external.environment, &library.files.first()?.path)
                 }),
+                copy: None,
                 named: false,
             });
             if matches!(&library.origin, ExternalOrigin::Sdk(uri) if uri.as_str() == "dart:core") {
                 core = Some(id);
             }
+            if let ExternalOrigin::Package(package) = &library.origin
+                && let Some(configured) = external.and_then(|external| {
+                    external
+                        .libraries
+                        .package_library(external.environment, &library.files.first()?.path)
+                })
+            {
+                package_copies.push((id, package.as_str(), configured.lib_root.as_path()));
+            }
             for file in &library.files {
                 file_library.push(id);
                 all.push((&file.path, &file.facts, file.has_parse_errors));
             }
+        }
+        // Contexts resolving a package to different library roots see different declarations.
+        let mut package_roots: FxHashMap<&str, BTreeSet<&Path>> = FxHashMap::default();
+        for &(_, package, root) in &package_copies {
+            package_roots.entry(package).or_default().insert(root);
+        }
+        let copies: FxHashMap<(&str, &Path), u32> = package_roots
+            .iter()
+            .filter(|(_, roots)| roots.len() > 1)
+            .flat_map(|(&package, roots)| {
+                (0..)
+                    .zip(roots)
+                    .map(move |(copy, &root)| ((package, root), copy))
+            })
+            .collect();
+        for (id, package, root) in package_copies {
+            libraries[id.0].copy = copies.get(&(package, root)).copied();
         }
 
         let mut interner = StringInterner::default();
@@ -677,8 +725,7 @@ impl IdentityIndex {
         for (path, file) in &by_path {
             paths[file.0] = Some(path.clone());
         }
-        let mut declared_by: FxHashMap<(&ExternalOrigin, &InternedString), (Option<&str>, bool)> =
-            FxHashMap::default();
+        let mut declared_by = FxHashMap::default();
         for library in &libraries {
             // SDK URI/name identities are canonical even when package contexts
             // load both an SDK and an embedder's physical copy of its libraries.
@@ -686,7 +733,7 @@ impl IdentityIndex {
                 for name in library.declarations.keys().chain(library.extensions.iter()) {
                     let uri = library.uri.as_deref();
                     declared_by
-                        .entry((origin, name))
+                        .entry((origin, library.copy, name))
                         .and_modify(|(first, colliding)| {
                             *colliding |= uri.is_none() || *first != uri;
                         })
@@ -694,13 +741,15 @@ impl IdentityIndex {
                 }
             }
         }
-        let mut colliding: FxHashMap<ExternalOrigin, FxHashSet<InternedString>> =
+        let mut colliding: FxHashMap<ExternalOrigin, FxHashMap<Option<u32>, FxHashSet<_>>> =
             FxHashMap::default();
         let declaration_capacity = declared_by.len();
-        for ((origin, name), (_, has_collision)) in declared_by {
+        for ((origin, copy, name), (_, has_collision)) in declared_by {
             if has_collision {
                 colliding
                     .entry(origin.clone())
+                    .or_default()
+                    .entry(copy)
                     .or_default()
                     .insert(name.clone());
             }
@@ -797,17 +846,15 @@ impl IdentityIndex {
                 name: name.to_string(),
             }),
             Some(origin) => {
-                if self
-                    .colliding
-                    .get(origin)
-                    .is_some_and(|names| names.contains(name))
-                    || self.external.as_ref().is_some_and(|external| {
-                        external
-                            .colliding
-                            .get(origin)
-                            .is_some_and(|names| names.contains(name))
-                    })
-                {
+                let copy = self.get(library).copy;
+                let collides = |index: &Self| {
+                    index
+                        .colliding
+                        .get(origin)
+                        .and_then(|copies| copies.get(&copy))
+                        .is_some_and(|names| names.contains(name))
+                };
+                if collides(self) || self.external.as_deref().is_some_and(collides) {
                     return Some(DeclarationIdentity::Project {
                         library,
                         name: name.to_owned(),
@@ -827,6 +874,7 @@ impl IdentityIndex {
                     ExternalOrigin::Package(package) => DeclarationIdentity::Package {
                         package: package.clone(),
                         name: name.clone(),
+                        copy: self.get(library).copy,
                     },
                     ExternalOrigin::Project => DeclarationIdentity::Project {
                         library,
@@ -1532,6 +1580,7 @@ impl IdentityIndex {
                 Some(DeclarationIdentity::Package {
                     package: InternedString::Shared(package.into()),
                     name: name.clone(),
+                    copy: None,
                 })
             }
             identity => Some(identity),
@@ -3906,10 +3955,7 @@ mod tests {
             ),
             (
                 ExternalOrigin::Package(InternedString::Static("example")),
-                DeclarationIdentity::Package {
-                    package: InternedString::Static("example"),
-                    name: InternedString::Static("Ex"),
-                },
+                DeclarationIdentity::package("example", "Ex"),
             ),
         ] {
             let mut index = index(

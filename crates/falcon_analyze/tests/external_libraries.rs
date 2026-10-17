@@ -1856,7 +1856,7 @@ fn executable_library_names_preserve_collisions_without_documentation_imports() 
 }
 
 #[test]
-fn independent_package_configs_choose_the_same_canonical_package_authority_in_every_order() {
+fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
     use falcon_analyze::{MemberKind, MemberResult, MemberSelector, MemberSelectorKind};
 
     let (dir, _) = workspace();
@@ -1949,57 +1949,128 @@ fn independent_package_configs_choose_the_same_canonical_package_authority_in_ev
                 let files = paths.map(|path| (path.to_path_buf(), &program));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
-                let expected_path =
-                    canonical_or_lexical(&dir.path().join("packages/method/lib/foo.dart"));
-                let canonical = DeclarationIdentity::package("foo", "Foo");
-                for app in &apps {
+                let mut resolved = Vec::with_capacity(apps.len());
+                for (app, copy) in apps.iter().zip(["getter", "method"]) {
+                    let expected_path = canonical_or_lexical(
+                        &dir.path().join(format!("packages/{copy}/lib/foo.dart")),
+                    );
                     let model = SemanticModel::new(app, &identities, Some(&types));
                     let identity = model.resolve_name("Foo").unwrap();
-                    assert_eq!(identity, canonical);
+                    assert!(identity.is_package("foo", "Foo"));
+                    assert!(identity.matches(&DeclarationIdentity::package("foo", "Foo")));
+                    let receiver = ResolvedType::interface_identity(identity.clone());
                     assert_eq!(
-                        identities.declaration_library(&identity),
-                        Some(identities.library(identities.file(&expected_path).unwrap())),
-                        "order={order:?}, incremental={incremental}",
+                        signatures.is_subtype_of(
+                            &receiver,
+                            &DeclarationIdentity::package("foo", "Foo"),
+                            &model
+                        ),
+                        falcon_analyze::Truth::Yes
                     );
-                    assert_eq!(
-                        types.member_lookup_identity(&identity, "value"),
-                        MemberResult::Found(MemberKind::Method)
-                    );
-                    let receiver = ResolvedType::interface_identity(identity);
-                    let (signature, _) = signatures
-                        .resolved_member(&receiver, "value", &model)
-                        .unwrap();
-                    assert_eq!(signature.return_type, receiver);
-                    assert_eq!(
-                        signature.positional.as_slice(),
-                        std::slice::from_ref(&receiver)
-                    );
-                    assert!(
-                        signatures
-                            .resolved_field(&receiver, "value", &model)
-                            .is_none()
-                    );
-                }
-                for index in [&identities, base.as_ref()] {
-                    assert_eq!(
-                        index.declaration_library(&canonical),
-                        Some(index.library(index.file(&expected_path).unwrap())),
-                    );
-                    for selector in [
-                        MemberSelector::DECLARATION,
-                        MemberSelector::new(MemberSelectorKind::Read, false, "value"),
-                    ] {
-                        let (path, annotations) = index
-                            .source_annotations(&canonical, selector.into())
-                            .unwrap();
-                        assert_eq!(path, expected_path);
-                        assert_eq!(annotations.len(), 1);
-                        assert_eq!(annotations[0].name[0].name, "Deprecated");
+                    for index in [&identities, base.as_ref()] {
+                        assert_eq!(
+                            index.declaration_library(&identity),
+                            Some(index.library(index.file(&expected_path).unwrap())),
+                            "order={order:?}, incremental={incremental}",
+                        );
+                        for selector in [
+                            MemberSelector::DECLARATION,
+                            MemberSelector::new(MemberSelectorKind::Read, false, "value"),
+                        ] {
+                            let (path, annotations) = index
+                                .source_annotations(&identity, selector.into())
+                                .unwrap();
+                            assert_eq!(path, expected_path);
+                            assert_eq!(annotations.len(), 1);
+                        }
                     }
+                    if copy == "getter" {
+                        assert_eq!(
+                            types.member_lookup_identity(&identity, "value"),
+                            MemberResult::Found(MemberKind::Getter)
+                        );
+                        let (field, _) = signatures
+                            .resolved_field(&receiver, "value", &model)
+                            .unwrap();
+                        assert!(field.interface("dart:core", "int"));
+                    } else {
+                        assert_eq!(
+                            types.member_lookup_identity(&identity, "value"),
+                            MemberResult::Found(MemberKind::Method)
+                        );
+                        let (signature, _) = signatures
+                            .resolved_member(&receiver, "value", &model)
+                            .unwrap();
+                        assert_eq!(signature.return_type, receiver);
+                        assert!(
+                            signatures
+                                .resolved_field(&receiver, "value", &model)
+                                .is_none()
+                        );
+                    }
+                    resolved.push(identity);
                 }
+                assert_ne!(resolved[0], resolved[1]);
             }
         }
     }
+}
+
+#[test]
+fn package_copies_keep_package_identities_when_a_declaration_moves_between_versions() {
+    let (dir, _) = workspace();
+    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
+    let source = "import 'package:foo/foo.dart';";
+    let apps = [
+        ("old", "class Foo {}", None),
+        ("new", "export 'src/foo.dart';", Some("class Foo {}")),
+    ]
+    .map(|(name, library, moved)| {
+        let package = dir.path().join(format!("packages/{name}"));
+        write(&package, "lib/foo.dart", library);
+        if let Some(moved) = moved {
+            write(&package, "lib/src/foo.dart", moved);
+        }
+        write(
+            dir.path(),
+            &format!("{name}/.dart_tool/package_config.json"),
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
+                ]}}"#,
+                flutter.display(),
+                canonical_or_lexical(&package).display(),
+            ),
+        );
+        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
+    });
+    let falcon_dart_parser::ParseResult { program, .. } = parse(source);
+    let paths = apps.each_ref().map(PathBuf::as_path);
+    let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
+    let roots = paths.map(|path| (path, &program, source));
+    let externals = ExternalLibraries::load(&environment, &roots, |path| paths.contains(&path));
+    let sources = paths.map(|path| IdentitySource {
+        path,
+        program: &program,
+        has_parse_errors: false,
+    });
+    let identities = IdentityIndex::build(
+        &sources,
+        &[source, source],
+        &[],
+        Some(ExternalSources {
+            libraries: &externals,
+            environment: &environment,
+        }),
+    );
+    let [old, new] = paths.map(|path| {
+        SemanticModel::new(path, &identities, None)
+            .resolve_name("Foo")
+            .unwrap()
+    });
+    assert!(old.is_package("foo", "Foo"), "{old:?}");
+    assert!(new.is_package("foo", "Foo"), "{new:?}");
+    assert_ne!(old, new);
 }
 
 #[test]
