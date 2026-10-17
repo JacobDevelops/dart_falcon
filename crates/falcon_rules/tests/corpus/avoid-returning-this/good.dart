@@ -59,3 +59,22 @@ class GroupedReceiver {
     return ((this));
   }
 }
+
+class NestedOnly {
+  NestedOnly run() {
+    NestedOnly local() {
+      return this;
+    }
+    final callback = () {
+      return this;
+    };
+  }
+}
+
+class ReturnedClosure {
+  ReturnedClosure run() {
+    return (() {
+      return this;
+    })();
+  }
+}

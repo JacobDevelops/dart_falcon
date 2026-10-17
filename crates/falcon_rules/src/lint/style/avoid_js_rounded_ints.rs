@@ -11,11 +11,12 @@
 //!
 //! Adopted from the official `avoid_js_rounded_ints` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, parse_int};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal, parse_int,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
 
 #[derive(Default)]
 pub struct AvoidJsRoundedInts;
@@ -23,15 +24,14 @@ pub struct AvoidJsRoundedInts;
 impl Rule for AvoidJsRoundedInts {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
         };
-        walk_program(&mut collector, program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -40,8 +40,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::IntLit { value, span } = node
             && literal_value(value).is_some_and(|value| (value as f64) as i64 != value)
         {
@@ -51,8 +56,9 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// The runtime `int` value of a literal: hexadecimal literals up to 64 bits

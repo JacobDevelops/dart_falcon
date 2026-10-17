@@ -22,8 +22,10 @@
 //! Adopted from the official `use_to_and_as_if_applicable` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel, resolve_call_constructor,
+    AnalyzeContext, DeclarationIdentity, MemberKind, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, resolve_call_constructor,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -32,18 +34,36 @@ pub struct UseToAndAsIfApplicable;
 impl Rule for UseToAndAsIfApplicable {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let Some(members) = crate::lint::declarations::members_of(decl) else {
-                continue;
-            };
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            signatures,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            owner: None,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a, 'ctx> {
+    ctx: &'a AnalyzeContext<'ctx>,
+    signatures: &'a SignatureIndex,
+    model: SemanticModel<'a>,
+    owner: Option<Option<DeclarationIdentity>>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        self.owner = None;
             // Extensions have no supertypes to inherit from.
             let owner = match decl {
                 TopLevelDecl::Extension(_) => None,
@@ -52,16 +72,23 @@ impl Rule for UseToAndAsIfApplicable {
                 TopLevelDecl::MixinClass(node) => Some(&node.name.name),
                 TopLevelDecl::Enum(node) => Some(&node.name.name),
                 TopLevelDecl::ExtensionType(node) => Some(&node.name.name),
-                _ => continue,
+                _ => return StructuralTraversal::Continue,
             };
             let owner = match owner {
-                Some(name) => match model.resolve_name(name.as_str()) {
+                Some(name) => match self.model.resolve_name(name.as_str()) {
                     Some(identity) => Some(identity),
-                    None => continue,
+                    None => return StructuralTraversal::Continue,
                 },
                 None => None,
             };
-            for member in members {
+        self.owner = Some(owner);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        let Some(owner) = &self.owner else {
+            return StructuralTraversal::Continue;
+        };
                 let (name, params, return_type, body, span) = match member {
                     ClassMember::Method(method) => (
                         method.name.name.as_str(),
@@ -75,36 +102,35 @@ impl Rule for UseToAndAsIfApplicable {
                         &operator.params,
                         &operator.return_type,
                         &operator.body,
-                        crate::lint::declarations::operator_token_span(operator, ctx.syntax),
+                        crate::lint::declarations::operator_token_span(operator, self.ctx.syntax),
                     ),
-                    _ => continue,
+                    _ => return StructuralTraversal::Continue,
                 };
                 let Some(body) = body else {
-                    continue;
+                    return StructuralTraversal::Continue;
                 };
                 if !params.params.is_empty()
                     || matches!(return_type, Some(DartType::Void { .. }))
                     || begins_with_as_or_to(name)
-                    || !wraps_this(body, &model, signatures)
+                    || !wraps_this(body, &self.model, self.signatures)
                 {
-                    continue;
+                    return StructuralTraversal::Continue;
                 }
                 let inherited = owner.as_ref().map_or(Some(false), |owner| {
-                    signatures
+                    self.signatures
                         .inherited_member_facts(owner, name)
                         .map(|facts| facts.iter().any(|fact| fact.kind == MemberKind::Method))
                 });
                 if inherited != Some(true) {
-                    diags.push(ctx.diagnostic(
+                    self.diags.push(self.ctx.diagnostic(
                         "use-to-and-as-if-applicable",
                         "Start the name of the method with 'to' or 'as'.",
                         span,
                     ));
                 }
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// Matches `(to|as|_to|_as)[A-Z]` at the start of `name`.

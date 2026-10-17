@@ -9,7 +9,9 @@
 //! declarations, and thread mutable state explicitly through constructors or
 //! parameters rather than hanging it off globals.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -19,45 +21,56 @@ pub struct AvoidGlobalState;
 impl Rule for AvoidGlobalState {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Variable(var) if is_mutable(var.keyword, var.is_late) => {
-                    diags.push(ctx.diagnostic(
-                        "avoid-global-state",
-                        "Avoid mutable global state — use const or final declarations instead",
-                        var.span,
-                    ));
-                }
-                _ => {
-                    if let Some(members) = crate::lint::declarations::members_of(decl) {
-                        check_static_fields(members, &mut diags, ctx);
-                    }
-                }
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
 }
 
-fn is_mutable(keyword: VarKeyword, is_late: bool) -> bool {
-    keyword == VarKeyword::Var || (keyword == VarKeyword::Final && is_late)
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
 }
 
-fn check_static_fields(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for member in members {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Variable(var) = decl
+            && is_mutable(var.keyword, var.is_late)
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-global-state",
+                "Avoid mutable global state — use const or final declarations instead",
+                var.span,
+            ));
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Field(field) = member
             && field.is_static
             && is_mutable(field.keyword, field.is_late)
         {
-            diags.push(ctx.diagnostic(
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-global-state",
                 "Avoid mutable global state — use const or final declarations instead",
                 field.span,
             ));
         }
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
+}
+
+fn is_mutable(keyword: VarKeyword, is_late: bool) -> bool {
+    keyword == VarKeyword::Var || (keyword == VarKeyword::Final && is_late)
 }

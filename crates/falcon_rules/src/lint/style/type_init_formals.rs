@@ -20,7 +20,9 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -53,17 +55,42 @@ impl Rule for TypeInitFormals {
             }
         }
 
-        let mut diags = Vec::new();
-        for info in classes.values() {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            classes,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    classes: ClassTable<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        // The dependency table keeps only the last declaration of each name.
+        // Check that declaration once, not once per overwritten declaration.
+        if let Some((name, declaration)) = class_info(decl)
+            && let Some(info) = self.classes.get(name)
+            && std::ptr::eq(info.members, declaration.members)
+        {
             for member in info.members {
-                let ClassMember::Constructor(ctor) = member else {
-                    continue;
-                };
-                check_ctor(&classes, info, ctor, ctx, &mut diags);
+                if let ClassMember::Constructor(ctor) = member {
+                    check_ctor(&self.classes, info, ctor, self.ctx, &mut self.diags);
+                }
             }
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn class_info(decl: &TopLevelDecl) -> Option<(&str, ClassInfo<'_>)> {
@@ -255,4 +282,29 @@ fn same_type(ctx: &AnalyzeContext, a: &DartType, b: &DartType) -> bool {
             .filter(|character| !character.is_whitespace())
     };
     text(a).eq(text(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::RuleAnalysis;
+
+    #[test]
+    fn duplicate_class_names_check_only_the_last_declaration_once() {
+        let source = "class C { int x; C(int this.x); }\nclass C { int y; C(int this.y); }";
+        let falcon_dart_parser::ParseResult {
+            program,
+            syntax,
+            errors,
+        } = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let config = falcon_config::FalconConfig::default();
+        let context =
+            AnalyzeContext::new(std::path::Path::new("test.dart"), source, &config, &syntax);
+        let diagnostics = TypeInitFormals.analyze(&program, &context);
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "int");
+        assert!(diagnostic.span.start > source.find('\n').unwrap());
+    }
 }

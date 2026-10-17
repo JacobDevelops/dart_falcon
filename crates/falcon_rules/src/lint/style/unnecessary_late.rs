@@ -7,7 +7,9 @@
 //! the declarator actually has an initializer, since `late` on an uninitialized
 //! static or top-level variable does carry meaning. Drop the `late` keyword.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -18,26 +20,43 @@ pub struct UnnecessaryLate;
 impl Rule for UnnecessaryLate {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
 
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Variable(var) if var.is_late => {
-                    flag_initialized(&var.declarators, ctx, &mut diags);
-                }
-                _ => {
-                    if let Some(members) = crate::lint::declarations::members_of(decl) {
-                        static_late_fields(members, ctx, &mut diags);
-                    }
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
+        let diags = &mut self.diags;
+        match decl {
+            TopLevelDecl::Variable(var) if var.is_late => {
+                flag_initialized(&var.declarators, ctx, diags);
+            }
+            _ => {
+                if let Some(members) = crate::lint::declarations::members_of(decl) {
+                    static_late_fields(members, ctx, diags);
                 }
             }
         }
-
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn static_late_fields(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {

@@ -67,3 +67,55 @@ class G extends State<StatefulWidget> {
 class H extends flutter.State<flutter.StatefulWidget> {
   final controller = flutter.ScrollController(); /* expect: proper-controller-dispose */
 }
+
+class CollectionIfCaseInsideStatement extends State<StatefulWidget> {
+  late TextEditingController controller; /* expect: proper-controller-dispose */
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget case final controller?) {
+      final list = [if (widget case final nested?) nested];
+    }
+    controller = TextEditingController();
+  }
+}
+
+class ShadowedBodyDisposals extends State<StatefulWidget> {
+  final blockShadow = TextEditingController(); /* expect: proper-controller-dispose */
+  final forShadow = TextEditingController(); /* expect: proper-controller-dispose */
+  final patternShadow = TextEditingController(); /* expect: proper-controller-dispose */
+  final caseShadow = TextEditingController(); /* expect: proper-controller-dispose */
+  final catchShadow = TextEditingController(); /* expect: proper-controller-dispose */
+  final closureShadow = TextEditingController(); /* expect: proper-controller-dispose */
+  final functionShadow = TextEditingController(); /* expect: proper-controller-dispose */
+
+  @override
+  void dispose() {
+    {
+      final blockShadow = TextEditingController();
+      blockShadow.dispose();
+    }
+    for (final forShadow in <TextEditingController>[]) {
+      forShadow.dispose();
+    }
+    for (final [patternShadow] in <List<TextEditingController>>[]) {
+      patternShadow.dispose();
+    }
+    if (widget case TextEditingController caseShadow) {
+      caseShadow.dispose();
+    }
+    try {
+      throw widget;
+    } catch (catchShadow) {
+      catchShadow.dispose();
+    }
+    final callback = (TextEditingController closureShadow) {
+      closureShadow.dispose();
+    };
+    void local(TextEditingController functionShadow) {
+      functionShadow.dispose();
+    }
+    super.dispose();
+  }
+}

@@ -8,10 +8,12 @@
 //! operators; parameters, local variables, setters, and top-level declarations
 //! are out of scope.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct NoObjectDeclaration;
@@ -19,15 +21,13 @@ pub struct NoObjectDeclaration;
 impl Rule for NoObjectDeclaration {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut visitor = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        visitor.visit_program(program);
-        RulePreparation::Diagnostics(visitor.diags)
+        }))
     }
 }
 
@@ -58,8 +58,11 @@ struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
         if matches!(
             decl,
             TopLevelDecl::Class(_)
@@ -69,11 +72,13 @@ impl Visitor for Collector<'_, '_> {
                 | TopLevelDecl::Extension(_)
                 | TopLevelDecl::ExtensionType(_)
         ) {
-            walk_top_level_decl(self, decl);
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) {
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
         let ty = match member {
             ClassMember::Field(f) => f.field_type.as_ref(),
             ClassMember::Method(m) => m.return_type.as_ref(),
@@ -82,5 +87,7 @@ impl Visitor for Collector<'_, '_> {
             _ => None,
         };
         check_type(ty, &mut self.diags, self.ctx);
+        StructuralTraversal::SkipChildren
     }
+}
 }

@@ -7,7 +7,10 @@
 //! aliases. Legacy declarations retain their written formal parameter list in
 //! the AST, distinguishing them from modern aliases.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::{Program, TopLevelDecl};
 use falcon_syntax::token::TokenKind;
 
@@ -17,43 +20,60 @@ pub struct PreferGenericFunctionTypeAliases;
 impl Rule for PreferGenericFunctionTypeAliases {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for declaration in &program.declarations {
-            let TopLevelDecl::TypeAlias(alias) = declaration else {
-                continue;
-            };
-            let Some(params) = &alias.legacy_params else {
-                continue;
-            };
-            if !ctx
-                .syntax
-                .tokens_in(params.span)
-                .find(|token| !token.is_trivia())
-                .is_some_and(|token| token.kind == TokenKind::LParen)
-            {
-                continue;
-            }
-            if let Some(keyword) = ctx
-                .syntax
-                .keywords_in(alias.span, TokenKind::Typedef)
-                .next()
-            {
-                diags.push(ctx.diagnostic(
-                    "prefer-generic-function-type-aliases",
-                    "Use the generic function type syntax in typedefs.",
-                    falcon_syntax::ast::Span {
-                        start: keyword.offset(),
-                        end: keyword.offset() + keyword.len(),
-                    },
-                ));
-            }
-        }
-
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
+        let TopLevelDecl::TypeAlias(alias) = declaration else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let Some(params) = &alias.legacy_params else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if !ctx
+            .syntax
+            .tokens_in(params.span)
+            .find(|token| !token.is_trivia())
+            .is_some_and(|token| token.kind == TokenKind::LParen)
+        {
+            return StructuralTraversal::SkipChildren;
+        }
+        if let Some(keyword) = ctx
+            .syntax
+            .keywords_in(alias.span, TokenKind::Typedef)
+            .next()
+        {
+            self.diags.push(ctx.diagnostic(
+                "prefer-generic-function-type-aliases",
+                "Use the generic function type syntax in typedefs.",
+                falcon_syntax::ast::Span {
+                    start: keyword.offset(),
+                    end: keyword.offset() + keyword.len(),
+                },
+            ));
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 #[cfg(test)]

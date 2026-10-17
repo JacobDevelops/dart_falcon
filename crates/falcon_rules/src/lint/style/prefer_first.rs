@@ -7,10 +7,12 @@
 //! expression that evaluates to zero, is left alone. Matching is syntactic on the
 //! literal, so it does not confirm the receiver exposes a `first` getter.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferFirst;
@@ -18,15 +20,13 @@ pub struct PreferFirst;
 impl Rule for PreferFirst {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -37,8 +37,11 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Index { index, span, .. } = node
             && is_zero(index)
         {
@@ -48,8 +51,9 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// True for the integer literal `0`.

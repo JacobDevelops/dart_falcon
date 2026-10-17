@@ -8,13 +8,11 @@
 //! easily mistake the two unrelated types for the same one, which invites subtle
 //! type errors. Rename the inner parameter to something distinct.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_dart_type, walk_expr, walk_formal_param, walk_stmt,
-    walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct AvoidShadowingTypeParameters;
@@ -22,16 +20,16 @@ pub struct AvoidShadowingTypeParameters;
 impl Rule for AvoidShadowingTypeParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut checker = Checker {
+        let checker = Checker {
             diags: Vec::new(),
             ctx,
             scope: Vec::new(),
+            scope_lengths: Vec::new(),
         };
-        checker.visit_program(program);
-        RulePreparation::Diagnostics(checker.diags)
+        RulePreparation::Structural(Box::new(checker))
     }
 }
 
@@ -39,6 +37,7 @@ struct Checker<'a, 'ctx> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
     scope: Vec<(String, &'static str)>,
+    scope_lengths: Vec<usize>,
 }
 
 impl Checker<'_, '_> {
@@ -60,15 +59,23 @@ impl Checker<'_, '_> {
         tps.len()
     }
 
-    fn scoped(&mut self, tps: &[TypeParam], kind: &'static str, walk: impl FnOnce(&mut Self)) {
-        let entered = self.enter(tps, kind);
-        walk(self);
-        self.scope.truncate(self.scope.len() - entered);
+    fn save_scope(&mut self) {
+        self.scope_lengths.push(self.scope.len());
+    }
+
+    fn restore_scope(&mut self) {
+        self.scope.truncate(self.scope_lengths.pop().unwrap());
     }
 }
 
-impl Visitor for Checker<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Checker<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.save_scope();
         let (type_params, kind): (&[TypeParam], _) = match node {
             TopLevelDecl::Class(x) => (&x.type_params, "class"),
             TopLevelDecl::ClassTypeAlias(x) => (&x.type_params, "class"),
@@ -81,10 +88,12 @@ impl Visitor for Checker<'_, '_> {
             TopLevelDecl::TypeAlias(x) => (&x.type_params, "typedef"),
             TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => (&[], "declaration"),
         };
-        self.scoped(type_params, kind, |this| walk_top_level_decl(this, node));
+        self.enter(type_params, kind);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        self.save_scope();
         let type_params: &[TypeParam] = match node {
             ClassMember::Method(x) => &x.type_params,
             ClassMember::Field(_)
@@ -103,42 +112,64 @@ impl Visitor for Checker<'_, '_> {
                     .iter()
                     .map(|parameter| (parameter.name.name.clone(), "method")),
             );
-            walk_class_member(self, node);
-            self.scope.truncate(self.scope.len() - type_params.len());
         } else {
-            self.scoped(type_params, "method", |this| walk_class_member(this, node));
+            self.enter(type_params, "method");
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.save_scope();
         if let Stmt::LocalFunc(local) = node {
-            self.scoped(&local.type_params, "function", |this| walk_stmt(this, node));
-        } else {
-            walk_stmt(self, node);
+            self.enter(&local.type_params, "function");
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.save_scope();
         if let Expr::FuncExpr { type_params, .. } = node {
-            self.scoped(type_params, "function", |this| walk_expr(this, node));
-        } else {
-            walk_expr(self, node);
+            self.enter(type_params, "function");
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
-        self.scoped(&node.type_params, "parameter", |this| {
-            walk_formal_param(this, node)
-        });
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
+        self.save_scope();
+        self.enter(&node.type_params, "parameter");
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+        self.save_scope();
         if let DartType::Function(function) = node {
-            self.scoped(&function.type_params, "function", |this| {
-                walk_dart_type(this, node)
-            });
-        } else {
-            walk_dart_type(self, node);
+            self.enter(&function.type_params, "function");
         }
+        StructuralTraversal::Continue
     }
+
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+        self.restore_scope();
+    }
+
+    fn exit_class_member(&mut self, _node: &ClassMember) {
+        self.restore_scope();
+    }
+
+    fn exit_stmt(&mut self, _node: &Stmt) {
+        self.restore_scope();
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.restore_scope();
+    }
+
+    fn exit_formal_param(&mut self, _node: &FormalParam) {
+        self.restore_scope();
+    }
+
+    fn exit_dart_type(&mut self, _node: &DartType) {
+        self.restore_scope();
+    }
+}
 }

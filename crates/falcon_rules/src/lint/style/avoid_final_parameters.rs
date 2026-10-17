@@ -17,12 +17,13 @@
 //!
 //! Adopted from the official `avoid_final_parameters` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
-use falcon_syntax::visitor::{Visitor, walk_class_member, walk_formal_param};
 
 const RULE: &str = "avoid-final-parameters";
 const MESSAGE: &str = "Parameters should not be marked as 'final'.";
@@ -33,7 +34,7 @@ pub struct AvoidFinalParameters;
 impl Rule for AvoidFinalParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         // With primary constructors `final` declares a field, not a final
@@ -44,12 +45,11 @@ impl Rule for AvoidFinalParameters {
         {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -101,18 +101,22 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if node.is_final && node.function_params.is_none() && node.initializing.is_none() {
             self.report_final_in(node.span.start, node.name.span.start);
         }
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Setter(setter) = node {
             self.check_setter(setter);
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

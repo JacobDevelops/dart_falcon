@@ -11,7 +11,9 @@
 //! members are exempt, as is any return type naming a concrete widget subclass
 //! such as `Container`.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -21,30 +23,44 @@ pub struct AvoidReturningWidgets;
 impl Rule for AvoidReturningWidgets {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(f) => {
-                    if let Some(ret_type) = &f.return_type
-                        && contains_widget_type(ret_type)
-                    {
-                        diags.push(ctx.diagnostic("avoid-returning-widgets", "Functions should not return Widget directly; extract to a separate widget class", f.span));
-                    }
-                }
-                _ => {
-                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                        check_class_member(member, &mut diags, ctx);
-                    }
-                }
-            }
-        }
-
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Function(f) = decl {
+            if let Some(ret_type) = &f.return_type
+                && contains_widget_type(ret_type)
+            {
+                self.diags.push(self.ctx.diagnostic("avoid-returning-widgets", "Functions should not return Widget directly; extract to a separate widget class", f.span));
+            }
+            return StructuralTraversal::SkipChildren;
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        check_class_member(member, &mut self.diags, self.ctx);
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn is_widget_type(dart_type: &DartType) -> bool {

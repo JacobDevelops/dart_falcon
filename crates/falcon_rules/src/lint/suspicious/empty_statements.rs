@@ -10,10 +10,11 @@
 //!
 //! This includes empty statements inside anonymous functions.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
 
 #[derive(Default)]
 pub struct EmptyStatements;
@@ -21,15 +22,14 @@ pub struct EmptyStatements;
 impl Rule for EmptyStatements {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -38,8 +38,9 @@ struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::Empty(span) = node {
             self.diags.push(self.ctx.diagnostic(
                 "empty-statements",
@@ -47,6 +48,11 @@ impl Visitor for Collector<'_, '_> {
                 *span,
             ));
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

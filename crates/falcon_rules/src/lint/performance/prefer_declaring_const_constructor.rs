@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -17,22 +17,41 @@ pub struct PreferDeclaringConstConstructor;
 impl Rule for PreferDeclaringConstConstructor {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for declaration in &program.declarations {
-            let TopLevelDecl::Class(class) = declaration else {
-                continue;
-            };
-            check_class(class, &model, signatures, ctx, &mut diags);
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            signatures,
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Class(class) = declaration {
+            check_class(class, &self.model, self.signatures, self.ctx, &mut self.diags);
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn check_class(

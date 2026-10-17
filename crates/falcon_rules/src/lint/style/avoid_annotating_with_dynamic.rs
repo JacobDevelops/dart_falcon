@@ -15,11 +15,12 @@
 //!
 //! Adopted from the official `avoid_annotating_with_dynamic` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_dart_type, walk_formal_param, walk_setter_decl};
 
 use crate::lint::core_imports::CoreImports;
 
@@ -35,13 +36,12 @@ impl Rule for AvoidAnnotatingWithDynamic {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             core: CoreImports::new(program),
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -57,8 +57,11 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if node
             .param_type
             .as_ref()
@@ -66,19 +69,19 @@ impl Visitor for Collector<'_, '_> {
         {
             self.report(node.span);
         }
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         if let Some(ty) = &node.param_type
             && self.core.is_dynamic(ty)
         {
             self.report(ty.span().merge(&node.param.span));
         }
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Function(function) = node {
             for param in &function.params {
                 let ty = &param.param_type;
@@ -98,6 +101,7 @@ impl Visitor for Collector<'_, '_> {
                 }
             }
         }
-        walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

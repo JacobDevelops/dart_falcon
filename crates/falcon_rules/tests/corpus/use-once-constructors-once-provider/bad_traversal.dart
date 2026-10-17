@@ -35,3 +35,11 @@ enum ProviderEnum {
 
   Object create() => OnceProvider((ref) => 5); /* expect: use-once-constructors-once-provider */
 }
+
+void restoresConstScopes() {
+  const constant = [OnceProvider(null)];
+  final runtime = [
+    const [OnceProvider(null)],
+    OnceProvider(null), /* expect: use-once-constructors-once-provider */
+  ];
+}

@@ -15,12 +15,11 @@
 //! accepted boolean-name prefixes. User-provided entries extend the defaults
 //! rather than replacing them.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_function_decl, walk_local_var, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct BooleanPrefixes;
@@ -28,16 +27,15 @@ pub struct BooleanPrefixes;
 impl Rule for BooleanPrefixes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut visitor = Collector {
+        let visitor = Collector {
             diags: Vec::new(),
             ctx,
             prefixes: resolve_prefixes(ctx),
         };
-        visitor.visit_program(program);
-        RulePreparation::Diagnostics(visitor.diags)
+        RulePreparation::Structural(Box::new(visitor))
     }
 }
 
@@ -114,22 +112,25 @@ struct Collector<'a, 'ctx> {
     prefixes: Vec<String>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = decl {
             check_declarators(&v.declarators, &mut self.diags, self.ctx, &self.prefixes);
         }
-        walk_top_level_decl(self, decl);
+        StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, f: &FunctionDecl) {
+    fn visit_function_decl(&mut self, f: &FunctionDecl) -> StructuralTraversal {
         if !matches!(f.kind, FunctionKind::Setter(_)) && is_bool_type(f.return_type.as_ref()) {
             check_name(&f.name, &mut self.diags, self.ctx, &self.prefixes);
         }
-        walk_function_decl(self, f);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) {
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
         let named_return = match member {
             ClassMember::Field(f) => {
                 check_declarators(&f.declarators, &mut self.diags, self.ctx, &self.prefixes);
@@ -148,16 +149,17 @@ impl Visitor for Collector<'_, '_> {
         {
             check_name(name, &mut self.diags, self.ctx, &self.prefixes);
         }
-        walk_class_member(self, member);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
         check_declarators(
             &local.declarators,
             &mut self.diags,
             self.ctx,
             &self.prefixes,
         );
-        walk_local_var(self, local);
+        StructuralTraversal::Continue
     }
+}
 }

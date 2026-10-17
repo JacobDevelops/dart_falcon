@@ -7,10 +7,11 @@
 //! one statement of the form `return await <expr>;`. Local functions and
 //! anonymous closures are not checked.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct AvoidRedundantAsync;
@@ -18,48 +19,55 @@ pub struct AvoidRedundantAsync;
 impl Rule for AvoidRedundantAsync {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-
-        AsyncDeclarations {
-            diags: &mut diags,
+        RulePreparation::Structural(Box::new(AsyncDeclarations {
+            diags: Vec::new(),
             ctx,
-        }
-        .visit_program(program);
-
-        RulePreparation::Diagnostics(diags)
+        }))
     }
 }
 
 struct AsyncDeclarations<'a, 'ctx> {
-    diags: &'a mut Vec<Diagnostic>,
+    diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
 }
 
-impl Visitor for AsyncDeclarations<'_, '_> {
-    fn visit_expr(&mut self, _node: &Expr) {}
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for AsyncDeclarations<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        if !matches!(node, TopLevelDecl::Variable(_)) {
-            walk_top_level_decl(self, node);
+    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        if matches!(node, TopLevelDecl::Variable(_)) {
+            StructuralTraversal::SkipChildren
+        } else {
+            StructuralTraversal::Continue
         }
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if let Some(diag) = check_function_async(node, self.ctx) {
             self.diags.push(diag);
         }
+        StructuralTraversal::SkipChildren
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Method(method) = node
             && let Some(diag) = check_method_async(method, self.ctx)
         {
             self.diags.push(diag);
         }
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 fn check_function_async(func_decl: &FunctionDecl, ctx: &AnalyzeContext) -> Option<Diagnostic> {

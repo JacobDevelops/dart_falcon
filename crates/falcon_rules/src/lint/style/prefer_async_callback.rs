@@ -7,10 +7,12 @@
 //! zero-parameter function type returning `Future<void>`; any parameters or a different
 //! return type leave it untouched.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_dart_type};
 
 #[derive(Default)]
 pub struct PreferAsyncCallback;
@@ -18,15 +20,13 @@ pub struct PreferAsyncCallback;
 impl Rule for PreferAsyncCallback {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -35,8 +35,11 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_dart_type(&mut self, node: &DartType) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if is_future_void_function(node) {
             let span = node.span();
             self.diags.push(self.ctx.diagnostic(
@@ -45,8 +48,9 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// True for the type `Future<void> Function()` with no parameters.

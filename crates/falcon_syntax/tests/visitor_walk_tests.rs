@@ -557,16 +557,23 @@ fn program_callbacks_preserve_traversal_order_and_coverage() {
     );
     assert!(errors.is_empty(), "{errors:?}");
 
-    let mut expressions = Vec::new();
-    for_each_expr_in_program(&program, |expr| match expr {
-        Expr::Binary {
-            op: BinaryOp::Add, ..
-        } => expressions.push("+".to_owned()),
-        Expr::IntLit { value, .. } => expressions.push(value.clone()),
-        _ => {}
-    });
+    struct Expressions(Vec<String>);
+    impl Visitor for Expressions {
+        fn visit_expr(&mut self, expr: &Expr) {
+            match expr {
+                Expr::Binary {
+                    op: BinaryOp::Add, ..
+                } => self.0.push("+".to_owned()),
+                Expr::IntLit { value, .. } => self.0.push(value.clone()),
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut expressions = Expressions(Vec::new());
+    expressions.visit_program(&program);
     assert_eq!(
-        expressions,
+        expressions.0,
         [
             "+", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
             "16", "17",

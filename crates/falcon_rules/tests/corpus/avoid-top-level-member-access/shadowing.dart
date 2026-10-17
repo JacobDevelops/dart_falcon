@@ -73,3 +73,21 @@ void implicitStatementLists(int value) {
       print(shared); /* expect: avoid-top-level-member-access */
   }
 }
+
+final initializerClosure = () => shared;
+
+class ConstructorScopes {
+  final Object stored;
+  ConstructorScopes(Object shared) : stored = (() => shared)() {
+    final callback = () => shared;
+    print(callback);
+  }
+}
+
+void nestedClosures() {
+  final callback = (Object shared) {
+    return () => shared;
+  };
+  print(callback);
+  print(shared); /* expect: avoid-top-level-member-access */
+}

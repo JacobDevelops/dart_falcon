@@ -19,3 +19,34 @@ void functionBoundaries(bool a, bool b) {
     }
   }
 }
+
+final outsideDeclaredBody = (bool value) {
+  if (value) {
+    if (value) {
+      if (value) {}
+    }
+  }
+};
+
+class OutsideDeclaredBodies {
+  void previous() {}
+
+  final field = (bool value) {
+    if (value) {
+      if (value) {
+        if (value) {}
+      }
+    }
+  };
+
+  final dynamic initialized;
+
+  OutsideDeclaredBodies()
+      : initialized = ((bool value) {
+          if (value) {
+            if (value) {
+              if (value) {}
+            }
+          }
+        }) {}
+}

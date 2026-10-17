@@ -11,10 +11,11 @@
 use crate::lint::string_lit::{
     interpolated_literals, is_ident_body, is_simple_identifier, matching_brace,
 };
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 #[derive(Default)]
 pub struct UnnecessaryBraceInStringInterps;
@@ -22,15 +23,14 @@ pub struct UnnecessaryBraceInStringInterps;
 impl Rule for UnnecessaryBraceInStringInterps {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -45,8 +45,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
         for (lit, span) in interpolated_literals(node) {
             let bytes = lit.content.as_bytes();
             let mut i = 0;
@@ -78,5 +83,7 @@ impl Visitor for Collector<'_> {
                 }
             }
         }
+        StructuralTraversal::Continue
     }
+}
 }

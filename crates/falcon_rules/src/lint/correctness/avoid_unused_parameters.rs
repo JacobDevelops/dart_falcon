@@ -4,10 +4,11 @@
 pub use dcl::AvoidUnusedParameters;
 
 mod dcl {
-    use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+    use falcon_analyze::{
+        AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    };
     use falcon_diagnostics::Diagnostic;
     use falcon_syntax::ast::*;
-    use falcon_syntax::visitor::{Visitor, walk_function_decl, walk_method_decl, walk_stmt};
 
     use falcon_analyze::resolve::lexical_usage::{used_constructor_parameters, used_parameters};
 
@@ -17,15 +18,14 @@ mod dcl {
     impl Rule for AvoidUnusedParameters {
         fn prepare<'a>(
             &self,
-            program: &'a Program,
+            _program: &'a Program,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
-            let mut collector = Collector {
+            let collector = Collector {
                 ctx,
                 diagnostics: Vec::new(),
             };
-            collector.visit_program(program);
-            RulePreparation::Diagnostics(collector.diagnostics)
+            RulePreparation::Structural(Box::new(collector))
         }
     }
 
@@ -60,15 +60,16 @@ mod dcl {
         }
     }
 
-    impl Visitor for Collector<'_, '_> {
-        fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    falcon_analyze::structural_visitor! {
+    impl StructuralRuleVisitor for Collector<'_, '_> {
+        fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
             if let Some(params) = node.params() {
                 self.check(params, node.body.as_ref(), false);
             }
-            walk_function_decl(self, node);
+            StructuralTraversal::Continue
         }
 
-        fn visit_method_decl(&mut self, node: &MethodDecl) {
+        fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
             let exempt = node.name.name == "noSuchMethod"
                 || node.annotations.iter().any(|annotation| {
                     annotation
@@ -77,22 +78,28 @@ mod dcl {
                         .is_some_and(|name| name.name == "override")
                 });
             self.check(&node.params, node.body.as_ref(), exempt);
-            walk_method_decl(self, node);
+            StructuralTraversal::Continue
         }
 
-        fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
             if node.is_primary || (node.body.is_none() && node.initializers.is_empty()) {
-                return;
+                return StructuralTraversal::Continue;
             }
             let used = used_constructor_parameters(node.params, node.initializers, node.body);
             self.report(node.params, &used);
+            StructuralTraversal::Continue
         }
 
-        fn visit_stmt(&mut self, node: &Stmt) {
+        fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
             if let Stmt::LocalFunc(function) = node {
                 self.check(&function.params, Some(&function.body), false);
             }
-            walk_stmt(self, node);
+            StructuralTraversal::Continue
         }
+
+        fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+            self.diagnostics
+        }
+    }
     }
 }

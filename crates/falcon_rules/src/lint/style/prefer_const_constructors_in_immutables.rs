@@ -30,8 +30,9 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, Truth,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::const_eval::initializer_potentially_constant;
@@ -50,110 +51,173 @@ impl Rule for PreferConstConstructorsInImmutables {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let (name, type_params, members, extends) = match decl {
-                TopLevelDecl::Class(class) if class.with_clause.is_empty() => (
-                    &class.name,
-                    class.type_params.as_slice(),
-                    class.element_members(),
-                    class.extends.as_ref(),
-                ),
-                TopLevelDecl::MixinClass(class) if class.with_clause.is_empty() => (
-                    &class.name,
-                    class.type_params.as_slice(),
-                    class.element_members(),
-                    class.extends.as_ref(),
-                ),
-                TopLevelDecl::ExtensionType(extension) => (
-                    &extension.name,
-                    extension.type_params.as_slice(),
-                    extension.element_members(),
-                    None,
-                ),
-                _ => continue,
-            };
-            let Some(owner) = model.resolve_name(&name.name) else {
-                continue;
-            };
-            if signatures.has_immutable_supertype(&owner, true) != Truth::Yes {
-                continue;
-            }
-            let checker = ClassChecker {
-                extends,
-                representation_const: members
-                    .primary
-                    .filter(|_| members.representation)
-                    .map(|primary| primary.is_const),
-                owner: &owner,
-                model: &model,
-                signatures,
-                shadowed: class_lexical_value_names(type_params, members),
-                fields: class_field_initializers(members.declared),
-            };
-            for member in members.declared {
-                let ClassMember::Constructor(constructor) = member else {
-                    continue;
-                };
-                if constructor.is_const || constructor.body.is_some() {
-                    continue;
-                }
-                let reportable = if constructor.is_factory {
-                    checker.redirects_to_const(constructor)
-                } else {
-                    checker.delegates_to_const(&constructor.initializers)
-                        && checker.can_be_const(&constructor.params, &constructor.initializers)
-                };
-                if reportable {
-                    let start = first_token_after_annotations(
-                        &constructor.annotations,
-                        constructor.span,
-                        ctx.syntax,
-                    );
-                    let end = ctx
-                        .syntax
-                        .tokens_in(Span::new(start, constructor.span.end))
-                        .next()
-                        .map_or(start, |token| token.offset() + token.len());
-                    diags.push(ctx.diagnostic(
-                        "prefer-const-constructors-in-immutables",
-                        "Declare a const constructor in an immutable class.",
-                        Span::new(start, end),
-                    ));
-                }
-            }
-            if let Some(primary) = members.primary {
-                let has_body = members.declared.iter().any(|member| {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            declarations: program.declarations.iter(),
+            scope: None,
+            model,
+            signatures,
+            diagnostics: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    scope: Option<ClassScope<'a>>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    diagnostics: Vec<Diagnostic>,
+}
+
+struct ClassScope<'a> {
+    name: &'a Identifier,
+    members: EffectiveMembers<'a>,
+    extends: Option<&'a DartType>,
+    representation_const: Option<bool>,
+    owner: DeclarationIdentity,
+    shadowed: HashSet<String>,
+    fields: HashMap<&'a str, &'a Expr>,
+}
+
+impl ClassScope<'_> {
+    fn checker<'a>(
+        &'a self,
+        model: &'a SemanticModel<'a>,
+        signatures: &'a SignatureIndex,
+    ) -> ClassChecker<'a> {
+        ClassChecker {
+            extends: self.extends,
+            representation_const: self.representation_const,
+            owner: &self.owner,
+            model,
+            signatures,
+            shadowed: &self.shadowed,
+            fields: &self.fields,
+        }
+    }
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        let decl = self.declarations.next().expect("shared declaration order");
+        debug_assert!(std::ptr::eq(decl, declaration));
+        self.scope = None;
+        let (name, type_params, members, extends) = match decl {
+            TopLevelDecl::Class(class) if class.with_clause.is_empty() => (
+                &class.name,
+                class.type_params.as_slice(),
+                class.element_members(),
+                class.extends.as_ref(),
+            ),
+            TopLevelDecl::MixinClass(class) if class.with_clause.is_empty() => (
+                &class.name,
+                class.type_params.as_slice(),
+                class.element_members(),
+                class.extends.as_ref(),
+            ),
+            TopLevelDecl::ExtensionType(extension) => (
+                &extension.name,
+                extension.type_params.as_slice(),
+                extension.element_members(),
+                None,
+            ),
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        let Some(owner) = self.model.resolve_name(&name.name) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if self.signatures.has_immutable_supertype(&owner, true) != Truth::Yes {
+            return StructuralTraversal::SkipChildren;
+        }
+        self.scope = Some(ClassScope {
+            name,
+            members,
+            extends,
+            representation_const: members.primary
+                .filter(|_| members.representation)
+                .map(|primary| primary.is_const),
+            owner,
+            shadowed: class_lexical_value_names(type_params, members),
+            fields: class_field_initializers(members.declared),
+        });
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        let ClassMember::Constructor(constructor) = member else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let Some(scope) = &self.scope else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if constructor.is_const || constructor.body.is_some() {
+            return StructuralTraversal::SkipChildren;
+        }
+        let checker = scope.checker(&self.model, self.signatures);
+        let reportable = if constructor.is_factory {
+            checker.redirects_to_const(constructor)
+        } else {
+            checker.delegates_to_const(&constructor.initializers)
+                && checker.can_be_const(&constructor.params, &constructor.initializers)
+        };
+        if reportable {
+            let start = first_token_after_annotations(
+                &constructor.annotations,
+                constructor.span,
+                self.ctx.syntax,
+            );
+            let end = self.ctx.syntax
+                .tokens_in(Span::new(start, constructor.span.end))
+                .next()
+                .map_or(start, |token| token.offset() + token.len());
+            self.diagnostics.push(self.ctx.diagnostic(
+                "prefer-const-constructors-in-immutables",
+                "Declare a const constructor in an immutable class.",
+                Span::new(start, end),
+            ));
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn exit_top_level_decl(&mut self, _decl: &TopLevelDecl) {
+        let Some(scope) = self.scope.take() else {
+            return;
+        };
+        let Some(primary) = scope.members.primary else {
+            return;
+        };
+        let has_body = scope.members.declared.iter().any(|member| {
             matches!(member, ClassMember::PrimaryConstructorBody(body) if body.body.is_some())
         });
-                let constructor = members
-                    .constructors()
-                    .find(|constructor| constructor.is_primary)
-                    .expect("primary constructor");
-                if !constructor.is_const
-                    && !has_body
-                    && (members.representation
-                        || (checker.delegates_to_const(constructor.initializers)
-                            && signatures.has_non_final_field(&owner) == Some(false)))
-                {
-                    diags.push(
-                        ctx.diagnostic(
-                            "prefer-const-constructors-in-immutables",
-                            "Declare a const constructor in an immutable class.",
-                            Span::new(
-                                name.span.start,
-                                primary
-                                    .constructor_name
-                                    .as_ref()
-                                    .map_or(name.span.end, |name| name.span.end),
-                            ),
-                        ),
-                    );
-                }
-            }
+        let constructor = scope.members.constructors()
+            .find(|constructor| constructor.is_primary)
+            .expect("primary constructor");
+        let checker = scope.checker(&self.model, self.signatures);
+        if !constructor.is_const
+            && !has_body
+            && (scope.members.representation
+                || (checker.delegates_to_const(constructor.initializers)
+                    && self.signatures.has_non_final_field(&scope.owner) == Some(false)))
+        {
+            self.diagnostics.push(self.ctx.diagnostic(
+                "prefer-const-constructors-in-immutables",
+                "Declare a const constructor in an immutable class.",
+                Span::new(
+                    scope.name.span.start,
+                    primary.constructor_name.as_ref()
+                        .map_or(scope.name.span.end, |name| name.span.end),
+                ),
+            ));
         }
-        RulePreparation::Diagnostics(diags)
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+}
 }
 
 struct ClassChecker<'a> {
@@ -163,8 +227,8 @@ struct ClassChecker<'a> {
     model: &'a SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     /// Type parameters and member names, which shadow top-level names.
-    shadowed: HashSet<String>,
-    fields: HashMap<&'a str, &'a Expr>,
+    shadowed: &'a HashSet<String>,
+    fields: &'a HashMap<&'a str, &'a Expr>,
 }
 
 impl ClassChecker<'_> {
@@ -250,9 +314,9 @@ impl ClassChecker<'_> {
             initializer_potentially_constant(
                 initializer,
                 &no_parameters,
-                &self.shadowed,
+                self.shadowed,
                 self.owner,
-                &self.fields,
+                self.fields,
                 self.model,
                 self.signatures,
             )
@@ -265,7 +329,7 @@ impl ClassChecker<'_> {
             .iter()
             .map(|parameter| parameter.name.name.clone())
             .collect();
-        let mut shadowed = self.shadowed.clone();
+        let mut shadowed = (*self.shadowed).clone();
         shadowed.extend(parameters.iter().cloned());
         let constant = |expr: &Expr| {
             initializer_potentially_constant(
@@ -273,7 +337,7 @@ impl ClassChecker<'_> {
                 &parameters,
                 &shadowed,
                 self.owner,
-                &self.fields,
+                self.fields,
                 self.model,
                 self.signatures,
             )
@@ -378,5 +442,36 @@ class Other implements External { const Other(); }
                 expected
             );
         }
+    }
+
+    #[test]
+    fn reports_ordinary_constructors_before_the_primary_constructor() {
+        let source = r"
+// @dart = 3.13
+import 'package:meta/meta.dart';
+@immutable
+class Frozen() {
+  Frozen.named();
+}
+";
+        let diagnostics = span_test_support::analyze(
+            &PreferConstConstructorsInImmutables,
+            Path::new("test.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        let spans: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
+            .collect();
+        let ordinary = source.find("Frozen.named").unwrap();
+        let primary = source.find("Frozen()").unwrap();
+        assert_eq!(
+            spans,
+            [
+                (ordinary, ordinary + "Frozen".len()),
+                (primary, primary + "Frozen".len()),
+            ]
+        );
     }
 }

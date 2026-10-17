@@ -27,7 +27,9 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    StructuralRuleVisitor, StructuralTraversal,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -36,31 +38,51 @@ pub struct AvoidImplementingValueTypes;
 impl Rule for AvoidImplementingValueTypes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            signatures,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
             let implements = match decl {
                 TopLevelDecl::Class(class) => &class.implements,
-                _ => continue,
+                _ => return StructuralTraversal::SkipChildren,
             };
             for interface in implements {
-                if overrides_equals(interface, signatures, &model) {
-                    diags.push(ctx.diagnostic(
+                if overrides_equals(interface, self.signatures, &self.model) {
+                    self.diags.push(self.ctx.diagnostic(
                         "avoid-implementing-value-types",
                         "Classes that override '==' should not be implemented.",
                         *interface.span(),
                     ));
                 }
             }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 /// Whether the interface's `==` is declared outside `dart:core`.

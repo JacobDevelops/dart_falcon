@@ -48,3 +48,15 @@ class ParameterMessage {
     assert(value > 0, value); /* expect: prefer-asserts-in-initializer-lists */
   }
 }
+
+class NestedAssertions {
+  NestedAssertions(int value) {
+    assert(() { /* expect: prefer-asserts-in-initializer-lists */
+      assert(value > 0);
+      return true;
+    }());
+    assert(value < 10); /* expect: prefer-asserts-in-initializer-lists */
+    print(value);
+    assert(value != 5);
+  }
+}

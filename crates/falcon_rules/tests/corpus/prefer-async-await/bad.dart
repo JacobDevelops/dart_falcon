@@ -34,3 +34,12 @@ void withLocalFunction() {
   }
   body();
 }
+
+void restoredAfterArrow(Future<int> future) {
+  Future<int> arrow() => future.then((value) => value);
+  final callback = () {
+    future.then((value) => value);
+  };
+  future.then((value) => value); /* expect: prefer-async-await */
+  print(callback);
+}

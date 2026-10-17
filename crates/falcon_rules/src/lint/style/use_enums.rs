@@ -24,9 +24,11 @@
 //!
 //! Adopted from the official `use_enums` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct UseEnums;
@@ -37,31 +39,111 @@ impl Rule for UseEnums {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Diagnostics(
-            program
-                .declarations
-                .iter()
-                .enumerate()
-                .filter_map(|(index, decl)| match decl {
-                    TopLevelDecl::Class(class) if behaves_like_enum(class, index, program) => Some(
-                        ctx.diagnostic("use-enums", "Class should be an enum.", class.name.span),
-                    ),
-                    _ => None,
-                })
-                .collect(),
-        )
+        let candidates: Vec<_> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let TopLevelDecl::Class(class) = decl {
+                    enum_candidate(class)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if candidates.is_empty() {
+            return RulePreparation::Diagnostics(Vec::new());
+        }
+        RulePreparation::Structural(Box::new(Collector { ctx, candidates }))
     }
 }
 
-fn behaves_like_enum(class: &ClassDecl, index: usize, program: &Program) -> bool {
+struct Candidate<'a> {
+    name: &'a str,
+    span: Span,
+    generative: Vec<&'a str>,
+    allowed: Vec<usize>,
+    found: bool,
+}
+
+struct Collector<'a, 'ctx> {
+    ctx: &'a AnalyzeContext<'ctx>,
+    candidates: Vec<Candidate<'a>>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.candidates.into_iter().filter(|candidate| !candidate.found).map(|candidate| {
+            self.ctx.diagnostic("use-enums", "Class should be an enum.", candidate.span)
+        }).collect()
+    }
+
+    fn visit_library_directive(&mut self, _node: &LibraryDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_part_of_directive(&mut self, _node: &PartOfDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_part_directive(&mut self, _node: &PartDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_import(&mut self, _node: &ImportDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_export(&mut self, _node: &ExportDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        for candidate in &mut self.candidates {
+            if !candidate.found
+                && !matches!(decl, TopLevelDecl::Class(class) if class.name.span == candidate.span)
+                && inherits_from(decl, candidate.name)
+            {
+                candidate.found = true;
+            }
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if !matches!(node, Expr::Paren { .. }) {
+            for candidate in &mut self.candidates {
+                if candidate.found {
+                    continue;
+                }
+                let invoked = creation(node, candidate.name).or(match node {
+                    Expr::Call { callee, .. } => match callee.unparenthesized() {
+                        Expr::DotShorthand { name, .. } => Some(name.name.as_str()),
+                        _ => None,
+                    },
+                    _ => None,
+                });
+                if invoked.is_some_and(|invoked| candidate.generative.contains(&invoked))
+                    && !candidate.allowed.contains(&node.span().start)
+                {
+                    candidate.found = true;
+                }
+            }
+        }
+        StructuralTraversal::Continue
+    }
+}
+}
+
+fn enum_candidate(class: &ClassDecl) -> Option<Candidate<'_>> {
     if class.modifiers.is_abstract
         || class.modifiers.restriction == Some(ClassRestriction::Sealed)
         || class.extends.as_ref().is_some_and(|ty| !is_object(ty))
     {
-        return false;
+        return None;
     }
     let public = !class.name.name.starts_with('_');
-    let mut generative: Vec<(&str, bool)> = Vec::new();
+    let mut generative: Vec<&str> = Vec::new();
     if let Some(primary) = &class.primary_constructor {
         let name = primary
             .constructor_name
@@ -75,41 +157,41 @@ fn behaves_like_enum(class: &ClassDecl, index: usize, program: &Program) -> bool
                 .iter()
                 .any(|param| is_reserved(&param.name.name))
         {
-            return false;
+            return None;
         }
-        generative.push((name, true));
+        generative.push(name);
     }
     for member in &class.members {
         match member {
-            ClassMember::Operator(op) if op.op == "==" => return false,
+            ClassMember::Operator(op) if op.op == "==" => return None,
             ClassMember::Field(field)
                 if field
                     .declarators
                     .iter()
                     .any(|declarator| is_reserved(&declarator.name.name)) =>
             {
-                return false;
+                return None;
             }
             ClassMember::Method(MethodDecl { name, .. })
             | ClassMember::Getter(GetterDecl { name, .. })
             | ClassMember::Setter(SetterDecl { name, .. })
                 if is_reserved(&name.name) =>
             {
-                return false;
+                return None;
             }
             ClassMember::Constructor(constructor) => {
                 if !constructor.is_factory && !constructor.is_const {
-                    return false;
+                    return None;
                 }
                 let private = constructor
                     .constructor_name
                     .as_ref()
                     .is_some_and(|name| name.name.starts_with('_'));
                 if public && !private {
-                    return false;
+                    return None;
                 }
                 if !constructor.is_factory {
-                    generative.push((constructor_name(constructor), constructor.is_const));
+                    generative.push(constructor_name(constructor));
                 }
             }
             _ => {}
@@ -130,38 +212,24 @@ fn behaves_like_enum(class: &ClassDecl, index: usize, program: &Program) -> bool
             .iter()
             .filter_map(|d| d.initializer.as_ref())
         {
-            let is_candidate = creation(initializer, name).is_some_and(|invoked| {
-                generative
-                    .iter()
-                    .any(|&(constructor, is_const)| is_const && constructor == invoked)
-            });
+            let is_candidate =
+                creation(initializer, name).is_some_and(|invoked| generative.contains(&invoked));
             if is_candidate {
                 candidates.push(initializer.span().start);
             }
         }
     }
     if candidates.len() < 2 {
-        return false;
+        return None;
     }
 
-    let generative: Vec<&str> = generative.iter().map(|&(name, _)| name).collect();
-    let mut finder = StrayCreation {
+    Some(Candidate {
         name,
-        generative: &generative,
-        allowed: &candidates,
+        span: class.name.span,
+        generative,
+        allowed: candidates,
         found: false,
-    };
-    finder.visit_class_decl(class);
-    for (other_index, decl) in program.declarations.iter().enumerate() {
-        if other_index == index {
-            continue;
-        }
-        if inherits_from(decl, name) {
-            return false;
-        }
-        finder.visit_top_level_decl(decl);
-    }
-    !finder.found
+    })
 }
 
 /// Members whose presence conflicts with an enum's implicit API.
@@ -235,41 +303,5 @@ fn creation<'a>(expr: &'a Expr, name: &str) -> Option<&'a str> {
             }
         }
         _ => None,
-    }
-}
-
-/// Finds an invocation of one of the class's generative constructors outside
-/// the candidate constant initializers. A dot-shorthand call naming such a
-/// constructor counts too, since its target type is not tracked.
-struct StrayCreation<'a> {
-    name: &'a str,
-    generative: &'a [&'a str],
-    allowed: &'a [usize],
-    found: bool,
-}
-
-impl Visitor for StrayCreation<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
-        }
-        if self.found {
-            return;
-        }
-        let invoked = creation(node, self.name).or(match node {
-            Expr::Call { callee, .. } => match callee.unparenthesized() {
-                Expr::DotShorthand { name, .. } => Some(name.name.as_str()),
-                _ => None,
-            },
-            _ => None,
-        });
-        if invoked.is_some_and(|invoked| self.generative.contains(&invoked))
-            && !self.allowed.contains(&node.span().start)
-        {
-            self.found = true;
-            return;
-        }
-        walk_expr(self, node);
     }
 }

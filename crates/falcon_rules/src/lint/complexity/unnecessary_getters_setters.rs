@@ -8,7 +8,9 @@
 //! is private (has a leading underscore). Metadata on either accessor exempts
 //! the pair.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -20,17 +22,34 @@ pub struct UnnecessaryGettersSetters;
 impl Rule for UnnecessaryGettersSetters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            if let Some(members) = crate::lint::declarations::members_of(decl) {
-                check_members(members, ctx, &mut diags);
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        if let Some(members) = crate::lint::declarations::members_of(decl) {
+            check_members(members, self.ctx, &mut self.diags);
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {

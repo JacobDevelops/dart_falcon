@@ -20,10 +20,12 @@
 //!
 //! Adopted from the official `avoid_returning_this` lint.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, MemberKind, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-
-use falcon_analyze::semantic_scope::returned_expressions;
 
 #[derive(Default)]
 pub struct AvoidReturningThis;
@@ -37,78 +39,140 @@ impl Rule for AvoidReturningThis {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let returns_this = |expr: &Expr| matches!(expr, Expr::This { .. });
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let (name, members) = match decl {
-                TopLevelDecl::Class(node) => (&node.name.name, &node.members),
-                TopLevelDecl::MixinClass(node) => (&node.name.name, &node.members),
-                TopLevelDecl::Enum(node) => (&node.name.name, &node.members),
-                TopLevelDecl::Mixin(node) => (&node.name.name, &node.members),
-                _ => continue,
-            };
-            let Some(owner) = model.resolve_name(name.as_str()) else {
-                continue;
-            };
-            for member in members {
-                let (member_name, return_type, body, annotations, getter) = match member {
-                    ClassMember::Method(method) => (
-                        &method.name,
-                        &method.return_type,
-                        &method.body,
-                        &method.annotations,
-                        false,
-                    ),
-                    ClassMember::Getter(getter) => (
-                        &getter.name,
-                        &getter.return_type,
-                        &getter.body,
-                        &getter.annotations,
-                        true,
-                    ),
-                    _ => continue,
-                };
-                let (Some(return_type), Some(body)) = (return_type, body) else {
-                    continue;
-                };
-                if !names_type(return_type, name) || has_override(annotations) {
-                    continue;
-                }
-                let overrides = signatures
-                    .inherited_member_facts(&owner, &member_name.name)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|fact| {
-                        if getter {
-                            fact.kind.has_getter()
-                        } else {
-                            fact.kind == MemberKind::Method
-                        }
-                    });
-                if overrides {
-                    continue;
-                }
-                let span = match body {
-                    FunctionBody::Arrow(expr, _) => returns_this(expr).then_some(member_name.span),
-                    FunctionBody::Block(_) => {
-                        let returned = returned_expressions(body);
-                        (!returned.is_empty() && returned.iter().all(|expr| returns_this(expr)))
-                            .then(|| *returned[0].span())
-                    }
-                    FunctionBody::Native(..) => None,
-                };
-                if let Some(span) = span {
-                    diags.push(ctx.diagnostic(
-                        "avoid-returning-this",
-                        "Don't return 'this' from a method.",
-                        span,
-                    ));
-                }
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            signatures,
+            declarations: program.declarations.iter(),
+            owner: None,
+            returned: None,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Returned {
+    first: Option<Span>,
+    all_this: bool,
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    owner: Option<(&'a str, DeclarationIdentity)>,
+    returned: Option<Returned>,
+    diags: Vec<Diagnostic>,
+}
+
+impl Collector<'_> {
+    fn report(&mut self, span: Span) {
+        self.diags.push(self.ctx.diagnostic(
+            "avoid-returning-this",
+            "Don't return 'this' from a method.",
+            span,
+        ));
+    }
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.owner = self.declarations.next()
+            .inspect(|declaration| debug_assert!(std::ptr::eq(*declaration, node)))
+            .and_then(|declaration| match declaration {
+                TopLevelDecl::Class(node) => Some(node.name.name.as_str()),
+                TopLevelDecl::MixinClass(node) => Some(node.name.name.as_str()),
+                TopLevelDecl::Enum(node) => Some(node.name.name.as_str()),
+                TopLevelDecl::Mixin(node) => Some(node.name.name.as_str()),
+                _ => None,
+            })
+            .and_then(|name| self.model.resolve_name(name).map(|owner| (name, owner)));
+        if self.owner.is_some() {
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
+        }
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        let Some((name, owner)) = &self.owner else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let (member_name, return_type, body, annotations, getter) = match member {
+            ClassMember::Method(method) => (
+                &method.name, &method.return_type, &method.body, &method.annotations, false,
+            ),
+            ClassMember::Getter(getter) => (
+                &getter.name, &getter.return_type, &getter.body, &getter.annotations, true,
+            ),
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        let (Some(return_type), Some(body)) = (return_type, body) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if !names_type(return_type, name) || has_override(annotations) {
+            return StructuralTraversal::SkipChildren;
+        }
+        let overrides = self.signatures
+            .inherited_member_facts(owner, &member_name.name)
+            .unwrap_or_default()
+            .iter()
+            .any(|fact| {
+                if getter { fact.kind.has_getter() } else { fact.kind == MemberKind::Method }
+            });
+        if overrides {
+            return StructuralTraversal::SkipChildren;
+        }
+        match body {
+            FunctionBody::Arrow(expr, _) => {
+                if matches!(expr.as_ref(), Expr::This { .. }) {
+                    self.report(member_name.span);
+                }
+                StructuralTraversal::SkipChildren
+            }
+            FunctionBody::Block(_) => {
+                self.returned = Some(Returned { first: None, all_this: true });
+                StructuralTraversal::Continue
+            }
+            FunctionBody::Native(..) => StructuralTraversal::SkipChildren,
+        }
+    }
+
+    fn exit_class_member(&mut self, _member: &ClassMember) {
+        if let Some(returned) = self.returned.take()
+            && returned.all_this
+            && let Some(span) = returned.first
+        {
+            self.report(span);
+        }
+    }
+
+    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        if matches!(node, Stmt::LocalFunc(_)) {
+            StructuralTraversal::SkipChildren
+        } else {
+            StructuralTraversal::Continue
+        }
+    }
+
+    fn visit_return_stmt(&mut self, node: &ReturnStmt) -> StructuralTraversal {
+        if let Some(returned) = &mut self.returned
+            && let Some(value) = &node.value
+        {
+            returned.first.get_or_insert(*value.span());
+            returned.all_this &= matches!(value, Expr::This { .. });
+        }
+        StructuralTraversal::SkipChildren
+    }
+}
 }
 
 /// Whether `ty` names the enclosing declaration (type arguments and

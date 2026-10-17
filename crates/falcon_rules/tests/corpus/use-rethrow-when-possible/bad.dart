@@ -46,3 +46,27 @@ void e2() {
     throw err; /* expect: use-rethrow-when-possible */
   }
 }
+
+void nestedCatchInsideFunctionBoundaries() {
+  try {
+    x();
+  } catch (outer) {
+    final callback = () {
+      try {
+        x();
+      } catch (inner) {
+        throw inner; /* expect: use-rethrow-when-possible */
+      }
+    };
+    void local() {
+      try {
+        x();
+      } catch (inner) {
+        throw inner; /* expect: use-rethrow-when-possible */
+      }
+    }
+    callback();
+    local();
+    throw outer; /* expect: use-rethrow-when-possible */
+  }
+}

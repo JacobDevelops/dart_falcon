@@ -14,10 +14,16 @@
 //! A `_` name on either side is skipped when the library's language version
 //! enables wildcard variables (3.7+).
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, Feature, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::{Token, ast::*};
 
-use crate::lint::inherited_members::{inherited_concrete_member, inheriting_declarations};
+use crate::lint::inherited_members::{
+    InheritanceSource, inherited_concrete_member, inheriting_declaration,
+};
 use crate::lint::package_layout::is_in_lib_dir;
 use crate::lint::style::public_member_api_docs::documented;
 
@@ -36,74 +42,90 @@ impl Rule for AvoidRenamingMethodParameters {
         if !is_in_lib_dir(ctx.file_path) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let wildcards = ctx.language_version().supports(Feature::WildcardVariables);
-        let is_wildcard = |name: &str| wildcards && name == "_";
-        let mut diags = Vec::new();
-        for declaration in inheriting_declarations(program) {
-            if declaration.name.name.starts_with('_') {
-                continue;
-            }
-            let Some(owner) = model.resolve_name(&*declaration.name.name) else {
-                continue;
-            };
-            for member in declaration.members {
-                let (name, annotations, params, start) = match member {
-                    ClassMember::Method(method) if !method.is_static => (
-                        method.name.name.as_str(),
-                        &method.annotations,
-                        &method.params,
-                        method.span.start,
-                    ),
-                    ClassMember::Operator(operator) => (
-                        operator.lookup_name(),
-                        &operator.annotations,
-                        &operator.params,
-                        operator.span.start,
-                    ),
-                    ClassMember::Method(_)
-                    | ClassMember::Field(_)
-                    | ClassMember::Constructor(_)
-                    | ClassMember::PrimaryConstructorBody(_)
-                    | ClassMember::Getter(_)
-                    | ClassMember::Setter(_)
-                    | ClassMember::Error(_) => continue,
-                };
-                let Some(parent) = inherited_concrete_member(
-                    &model,
-                    signatures,
-                    &owner,
-                    name,
-                    &declaration.source,
-                ) else {
-                    continue;
-                };
-                let mut renamed = params
-                    .positional()
-                    .zip(&parent.positional_parameter_names)
-                    .filter(|(param, parent_name)| {
-                        param.name.name != **parent_name
-                            && !is_wildcard(&param.name.name)
-                            && !is_wildcard(parent_name)
-                    })
-                    .peekable();
-                if renamed.peek().is_none() || is_documented(ctx.tokens(), start, annotations) {
-                    continue;
-                }
-                diags.extend(renamed.map(|(param, parent_name)| {
-                    ctx.diagnostic(
-                        "avoid-renaming-method-parameters",
-                        format!(
-                            "Rename parameter '{}' to match the overridden declaration's '{}'.",
-                            param.name.name, parent_name
-                        ),
-                        param.name.span,
-                    )
-                }));
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            signatures,
+            declarations: program.declarations.iter(),
+            owner: None,
+            wildcards: ctx.language_version().supports(Feature::WildcardVariables),
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    owner: Option<(DeclarationIdentity, InheritanceSource<'a>)>,
+    wildcards: bool,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.owner = self.declarations.next()
+            .inspect(|declaration| debug_assert!(std::ptr::eq(*declaration, node)))
+            .and_then(inheriting_declaration)
+            .filter(|declaration| !declaration.name.name.starts_with('_'))
+            .and_then(|declaration| {
+                self.model.resolve_name(&*declaration.name.name)
+                    .map(|owner| (owner, declaration.source))
+            });
+        if self.owner.is_some() {
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
+        }
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        let Some((owner, source)) = &self.owner else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let (name, annotations, params, start) = match member {
+            ClassMember::Method(method) if !method.is_static => (
+                method.name.name.as_str(), &method.annotations, &method.params, method.span.start,
+            ),
+            ClassMember::Operator(operator) => (
+                operator.lookup_name(), &operator.annotations, &operator.params, operator.span.start,
+            ),
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        let Some(parent) = inherited_concrete_member(
+            &self.model, self.signatures, owner, name, source,
+        ) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let is_wildcard = |name: &str| self.wildcards && name == "_";
+        let mut renamed = params.positional()
+            .zip(&parent.positional_parameter_names)
+            .filter(|(param, parent_name)| {
+                param.name.name != **parent_name
+                    && !is_wildcard(&param.name.name)
+                    && !is_wildcard(parent_name)
+            })
+            .peekable();
+        if renamed.peek().is_some() && !is_documented(self.ctx.tokens(), start, annotations) {
+            self.diags.extend(renamed.map(|(param, parent_name)| {
+                self.ctx.diagnostic(
+                    "avoid-renaming-method-parameters",
+                    format!(
+                        "Rename parameter '{}' to match the overridden declaration's '{}'.",
+                        param.name.name, parent_name
+                    ),
+                    param.name.span,
+                )
+            }));
+        }
+        StructuralTraversal::SkipChildren
+    }
+}
 }
 
 /// Whether a doc comment precedes the member or follows its annotations.

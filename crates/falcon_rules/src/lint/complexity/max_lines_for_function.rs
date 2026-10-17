@@ -11,10 +11,11 @@
 //! `max_lines` (integer, default: 100) — flag functions/methods spanning more
 //! than this many lines.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_declared_body;
 
 #[derive(Default)]
 pub struct MaxLinesForFunction;
@@ -22,15 +23,41 @@ pub struct MaxLinesForFunction;
 impl Rule for MaxLinesForFunction {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_declared_body(program, ctx.source, &mut |_, _, span| {
-            check_function_lines(span, &mut diags, ctx);
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        if node.body.is_some() {
+            check_function_lines(&node.span, &mut self.diags, self.ctx);
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        if let Some((_, span)) = falcon_syntax::visitor::declared_member_body(node) {
+            check_function_lines(&span, &mut self.diags, self.ctx);
+        }
+        StructuralTraversal::SkipChildren
+    }
+}
 }
 
 use crate::lint::expressions::line_of;

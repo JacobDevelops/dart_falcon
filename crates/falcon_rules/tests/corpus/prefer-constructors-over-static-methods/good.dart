@@ -52,3 +52,18 @@ class LastCreation {
     return value;
   }
 }
+
+class DefaultParameterOnly {
+  const DefaultParameterOnly();
+  static DefaultParameterOnly create([
+    DefaultParameterOnly value = const DefaultParameterOnly(),
+  ]) => value;
+}
+
+class ClosureOverwrite {
+  static ClosureOverwrite create() {
+    final value = ClosureOverwrite();
+    final other = () => Object();
+    return value;
+  }
+}

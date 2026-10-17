@@ -16,7 +16,9 @@
 //! `methods`, `getters`, and `setters`. A member is ranked by the earliest
 //! token it qualifies for; members matching no token are ignored.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -30,31 +32,47 @@ const NAME: &str = "class-members-ordering";
 impl Rule for ClassMembersOrdering {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        // A configured `order` option (a list of DCL category tokens) drives the
-        // check; otherwise the built-in default order is used.
-        let order = read_string_list(ctx, NAME, "order");
-        for decl in &program.declarations {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            order: read_string_list(ctx, NAME, "order"),
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    order: Option<Vec<String>>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
             let Some(members) = crate::lint::declarations::members_of(decl) else {
-                continue;
+                return StructuralTraversal::SkipChildren;
             };
-            match &order {
+            match &self.order {
                 Some(seq) => check_sequence(
                     members,
-                    &mut diags,
-                    ctx,
+                    &mut self.diags,
+                    self.ctx,
                     NAME,
                     |m| category_rank(m, seq),
                     ORDER_MESSAGE,
                 ),
-                None => check_members(members, &mut diags, ctx),
+                None => check_members(members, &mut self.diags, self.ctx),
             }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 const ORDER_MESSAGE: &str = "Class member is out of the configured order";

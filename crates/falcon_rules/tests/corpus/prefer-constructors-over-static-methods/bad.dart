@@ -41,3 +41,15 @@ class NamedCreation {
   const NamedCreation.fallback();
   static NamedCreation of(Object? value) => value as NamedCreation? ?? const NamedCreation.fallback(); /* expect: prefer-constructors-over-static-methods */
 }
+
+class PrunedArguments {
+  PrunedArguments(Object value);
+  static PrunedArguments create() => PrunedArguments(Object()); /* expect: prefer-constructors-over-static-methods */
+}
+
+class ClosureCreation {
+  static ClosureCreation create() { /* expect: prefer-constructors-over-static-methods */
+    final make = () => ClosureCreation();
+    return make();
+  }
+}

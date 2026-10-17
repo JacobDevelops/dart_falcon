@@ -23,13 +23,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Feature, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, bound_names, walk_class_member, walk_expr, walk_local_var, walk_pattern, walk_stmt,
-    walk_top_level_decl,
-};
+use falcon_syntax::visitor::{Visitor, bound_names, walk_pattern};
 
 use falcon_syntax::token::TokenKind;
 
@@ -46,16 +45,17 @@ impl Rule for PreferFinalLocals {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mutated = ctx.mutated_declarations(program);
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             mutated,
             case_roots: HashMap::new(),
             case_variables: None,
             outside_body: false,
             diagnostics: Vec::new(),
+            outside_context: Vec::new(),
+            pattern_context: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -92,6 +92,8 @@ struct Collector<'a, 'ctx> {
     /// Whether the walk is in a top-level variable or field initializer,
     /// outside any function body.
     outside_body: bool,
+    outside_context: Vec<bool>,
+    pattern_context: Vec<Option<CaseRoot>>,
 }
 
 impl Collector<'_, '_> {
@@ -256,31 +258,40 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         let outside = std::mem::replace(
             &mut self.outside_body,
             matches!(node, TopLevelDecl::Variable(_)),
         );
-        walk_top_level_decl(self, node);
-        self.outside_body = outside;
+        self.outside_context.push(outside);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+        self.outside_body = self.outside_context.pop().unwrap();
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         let outside = std::mem::replace(
             &mut self.outside_body,
             matches!(node, ClassMember::Field(_)),
         );
-        walk_class_member(self, node);
-        self.outside_body = outside;
+        self.outside_context.push(outside);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn exit_class_member(&mut self, _node: &ClassMember) {
+        self.outside_body = self.outside_context.pop().unwrap();
+    }
+
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
         self.check_local_var(node);
-        walk_local_var(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::PatternDecl(declaration) = node {
             self.check_pattern_declaration(declaration);
         } else if let Stmt::For(statement) = node {
@@ -295,10 +306,10 @@ impl Visitor for Collector<'_, '_> {
                 }));
             }
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         // Collection `if`-case elements are case clauses and collection `for`
         // elements are for-each loops.
         if let Expr::List { elements, .. } | Expr::Set { elements, .. } = node {
@@ -315,15 +326,20 @@ impl Visitor for Collector<'_, '_> {
             }
         } else if let Expr::FuncExpr { .. } = node {
             let outside = std::mem::replace(&mut self.outside_body, false);
-            walk_expr(self, node);
-            self.outside_body = outside;
-            return;
+            self.outside_context.push(outside);
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
+    fn exit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.outside_body = self.outside_context.pop().unwrap();
+        }
+    }
+
+    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
         let root = self.case_roots.remove(&std::ptr::from_ref(node));
+        self.pattern_context.push(root);
         if root.is_some_and(|root| root.first) {
             self.case_variables = Some(Vec::new());
         }
@@ -349,11 +365,20 @@ impl Visitor for Collector<'_, '_> {
                 None => variables.push((name.name.clone(), vec![variable])),
             }
         }
-        walk_pattern(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_pattern(&mut self, _node: &Pattern) {
+        let root = self.pattern_context.pop().unwrap();
         if root.is_some_and(|root| root.last) {
             self.finish_case_clause();
         }
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+}
 }
 
 /// The span of the `Pattern::Variable` declaring `name` inside `pattern`.

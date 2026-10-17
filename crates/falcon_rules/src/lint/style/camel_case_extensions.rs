@@ -7,7 +7,10 @@
 //! no identifier to check and are skipped.
 
 use crate::lint::naming::is_upper_camel_case;
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -16,20 +19,37 @@ pub struct CamelCaseExtensions;
 impl Rule for CamelCaseExtensions {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            if let TopLevelDecl::Extension(ext) = decl
-                && let Some(name) = &ext.name
-                && !is_upper_camel_case(&name.name)
-            {
-                diags.push(ctx.diagnostic("camel-case-extensions", MESSAGE, name.span));
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Extension(ext) = decl
+            && let Some(name) = &ext.name
+            && !is_upper_camel_case(&name.name)
+        {
+            self.diags.push(self.ctx.diagnostic("camel-case-extensions", MESSAGE, name.span));
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 const MESSAGE: &str = "Name extensions using UpperCamelCase.";

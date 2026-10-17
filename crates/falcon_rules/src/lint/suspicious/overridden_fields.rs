@@ -11,10 +11,14 @@
 //! Declaring `var`/`final` primary constructor parameters are instance fields
 //! too; forwarding formals and ordinary header parameters are not declarations.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::inherited_members::{inherited_concrete_member, inheriting_declarations};
+use crate::lint::inherited_members::{inherited_concrete_member, inheriting_declaration};
 
 #[derive(Default)]
 pub struct OverriddenFields;
@@ -22,67 +26,95 @@ pub struct OverriddenFields;
 impl Rule for OverriddenFields {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for declaration in inheriting_declarations(program) {
-            let Some(owner) = model.resolve_name(&*declaration.name.name) else {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model,
+            signatures,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let Some(declaration) = inheriting_declaration(decl) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let ctx = self.ctx;
+        let model = &self.model;
+        let signatures = self.signatures;
+        let diags = &mut self.diags;
+        let Some(owner) = model.resolve_name(&*declaration.name.name) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        for parameter in (EffectiveMembers {
+            declared: declaration.members,
+            primary: declaration.primary_constructor,
+            representation: false,
+        }
+        .declaring_params())
+        {
+            if inherited_concrete_member(
+                model,
+                signatures,
+                &owner,
+                &parameter.name.name,
+                &declaration.source,
+            )
+            .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }))
+            {
+                diags.push(ctx.diagnostic(
+                    "overridden-fields",
+                    "Don't override inherited fields.",
+                    parameter.name.span,
+                ));
+            }
+        }
+        for member in declaration.members {
+            let ClassMember::Field(field) = member else {
                 continue;
             };
-            for parameter in (EffectiveMembers {
-                declared: declaration.members,
-                primary: declaration.primary_constructor,
-                representation: false,
+            if field.is_static {
+                continue;
             }
-            .declaring_params())
-            {
-                if inherited_concrete_member(
-                    &model,
+            for declarator in &field.declarators {
+                let overrides_field = inherited_concrete_member(
+                    model,
                     signatures,
                     &owner,
-                    &parameter.name.name,
+                    &declarator.name.name,
                     &declaration.source,
                 )
-                .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }))
-                {
+                .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }));
+                if overrides_field {
                     diags.push(ctx.diagnostic(
                         "overridden-fields",
                         "Don't override inherited fields.",
-                        parameter.name.span,
+                        declarator.name.span,
                     ));
                 }
             }
-            for member in declaration.members {
-                let ClassMember::Field(field) = member else {
-                    continue;
-                };
-                if field.is_static {
-                    continue;
-                }
-                for declarator in &field.declarators {
-                    let overrides_field = inherited_concrete_member(
-                        &model,
-                        signatures,
-                        &owner,
-                        &declarator.name.name,
-                        &declaration.source,
-                    )
-                    .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }));
-                    if overrides_field {
-                        diags.push(ctx.diagnostic(
-                            "overridden-fields",
-                            "Don't override inherited fields.",
-                            declarator.name.span,
-                        ));
-                    }
-                }
-            }
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

@@ -16,3 +16,27 @@ extension Checked on Object {
     }
   }
 }
+
+void delayedCatchScopes() {
+  try {
+    work();
+  } catch (outer) {
+    void delayed() {
+      throw StateError('delayed local');
+      try {
+        work();
+      } catch (inner) {
+        throw StateError('local catch'); /* expect: avoid-throw-in-catch-block */
+      }
+    }
+    final callback = () {
+      throw StateError('delayed closure');
+      try {
+        work();
+      } catch (inner) {
+        throw StateError('closure catch'); /* expect: avoid-throw-in-catch-block */
+      }
+    };
+    throw StateError('outer restored'); /* expect: avoid-throw-in-catch-block */
+  }
+}

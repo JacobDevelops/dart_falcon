@@ -7,12 +7,11 @@
 //! and nested record and function types, so a positional field buried inside a
 //! generic is still reported.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_dart_type, walk_field_decl, walk_local_var, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct AvoidPositionalFieldsInRecords;
@@ -20,15 +19,14 @@ pub struct AvoidPositionalFieldsInRecords;
 impl Rule for AvoidPositionalFieldsInRecords {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut visitor = Collector {
+        let visitor = Collector {
             diags: Vec::new(),
             ctx,
         };
-        visitor.visit_program(program);
-        RulePreparation::Diagnostics(visitor.diags)
+        RulePreparation::Structural(Box::new(visitor))
     }
 }
 
@@ -64,8 +62,11 @@ struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_dart_type(&mut self, ty: &DartType) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_dart_type(&mut self, ty: &DartType) -> StructuralTraversal {
         if let DartType::Record(rec) = ty
             && !rec.positional.is_empty()
         {
@@ -75,10 +76,10 @@ impl Visitor for Collector<'_, '_> {
                 rec.span,
             ));
         }
-        walk_dart_type(self, ty);
+        StructuralTraversal::Continue
     }
 
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = decl {
             check_declarators(
                 &v.declarators,
@@ -87,26 +88,27 @@ impl Visitor for Collector<'_, '_> {
                 self.ctx,
             );
         }
-        walk_top_level_decl(self, decl);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, field: &FieldDecl) {
+    fn visit_field_decl(&mut self, field: &FieldDecl) -> StructuralTraversal {
         check_declarators(
             &field.declarators,
             field.field_type.is_some(),
             &mut self.diags,
             self.ctx,
         );
-        walk_field_decl(self, field);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
         check_declarators(
             &local.declarators,
             local.var_type.is_some(),
             &mut self.diags,
             self.ctx,
         );
-        walk_local_var(self, local);
+        StructuralTraversal::Continue
     }
+}
 }

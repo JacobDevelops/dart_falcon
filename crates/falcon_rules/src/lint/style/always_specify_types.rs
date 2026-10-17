@@ -33,15 +33,10 @@ use std::collections::HashSet;
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedType, Rule,
-    RulePreparation, resolve_call_constructor,
+    RulePreparation, StructuralRuleVisitor, StructuralTraversal, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_dart_type, walk_expr, walk_field_decl, walk_for_header,
-    walk_formal_param, walk_local_var, walk_pattern, walk_setter_decl, walk_stmt,
-    walk_top_level_decl,
-};
 use falcon_syntax::{Program, TokenKind};
 
 use crate::lint::declarations::{documented_node_span, member_names, members_of};
@@ -81,7 +76,7 @@ impl Rule for AlwaysSpecifyTypes {
         } else {
             HashSet::new()
         };
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             state,
             locals,
@@ -90,10 +85,11 @@ impl Rule for AlwaysSpecifyTypes {
             is_type_test: None,
             reference: None,
             assigned_pattern: false,
+            assignment_value: None,
+            expression_scopes: Vec::new(),
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -176,6 +172,8 @@ struct Collector<'a> {
     /// Inside the pattern of a pattern assignment, whose variables are
     /// assigned rather than declared.
     assigned_pattern: bool,
+    assignment_value: Option<*const Expr>,
+    expression_scopes: Vec<(Option<Span>, Option<Span>)>,
     diags: Vec<Diagnostic>,
 }
 
@@ -244,16 +242,17 @@ impl Collector<'_> {
         state.signatures.has_constructor(&identity, name)
     }
 
-    /// Visit within the scope of `parameters`.
-    fn with_type_parameters(&mut self, parameters: &[TypeParam], visit: impl FnOnce(&mut Self)) {
-        let previous = self.type_parameters.len();
+    fn push_type_parameters(&mut self, parameters: &[TypeParam]) {
         self.type_parameters.extend(
             parameters
                 .iter()
                 .map(|parameter| parameter.name.name.clone()),
         );
-        visit(self);
-        self.type_parameters.truncate(previous);
+    }
+
+    fn pop_type_parameters(&mut self, parameters: &[TypeParam]) {
+        self.type_parameters
+            .truncate(self.type_parameters.len() - parameters.len());
     }
 
     /// Whether `name`, read as an expression, is a type literal of a raw
@@ -423,8 +422,11 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(variable) = node {
             self.check_declaration(
                 &variable.annotations,
@@ -438,31 +440,41 @@ impl Visitor for Collector<'_> {
         {
             self.members = member_names(members);
         }
-        self.with_type_parameters(declared_type_parameters(node), |collector| {
-            walk_top_level_decl(collector, node);
-        });
+        self.push_type_parameters(declared_type_parameters(node));
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        self.pop_type_parameters(declared_type_parameters(node));
         self.members.clear();
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         let parameters = match node {
             ClassMember::Method(method) => method.type_params.as_slice(),
             _ => &[],
         };
-        self.with_type_parameters(parameters, |collector| walk_class_member(collector, node));
+        self.push_type_parameters(parameters);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn exit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Method(method) = node {
+            self.pop_type_parameters(&method.type_params);
+        }
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         self.check_declaration(
             &node.annotations,
             node.span,
             node.field_type.as_ref(),
             &node.declarators,
         );
-        walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
         if node.var_type.is_none()
             && let Some(keyword) = node.keyword_span
         {
@@ -475,15 +487,15 @@ impl Visitor for Collector<'_> {
                 &node.declarators,
             );
         }
-        walk_local_var(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         self.check_untyped_param(node);
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         if node.param_type.is_none() && !is_just_underscores(&node.param.name) {
             let parameter_span = setter_parameter_span(node, self.ctx);
             let keyword_start = node
@@ -495,30 +507,31 @@ impl Visitor for Collector<'_> {
                 .unwrap_or(parameter_span);
             self.report(span);
         }
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        // `(a, b) = r;` assigns existing variables; nothing is declared, but
-        // the types its patterns name still need their arguments.
-        if let Stmt::PatternAssign(assign) = node {
-            self.assigned_pattern = true;
-            self.visit_pattern(&assign.pattern);
-            self.assigned_pattern = false;
-            self.visit_expr(&assign.value);
-            return;
-        }
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
-            self.with_type_parameters(&function.type_params, |collector| {
-                walk_stmt(collector, node);
-            });
-            return;
+            self.push_type_parameters(&function.type_params);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::LocalFunc(function) = node {
+            self.pop_type_parameters(&function.type_params);
+        }
+    }
+
+    fn visit_pattern_assign_stmt(&mut self, node: &PatternAssignStmt) -> StructuralTraversal {
+        self.assigned_pattern = true;
+        self.assignment_value = Some(&node.value);
+        StructuralTraversal::Continue
+    }
+
 
     /// Loop variables of `for` statements and collection `for` elements.
-    fn visit_for_header(&mut self, node: &ForHeader) {
+    fn visit_for_header(&mut self, node: &ForHeader) -> StructuralTraversal {
         if let Some(ForInit::ForIn {
             declares_variable: true,
             var_type,
@@ -528,10 +541,10 @@ impl Visitor for Collector<'_> {
         {
             self.check_for_in(var_type.as_ref(), name);
         }
-        walk_for_header(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
+    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
         if !self.assigned_pattern {
             if let Pattern::Variable {
                 type_: None,
@@ -555,10 +568,10 @@ impl Visitor for Collector<'_> {
         {
             self.report(head.span.merge(&last.span));
         }
-        walk_pattern(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Named(named) = node
             && named.type_args.is_empty()
             && self.is_type_test != Some(named.span)
@@ -567,17 +580,23 @@ impl Visitor for Collector<'_> {
             self.report(named.span);
         }
         if let DartType::Function(function) = node {
-            self.with_type_parameters(&function.type_params, |collector| {
-                walk_dart_type(collector, node);
-            });
-        } else {
-            walk_dart_type(self, node);
+            self.push_type_parameters(&function.type_params);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_dart_type(&mut self, node: &DartType) {
+        if let DartType::Function(function) = node {
+            self.pop_type_parameters(&function.type_params);
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        let previous_type_test = self.is_type_test;
-        let previous_reference = self.reference;
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if self.assignment_value.is_some_and(|value| std::ptr::eq(value, node)) {
+            self.assigned_pattern = false;
+            self.assignment_value = None;
+        }
+        self.expression_scopes.push((self.is_type_test, self.reference));
         if self.reference != Some(*node.span())
             && let Some(span) = self.raw_type_literal(node)
         {
@@ -592,17 +611,8 @@ impl Visitor for Collector<'_> {
             _ => None,
         };
         if let Expr::FuncExpr { type_params, .. } = node {
-            let previous = self.type_parameters.len();
-            self.type_parameters.extend(
-                type_params
-                    .iter()
-                    .map(|parameter| parameter.name.name.clone()),
-            );
-            walk_expr(self, node);
-            self.type_parameters.truncate(previous);
-            self.is_type_test = previous_type_test;
-            self.reference = previous_reference;
-            return;
+            self.push_type_parameters(type_params);
+            return StructuralTraversal::Continue;
         }
         match node {
             Expr::List {
@@ -638,8 +648,17 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_expr(self, node);
-        self.is_type_test = previous_type_test;
-        self.reference = previous_reference;
+        StructuralTraversal::Continue
     }
+
+    fn exit_expr(&mut self, node: &Expr) {
+        if let Expr::FuncExpr { type_params, .. } = node {
+            self.pop_type_parameters(type_params);
+        }
+        if let Some((type_test, reference)) = self.expression_scopes.pop() {
+            self.is_type_test = type_test;
+            self.reference = reference;
+        }
+    }
+}
 }

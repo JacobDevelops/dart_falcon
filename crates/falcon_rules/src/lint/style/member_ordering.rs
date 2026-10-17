@@ -21,7 +21,9 @@
 //! `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`,
 //! `dispose`, `build`, and `overridden-methods`.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -35,39 +37,57 @@ const NAME: &str = "member-ordering";
 impl Rule for MemberOrdering {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        let order = read_string_list(ctx, NAME, "order");
-        let widgets_order = read_string_list(ctx, NAME, "widgets_order");
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            order: read_string_list(ctx, NAME, "order"),
+            widgets_order: read_string_list(ctx, NAME, "widgets_order"),
+            diags: Vec::new(),
+        }))
+    }
+}
 
-        for decl in &program.declarations {
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    order: Option<Vec<String>>,
+    widgets_order: Option<Vec<String>>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
             match decl {
                 TopLevelDecl::Class(c) => check_class(
                     &c.members,
                     c.extends.as_ref(),
-                    &order,
-                    &widgets_order,
-                    &mut diags,
-                    ctx,
+                    &self.order,
+                    &self.widgets_order,
+                    &mut self.diags,
+                    self.ctx,
                 ),
                 TopLevelDecl::Mixin(m) => {
-                    check_class(&m.members, None, &order, &widgets_order, &mut diags, ctx)
+                    check_class(&m.members, None, &self.order, &self.widgets_order, &mut self.diags, self.ctx)
                 }
                 TopLevelDecl::MixinClass(mc) => check_class(
                     &mc.members,
                     mc.extends.as_ref(),
-                    &order,
-                    &widgets_order,
-                    &mut diags,
-                    ctx,
+                    &self.order,
+                    &self.widgets_order,
+                    &mut self.diags,
+                    self.ctx,
                 ),
                 _ => {}
             }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn check_class(

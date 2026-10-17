@@ -5,9 +5,7 @@
 use falcon_analyze::{
     DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex,
 };
-use falcon_syntax::ast::{
-    ClassMember, DartType, Identifier, PrimaryConstructor, Program, TopLevelDecl,
-};
+use falcon_syntax::ast::{ClassMember, DartType, Identifier, PrimaryConstructor, TopLevelDecl};
 
 /// Where a declaration's inherited concrete members come from.
 pub(crate) enum InheritanceSource<'a> {
@@ -28,51 +26,47 @@ pub(crate) struct InheritingDeclaration<'a> {
     pub source: InheritanceSource<'a>,
 }
 
-/// Every class, mixin class, enum, and mixin of `program`. Extension types
-/// inherit no concrete members and are omitted.
-pub(crate) fn inheriting_declarations(
-    program: &Program,
-) -> impl Iterator<Item = InheritingDeclaration<'_>> {
-    program.declarations.iter().filter_map(|declaration| {
-        let (name, members, primary_constructor, source) = match declaration {
-            TopLevelDecl::Class(node) => (
-                &node.name,
-                &node.members,
-                node.primary_constructor.as_ref(),
-                InheritanceSource::Superclasses,
-            ),
-            TopLevelDecl::MixinClass(node) => (
-                &node.name,
-                &node.members,
-                node.primary_constructor.as_ref(),
-                InheritanceSource::Superclasses,
-            ),
-            TopLevelDecl::Enum(node) => (
-                &node.name,
-                &node.members,
-                node.primary_constructor.as_ref(),
-                InheritanceSource::Superclasses,
-            ),
-            TopLevelDecl::Mixin(node) => (
-                &node.name,
-                &node.members,
-                None,
-                InheritanceSource::SuperclassConstraints(&node.on_clause),
-            ),
-            TopLevelDecl::ExtensionType(_)
-            | TopLevelDecl::ClassTypeAlias(_)
-            | TopLevelDecl::Extension(_)
-            | TopLevelDecl::Function(_)
-            | TopLevelDecl::Variable(_)
-            | TopLevelDecl::TypeAlias(_)
-            | TopLevelDecl::Error(_) => return None,
-        };
-        Some(InheritingDeclaration {
-            name,
-            members,
-            primary_constructor,
-            source,
-        })
+pub(crate) fn inheriting_declaration(
+    declaration: &TopLevelDecl,
+) -> Option<InheritingDeclaration<'_>> {
+    let (name, members, primary_constructor, source) = match declaration {
+        TopLevelDecl::Class(node) => (
+            &node.name,
+            &node.members,
+            node.primary_constructor.as_ref(),
+            InheritanceSource::Superclasses,
+        ),
+        TopLevelDecl::MixinClass(node) => (
+            &node.name,
+            &node.members,
+            node.primary_constructor.as_ref(),
+            InheritanceSource::Superclasses,
+        ),
+        TopLevelDecl::Enum(node) => (
+            &node.name,
+            &node.members,
+            node.primary_constructor.as_ref(),
+            InheritanceSource::Superclasses,
+        ),
+        TopLevelDecl::Mixin(node) => (
+            &node.name,
+            &node.members,
+            None,
+            InheritanceSource::SuperclassConstraints(&node.on_clause),
+        ),
+        TopLevelDecl::ExtensionType(_)
+        | TopLevelDecl::ClassTypeAlias(_)
+        | TopLevelDecl::Extension(_)
+        | TopLevelDecl::Function(_)
+        | TopLevelDecl::Variable(_)
+        | TopLevelDecl::TypeAlias(_)
+        | TopLevelDecl::Error(_) => return None,
+    };
+    Some(InheritingDeclaration {
+        name,
+        members,
+        primary_constructor,
+        source,
     })
 }
 

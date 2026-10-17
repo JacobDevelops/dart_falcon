@@ -7,7 +7,9 @@
 //! misbehaves as a `Map` key or `Set` element — lookups miss and duplicates slip
 //! through. Override both and derive them from the same fields.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -17,20 +19,37 @@ pub struct HashAndEquals;
 impl Rule for HashAndEquals {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let members = match decl {
-                TopLevelDecl::Class(class) => &class.members,
-                TopLevelDecl::MixinClass(class) => &class.members,
-                _ => continue,
-            };
-            check_members(members, ctx, &mut diags);
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let members = match decl {
+            TopLevelDecl::Class(class) => &class.members,
+            TopLevelDecl::MixinClass(class) => &class.members,
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        check_members(members, self.ctx, &mut self.diags);
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 /// The span of the `==` operator, if the type declares one.

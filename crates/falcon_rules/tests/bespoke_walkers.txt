@@ -1,8 +1,6 @@
 # Hand-rolled AST walkers, pinned by tests/no_new_bespoke_walkers.rs.
 # This list may only shrink. Build new rules on falcon_syntax::visitor.
 cross_file/unnecessary_nullable.rs::visit_expr
-lint/correctness/proper_controller_dispose.rs::visit_stmt
 lint/style/no_magic_number.rs::root_name
 lint/style/prefer_iterable_of.rs::base_type_name
-lint/style/unnecessary_this.rs::visit_stmt
 lint/suspicious/no_equal_arguments.rs::is_literal

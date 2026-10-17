@@ -24,7 +24,9 @@
 //!
 //! Adopted from the official `type_annotate_public_apis` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -49,15 +51,12 @@ impl Rule for TypeAnnotatePublicApis {
         let Some(state) = SemanticState::new(program, ctx) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let mut checker = Checker {
+        let checker = Checker {
             ctx,
             state,
             diags: Vec::new(),
         };
-        for declaration in &program.declarations {
-            checker.declaration(declaration);
-        }
-        RulePreparation::Diagnostics(checker.diags)
+        RulePreparation::Structural(Box::new(checker))
     }
 }
 
@@ -65,6 +64,19 @@ struct Checker<'a> {
     ctx: &'a AnalyzeContext<'a>,
     state: SemanticState<'a>,
     diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Checker<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        self.declaration(declaration);
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn is_private(name: &str) -> bool {

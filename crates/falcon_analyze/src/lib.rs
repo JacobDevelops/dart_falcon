@@ -12,6 +12,7 @@ pub mod resolve;
 pub mod rule;
 pub mod semantic_scope;
 pub mod source;
+pub mod structural_scope;
 pub mod suppressions;
 
 pub use constant_value::{
@@ -45,4 +46,7 @@ pub use resolve::{
     resolve_call_constructor, resolve_new_constructor,
 };
 pub use rule::{Rule, RuleAnalysis, RulePreparation};
+pub use structural_scope::{
+    StructuralInterests, StructuralKind, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
+};
 pub use suppressions::{FileSuppressions, RuleLookup};

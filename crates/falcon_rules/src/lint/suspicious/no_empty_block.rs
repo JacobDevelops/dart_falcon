@@ -7,13 +7,11 @@
 //! a comment is treated as intentional and left alone. The report lands on the
 //! closing brace.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl,
-    walk_setter_decl, walk_stmt,
-};
 
 #[derive(Default)]
 pub struct NoEmptyBlock;
@@ -21,15 +19,14 @@ pub struct NoEmptyBlock;
 impl Rule for NoEmptyBlock {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -46,39 +43,45 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.check_body(node.body.as_ref());
-        walk_function_decl(self, node);
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.check_body(node.body.as_ref());
+        StructuralTraversal::Continue
+    }
+
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         self.check_body(node.body);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_getter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             self.check_body(operator.body.as_ref());
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             Stmt::Block(block) => flag_if_empty(block, &mut self.diags, self.ctx),
             Stmt::TryCatch(try_catch) => {
@@ -93,15 +96,16 @@ impl Visitor for Collector<'_, '_> {
             Stmt::LocalFunc(local) => self.check_body(Some(&local.body)),
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::FuncExpr { body, .. } = node {
             self.check_body(Some(body));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

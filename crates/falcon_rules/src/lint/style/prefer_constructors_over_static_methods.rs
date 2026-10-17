@@ -24,9 +24,10 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    StructuralNode, StructuralRuleVisitor, StructuralTraversal,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
 #[derive(Default)]
 pub struct PreferConstructorsOverStaticMethods;
@@ -34,128 +35,160 @@ pub struct PreferConstructorsOverStaticMethods;
 impl Rule for PreferConstructorsOverStaticMethods {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let (name, type_params, members, representation) = match decl {
-                TopLevelDecl::Class(node) => (&node.name, &node.type_params, &node.members, None),
-                TopLevelDecl::MixinClass(node) => {
-                    (&node.name, &node.type_params, &node.members, None)
-                }
-                TopLevelDecl::ExtensionType(node) => (
-                    &node.name,
-                    &node.type_params,
-                    &node.members,
-                    Some(
-                        node.primary_constructor
-                            .constructor_name
-                            .as_ref()
-                            .map_or("new", |name| name.name.as_str()),
-                    ),
-                ),
-                _ => continue,
-            };
-            if !type_params.is_empty() {
-                continue;
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model,
+            owner: None,
+            constructors: Vec::new(),
+            active: None,
+            diagnostics: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    owner: Option<DeclarationIdentity>,
+    constructors: Vec<&'a str>,
+    active: Option<(Span, bool)>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let (name, type_params, members, representation) = match decl {
+            TopLevelDecl::Class(node) => (&node.name, &node.type_params, &node.members, None),
+            TopLevelDecl::MixinClass(node) => {
+                (&node.name, &node.type_params, &node.members, None)
             }
-            let Some(owner) = model.resolve_name(name.name.as_str()) else {
-                continue;
-            };
-            let mut constructors: Vec<&str> = members
+            TopLevelDecl::ExtensionType(node) => (
+                &node.name,
+                &node.type_params,
+                &node.members,
+                Some(
+                    node.primary_constructor
+                        .constructor_name
+                        .as_ref()
+                        .map_or("new", |name| &self.ctx.source[name.span.start..name.span.end]),
+                ),
+            ),
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        if !type_params.is_empty() {
+            return StructuralTraversal::SkipChildren;
+        }
+        let Some(owner) = self.model.resolve_name(name.name.as_str()) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        self.owner = Some(owner);
+        self.constructors.clear();
+        self.constructors.extend(
+            members
                 .iter()
                 .filter_map(|member| match member {
                     ClassMember::Constructor(constructor) => Some(
                         constructor
                             .constructor_name
                             .as_ref()
-                            .map_or("new", |name| name.name.as_str()),
+                            .map_or("new", |name| &self.ctx.source[name.span.start..name.span.end]),
                     ),
                     _ => None,
                 })
-                .chain(representation)
-                .collect();
-            if constructors.is_empty() {
-                // The implicit default constructor.
-                constructors.push("new");
-            }
-            for member in members {
-                let (name, return_type, body, is_static, generic) = match member {
-                    ClassMember::Method(method) => (
-                        &method.name,
-                        &method.return_type,
-                        &method.body,
-                        method.is_static,
-                        !method.type_params.is_empty(),
-                    ),
-                    ClassMember::Getter(getter) => (
-                        &getter.name,
-                        &getter.return_type,
-                        &getter.body,
-                        getter.is_static,
-                        false,
-                    ),
-                    _ => continue,
-                };
-                let (Some(return_type), Some(body)) = (return_type, body) else {
-                    continue;
-                };
-                if !is_static || generic {
-                    continue;
-                }
-                let returns_owner = matches!(
-                    model.resolve_type(return_type),
-                    ResolvedType::Interface { identity, nullable: false, .. } if identity == owner
-                );
-                if !returns_owner {
-                    continue;
-                }
-                let mut finder = InstanceCreation {
-                    owner: &owner,
-                    constructors: &constructors,
-                    model: &model,
-                    found: false,
-                };
-                walk_function_body(&mut finder, body);
-                if finder.found {
-                    diags.push(ctx.diagnostic(
-                        "prefer-constructors-over-static-methods",
-                        "Static method should be a constructor.",
-                        name.span,
-                    ));
-                }
-            }
+                .chain(representation),
+        );
+        if self.constructors.is_empty() {
+            self.constructors.push("new");
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::Continue
     }
-}
 
-/// Finds a constructor invocation of the owner type.
-struct InstanceCreation<'a> {
-    owner: &'a DeclarationIdentity,
-    constructors: &'a [&'a str],
-    model: &'a SemanticModel<'a>,
-    found: bool,
-}
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        let (name, return_type, body, is_static, generic) = match member {
+            ClassMember::Method(method) => (
+                &method.name,
+                &method.return_type,
+                &method.body,
+                method.is_static,
+                !method.type_params.is_empty(),
+            ),
+            ClassMember::Getter(getter) => (
+                &getter.name,
+                &getter.return_type,
+                &getter.body,
+                getter.is_static,
+                false,
+            ),
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        let (Some(return_type), Some(_body)) = (return_type, body) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if !is_static || generic {
+            return StructuralTraversal::SkipChildren;
+        }
+        let returns_owner = matches!(
+            self.model.resolve_type(return_type),
+            ResolvedType::Interface { identity, nullable: false, .. }
+                if self.owner.as_ref() == Some(&identity)
+        );
+        if !returns_owner {
+            return StructuralTraversal::SkipChildren;
+        }
+        self.active = Some((name.span, false));
+        StructuralTraversal::Continue
+    }
 
-impl Visitor for InstanceCreation<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        match parent {
+            StructuralNode::MethodDecl(_) | StructuralNode::GetterDecl(_) => {
+                matches!(child, StructuralNode::FunctionBody(_))
+            }
+            _ => true,
+        }
+    }
+
+    fn exit_class_member(&mut self, _member: &ClassMember) {
+        if let Some((span, found)) = self.active.take()
+            && found
+        {
+            self.diagnostics.push(self.ctx.diagnostic(
+                "prefer-constructors-over-static-methods",
+                "Static method should be a constructor.",
+                span,
+            ));
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        let Some((_, found)) = self.active.as_mut() else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let owner = self.owner.as_ref().expect("eligible enclosing declaration");
         if let Some((identity, constructor, _)) =
-            crate::lint::flutter::constructor_invocation(node, self.model)
+            crate::lint::flutter::constructor_invocation(node, &self.model)
             && (matches!(node, Expr::New { .. })
-                || identity != *self.owner
+                || identity != *owner
                 || self.constructors.contains(&constructor))
         {
-            self.found = identity == *self.owner;
-            if self.found {
-                return;
+            *found = identity == *owner;
+            if *found {
+                return StructuralTraversal::SkipChildren;
             }
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+}
 }

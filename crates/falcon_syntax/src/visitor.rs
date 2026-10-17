@@ -7,54 +7,30 @@ pub enum StatementListKind {
     SwitchCase,
 }
 
-/// Visits declaration bodies without entering nested local functions or closures.
-pub fn for_each_declared_body(
-    program: &Program,
-    source: &str,
-    f: &mut impl FnMut(&FunctionBody, &Span, &Span),
-) {
-    struct Bodies<'a, F> {
-        source: &'a str,
-        callback: &'a mut F,
-    }
-    impl<F: FnMut(&FunctionBody, &Span, &Span)> Visitor for Bodies<'_, F> {
-        fn visit_function_decl(&mut self, node: &FunctionDecl) {
-            if let Some(body) = &node.body {
-                (self.callback)(body, &node.name.span, &node.span);
-            }
-        }
+pub fn declared_member_body(member: &ClassMember) -> Option<(&FunctionBody, Span)> {
+    let (body, span) = match member {
+        ClassMember::Method(n) => (n.body.as_ref()?, n.span),
+        ClassMember::Constructor(n) => (n.body.as_ref()?, n.span),
+        ClassMember::Getter(n) => (n.body.as_ref()?, n.span),
+        ClassMember::Setter(n) => (n.body.as_ref()?, n.span),
+        ClassMember::PrimaryConstructorBody(n) => (n.body.as_ref()?, n.span),
+        ClassMember::Operator(n) => (n.body.as_ref()?, n.span),
+        ClassMember::Field(_) | ClassMember::Error(_) => return None,
+    };
+    Some((body, span))
+}
 
-        fn visit_class_member(&mut self, node: &ClassMember) {
-            if let ClassMember::Operator(operator) = node {
-                if let Some(body) = &operator.body {
-                    let name = operator_header_span(operator, self.source);
-                    (self.callback)(body, &name, &operator.span);
-                }
-                return;
-            }
-            let (body, name, span) = match node {
-                ClassMember::Method(n) => (&n.body, &n.name.span, &n.span),
-                ClassMember::Constructor(n) => (&n.body, &n.name.span, &n.span),
-                ClassMember::Getter(n) => (&n.body, &n.name.span, &n.span),
-                ClassMember::Setter(n) => (&n.body, &n.name.span, &n.span),
-                ClassMember::Field(_) | ClassMember::Operator(_) | ClassMember::Error(_) => return,
-                ClassMember::PrimaryConstructorBody(n) => {
-                    if let Some(body) = &n.body {
-                        (self.callback)(body, &n.this_span, &n.span);
-                    }
-                    return;
-                }
-            };
-            if let Some(body) = body {
-                (self.callback)(body, name, span);
-            }
-        }
-    }
-    Bodies {
-        source,
-        callback: f,
-    }
-    .visit_program(program);
+pub fn declared_member_name(member: &ClassMember, source: &str) -> Option<Span> {
+    declared_member_body(member)?;
+    Some(match member {
+        ClassMember::Method(n) => n.name.span,
+        ClassMember::Constructor(n) => n.name.span,
+        ClassMember::Getter(n) => n.name.span,
+        ClassMember::Setter(n) => n.name.span,
+        ClassMember::PrimaryConstructorBody(n) => n.this_span,
+        ClassMember::Operator(n) => operator_header_span(n, source),
+        ClassMember::Field(_) | ClassMember::Error(_) => return None,
+    })
 }
 
 // Suppression directives must target the operator token, not annotations or comments.
@@ -106,83 +82,76 @@ fn operator_header_span(node: &OperatorDecl, source: &str) -> Span {
     }
 }
 
-/// Visits statement lists, including those inside local functions and closures.
-pub fn for_each_stmt_list(program: &Program, f: &mut impl FnMut(&[Stmt], StatementListKind)) {
-    struct Lists<'a, F>(&'a mut F);
-    impl<F: FnMut(&[Stmt], StatementListKind)> Lists<'_, F> {
-        fn body(&mut self, body: &FunctionBody) {
-            if let FunctionBody::Block(block) = body {
-                (self.0)(&block.stmts, StatementListKind::Block);
+pub fn body_list(body: Option<&FunctionBody>, f: &mut impl FnMut(&[Stmt], StatementListKind)) {
+    if let Some(FunctionBody::Block(block)) = body {
+        f(&block.stmts, StatementListKind::Block);
+    }
+}
+
+pub fn member_list(member: &ClassMember, f: &mut impl FnMut(&[Stmt], StatementListKind)) {
+    body_list(declared_member_body(member).map(|(body, _)| body), f);
+}
+
+pub fn stmt_lists(node: &Stmt, f: &mut impl FnMut(&[Stmt], StatementListKind)) {
+    match node {
+        Stmt::Block(block) => f(&block.stmts, StatementListKind::Block),
+        Stmt::LocalFunc(n) => body_list(Some(&n.body), f),
+        Stmt::TryCatch(n) => {
+            f(&n.body.stmts, StatementListKind::Block);
+            for catch in &n.catches {
+                f(&catch.body.stmts, StatementListKind::Block);
+            }
+            if let Some(block) = &n.finally {
+                f(&block.stmts, StatementListKind::Block);
             }
         }
+        Stmt::Switch(n) => {
+            for case in &n.cases {
+                f(&case.body, StatementListKind::SwitchCase);
+            }
+        }
+        Stmt::If(_)
+        | Stmt::For(_)
+        | Stmt::While(_)
+        | Stmt::DoWhile(_)
+        | Stmt::Return(_)
+        | Stmt::Throw(_)
+        | Stmt::LocalVar(_)
+        | Stmt::PatternDecl(_)
+        | Stmt::PatternAssign(_)
+        | Stmt::Labeled(_)
+        | Stmt::Assert(_)
+        | Stmt::Yield(_)
+        | Stmt::Expr(_)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Error(_)
+        | Stmt::Rethrow(_)
+        | Stmt::Empty(_) => {}
     }
+}
+
+pub fn for_each_stmt_list(program: &Program, f: &mut impl FnMut(&[Stmt], StatementListKind)) {
+    struct Lists<'a, F>(&'a mut F);
     impl<F: FnMut(&[Stmt], StatementListKind)> Visitor for Lists<'_, F> {
         fn visit_function_decl(&mut self, node: &FunctionDecl) {
-            if let Some(body) = &node.body {
-                self.body(body);
-            }
+            body_list(node.body.as_ref(), self.0);
             walk_function_decl(self, node);
         }
 
         fn visit_class_member(&mut self, node: &ClassMember) {
-            let body = match node {
-                ClassMember::Method(n) => n.body.as_ref(),
-                ClassMember::Constructor(n) => n.body.as_ref(),
-                ClassMember::Getter(n) => n.body.as_ref(),
-                ClassMember::Setter(n) => n.body.as_ref(),
-                ClassMember::Operator(n) => n.body.as_ref(),
-                ClassMember::PrimaryConstructorBody(n) => n.body.as_ref(),
-                ClassMember::Field(_) | ClassMember::Error(_) => None,
-            };
-            if let Some(body) = body {
-                self.body(body);
-            }
+            member_list(node, self.0);
             walk_class_member(self, node);
         }
 
         fn visit_stmt(&mut self, node: &Stmt) {
-            match node {
-                Stmt::Block(block) => (self.0)(&block.stmts, StatementListKind::Block),
-                Stmt::LocalFunc(n) => self.body(&n.body),
-                Stmt::TryCatch(n) => {
-                    (self.0)(&n.body.stmts, StatementListKind::Block);
-                    for catch in &n.catches {
-                        (self.0)(&catch.body.stmts, StatementListKind::Block);
-                    }
-                    if let Some(block) = &n.finally {
-                        (self.0)(&block.stmts, StatementListKind::Block);
-                    }
-                }
-                Stmt::Switch(n) => {
-                    for case in &n.cases {
-                        (self.0)(&case.body, StatementListKind::SwitchCase);
-                    }
-                }
-                Stmt::If(_)
-                | Stmt::For(_)
-                | Stmt::While(_)
-                | Stmt::DoWhile(_)
-                | Stmt::Return(_)
-                | Stmt::Throw(_)
-                | Stmt::LocalVar(_)
-                | Stmt::PatternDecl(_)
-                | Stmt::PatternAssign(_)
-                | Stmt::Labeled(_)
-                | Stmt::Assert(_)
-                | Stmt::Yield(_)
-                | Stmt::Expr(_)
-                | Stmt::Break(_)
-                | Stmt::Continue(_)
-                | Stmt::Error(_)
-                | Stmt::Rethrow(_)
-                | Stmt::Empty(_) => {}
-            }
+            stmt_lists(node, self.0);
             walk_stmt(self, node);
         }
 
         fn visit_expr(&mut self, node: &Expr) {
             if let Expr::FuncExpr { body, .. } = node {
-                self.body(body);
+                body_list(Some(body), self.0);
             }
             walk_expr(self, node);
         }
@@ -1453,11 +1422,6 @@ pub fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
 /// Visit `root` and every nested expression.
 pub fn for_each_expr<F: FnMut(&Expr)>(root: &Expr, f: &mut F) {
     ExprWalker { f }.visit_expr(root);
-}
-
-/// Visit every expression in `program` in depth-first, parent-before-child order.
-pub fn for_each_expr_in_program(program: &Program, mut f: impl FnMut(&Expr)) {
-    ExprWalker { f: &mut f }.visit_program(program);
 }
 
 /// Visit every statement in `program` in depth-first, parent-before-child order.

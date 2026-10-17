@@ -3,10 +3,10 @@
 
 use falcon_analyze::{
     AnalyzeContext, IdentityIndex, LibraryId, NameIdentity, Rule, RulePreparation,
+    StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::*;
 
 #[derive(Default)]
 pub struct AvoidTypesAsParameterNames;
@@ -14,7 +14,7 @@ pub struct AvoidTypesAsParameterNames;
 impl Rule for AvoidTypesAsParameterNames {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some((identities, file)) = ctx
@@ -23,7 +23,7 @@ impl Rule for AvoidTypesAsParameterNames {
         else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             identities,
@@ -31,9 +31,9 @@ impl Rule for AvoidTypesAsParameterNames {
             type_names: Vec::new(),
             primary_parameter: false,
             representation_constructor: false,
+            scopes: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -45,9 +45,25 @@ struct Collector<'a> {
     type_names: Vec<&'a str>,
     primary_parameter: bool,
     representation_constructor: bool,
+    scopes: Vec<(usize, bool, bool)>,
 }
 
 impl Collector<'_> {
+    fn save_scope(&mut self) {
+        self.scopes.push((
+            self.type_names.len(),
+            self.primary_parameter,
+            self.representation_constructor,
+        ));
+    }
+
+    fn restore_scope(&mut self) {
+        let (types, primary, representation) = self.scopes.pop().unwrap();
+        self.type_names.truncate(types);
+        self.primary_parameter = primary;
+        self.representation_constructor = representation;
+    }
+
     fn resolves_to_library_type(&self, name: &str) -> bool {
         self.identities.resolve(self.library, name.into()) == NameIdentity::Type
             && !self
@@ -72,8 +88,7 @@ impl Collector<'_> {
         (name != "_" && self.type_names.contains(&name)) || self.resolves_to_library_type(name)
     }
 
-    fn enter_types(&mut self, params: &[TypeParam], method: bool) -> usize {
-        let previous = self.type_names.len();
+    fn enter_types(&mut self, params: &[TypeParam], method: bool) {
         for param in params {
             if self.resolves_to_library_type(&param.name.name)
                 || (!method && self.type_names.contains(&param.name.name.as_str()))
@@ -92,12 +107,15 @@ impl Collector<'_> {
                 .filter_map(|param| self.ctx.syntax.tokens_in(param.name.span).next())
                 .map(|token| token.text(self.ctx.source)),
         );
-        previous
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.save_scope();
         let params = match node {
             TopLevelDecl::Class(node) => &node.type_params,
             TopLevelDecl::ClassTypeAlias(node) => &node.type_params,
@@ -107,52 +125,63 @@ impl Visitor for Collector<'_> {
             TopLevelDecl::Extension(node) => &node.type_params,
             TopLevelDecl::ExtensionType(node) => &node.type_params,
             TopLevelDecl::TypeAlias(node) => &node.type_params,
-            _ => {
-                walk_top_level_decl(self, node);
-                return;
-            }
+            _ => return StructuralTraversal::Continue,
         };
-        let previous = self.enter_types(params, false);
-        let representation = self.representation_constructor;
+        self.enter_types(params, false);
         self.representation_constructor = matches!(node, TopLevelDecl::ExtensionType(_));
-        walk_top_level_decl(self, node);
-        self.type_names.truncate(previous);
-        self.representation_constructor = representation;
+        StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        let previous = self.enter_types(&node.type_params, false);
-        walk_function_decl(self, node);
-        self.type_names.truncate(previous);
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+        self.restore_scope();
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        let previous = self.enter_types(&node.type_params, true);
-        walk_method_decl(self, node);
-        self.type_names.truncate(previous);
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.save_scope();
+        self.enter_types(&node.type_params, false);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        let previous = if let Expr::FuncExpr { type_params, .. } = node {
-            self.enter_types(type_params, false)
-        } else {
-            self.type_names.len()
-        };
-        walk_expr(self, node);
-        self.type_names.truncate(previous);
+    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+        self.restore_scope();
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
-        let previous = if let DartType::Function(node) = node {
-            self.enter_types(&node.type_params, false)
-        } else {
-            self.type_names.len()
-        };
-        walk_dart_type(self, node);
-        self.type_names.truncate(previous);
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
+        self.save_scope();
+        self.enter_types(&node.type_params, true);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn exit_method_decl(&mut self, _node: &MethodDecl) {
+        self.restore_scope();
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.save_scope();
+        if let Expr::FuncExpr { type_params, .. } = node {
+            self.enter_types(type_params, false);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.restore_scope();
+    }
+
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+        self.save_scope();
+        if let DartType::Function(node) = node {
+            self.enter_types(&node.type_params, false);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_dart_type(&mut self, _node: &DartType) {
+        self.restore_scope();
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.save_scope();
         if let Stmt::TryCatch(statement) = node {
             for clause in &statement.catches {
                 if let Some(name) = &clause.exception_var
@@ -167,22 +196,27 @@ impl Visitor for Collector<'_> {
             }
         }
         if let Stmt::LocalFunc(function) = node {
-            let previous = self.enter_types(&function.type_params, false);
-            walk_stmt(self, node);
-            self.type_names.truncate(previous);
-        } else {
-            walk_stmt(self, node);
+            self.enter_types(&function.type_params, false);
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) {
-        let previous = self.primary_parameter;
+    fn exit_stmt(&mut self, _node: &Stmt) {
+        self.restore_scope();
+    }
+
+    fn visit_primary_constructor(&mut self, _node: &PrimaryConstructor) -> StructuralTraversal {
+        self.save_scope();
         self.primary_parameter = true;
-        walk_primary_constructor(self, node);
-        self.primary_parameter = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+    fn exit_primary_constructor(&mut self, _node: &PrimaryConstructor) {
+        self.restore_scope();
+    }
+
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
+        self.save_scope();
         if node.param_type.is_none()
             && node.function_params.is_none()
             && node.initializing != Some(InitializingFormal::This)
@@ -198,9 +232,12 @@ impl Visitor for Collector<'_> {
         }
         // Nested function parameters and default expressions are not declaring
         // parameters of the enclosing primary constructor.
-        let previous = self.primary_parameter;
         self.primary_parameter = false;
-        walk_formal_param(self, node);
-        self.primary_parameter = previous;
+        StructuralTraversal::Continue
     }
+
+    fn exit_formal_param(&mut self, _node: &FormalParam) {
+        self.restore_scope();
+    }
+}
 }

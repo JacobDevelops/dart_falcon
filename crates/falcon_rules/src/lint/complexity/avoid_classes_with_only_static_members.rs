@@ -23,7 +23,11 @@
 //!
 //! Adopted from the official `avoid_classes_with_only_static_members` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, SemanticModel, Truth};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal, Truth,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -35,14 +39,35 @@ impl Rule for AvoidClassesWithOnlyStaticMembers {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let model = ctx
-            .identities
-            .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
-        RulePreparation::Diagnostics(
-            program
-                .declarations
-                .iter()
-                .filter_map(|decl| {
+        RulePreparation::Structural(Box::new(Collector {
+            program,
+            ctx,
+            diags: Vec::new(),
+            model: ctx
+                .identities
+                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+    model: Option<SemanticModel<'a>>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
+        let program = self.program;
+        let model = self.model.as_ref();
+        let diagnostic = (|| {
                     let (name, sealed, extends, with_clause, implements, members) = match decl {
                         TopLevelDecl::Class(class) => (
                             &class.name,
@@ -93,7 +118,7 @@ impl Rule for AvoidClassesWithOnlyStaticMembers {
                         || !with_clause.is_empty()
                         || !implements.is_empty();
                     if has_supertypes {
-                        let inherits = match (&model, ctx.signatures) {
+                        let inherits = match (model, ctx.signatures) {
                             (Some(model), Some(signatures)) => model
                                 .resolve_name(&*name.name)
                                 .map_or(Truth::Unknown, |identity| {
@@ -116,10 +141,11 @@ impl Rule for AvoidClassesWithOnlyStaticMembers {
                         "Classes should define instance members.",
                         name.span,
                     ))
-                })
-                .collect(),
-        )
+        })();
+        self.diags.extend(diagnostic);
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 /// Whether the declared members are all static, constructors are default

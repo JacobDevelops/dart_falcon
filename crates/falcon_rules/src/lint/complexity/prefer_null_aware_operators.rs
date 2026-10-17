@@ -6,10 +6,11 @@
 //! other is a field access, index, or method call whose receiver matches the
 //! checked operand (whitespace-insensitive).
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferNullAwareOperators;
@@ -17,15 +18,14 @@ pub struct PreferNullAwareOperators;
 impl Rule for PreferNullAwareOperators {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -49,8 +49,9 @@ fn access_receiver(expr: &Expr) -> Option<&Expr> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Conditional {
             condition,
             then_expr,
@@ -77,6 +78,11 @@ impl Visitor for Collector<'_> {
                 ));
             }
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

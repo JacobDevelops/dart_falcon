@@ -7,10 +7,11 @@
 //! `EdgeInsets.only(...)` (and a direct `EdgeInsets(...)` carrying the same
 //! named arguments) and reports the equivalent to prefer.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferCorrectEdgeInsetsConstructor;
@@ -18,15 +19,14 @@ pub struct PreferCorrectEdgeInsetsConstructor;
 impl Rule for PreferCorrectEdgeInsetsConstructor {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 fn check_edge_insets_only_call(
@@ -153,8 +153,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             Expr::New {
                 dart_type,
@@ -167,6 +172,7 @@ impl Visitor for Collector<'_> {
             } => check_edge_insets_only_call(callee, args, span, &mut self.diags, self.ctx),
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

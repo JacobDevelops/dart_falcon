@@ -12,13 +12,11 @@
 //! Constants (see `constant-identifier-names`) are covered by a separate rule.
 
 use crate::lint::naming::is_lower_camel_case;
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_field_decl, walk_formal_param, walk_function_decl, walk_getter_decl,
-    walk_method_decl, walk_pattern, walk_setter_decl, walk_stmt, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct NonConstantIdentifierNames;
@@ -26,16 +24,15 @@ pub struct NonConstantIdentifierNames;
 impl Rule for NonConstantIdentifierNames {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             in_extension_type: false,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -75,8 +72,11 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         self.in_extension_type = matches!(node, TopLevelDecl::ExtensionType(_));
         if let TopLevelDecl::Variable(v) = node {
             self.check_declarators(
@@ -84,36 +84,39 @@ impl Visitor for Collector<'_> {
                 v.keyword == falcon_syntax::ast::VarKeyword::Const,
             );
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
         self.in_extension_type = false;
     }
 
     /// Covers top-level functions, getters, and setters alike — the analyzer
     /// exempts only operators and augmentations.
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         self.check(&node.name);
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check(&node.name);
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
         self.check(&node.name);
-        walk_getter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         self.check(&node.name);
         self.check_parameter(&node.param);
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
     /// Only the named part of a constructor is an identifier; the leading type
     /// name is governed by `camel-case-types`.
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         if let Some(named) = &node.constructor_name {
             if self.in_extension_type && node.is_primary {
                 self.check(named);
@@ -121,24 +124,25 @@ impl Visitor for Collector<'_> {
                 self.check_parameter(named);
             }
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         self.check_declarators(
             &node.declarators,
             node.keyword == falcon_syntax::ast::VarKeyword::Const,
         );
-        walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if node.initializing != Some(InitializingFormal::This) {
             self.check_parameter(&node.name);
         }
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Function(function) = node {
             for param in &function.params {
                 if let Some(name) = &param.name
@@ -148,18 +152,18 @@ impl Visitor for Collector<'_> {
                 }
             }
         }
-        falcon_syntax::visitor::walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
         self.check_declarators(
             &node.declarators,
             node.keyword == falcon_syntax::ast::VarKeyword::Const,
         );
-        falcon_syntax::visitor::walk_local_var(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             Stmt::LocalFunc(lf) => self.check(&lf.name),
             // Local declarations and pattern bindings use their dedicated hooks.
@@ -185,15 +189,16 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
+    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
         if let Pattern::Variable { name, .. } = node {
             self.check(name);
         }
-        walk_pattern(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 #[cfg(test)]

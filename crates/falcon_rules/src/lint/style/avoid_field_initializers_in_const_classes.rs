@@ -29,10 +29,11 @@
 //!
 //! Adopted from the official `avoid_field_initializers_in_const_classes` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 const MESSAGE: &str = "Fields in 'const' classes should not have initializers.";
 
@@ -45,92 +46,186 @@ impl Rule for AvoidFieldInitializersInConstClasses {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let members = match decl {
-                TopLevelDecl::Class(class) => &class.members,
-                TopLevelDecl::MixinClass(class) => &class.members,
-                _ => continue,
-            };
-            check_members(members, ctx, &mut diags);
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            program,
+            ctx,
+            declaration: 0,
+            constructor: None,
+            initializer: None,
+            found: false,
+            diags: Vec::new(),
+        }))
     }
 }
 
-fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let constructors: Vec<&ConstructorDecl> = members
-        .iter()
-        .filter_map(|member| match member {
+struct Collector<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    declaration: usize,
+    constructor: Option<&'a ConstructorDecl>,
+    initializer: Option<Span>,
+    found: bool,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, _node: &TopLevelDecl) -> StructuralTraversal {
+        let declaration = &self.program.declarations[self.declaration];
+        self.declaration += 1;
+        self.constructor = None;
+        let members = match declaration {
+            TopLevelDecl::Class(class) => &class.members,
+            TopLevelDecl::MixinClass(class) => &class.members,
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        let mut constructors = members.iter().filter_map(|member| match member {
             ClassMember::Constructor(constructor) => Some(constructor),
             _ => None,
-        })
-        .collect();
-    if !constructors.iter().any(|constructor| constructor.is_const) {
-        return;
-    }
-    for member in members {
-        let ClassMember::Field(field) = member else {
-            continue;
-        };
-        if field.is_static || field.keyword != VarKeyword::Final {
-            continue;
+        });
+        let first = constructors.next();
+        let second = constructors.next();
+        let has_const = first.is_some_and(|constructor| constructor.is_const)
+            || second.is_some_and(|constructor| constructor.is_const)
+            || constructors.any(|constructor| constructor.is_const);
+        if !has_const {
+            return StructuralTraversal::SkipChildren;
         }
-        for declarator in &field.declarators {
-            if declarator.initializer.is_some() {
-                diags.push(ctx.diagnostic(
-                    "avoid-field-initializers-in-const-classes",
-                    MESSAGE,
-                    declarator.span,
-                ));
+        for member in members {
+            let ClassMember::Field(field) = member else {
+                continue;
+            };
+            if field.is_static || field.keyword != VarKeyword::Final {
+                continue;
+            }
+            for declarator in &field.declarators {
+                if declarator.initializer.is_some() {
+                    self.diags.push(self.ctx.diagnostic(
+                        "avoid-field-initializers-in-const-classes",
+                        MESSAGE,
+                        declarator.span,
+                    ));
+                }
             }
         }
-    }
-    let [constructor] = constructors.as_slice() else {
-        return;
-    };
-    if !constructor.is_const {
-        return;
-    }
-    let parameters: Vec<&str> = constructor
-        .params
-        .params
-        .iter()
-        .map(|param| param.name.name.as_str())
-        .collect();
-    for initializer in &constructor.initializers {
-        let ConstructorInitializer::FieldInit { value, span, .. } = initializer else {
-            continue;
-        };
-        let mut finder = ParameterReference {
-            parameters: &parameters,
-            found: false,
-        };
-        finder.visit_expr(value);
-        if !finder.found {
-            diags.push(ctx.diagnostic("avoid-field-initializers-in-const-classes", MESSAGE, *span));
+        if second.is_none() {
+            self.constructor = first.filter(|constructor| constructor.is_const);
+        }
+        if self.constructor.is_some() {
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
         }
     }
-}
 
-/// Finds any identifier naming one of the constructor's parameters. A const
-/// initializer cannot contain closures, so no inner scope can shadow them.
-struct ParameterReference<'a> {
-    parameters: &'a [&'a str],
-    found: bool,
-}
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        if matches!(node, ClassMember::Constructor(_)) {
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
+        }
+    }
 
-impl Visitor for ParameterReference<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if self.found {
-            return;
+    fn visit_constructor_initializer(&mut self, node: &ConstructorInitializer) -> StructuralTraversal {
+        if let ConstructorInitializer::FieldInit { span, .. } = node {
+            self.initializer = Some(*span);
+            self.found = false;
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
+        }
+    }
+
+    fn exit_constructor_initializer(&mut self, _node: &ConstructorInitializer) {
+        if let Some(span) = self.initializer.take()
+            && !self.found
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-field-initializers-in-const-classes", MESSAGE, span,
+            ));
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if self.initializer.is_none() || self.found {
+            return StructuralTraversal::SkipChildren;
         }
         if let Expr::Ident(identifier) = node
-            && self.parameters.contains(&identifier.name.as_str())
+            && self.constructor.is_some_and(|constructor| constructor.params.params.iter()
+                .any(|parameter| parameter.name.name == identifier.name))
         {
             self.found = true;
-            return;
+            return StructuralTraversal::SkipChildren;
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_primary_constructor(&mut self, _node: &PrimaryConstructor) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::RuleAnalysis;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn declaration_initializers_precede_constructor_initializers() {
+        let source = "class A { const A() : x = 1; final int x; final int y = 2; }";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = AvoidFieldInitializersInConstClasses.analyze(&parsed.program, &ctx);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].span.start, source.find("y = 2").unwrap());
+        assert_eq!(diagnostics[1].span.start, source.find("x = 1").unwrap());
+    }
+
+    #[test]
+    fn multiple_constructors_exclude_initializer_lists() {
+        let source =
+            "class A { const A() : x = 1; const A.named() : x = 2; final int x; final int y = 3; }";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = AvoidFieldInitializersInConstClasses.analyze(&parsed.program, &ctx);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].span.start, source.find("y = 3").unwrap());
+    }
+
+    #[test]
+    fn parameter_reads_do_not_leak_between_initializers() {
+        let source = "class Base { const Base(int v); } class A extends Base { final int x, y, z; const A(int v) : assert(v > 0), x = 1, y = v, z = 2, super(v); }";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = AvoidFieldInitializersInConstClasses.analyze(&parsed.program, &ctx);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].span.start, source.find("x = 1").unwrap());
+        assert_eq!(diagnostics[1].span.start, source.find("z = 2").unwrap());
+    }
+
+    #[test]
+    fn mixin_class_initializers_reset_parameter_reference_state() {
+        let source = "mixin class A { final int x, y; const A(int v) : x = v, y = 1; }";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = AvoidFieldInitializersInConstClasses.analyze(&parsed.program, &ctx);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].span.start, source.find("y = 1").unwrap());
     }
 }

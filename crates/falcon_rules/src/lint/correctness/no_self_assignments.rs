@@ -19,10 +19,11 @@
 //!
 //! Adopted from the official `no_self_assignments` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 use crate::lint::expressions::identifier_name;
 
@@ -32,15 +33,14 @@ pub struct NoSelfAssignments;
 impl Rule for NoSelfAssignments {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut finder = Finder {
+        let finder = Finder {
             ctx,
             diagnostics: Vec::new(),
         };
-        finder.visit_program(program);
-        RulePreparation::Diagnostics(finder.diagnostics)
+        RulePreparation::Structural(Box::new(finder))
     }
 }
 
@@ -49,8 +49,13 @@ struct Finder<'a, 'ctx> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl Visitor for Finder<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Finder<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Assign {
             target,
             op: AssignOp::Eq,
@@ -66,6 +71,7 @@ impl Visitor for Finder<'_, '_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

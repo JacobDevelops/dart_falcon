@@ -6,10 +6,11 @@
 //! compares it (ignoring whitespace) against the branch that falls through to
 //! it, firing when the two are textually equal.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferIfNullOperators;
@@ -17,15 +18,14 @@ pub struct PreferIfNullOperators;
 impl Rule for PreferIfNullOperators {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -36,8 +36,9 @@ struct Collector<'s> {
     ctx: &'s AnalyzeContext<'s>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Conditional {
             condition,
             then_expr,
@@ -57,6 +58,11 @@ impl Visitor for Collector<'_> {
                 ));
             }
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

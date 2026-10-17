@@ -10,10 +10,11 @@
 //! Checks direct statements of method block bodies, not nested blocks,
 //! callbacks, or other declarations named `dispose`.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 #[derive(Default)]
 pub struct CorrectOrderForSuperDispose;
@@ -21,15 +22,14 @@ pub struct CorrectOrderForSuperDispose;
 impl Rule for CorrectOrderForSuperDispose {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -38,20 +38,25 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         if node.name.name == "dispose"
             && let Some(FunctionBody::Block(block)) = &node.body
         {
             check_dispose_method(block, &mut self.diags, self.ctx);
         }
+        StructuralTraversal::SkipChildren
     }
 
-    fn visit_stmt(&mut self, _node: &Stmt) {}
+    fn visit_stmt(&mut self, _node: &Stmt) -> StructuralTraversal { StructuralTraversal::SkipChildren }
 
-    fn visit_expr(&mut self, _node: &Expr) {}
+    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal { StructuralTraversal::SkipChildren }
 
-    fn visit_dart_type(&mut self, _node: &DartType) {}
+    fn visit_dart_type(&mut self, _node: &DartType) -> StructuralTraversal { StructuralTraversal::SkipChildren }
+}
 }
 
 fn check_dispose_method(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

@@ -7,10 +7,12 @@
 //! deliberately narrow: it requires a literal `- 1` subtracted from `<name>.length`
 //! indexing `<name>`, so unrelated index expressions are left alone.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferLast;
@@ -18,15 +20,13 @@ pub struct PreferLast;
 impl Rule for PreferLast {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -37,8 +37,11 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Index {
             object,
             index,
@@ -53,8 +56,9 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// Matches `ident[ident.length - 1]` where both idents are the same name.

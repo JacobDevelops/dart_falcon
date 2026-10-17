@@ -20,14 +20,13 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Feature, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_expr, walk_function_decl, walk_method_decl, walk_setter_decl,
-    walk_stmt,
-};
 
 const RULE: &str = "prefer-final-parameters";
 
@@ -45,15 +44,13 @@ impl Rule for PreferFinalParameters {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let mutated = ctx.mutated_declarations(program);
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             ctx,
             docs: ctx.syntax.doc_blocks(ctx.source).collect(),
             mutated,
             wildcards: version.supports(Feature::WildcardVariables),
             diagnostics: Vec::new(),
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        }))
     }
 }
 
@@ -96,20 +93,23 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if let Some(params) = node.params() {
             self.check(params);
         }
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check(&node.params);
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         let tokens = self.ctx.tokens();
         let anchor = node
             .param_annotations
@@ -140,36 +140,38 @@ impl Visitor for Collector<'_, '_> {
                 },
             );
         }
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             self.check(&operator.params);
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         // Primary constructors in pre-3.13 libraries are extension-type
         // representation declarations: their parameters declare final fields.
         // In 3.13+ the lint is disabled for the whole library above.
         if !node.is_primary {
             self.check(node.params);
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
             self.check(&function.params);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::FuncExpr { params, .. } = node {
             self.check(params);
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

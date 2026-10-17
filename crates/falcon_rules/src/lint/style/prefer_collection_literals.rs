@@ -29,13 +29,11 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_expr, walk_field_decl, walk_function_body, walk_function_decl, walk_getter_decl,
-    walk_method_decl, walk_stmt, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct PreferCollectionLiterals;
@@ -48,35 +46,37 @@ const CONCRETE: [&str; 2] = ["LinkedHashMap", "LinkedHashSet"];
 impl Rule for PreferCollectionLiterals {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut scan = ContextScan {
-            suppressed: HashSet::new(),
-        };
-        scan.visit_program(program);
-
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-            suppressed: &scan.suppressed,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+            suppressed: HashSet::new(),
+            expected: None,
+            contexts: Vec::new(),
+        }))
     }
 }
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    suppressed: &'a HashSet<(usize, usize)>,
+    suppressed: HashSet<(usize, usize)>,
+    expected: Option<&'static str>,
+    contexts: Vec<Option<&'static str>>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.contexts.push(self.expected.take());
         if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
+            return StructuralTraversal::Continue;
         }
         if let Some((span, name)) = default_collection_ctor(node) {
             let user_shadow = match self.ctx.identities {
@@ -100,15 +100,101 @@ impl Visitor for Collector<'_> {
                 ));
             }
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.expected = self.contexts.pop().unwrap();
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Variable(v) = node {
+            self.record_decls(&v.var_type, &v.declarators);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
+        self.record_decls(&node.field_type, &node.declarators);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
+        self.record_decls(&node.var_type, &node.declarators);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.enter_return(node.return_type.as_ref());
+        StructuralTraversal::Continue
+    }
+
+    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+        self.expected = self.contexts.pop().unwrap();
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
+        self.enter_return(node.return_type.as_ref());
+        StructuralTraversal::Continue
+    }
+
+    fn exit_method_decl(&mut self, _node: &MethodDecl) {
+        self.expected = self.contexts.pop().unwrap();
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
+        self.enter_return(node.return_type.as_ref());
+        StructuralTraversal::Continue
+    }
+
+    fn exit_getter_decl(&mut self, _node: &GetterDecl) {
+        self.expected = self.contexts.pop().unwrap();
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        self.enter_return(match node {
+            ClassMember::Operator(op) => op.return_type.as_ref(),
+            _ => None,
+        });
+        StructuralTraversal::Continue
+    }
+
+    fn exit_class_member(&mut self, _node: &ClassMember) {
+        self.expected = self.contexts.pop().unwrap();
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.contexts.push(self.expected);
+        if let Stmt::LocalFunc(function) = node {
+            self.expected = function.return_type.as_ref().and_then(concrete_context);
+        } else if let Stmt::Return(ret) = node
+            && let (Some(value), Some(expected)) = (&ret.value, self.expected)
+        {
+            self.record_if_matching(value, expected);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_stmt(&mut self, _node: &Stmt) {
+        self.expected = self.contexts.pop().unwrap();
+    }
+
+    fn visit_function_body(&mut self, node: &FunctionBody) -> StructuralTraversal {
+        if let FunctionBody::Arrow(expr, _) = node
+            && let Some(expected) = self.expected
+        {
+            self.record_if_matching(expr, expected);
+        }
+        StructuralTraversal::Continue
     }
 }
-
-struct ContextScan {
-    suppressed: HashSet<(usize, usize)>,
 }
 
-impl ContextScan {
+impl Collector<'_> {
+    fn enter_return(&mut self, ty: Option<&DartType>) {
+        self.contexts.push(self.expected);
+        self.expected = ty.and_then(concrete_context);
+    }
     fn record_decls(&mut self, ty: &Option<DartType>, decls: &[VarDeclarator]) {
         let Some(ty) = ty else { return };
         let Some(expected) = concrete_context(ty) else {
@@ -128,116 +214,14 @@ impl ContextScan {
             self.suppressed.insert((span.start, span.end));
         }
     }
-
-    fn collect_returns(&mut self, body: &FunctionBody, expected: &str) {
-        match body {
-            FunctionBody::Arrow(e, _) => self.record_if_matching(e, expected),
-            _ => walk_function_body(
-                &mut ReturnScan {
-                    contexts: self,
-                    expected,
-                },
-                body,
-            ),
-        }
-    }
 }
 
-struct ReturnScan<'a, 'b> {
-    contexts: &'a mut ContextScan,
-    expected: &'b str,
-}
-
-impl Visitor for ReturnScan<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if matches!(node, Stmt::LocalFunc(_)) {
-            return;
-        }
-        if let Stmt::Return(ret) = node
-            && let Some(value) = &ret.value
-        {
-            self.contexts.record_if_matching(value, self.expected);
-        }
-        walk_stmt(self, node);
-    }
-
-    fn visit_expr(&mut self, _node: &Expr) {}
-}
-
-impl Visitor for ContextScan {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalFunc(function) = node
-            && let Some(expected) = function.return_type.as_ref().and_then(concrete_context)
-        {
-            self.collect_returns(&function.body, expected);
-        }
-        walk_stmt(self, node);
-    }
-
-    fn visit_class_member(&mut self, node: &ClassMember) {
-        if let ClassMember::Operator(operator) = node
-            && let Some(expected) = operator.return_type.as_ref().and_then(concrete_context)
-            && let Some(body) = &operator.body
-        {
-            self.collect_returns(body, expected);
-        }
-        falcon_syntax::visitor::walk_class_member(self, node);
-    }
-
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.record_decls(&node.field_type, &node.declarators);
-        walk_field_decl(self, node);
-    }
-
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
-        self.record_decls(&lv.var_type, &lv.declarators);
-        falcon_syntax::visitor::walk_local_var(self, lv);
-    }
-
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        if let TopLevelDecl::Variable(v) = node {
-            self.record_decls(&v.var_type, &v.declarators);
-        }
-        walk_top_level_decl(self, node);
-    }
-
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        if let Some(rt) = &node.return_type
-            && let Some(expected) = concrete_context(rt)
-            && let Some(body) = &node.body
-        {
-            self.collect_returns(body, expected);
-        }
-        walk_function_decl(self, node);
-    }
-
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        if let Some(rt) = &node.return_type
-            && let Some(expected) = concrete_context(rt)
-            && let Some(body) = &node.body
-        {
-            self.collect_returns(body, expected);
-        }
-        walk_method_decl(self, node);
-    }
-
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        if let Some(rt) = &node.return_type
-            && let Some(expected) = concrete_context(rt)
-            && let Some(body) = &node.body
-        {
-            self.collect_returns(body, expected);
-        }
-        walk_getter_decl(self, node);
-    }
-}
-
-fn concrete_context(ty: &DartType) -> Option<&str> {
+fn concrete_context(ty: &DartType) -> Option<&'static str> {
     if let DartType::Named(nt) = ty
         && let Some(seg) = nt.segments.last()
         && CONCRETE.contains(&seg.name.as_str())
     {
-        return Some(seg.name.as_str());
+        return CONCRETE.iter().copied().find(|name| *name == seg.name);
     }
     None
 }

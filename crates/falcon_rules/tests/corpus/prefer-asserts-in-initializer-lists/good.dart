@@ -58,3 +58,28 @@ class InstanceMessage {
     assert(value > 0, this.toString());
   }
 }
+
+class InitializerClosure {
+  final bool value;
+  InitializerClosure(int input)
+      : value = (() {
+          assert(input > 0);
+          return true;
+        })() {
+    assert(input > 0, this);
+  }
+}
+
+class SuperClosureParent {
+  SuperClosureParent(bool value);
+}
+
+class SuperArgumentClosure extends SuperClosureParent {
+  SuperArgumentClosure(int input)
+      : super((() {
+          assert(input > 0);
+          return true;
+        })()) {
+    assert(input > 0, this);
+  }
+}

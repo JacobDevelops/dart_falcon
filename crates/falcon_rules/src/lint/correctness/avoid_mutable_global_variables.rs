@@ -7,7 +7,10 @@
 //! it `const` or `final`; when a value genuinely must change over time, hold it
 //! in an object with a clear owner rather than a free-floating global.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -16,25 +19,38 @@ pub struct AvoidMutableGlobalVariables;
 impl Rule for AvoidMutableGlobalVariables {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-
-        for decl in &program.declarations {
-            if let TopLevelDecl::Variable(var_decl) = decl {
-                // pyramid_lint only flags top-level variables that are neither
-                // `const` nor `final` (`isConstOrFinal` skips the declaration).
-                if var_decl.keyword == falcon_syntax::ast::VarKeyword::Var {
-                    diags.push(ctx.diagnostic(
-                        "avoid-mutable-global-variables",
-                        "Avoid mutable global variables. Use const or final instead.",
-                        var_decl.span,
-                    ));
-                }
-            }
-        }
-
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Variable(var_decl) = decl
+            && var_decl.keyword == VarKeyword::Var
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-mutable-global-variables",
+                "Avoid mutable global variables. Use const or final instead.",
+                var_decl.span,
+            ));
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

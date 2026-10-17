@@ -7,10 +7,11 @@
 //! deeper), matching dart_code_linter's default acceptable level of one.
 //! Closure bodies restart the nesting count.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct AvoidNestedConditionalExpressions;
@@ -18,16 +19,15 @@ pub struct AvoidNestedConditionalExpressions;
 impl Rule for AvoidNestedConditionalExpressions {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             cond_ancestor: false,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+            ancestors: Vec::new(),
+        }))
     }
 }
 
@@ -37,17 +37,19 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     cond_ancestor: bool,
+    ancestors: Vec<bool>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::FuncExpr { .. } = node {
-            // A closure body is read on its own; a ternary inside one is not
-            // stacked with the ternary the closure happens to sit in.
-            let saved = std::mem::replace(&mut self.cond_ancestor, false);
-            walk_expr(self, node);
-            self.cond_ancestor = saved;
-            return;
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.ancestors.push(self.cond_ancestor);
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.cond_ancestor = false;
         }
         if let Expr::Conditional { span, .. } = node {
             if self.cond_ancestor {
@@ -57,12 +59,13 @@ impl Visitor for Collector<'_> {
                     *span,
                 ));
             }
-            // Everything under this conditional now has a conditional ancestor.
-            let saved = std::mem::replace(&mut self.cond_ancestor, true);
-            walk_expr(self, node);
-            self.cond_ancestor = saved;
-            return;
+            self.cond_ancestor = true;
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.cond_ancestor = self.ancestors.pop().unwrap();
+    }
+}
 }

@@ -9,10 +9,11 @@
 //! arguments are excluded, since repeating a literal like `Size(48, 48)` is
 //! intentional. The report lands on the last duplicate.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct NoEqualArguments;
@@ -20,15 +21,14 @@ pub struct NoEqualArguments;
 impl Rule for NoEqualArguments {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -112,8 +112,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             Expr::Call { args, .. } | Expr::New { args, .. } => {
                 check_args(args, &mut self.diags, self.ctx);
@@ -129,6 +134,7 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

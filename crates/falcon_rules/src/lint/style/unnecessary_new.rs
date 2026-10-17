@@ -6,9 +6,11 @@
 //! only targets explicit `new`; an implicit `Foo()` parses as a call and a
 //! `const Foo()` keeps its `const`, so neither is touched. Delete the `new`.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct UnnecessaryNew;
@@ -16,24 +18,41 @@ pub struct UnnecessaryNew;
 impl Rule for UnnecessaryNew {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_expr_in_program(program, |node| {
-            if let Expr::New {
-                is_const: false,
-                span,
-                ..
-            } = node.unparenthesized()
-            {
-                diags.push(ctx.diagnostic(
-                    "unnecessary-new",
-                    "Unnecessary `new` keyword; it is optional and can be removed.",
-                    *span,
-                ));
-            }
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if let Expr::New {
+            is_const: false,
+            span,
+            ..
+        } = node.unparenthesized()
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "unnecessary-new",
+                "Unnecessary `new` keyword; it is optional and can be removed.",
+                *span,
+            ));
+        }
+        StructuralTraversal::Continue
+    }
+}
 }

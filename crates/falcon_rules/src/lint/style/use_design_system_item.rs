@@ -18,7 +18,9 @@
 //!
 //! Checks constructions throughout the program, including initializers and annotations.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -28,7 +30,7 @@ pub struct UseDesignSystemItem;
 impl Rule for UseDesignSystemItem {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let items = parse_config_items(ctx);
@@ -36,22 +38,39 @@ impl Rule for UseDesignSystemItem {
             return RulePreparation::Diagnostics(Vec::new());
         }
 
-        let mut diags = Vec::new();
-        falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
-            let construction = match expr.unparenthesized() {
-                Expr::New { .. } => crate::lint::flutter::widget_construction(expr)
-                    .map(|(name, _, span)| (name, span)),
-                Expr::Call { callee, span, .. } => {
-                    callee_base_name(callee).map(|name| (name, span))
-                }
-                _ => None,
-            };
-            if let Some((name, span)) = construction {
-                emit_for_base(name, span, &mut diags, ctx, &items);
-            }
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            items,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a, 'ctx> {
+    ctx: &'a AnalyzeContext<'ctx>,
+    items: Vec<(&'a str, Option<&'a str>)>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, expr: &Expr) -> StructuralTraversal {
+        let construction = match expr.unparenthesized() {
+            Expr::New { .. } => crate::lint::flutter::widget_construction(expr)
+                .map(|(name, _, span)| (name, span)),
+            Expr::Call { callee, span, .. } => {
+                callee_base_name(callee).map(|name| (name, span))
+            }
+            _ => None,
+        };
+        if let Some((name, span)) = construction {
+            emit_for_base(name, span, &mut self.diags, self.ctx, &self.items);
+        }
+        StructuralTraversal::Continue
+    }
+}
 }
 
 fn parse_config_items<'a>(ctx: &'a AnalyzeContext<'_>) -> Vec<(&'a str, Option<&'a str>)> {

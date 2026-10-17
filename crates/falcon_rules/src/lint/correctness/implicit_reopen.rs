@@ -27,7 +27,11 @@
 //!
 //! Adopted from the official `implicit_reopen` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -39,17 +43,35 @@ impl Rule for ImplicitReopen {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        RulePreparation::Structural(Box::new(Collector {
+            program,
+            ctx,
+            model: ctx
+                .identities
+                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    model: Option<SemanticModel<'a>>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
         let siblings = ctx.library.map_or(&[][..], |library| library.siblings());
-        let library = || std::iter::once(program).chain(siblings.iter().copied());
-        let model = ctx
-            .identities
-            .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
+        let library = || std::iter::once(self.program).chain(siblings.iter().copied());
+        let model = &self.model;
             let (name, annotations, modifiers, superclass) = match decl {
                 TopLevelDecl::Class(node) => match &node.extends {
                     Some(superclass) => (&node.name, &node.annotations, node.modifiers, superclass),
-                    None => continue,
+                    None => return StructuralTraversal::SkipChildren,
                 },
                 TopLevelDecl::ClassTypeAlias(node) => (
                     &node.name,
@@ -57,20 +79,20 @@ impl Rule for ImplicitReopen {
                     node.modifiers,
                     &node.superclass,
                 ),
-                _ => continue,
+                _ => return StructuralTraversal::SkipChildren,
             };
             if annotations
                 .iter()
                 .any(|annotation| annotation.name.last().is_some_and(|n| n.name == "reopen"))
             {
-                continue;
+                return StructuralTraversal::SkipChildren;
             }
             // A prefixed supertype comes from another library.
             let DartType::Named(NamedType { segments, .. }) = superclass else {
-                continue;
+                return StructuralTraversal::SkipChildren;
             };
             let [super_name] = segments.as_slice() else {
-                continue;
+                return StructuralTraversal::SkipChildren;
             };
             let mut found = library()
                 .flat_map(|program| &program.declarations)
@@ -94,7 +116,7 @@ impl Rule for ImplicitReopen {
                 });
             // Exactly one same-library class declaration must own the name.
             let (Some(Some(super_modifiers)), None) = (found.next(), found.next()) else {
-                continue;
+                return StructuralTraversal::SkipChildren;
             };
             let super_restriction = match super_modifiers.restriction {
                 Some(ClassRestriction::Sealed) => {
@@ -107,7 +129,7 @@ impl Rule for ImplicitReopen {
                                     .effective_restriction(&model.resolve_name(&*super_name.name)?)
                             });
                     let Some(induced) = induced else {
-                        continue;
+                        return StructuralTraversal::SkipChildren;
                     };
                     induced
                 }
@@ -118,9 +140,9 @@ impl Rule for ImplicitReopen {
                 (Some(ClassRestriction::Base) | None, Some(ClassRestriction::Interface)) => {
                     "interface"
                 }
-                _ => continue,
+                _ => return StructuralTraversal::SkipChildren,
             };
-            diags.push(ctx.diagnostic(
+            self.diags.push(ctx.diagnostic(
                 "implicit-reopen",
                 format!(
                     "The class '{}' reopens '{}' because it is not marked '{reason}'.",
@@ -128,7 +150,11 @@ impl Rule for ImplicitReopen {
                 ),
                 name.span,
             ));
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

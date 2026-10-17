@@ -7,13 +7,12 @@
 //! non-nullable type are left alone, since for them the `null` is either
 //! required or meaningful.
 
-use falcon_analyze::{AnalyzeContext, ParameterDefault, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, ParameterDefault, ResolvedType, Rule, RulePreparation, StructuralRuleVisitor,
+    StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_field_decl, walk_formal_param, walk_local_var,
-    walk_top_level_decl,
-};
 
 use falcon_analyze::semantic_scope::SemanticState;
 
@@ -27,21 +26,20 @@ impl Rule for AvoidInitToNull {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let state = SemanticState::new(program, ctx);
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
-            state: state.as_ref(),
+            state,
             superclass: None,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    state: Option<&'a SemanticState<'a>>,
+    state: Option<SemanticState<'a>>,
     superclass: Option<ResolvedType>,
 }
 
@@ -79,7 +77,7 @@ impl Collector<'_> {
         initializers: &[ConstructorInitializer],
     ) {
         let (Some(state), Some(ResolvedType::Interface { identity, .. })) =
-            (self.state, self.superclass.as_ref())
+            (self.state.as_ref(), self.superclass.as_ref())
         else {
             return;
         };
@@ -120,19 +118,19 @@ impl Collector<'_> {
                     .and_then(|name| signature.defaults.get(name))
                     .is_none_or(default_is_null)
             {
-                self.check_default(param);
+                Self::check_default(self.ctx, &mut self.diags, param);
             }
         }
     }
 
-    fn check_default(&mut self, param: &FormalParam) {
+    fn check_default(ctx: &AnalyzeContext<'_>, diags: &mut Vec<Diagnostic>, param: &FormalParam) {
         if defaults_to_null(&param.param_type)
             && matches!(
                 param.default_value.as_ref().map(Expr::unparenthesized),
                 Some(Expr::NullLit { .. })
             )
         {
-            self.diags.push(self.ctx.diagnostic(
+            diags.push(ctx.diagnostic(
                 "avoid-init-to-null",
                 "Don't explicitly initialize variables to null.",
                 param.span,
@@ -158,14 +156,19 @@ fn default_is_null(default: &ParameterDefault) -> bool {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         self.superclass = match node {
             TopLevelDecl::Class(class) => class.extends.as_ref(),
             TopLevelDecl::MixinClass(class) => class.extends.as_ref(),
             _ => None,
         }
-        .and_then(|ty| self.state.map(|state| state.model.resolve_type(ty)));
+        .and_then(|ty| self.state.as_ref().map(|state| state.model.resolve_type(ty)));
         if let TopLevelDecl::Class(class) = node
             && let Some(constructor) = &class.primary_constructor
         {
@@ -182,35 +185,36 @@ impl Visitor for Collector<'_> {
         if let TopLevelDecl::Variable(v) = node {
             self.check(v.keyword, v.is_late, &v.var_type, &v.declarators);
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         self.check(
             node.keyword,
             node.is_late,
             &node.field_type,
             &node.declarators,
         );
-        walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) -> StructuralTraversal {
         self.check(lv.keyword, lv.is_late, &lv.var_type, &lv.declarators);
-        walk_local_var(self, lv);
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, param: &FormalParam) {
+    fn visit_formal_param(&mut self, param: &FormalParam) -> StructuralTraversal {
         if param.initializing != Some(InitializingFormal::Super) {
-            self.check_default(param);
+            Self::check_default(self.ctx, &mut self.diags, param);
         }
-        walk_formal_param(self, param);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) {
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Constructor(constructor) = member {
             self.check_super_defaults(&constructor.params, &constructor.initializers);
         }
-        walk_class_member(self, member);
+        StructuralTraversal::Continue
     }
+}
 }

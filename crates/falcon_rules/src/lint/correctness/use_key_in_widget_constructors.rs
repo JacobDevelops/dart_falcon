@@ -8,12 +8,12 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, TypeParameterId, TypeParameterScope,
+    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterId,
+    TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 #[derive(Default)]
 pub struct UseKeyInWidgetConstructors;
@@ -21,21 +21,20 @@ pub struct UseKeyInWidgetConstructors;
 impl Rule for UseKeyInWidgetConstructors {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut collector = Collector {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
             model,
             signatures,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -251,10 +250,15 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_class_decl(&mut self, node: &ClassDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn visit_class_decl(&mut self, node: &ClassDecl) -> StructuralTraversal {
         self.check_class(node);
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 fn target_defines_key(

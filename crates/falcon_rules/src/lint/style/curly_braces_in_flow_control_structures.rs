@@ -8,11 +8,12 @@
 //! braces, and an `else if` chain need not wrap the intermediate `if` in a
 //! block.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
 
 #[derive(Default)]
 pub struct CurlyBracesInFlowControlStructures;
@@ -20,16 +21,15 @@ pub struct CurlyBracesInFlowControlStructures;
 impl Rule for CurlyBracesInFlowControlStructures {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             source: ctx.source,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -54,8 +54,13 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             Stmt::If(i) => match &i.else_branch {
                 None => {
@@ -108,6 +113,7 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

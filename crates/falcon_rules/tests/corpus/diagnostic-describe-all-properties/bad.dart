@@ -78,3 +78,18 @@ class InferredModel with Diagnosticable {
   final count = 1; /* expect: diagnostic-describe-all-properties */
   final values = <String>[]; /* expect: diagnostic-describe-all-properties */
 }
+
+class DebugScopeModel with Diagnosticable {
+  final int outsideBody = 1; /* expect: diagnostic-describe-all-properties */
+  final int nestedReference = 2;
+
+  void otherMethod() {
+    print(outsideBody);
+  }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    final deferred = () => nestedReference;
+    properties.add(IntProperty('nestedReference', deferred()));
+  }
+}

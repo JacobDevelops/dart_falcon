@@ -10,11 +10,12 @@
 //! as a plain parameter with a function type and is not flagged. Rewrite using
 //! `Function` type syntax. Diagnostics cover the complete parameter declaration.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{self, Visitor};
 
 #[derive(Default)]
 pub struct UseFunctionTypeSyntaxForParameters;
@@ -22,15 +23,14 @@ pub struct UseFunctionTypeSyntaxForParameters;
 impl Rule for UseFunctionTypeSyntaxForParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -39,8 +39,9 @@ struct Collector<'a, 'c> {
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if node.function_params.is_some() {
             self.diags.push(self.ctx.diagnostic(
                 "use-function-type-syntax-for-parameters",
@@ -48,8 +49,13 @@ impl Visitor for Collector<'_, '_> {
                 node.span,
             ));
         }
-        visitor::walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 #[cfg(test)]

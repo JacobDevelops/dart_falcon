@@ -7,10 +7,11 @@
 //! `Container` has exactly one named argument, `child`, and no positional
 //! arguments.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct AvoidUnnecessaryContainers;
@@ -18,15 +19,14 @@ pub struct AvoidUnnecessaryContainers;
 impl Rule for AvoidUnnecessaryContainers {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -35,8 +35,9 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Some((name, args, span)) = crate::lint::flutter::widget_construction(node)
             && name == "Container"
             && args.positional.is_empty()
@@ -49,6 +50,11 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

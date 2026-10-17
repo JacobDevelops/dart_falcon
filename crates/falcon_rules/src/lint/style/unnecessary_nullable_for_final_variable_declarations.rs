@@ -10,10 +10,11 @@
 //! alone. It applies to final/const top-level variables, static fields, and local
 //! variables. Drop the `?` from the declared type.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct UnnecessaryNullableForFinalVariableDeclarations;
@@ -21,15 +22,14 @@ pub struct UnnecessaryNullableForFinalVariableDeclarations;
 impl Rule for UnnecessaryNullableForFinalVariableDeclarations {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -74,22 +74,29 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = node {
             self.check(v.keyword, &v.var_type, &v.declarators);
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         if node.is_static {
             self.check(node.keyword, &node.field_type, &node.declarators);
         }
+        StructuralTraversal::SkipChildren
     }
 
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) -> StructuralTraversal {
         self.check(lv.keyword, &lv.var_type, &lv.declarators);
-        falcon_syntax::visitor::walk_local_var(self, lv);
+        StructuralTraversal::Continue
     }
+}
 }

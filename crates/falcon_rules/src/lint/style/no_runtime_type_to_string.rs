@@ -25,13 +25,13 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralNode, StructuralRuleVisitor,
+    StructuralTraversal, structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_expr, walk_formal_param, walk_function_body, walk_stmt, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct NoRuntimeTypeToString;
@@ -55,18 +55,17 @@ impl Rule for NoRuntimeTypeToString {
                 _ => None,
             })
             .collect();
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diagnostics: Vec::new(),
             ctx,
             concrete_classes,
             exempt_depth: 0,
             in_type: false,
             shadowed: false,
-        };
-        for declaration in &program.declarations {
-            collector.visit_top_level_decl(declaration);
-        }
-        RulePreparation::Diagnostics(collector.diagnostics)
+            member_depth: 0,
+            pending: Vec::new(),
+            constructor_depth: 0,
+        }))
     }
 }
 
@@ -80,6 +79,9 @@ struct Collector<'a> {
     in_type: bool,
     /// The current type declares a local or parameter named `runtimeType`.
     shadowed: bool,
+    member_depth: usize,
+    pending: Vec<(Span, bool)>,
+    constructor_depth: usize,
 }
 
 impl Collector<'_> {
@@ -92,27 +94,15 @@ impl Collector<'_> {
                         Expr::This { .. } | Expr::Super { .. }
                     )
             }
-            Expr::Ident(identifier) => {
-                identifier.name == "runtimeType" && self.in_type && !self.shadowed
-            }
+            Expr::Ident(identifier) => identifier.name == "runtimeType" && self.in_type,
             _ => false,
         }
     }
 
-    fn report(&mut self, span: Span) {
+    fn report(&mut self, span: Span, implicit: bool) {
         if self.exempt_depth == 0 {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "no-runtime-type-to-string",
-                "Using 'toString' on a 'Type' is not safe in production code.",
-                span,
-            ));
+            self.pending.push((span, implicit));
         }
-    }
-
-    fn exempt(&mut self, visit: impl FnOnce(&mut Self)) {
-        self.exempt_depth += 1;
-        visit(self);
-        self.exempt_depth -= 1;
     }
 
     /// Whether an extension's `on` type is a non-abstract class, or not an
@@ -134,134 +124,132 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        let (checked, members) = match node {
-            TopLevelDecl::Class(class) => (!class.modifiers.is_abstract, class.members.as_slice()),
-            TopLevelDecl::MixinClass(class) => (!class.is_abstract, class.members.as_slice()),
-            TopLevelDecl::Enum(declaration) => (true, declaration.members.as_slice()),
-            TopLevelDecl::ExtensionType(declaration) => (true, declaration.members.as_slice()),
-            TopLevelDecl::Extension(extension) => (
-                self.extension_checked(extension),
-                extension.members.as_slice(),
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        match parent {
+            StructuralNode::Program(_) => matches!(child, StructuralNode::TopLevelDecl(_)),
+            StructuralNode::ConstructorDecl(_) => !matches!(
+                child, StructuralNode::Annotation(_) | StructuralNode::RedirectedConstructor(_)
             ),
-            TopLevelDecl::Mixin(mixin) => (false, mixin.members.as_slice()),
-            TopLevelDecl::ClassTypeAlias(_)
-            | TopLevelDecl::Function(_)
-            | TopLevelDecl::Variable(_)
-            | TopLevelDecl::TypeAlias(_)
-            | TopLevelDecl::Error(_) => {
-                walk_top_level_decl(self, node);
-                return;
-            }
-        };
-        let mut declared = DeclaresRuntimeType(false);
-        for member in members {
-            declared.visit_class_member(member);
+            _ => true,
         }
-        self.in_type = true;
-        self.shadowed = declared.0;
-        if checked {
-            walk_top_level_decl(self, node);
-        } else {
-            self.exempt(|collector| walk_top_level_decl(collector, node));
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        let checked = match node {
+            TopLevelDecl::Class(class) => Some(!class.modifiers.is_abstract),
+            TopLevelDecl::MixinClass(class) => Some(!class.is_abstract),
+            TopLevelDecl::Enum(_) | TopLevelDecl::ExtensionType(_) => Some(true),
+            TopLevelDecl::Extension(extension) => Some(self.extension_checked(extension)),
+            TopLevelDecl::Mixin(_) => Some(false),
+            _ => None,
+        };
+        self.in_type = checked.is_some();
+        self.exempt_depth += usize::from(checked == Some(false));
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+        for (span, implicit) in self.pending.drain(..) {
+            if !implicit || !self.shadowed {
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "no-runtime-type-to-string",
+                    "Using 'toString' on a 'Type' is not safe in production code.",
+                    span,
+                ));
+            }
         }
         self.in_type = false;
         self.shadowed = false;
+        self.exempt_depth = 0;
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        for param in &node.params.params {
-            self.visit_formal_param(param);
-        }
-        for initializer in &node.initializers {
-            match initializer {
-                ConstructorInitializer::SuperCall { args, .. }
-                | ConstructorInitializer::ThisCall { args, .. } => {
-                    for argument in &args.positional {
-                        self.visit_expr(argument);
-                    }
-                    for argument in &args.named {
-                        self.visit_expr(&argument.value);
-                    }
-                }
-                ConstructorInitializer::FieldInit { value, .. } => self.visit_expr(value),
-                ConstructorInitializer::Assert {
-                    condition, message, ..
-                } => self.exempt(|collector| {
-                    collector.visit_expr(condition);
-                    if let Some(message) = message {
-                        collector.visit_expr(message);
-                    }
-                }),
-            }
-        }
-        if let Some(body) = &node.body {
-            walk_function_body(self, body);
-        }
+    fn visit_constructor_decl(&mut self, _node: &ConstructorDecl) -> StructuralTraversal {
+        self.constructor_depth += 1;
+        StructuralTraversal::Continue
+    }
+    fn exit_constructor_decl(&mut self, _node: &ConstructorDecl) { self.constructor_depth -= 1; }
+
+    fn visit_constructor_initializer(&mut self, node: &ConstructorInitializer) -> StructuralTraversal {
+        self.exempt_depth += usize::from(self.constructor_depth > 0 && matches!(node, ConstructorInitializer::Assert { .. }));
+        StructuralTraversal::Continue
+    }
+    fn exit_constructor_initializer(&mut self, node: &ConstructorInitializer) {
+        self.exempt_depth -= usize::from(self.constructor_depth > 0 && matches!(node, ConstructorInitializer::Assert { .. }));
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::TryCatch(statement) = node {
-            for nested in &statement.body.stmts {
-                self.visit_stmt(nested);
-            }
-            for catch in &statement.catches {
-                self.exempt(|collector| {
-                    for nested in &catch.body.stmts {
-                        collector.visit_stmt(nested);
-                    }
-                });
-            }
-            if let Some(finally) = &statement.finally {
-                for nested in &finally.stmts {
-                    self.visit_stmt(nested);
-                }
-            }
-        } else if matches!(node, Stmt::Assert(_) | Stmt::Throw(_)) {
-            self.exempt(|collector| walk_stmt(collector, node));
-        } else {
-            walk_stmt(self, node);
-        }
+    fn visit_catch_clause(&mut self, _node: &CatchClause) -> StructuralTraversal {
+        self.exempt_depth += 1;
+        StructuralTraversal::Continue
+    }
+    fn exit_catch_clause(&mut self, _node: &CatchClause) { self.exempt_depth -= 1; }
+
+    fn visit_class_member(&mut self, _node: &ClassMember) -> StructuralTraversal {
+        self.member_depth += 1;
+        StructuralTraversal::Continue
+    }
+    fn exit_class_member(&mut self, _node: &ClassMember) { self.member_depth -= 1; }
+
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
+        self.shadowed |= self.member_depth > 0 && node.name.name == "runtimeType";
+        StructuralTraversal::Continue
+    }
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
+        self.shadowed |= self.member_depth > 0 && node.declarators.iter().any(|declarator| declarator.name.name == "runtimeType");
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::Throw { .. }) {
-            self.exempt(|collector| walk_expr(collector, node));
-            return;
-        }
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.exempt_depth += usize::from(matches!(node, Stmt::Assert(_) | Stmt::Throw(_)));
+        StructuralTraversal::Continue
+    }
+    fn exit_stmt(&mut self, node: &Stmt) {
+        self.exempt_depth -= usize::from(matches!(node, Stmt::Assert(_) | Stmt::Throw(_)));
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.exempt_depth += usize::from(matches!(node, Expr::Throw { .. }));
         if let Expr::Call { callee, .. } = node
             && let Expr::Field { object, field, .. } = callee.unparenthesized()
             && field.name == "toString"
             && self.is_runtime_type_access(object)
         {
-            self.report(field.span);
+            self.report(field.span, matches!(object.unparenthesized(), Expr::Ident(_)));
         }
         if let Expr::StringLit(literal) = node {
             for interpolation in &literal.interpolations {
                 if self.is_runtime_type_access(&interpolation.expr) {
-                    self.report(*interpolation.expr.span());
+                    self.report(*interpolation.expr.span(), matches!(interpolation.expr.unparenthesized(), Expr::Ident(_)));
                 }
             }
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
+    }
+    fn exit_expr(&mut self, node: &Expr) {
+        self.exempt_depth -= usize::from(matches!(node, Expr::Throw { .. }));
     }
 }
+}
 
-/// Finds a parameter or local variable named `runtimeType` in a declaration.
-struct DeclaresRuntimeType(bool);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::RuleAnalysis;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
 
-impl Visitor for DeclaresRuntimeType {
-    fn visit_formal_param(&mut self, node: &FormalParam) {
-        self.0 |= node.name.name == "runtimeType";
-        walk_formal_param(self, node);
-    }
-
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        self.0 |= node
-            .declarators
-            .iter()
-            .any(|declarator| declarator.name.name == "runtimeType");
-        falcon_syntax::visitor::walk_local_var(self, node);
+    #[test]
+    fn only_ordinary_constructor_assert_initializers_are_exempt() {
+        let source = "class Ordinary { Ordinary() : assert(runtimeType.toString().isNotEmpty); } class Primary(int value) { this : assert(runtimeType.toString().isNotEmpty); }";
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = NoRuntimeTypeToString.analyze(&parsed.program, &ctx);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].span.start, source.rfind("toString").unwrap());
     }
 }

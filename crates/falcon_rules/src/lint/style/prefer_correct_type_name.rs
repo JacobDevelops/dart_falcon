@@ -9,7 +9,10 @@
 //! declared name's spelling only, so it does not enforce interior capitalization
 //! such as an acronym written in all caps.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -19,40 +22,55 @@ pub struct PreferCorrectTypeName;
 impl Rule for PreferCorrectTypeName {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        match decl {
                 TopLevelDecl::Class(c) => {
-                    check_type_name(&c.name, &mut diags, ctx);
+                    check_type_name(&c.name, &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::Mixin(m) => {
-                    check_type_name(&m.name, &mut diags, ctx);
+                    check_type_name(&m.name, &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::MixinClass(mc) => {
-                    check_type_name(&mc.name, &mut diags, ctx);
+                    check_type_name(&mc.name, &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::Enum(e) => {
-                    check_type_name(&e.name, &mut diags, ctx);
+                    check_type_name(&e.name, &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::Extension(ext) => {
                     if let Some(name) = &ext.name {
-                        check_type_name(name, &mut diags, ctx);
+                        check_type_name(name, &mut self.diags, self.ctx);
                     }
                 }
                 TopLevelDecl::ExtensionType(et) => {
-                    check_type_name(&et.name, &mut diags, ctx);
+                    check_type_name(&et.name, &mut self.diags, self.ctx);
                 }
                 TopLevelDecl::TypeAlias(ta) => {
-                    check_type_name(&ta.name, &mut diags, ctx);
+                    check_type_name(&ta.name, &mut self.diags, self.ctx);
                 }
                 _ => {}
             }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 fn check_type_name(name_ident: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

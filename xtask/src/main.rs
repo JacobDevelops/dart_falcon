@@ -148,8 +148,9 @@ fn pascal_case(snake: &str) -> String {
 /// Render the Rule impl stub for a new rule.
 fn rule_stub(struct_name: &str) -> String {
     format!(
-        r#"use falcon_analyze::{{AnalyzeContext, Rule, RulePreparation}};
-use falcon_syntax::Program;
+        r#"use falcon_analyze::{{AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal}};
+use falcon_diagnostics::Diagnostic;
+use falcon_syntax::{{ast::Expr, Program}};
 
 #[derive(Default)]
 pub struct {struct_name};
@@ -157,9 +158,25 @@ pub struct {struct_name};
 impl Rule for {struct_name} {{
     fn prepare<'a>(&self, program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {{
         let _ = (program, ctx);
-        // TODO: walk `program.declarations` and emit diagnostics per violation.
-        RulePreparation::Diagnostics(Vec::new())
+        RulePreparation::Structural(Box::new(Collector {{ diagnostics: Vec::new() }}))
     }}
+}}
+
+struct Collector {{
+    diagnostics: Vec<Diagnostic>,
+}}
+
+falcon_analyze::structural_visitor! {{
+impl StructuralRuleVisitor for Collector {{
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {{
+        let _ = node;
+        StructuralTraversal::Continue
+    }}
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {{
+        self.diagnostics
+    }}
+}}
 }}
 "#
     )

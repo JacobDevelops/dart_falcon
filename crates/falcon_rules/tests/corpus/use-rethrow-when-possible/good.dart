@@ -61,3 +61,17 @@ void f() {
     cb();
   }
 }
+
+void nestedTryDoesNotRethrowOuterBinding() {
+  try {
+    x();
+  } catch (outer) {
+    try {
+      throw outer;
+    } catch (inner) {
+      throw outer;
+    } finally {
+      throw outer;
+    }
+  }
+}

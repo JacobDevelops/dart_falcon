@@ -9,12 +9,11 @@
 //! (on a `new`, list, map, set, or dot-shorthand) found at depth greater than
 //! zero.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_expr, walk_field_decl, walk_local_var, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct UnnecessaryConst;
@@ -22,16 +21,15 @@ pub struct UnnecessaryConst;
 impl Rule for UnnecessaryConst {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             const_depth: 0,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -56,45 +54,47 @@ struct Collector<'a> {
     const_depth: usize,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        if let TopLevelDecl::Variable(v) = node
-            && v.keyword == falcon_syntax::ast::VarKeyword::Const
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        if matches!(node, TopLevelDecl::Variable(v) if v.keyword == VarKeyword::Const) {
+            self.const_depth += 1;
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        if matches!(node, TopLevelDecl::Variable(v) if v.keyword == VarKeyword::Const) {
+            self.const_depth -= 1;
+        }
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
+        self.const_depth += usize::from(node.keyword == VarKeyword::Const);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_field_decl(&mut self, node: &FieldDecl) {
+        self.const_depth -= usize::from(node.keyword == VarKeyword::Const);
+    }
+
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
+        self.const_depth += usize::from(node.keyword == VarKeyword::Const);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_local_var(&mut self, node: &LocalVarDecl) {
+        self.const_depth -= usize::from(node.keyword == VarKeyword::Const);
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if !matches!(node, Expr::Paren { .. })
+            && let Some(span) = const_marker_span(node)
         {
-            self.const_depth += 1;
-            walk_top_level_decl(self, node);
-            self.const_depth -= 1;
-            return;
-        }
-        walk_top_level_decl(self, node);
-    }
-
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        if node.keyword == falcon_syntax::ast::VarKeyword::Const {
-            self.const_depth += 1;
-            walk_field_decl(self, node);
-            self.const_depth -= 1;
-            return;
-        }
-        walk_field_decl(self, node);
-    }
-
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
-        if lv.keyword == falcon_syntax::ast::VarKeyword::Const {
-            self.const_depth += 1;
-            walk_local_var(self, lv);
-            self.const_depth -= 1;
-            return;
-        }
-        walk_local_var(self, lv);
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
-        }
-        if let Some(span) = const_marker_span(node) {
             if self.const_depth > 0 {
                 self.diags.push(self.ctx.diagnostic(
                     "unnecessary-const",
@@ -103,12 +103,16 @@ impl Visitor for Collector<'_> {
                 ));
             }
             self.const_depth += 1;
-            walk_expr(self, node);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, node: &Expr) {
+        if !matches!(node, Expr::Paren { .. }) && const_marker_span(node).is_some() {
             self.const_depth -= 1;
-        } else {
-            walk_expr(self, node);
         }
     }
+}
 }
 
 #[cfg(test)]

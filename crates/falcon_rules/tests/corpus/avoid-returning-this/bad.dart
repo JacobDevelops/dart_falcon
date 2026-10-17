@@ -39,3 +39,57 @@ enum Level {
 class Remote extends SomeUnknownBase {
   Remote ping() => this; /* expect: avoid-returning-this */
 }
+
+class NestedReturns {
+  NestedReturns run() {
+    NestedReturns local() {
+      return NestedReturns();
+    }
+    final callback = () {
+      return NestedReturns();
+    };
+    return this; /* expect: avoid-returning-this */
+  }
+}
+
+class ControlReturns {
+  ControlReturns guarded(bool fail) {
+    try {
+      if (fail) throw StateError('failed');
+      return this; /* expect: avoid-returning-this */
+    } catch (_) {
+      return this;
+    } finally {
+      return this;
+    }
+  }
+
+  ControlReturns branches(int value) {
+    switch (value) {
+      case 0:
+        return this; /* expect: avoid-returning-this */
+      default:
+        outer:
+        for (var i = 0; i < value; i++) {
+          if (i == 1) return this;
+          break outer;
+        }
+    }
+    while (value-- > 0) {
+      return this;
+    }
+    do {
+      return this;
+    } while (false);
+  }
+
+  ControlReturns callbacks() {
+    final callback = () {
+      return this;
+    };
+    ControlReturns local() {
+      return this;
+    }
+    return this; /* expect: avoid-returning-this */
+  }
+}

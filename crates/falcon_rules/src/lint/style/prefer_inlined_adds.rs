@@ -7,9 +7,11 @@
 //! takes exactly one positional argument and no named arguments; multi-argument
 //! or named calls, and cascades on non-list receivers, are ignored.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct PreferInlinedAdds;
@@ -17,31 +19,48 @@ pub struct PreferInlinedAdds;
 impl Rule for PreferInlinedAdds {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_expr_in_program(program, |node| {
-            if let Expr::Cascade {
-                object, sections, ..
-            } = node.unparenthesized()
-                && matches!(object.unparenthesized(), Expr::List { .. })
-            {
-                for section in sections {
-                    // Stop after one match because operations in a section share its span.
-                    for op in &section.ops {
-                        if let CascadeOp::Call(ident, _, args) = op
-                            && ident.name == "add"
-                            && args.positional.len() == 1
-                            && args.named.is_empty()
-                        {
-                            diags.push(ctx.diagnostic("prefer-inlined-adds", "Inline the added element into the collection literal instead of using 'add'.", section.span));
-                            break;
-                        }
+        RulePreparation::Structural(Box::new(Collector {
+            diags: Vec::new(),
+            ctx,
+        }))
+    }
+}
+
+struct Collector<'a> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'a>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if let Expr::Cascade {
+            object, sections, ..
+        } = node.unparenthesized()
+            && matches!(object.unparenthesized(), Expr::List { .. })
+        {
+            for section in sections {
+                // Stop after one match because operations in a section share its span.
+                for op in &section.ops {
+                    if let CascadeOp::Call(ident, _, args) = op
+                        && ident.name == "add"
+                        && args.positional.len() == 1
+                        && args.named.is_empty()
+                    {
+                        self.diags.push(self.ctx.diagnostic("prefer-inlined-adds", "Inline the added element into the collection literal instead of using 'add'.", section.span));
+                        break;
                     }
                 }
             }
-        });
-        RulePreparation::Diagnostics(diags)
+        }
+        StructuralTraversal::Continue
     }
+}
 }

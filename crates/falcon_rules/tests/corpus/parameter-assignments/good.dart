@@ -51,3 +51,8 @@ void nestedInAssignment(List<int> target, int targetOffset, int size, Callbacks 
   };
   print(copy);
 }
+
+class InitializerOnly {
+  final int value;
+  InitializerOnly(int input) : value = input++;
+}

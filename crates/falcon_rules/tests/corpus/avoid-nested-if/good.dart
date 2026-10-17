@@ -51,3 +51,10 @@ class NestedIfExamples {
 
   void doSomething() {}
 }
+
+void unbracedThenRoot(bool a, bool b, bool c) {
+  if (a)
+    if (b) {
+      if (c) {}
+    }
+}

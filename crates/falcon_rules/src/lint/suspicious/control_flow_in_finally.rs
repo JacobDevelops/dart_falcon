@@ -10,10 +10,11 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct ControlFlowInFinally;
@@ -21,144 +22,163 @@ pub struct ControlFlowInFinally;
 impl Rule for ControlFlowInFinally {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut finder = Finder {
+        let finder = Finder {
             diags: Vec::new(),
             ctx,
+            contexts: Vec::new(),
+            finally_blocks: Vec::new(),
+            floor: 0,
+            floors: Vec::new(),
         };
-        finder.visit_program(program);
-        finder
-            .diags
-            .sort_unstable_by_key(|diagnostic| diagnostic.span.start);
-        finder
-            .diags
-            .dedup_by_key(|diagnostic| diagnostic.span.start);
-        RulePreparation::Diagnostics(finder.diags)
+        RulePreparation::Structural(Box::new(finder))
     }
 }
 
 struct Finder<'a, 'ctx> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
+    contexts: Vec<FinallyContext>,
+    finally_blocks: Vec<Option<Span>>,
+    floor: usize,
+    floors: Vec<usize>,
 }
 
-impl Visitor for Finder<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::TryCatch(try_catch) = node
-            && let Some(finally) = &try_catch.finally
-        {
-            let mut scanner = FinallyScanner {
-                diags: &mut self.diags,
-                ctx: self.ctx,
-                breakable: 0,
-                loops: 0,
-                break_labels: HashSet::new(),
-                loop_labels: HashSet::new(),
-            };
-            for stmt in &finally.stmts {
-                scanner.visit_stmt(stmt);
-            }
-        }
-        walk_stmt(self, node);
-    }
-}
-
-struct FinallyScanner<'a, 'ctx, 'diags> {
-    diags: &'diags mut Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'ctx>,
+#[derive(Default)]
+struct FinallyContext {
     breakable: usize,
     loops: usize,
     break_labels: HashSet<String>,
     loop_labels: HashSet<String>,
 }
 
-impl FinallyScanner<'_, '_, '_> {
-    fn with_depth(&mut self, breakable: usize, loops: usize, walk: impl FnOnce(&mut Self)) {
-        self.breakable += breakable;
-        self.loops += loops;
-        walk(self);
-        self.breakable -= breakable;
-        self.loops -= loops;
-    }
-
-    fn with_label(&mut self, labeled: &LabeledStmt, walk: impl FnOnce(&mut Self)) {
-        let name = labeled.label.name.clone();
-        self.break_labels.insert(name.clone());
+impl FinallyContext {
+    fn label_is_loop(labeled: &LabeledStmt) -> bool {
         let mut target = labeled.stmt.as_ref();
         while let Stmt::Labeled(inner) = target {
             target = inner.stmt.as_ref();
         }
-        let is_loop = matches!(target, Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_));
-        if is_loop {
-            self.loop_labels.insert(name.clone());
-        }
-        walk(self);
-        self.break_labels.remove(&name);
-        self.loop_labels.remove(&name);
+        matches!(target, Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_))
     }
 
-    fn visit_switch(&mut self, node: &Stmt, switch: &SwitchStmt) {
-        self.with_depth(1, 0, |this| {
-            for label in switch.cases.iter().flat_map(|case| &case.labels) {
-                this.loop_labels.insert(label.name.clone());
+    fn enter(&mut self, node: &Stmt) {
+        match node {
+            Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {
+                self.breakable += 1;
+                self.loops += 1;
             }
-            walk_stmt(this, node);
-            for label in switch.cases.iter().flat_map(|case| &case.labels) {
-                this.loop_labels.remove(&label.name);
+            Stmt::Switch(switch) => {
+                self.breakable += 1;
+                for label in switch.cases.iter().flat_map(|case| &case.labels) {
+                    self.loop_labels.insert(label.name.clone());
+                }
             }
-        });
+            Stmt::Labeled(labeled) => {
+                self.break_labels.insert(labeled.label.name.clone());
+                if Self::label_is_loop(labeled) {
+                    self.loop_labels.insert(labeled.label.name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn exit(&mut self, node: &Stmt) {
+        match node {
+            Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {
+                self.breakable -= 1;
+                self.loops -= 1;
+            }
+            Stmt::Switch(switch) => {
+                self.breakable -= 1;
+                for label in switch.cases.iter().flat_map(|case| &case.labels) {
+                    self.loop_labels.remove(&label.name);
+                }
+            }
+            Stmt::Labeled(labeled) => {
+                self.break_labels.remove(&labeled.label.name);
+                self.loop_labels.remove(&labeled.label.name);
+            }
+            _ => {}
+        }
+    }
+
+    fn escaping_span(&self, node: &Stmt) -> Option<Span> {
+        match node {
+            Stmt::Return(ret) => Some(ret.span),
+            Stmt::Break(brk)
+                if !brk.label.as_ref().map_or(self.breakable > 0, |label| {
+                    self.break_labels.contains(&label.name)
+                }) =>
+            {
+                Some(brk.span)
+            }
+            Stmt::Continue(cont)
+                if !cont.label.as_ref().map_or(self.loops > 0, |label| {
+                    self.loop_labels.contains(&label.name)
+                }) =>
+            {
+                Some(cont.span)
+            }
+            _ => None,
+        }
     }
 }
 
-impl Visitor for FinallyScanner<'_, '_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::Return(ret) => self.diags.push(self.ctx.diagnostic(
-                "control-flow-in-finally",
-                "Avoid control flow (return/break/continue) that escapes a finally block",
-                ret.span,
-            )),
-            Stmt::Break(brk) => {
-                let stays_inside = brk.label.as_ref().map_or(self.breakable > 0, |label| {
-                    self.break_labels.contains(&label.name)
-                });
-                if !stays_inside {
-                    self.diags.push(self.ctx.diagnostic(
-                        "control-flow-in-finally",
-                        "Avoid control flow (return/break/continue) that escapes a finally block",
-                        brk.span,
-                    ));
-                }
-            }
-            Stmt::Continue(cont) => {
-                let stays_inside = cont.label.as_ref().map_or(self.loops > 0, |label| {
-                    self.loop_labels.contains(&label.name)
-                });
-                if !stays_inside {
-                    self.diags.push(self.ctx.diagnostic(
-                        "control-flow-in-finally",
-                        "Avoid control flow (return/break/continue) that escapes a finally block",
-                        cont.span,
-                    ));
-                }
-            }
-            Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {
-                self.with_depth(1, 1, |this| walk_stmt(this, node));
-            }
-            Stmt::Switch(switch) => self.visit_switch(node, switch),
-            Stmt::Labeled(labeled) => {
-                self.with_label(labeled, |this| walk_stmt(this, node));
-            }
-            Stmt::LocalFunc(_) => {}
-            _ => walk_stmt(self, node),
-        }
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Finder<'_, '_> {
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags.sort_unstable_by_key(|diagnostic| diagnostic.span.start);
+        self.diags.dedup_by_key(|diagnostic| diagnostic.span.start);
+        self.diags
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if !matches!(node, Expr::FuncExpr { .. }) {
-            walk_expr(self, node);
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.floors.push(self.floor);
+        if matches!(node, Stmt::LocalFunc(_)) { self.floor = self.contexts.len(); }
+        if let Stmt::TryCatch(try_catch) = node {
+            self.finally_blocks.push(try_catch.finally.as_ref().map(|block| block.span));
         }
+        for context in &mut self.contexts[self.floor..] {
+            if let Some(span) = context.escaping_span(node) {
+                self.diags.push(self.ctx.diagnostic(
+                    "control-flow-in-finally",
+                    "Avoid control flow (return/break/continue) that escapes a finally block",
+                    span,
+                ));
+            }
+            context.enter(node);
+        }
+        StructuralTraversal::Continue
     }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        for context in &mut self.contexts[self.floor..] { context.exit(node); }
+        if matches!(node, Stmt::TryCatch(_)) { self.finally_blocks.pop(); }
+        self.floor = self.floors.pop().unwrap();
+    }
+
+    fn visit_block(&mut self, node: &Block) -> StructuralTraversal {
+        if self.finally_blocks.last() == Some(&Some(node.span)) {
+            self.contexts.push(FinallyContext::default());
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_block(&mut self, node: &Block) {
+        if self.finally_blocks.last() == Some(&Some(node.span)) { self.contexts.pop(); }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.floors.push(self.floor);
+        if matches!(node, Expr::FuncExpr { .. }) { self.floor = self.contexts.len(); }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.floor = self.floors.pop().unwrap();
+    }
+}
 }

@@ -27,3 +27,20 @@ List<int> forBody(List<int> values) => [
 const typed = <int>[
   true ? 1 : 2, /* expect: prefer-if-elements-to-conditional-expressions */
 ];
+
+List<int> nestedElseIf(bool a, bool b, bool c, bool d, bool e) => [
+  if (a)
+    b ? 1 : 2 /* expect: prefer-if-elements-to-conditional-expressions */
+  else if (c)
+    d ? 3 : 4 /* expect: prefer-if-elements-to-conditional-expressions */
+  else
+    e ? 5 : 6, /* expect: prefer-if-elements-to-conditional-expressions */
+];
+
+List<int> ifInsideFor(List<int> values, bool a, bool b, bool c) => [
+  for (final value in values)
+    if (a)
+      b ? value : -value /* expect: prefer-if-elements-to-conditional-expressions */
+    else
+      c ? value : 0, /* expect: prefer-if-elements-to-conditional-expressions */
+];

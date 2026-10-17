@@ -15,11 +15,12 @@
 //!
 //! Adopted from the official `always_declare_return_types` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_class_member, walk_stmt, walk_top_level_decl};
 
 use crate::lint::declarations::in_test_directory;
 
@@ -31,16 +32,15 @@ pub struct AlwaysDeclareReturnTypes;
 impl Rule for AlwaysDeclareReturnTypes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
             in_test_directory: in_test_directory(ctx.file_path),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -74,8 +74,13 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         match node {
             TopLevelDecl::Function(function)
                 if function.return_type.is_none()
@@ -95,10 +100,10 @@ impl Visitor for Collector<'_, '_> {
             }
             _ => {}
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         match node {
             ClassMember::Method(method) if method.return_type.is_none() => {
                 self.method(&method.name.name, method.name.span);
@@ -114,17 +119,18 @@ impl Visitor for Collector<'_, '_> {
             }
             _ => {}
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node
             && function.return_type.is_none()
         {
             self.function(&function.name);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// The operator name alone, including both tokens of `[]`.

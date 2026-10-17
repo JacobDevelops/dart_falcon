@@ -19,7 +19,10 @@
 //!
 //! Adopted from the official `avoid_setters_without_getters` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, Rule, RulePreparation, StructuralRuleVisitor,
+    StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -40,8 +43,25 @@ impl Rule for AvoidSettersWithoutGetters {
         let Some(state) = SemanticState::new(program, ctx) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let mut diags = Vec::new();
-        for declaration in &program.declarations {
+        RulePreparation::Structural(Box::new(Collector {
+            program,
+            ctx,
+            state,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    state: SemanticState<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
             let (name, members) = match declaration {
                 TopLevelDecl::Class(node) => (&node.name, &node.members),
                 TopLevelDecl::MixinClass(node) => (&node.name, &node.members),
@@ -53,20 +73,24 @@ impl Rule for AvoidSettersWithoutGetters {
                 | TopLevelDecl::Function(_)
                 | TopLevelDecl::Variable(_)
                 | TopLevelDecl::TypeAlias(_)
-                | TopLevelDecl::Error(_) => continue,
+                | TopLevelDecl::Error(_) => return StructuralTraversal::SkipChildren,
             };
             check_members(
                 &name.name,
                 members,
-                program,
+                self.program,
                 matches!(declaration, TopLevelDecl::ExtensionType(_)),
-                &state,
-                ctx,
-                &mut diags,
+                &self.state,
+                self.ctx,
+                &mut self.diags,
             );
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn declares_getter(members: &[ClassMember], name: &str) -> bool {

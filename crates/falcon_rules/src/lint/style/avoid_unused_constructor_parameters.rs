@@ -18,10 +18,11 @@
 //!
 //! Adopted from the official `avoid_unused_constructor_parameters` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 use falcon_analyze::resolve::lexical_usage::{
     used_constructor_parameters, used_primary_constructor_parameters,
@@ -33,15 +34,14 @@ pub struct AvoidUnusedConstructorParameters;
 impl Rule for AvoidUnusedConstructorParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diagnostics: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -71,8 +71,11 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         let members = match node {
             TopLevelDecl::Class(node) => Some(node.element_members()),
             TopLevelDecl::MixinClass(node) => Some(node.element_members()),
@@ -91,10 +94,10 @@ impl Visitor for Collector<'_, '_> {
             let used = used_primary_constructor_parameters(primary, members.declared);
             self.report(&primary.params, &used, true);
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         // Primary parameters need the enclosing field-initializer scope above.
         if !node.is_primary
             && node.redirect.is_none()
@@ -108,7 +111,9 @@ impl Visitor for Collector<'_, '_> {
             let used = used_constructor_parameters(node.params, node.initializers, node.body);
             self.report(node.params, &used, false);
         }
+        StructuralTraversal::Continue
     }
+}
 }
 
 fn is_candidate(param: &FormalParam, primary: bool) -> bool {

@@ -9,11 +9,12 @@
 //! since proving it is never reassigned requires dataflow this syntax-only pass
 //! does not perform.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{self, Visitor};
 
 #[derive(Default)]
 pub struct PreferFunctionDeclarationsOverVariables;
@@ -21,15 +22,14 @@ pub struct PreferFunctionDeclarationsOverVariables;
 impl Rule for PreferFunctionDeclarationsOverVariables {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -38,8 +38,9 @@ struct Collector<'a, 'c> {
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
         if local.keyword != falcon_syntax::ast::VarKeyword::Var {
             for decl in &local.declarators {
                 if let Some(Expr::FuncExpr { .. }) =
@@ -53,6 +54,11 @@ impl Visitor for Collector<'_, '_> {
                 }
             }
         }
-        visitor::walk_local_var(self, local);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

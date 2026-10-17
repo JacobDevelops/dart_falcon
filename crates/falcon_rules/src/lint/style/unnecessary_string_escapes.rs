@@ -6,10 +6,11 @@
 use crate::lint::string_lit::{
     LiteralPart, interpolated_literals, literal_parts, multiline_lead_len,
 };
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 #[derive(Default)]
 pub struct UnnecessaryStringEscapes;
@@ -17,15 +18,14 @@ pub struct UnnecessaryStringEscapes;
 impl Rule for UnnecessaryStringEscapes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -98,8 +98,13 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
         for (lit, span) in interpolated_literals(node) {
             let mut offset = 0;
             for part in literal_parts(&lit) {
@@ -122,5 +127,7 @@ impl Visitor for Collector<'_> {
                 offset += text.len();
             }
         }
+        StructuralTraversal::Continue
     }
+}
 }

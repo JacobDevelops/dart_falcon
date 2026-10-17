@@ -8,7 +8,9 @@
 //! is reported; a getter that merely mentions its own name inside a larger
 //! expression is left alone.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -18,25 +20,42 @@ pub struct RecursiveGetters;
 impl Rule for RecursiveGetters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for declaration in &program.declarations {
-            if let TopLevelDecl::Function(function) = declaration {
-                if matches!(function.kind, FunctionKind::Getter) {
-                    check(&function.body, &function.name.name, &mut diags, ctx);
-                }
-            } else if let Some(members) = crate::lint::declarations::members_of(declaration) {
-                for member in members {
-                    if let ClassMember::Getter(getter) = member {
-                        check(&getter.body, &getter.name.name, &mut diags, ctx);
-                    }
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Function(function) = declaration {
+            if matches!(function.kind, FunctionKind::Getter) {
+                check(&function.body, &function.name.name, &mut self.diags, self.ctx);
+            }
+        } else if let Some(members) = crate::lint::declarations::members_of(declaration) {
+            for member in members {
+                if let ClassMember::Getter(getter) = member {
+                    check(&getter.body, &getter.name.name, &mut self.diags, self.ctx);
                 }
             }
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn check(

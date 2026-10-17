@@ -14,10 +14,12 @@
 //! Adopted from the official `use_raw_strings` lint.
 
 use crate::lint::string_lit::{has_interpolation, literal_parts};
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 #[derive(Default)]
 pub struct UseRawStrings;
@@ -25,15 +27,13 @@ pub struct UseRawStrings;
 impl Rule for UseRawStrings {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -60,8 +60,11 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
         for (lit, span) in node.segments() {
             if !lit.terminated
                 || lit.is_raw
@@ -76,5 +79,7 @@ impl Visitor for Collector<'_> {
                 span,
             ));
         }
+        StructuralTraversal::Continue
     }
+}
 }

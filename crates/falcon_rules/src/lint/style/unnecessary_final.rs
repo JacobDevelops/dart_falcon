@@ -24,14 +24,13 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
-use falcon_syntax::visitor::{
-    Visitor, walk_formal_param, walk_pattern, walk_setter_decl, walk_stmt,
-};
 
 const RULE: &str = "unnecessary-final";
 const MESSAGE: &str = "Local variables should not be marked as 'final'.";
@@ -42,10 +41,10 @@ pub struct UnnecessaryFinal;
 impl Rule for UnnecessaryFinal {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             // With primary constructors `final` on a parameter declares a
             // field, so no parameter's `final` is unnecessary.
@@ -55,8 +54,7 @@ impl Rule for UnnecessaryFinal {
             reported: HashSet::new(),
             diagnostics: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -117,8 +115,11 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if self.check_params && node.is_final {
             let start = node
                 .annotations
@@ -126,10 +127,10 @@ impl Visitor for Collector<'_, '_> {
                 .map_or(node.span.start, |annotation| annotation.span.end);
             self.report_final_in(start, node.name.span.start);
         }
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         let start = node
             .param_annotations
             .last()
@@ -137,10 +138,10 @@ impl Visitor for Collector<'_, '_> {
         if self.check_params {
             self.report_final_in(start, node.param.span.start);
         }
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalVar(declaration) = node
             && declaration.keyword == VarKeyword::Final
             && let Some(keyword) = declaration.keyword_span
@@ -155,10 +156,10 @@ impl Visitor for Collector<'_, '_> {
         {
             self.check_for_init(init, statement.span.start);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
+    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
         if let Pattern::Variable { name, span, .. } = node
             && let Some(keyword) = self
                 .ctx
@@ -172,8 +173,9 @@ impl Visitor for Collector<'_, '_> {
                 keyword.offset() + keyword.len(),
             ));
         }
-        walk_pattern(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 #[cfg(test)]

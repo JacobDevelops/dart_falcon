@@ -7,10 +7,11 @@
 //! body nests two further `if`s is reported. Local functions and closures count
 //! as part of the then-branch subtree, and closures anywhere in the file are checked.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
 
 #[derive(Default)]
 pub struct AvoidNestedIf;
@@ -22,47 +23,63 @@ const MAX_NESTING_LEVEL: usize = 2;
 impl Rule for AvoidNestedIf {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        NestedIf {
-            diags: &mut diags,
+        RulePreparation::Structural(Box::new(NestedIf {
             ctx,
-        }
-        .visit_program(program);
-        RulePreparation::Diagnostics(diags)
+            candidates: Vec::new(),
+            active: Vec::new(),
+        }))
     }
 }
 
-struct IfCount(usize);
+struct Candidate {
+    span: Span,
+    then_span: Span,
+    count: usize,
+}
 
-impl Visitor for IfCount {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        self.0 += usize::from(matches!(node, Stmt::If(_)));
-        walk_stmt(self, node);
+struct NestedIf<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    candidates: Vec<Candidate>,
+    active: Vec<usize>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for NestedIf<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.candidates.iter().filter(|candidate| candidate.count >= MAX_NESTING_LEVEL)
+            .map(|candidate| self.ctx.diagnostic(
+                "avoid-nested-if",
+                "Avoid nesting if statements. Consider combining conditions or using early returns.",
+                candidate.span,
+            )).collect()
     }
-}
 
-struct NestedIf<'a, 'ctx> {
-    diags: &'a mut Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'ctx>,
-}
-
-impl Visitor for NestedIf<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::If(n) = node {
-            let mut count = IfCount(0);
-            // Count children, not a then-branch that is itself an if.
-            walk_stmt(&mut count, &n.then_branch);
-            if count.0 >= MAX_NESTING_LEVEL {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-nested-if",
-                    "Avoid nesting if statements. Consider combining conditions or using early returns.",
-                    n.span,
-                ));
+            for &index in &self.active {
+                let candidate = &mut self.candidates[index];
+                if candidate.then_span.start <= n.span.start
+                    && n.span.end <= candidate.then_span.end
+                    && candidate.then_span != n.span
+                {
+                    candidate.count += 1;
+                }
             }
+            self.active.push(self.candidates.len());
+            self.candidates.push(Candidate {
+                span: n.span, then_span: *n.then_branch.span(), count: 0,
+            });
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if matches!(node, Stmt::If(_)) {
+            self.active.pop();
+        }
+    }
+}
 }

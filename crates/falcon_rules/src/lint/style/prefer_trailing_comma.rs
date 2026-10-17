@@ -4,11 +4,13 @@
 //! across lines — when the last significant token sits on an earlier line than
 //! the closing `)`. This mirrors the Dart 3.x tall-style formatter.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
-use falcon_syntax::visitor::{Visitor, walk_annotation, walk_enum_decl, walk_expr};
 
 #[derive(Default)]
 pub struct PreferTrailingComma;
@@ -16,15 +18,13 @@ pub struct PreferTrailingComma;
 impl Rule for PreferTrailingComma {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -67,15 +67,18 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_annotation(&mut self, node: &Annotation) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_annotation(&mut self, node: &Annotation) -> StructuralTraversal {
         if let Some(args) = &node.args {
             self.check_args(args);
         }
-        walk_annotation(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         for initializer in node.initializers {
             match initializer {
                 ConstructorInitializer::SuperCall { args, .. }
@@ -84,18 +87,19 @@ impl Visitor for Collector<'_, '_> {
                 | ConstructorInitializer::Assert { .. } => {}
             }
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
         for variant in &node.variants {
             if let Some(args) = &variant.args {
                 self.check_args(args);
             }
         }
-        walk_enum_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             Expr::Call { args, .. } | Expr::New { args, .. } => self.check_args(args),
             Expr::Cascade { sections, .. } => {
@@ -109,8 +113,9 @@ impl Visitor for Collector<'_, '_> {
             }
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 #[cfg(test)]

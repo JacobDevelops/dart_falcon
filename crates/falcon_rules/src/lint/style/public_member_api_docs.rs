@@ -20,7 +20,11 @@
 //! An override exemption requires a combined inherited member, not merely a
 //! same-named declaration among incompatible inherited interface signatures.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::{TokenKind, ast::*};
 
 use crate::lint::declarations::has_meta_annotation;
@@ -79,207 +83,159 @@ impl ApiDeclaration<'_> {
     }
 }
 
-pub(crate) fn api_declarations<'a>(
-    program: &'a Program,
-    syntax: &falcon_syntax::SyntaxStore,
+fn declaration_candidates<'a>(
+    decl: &'a TopLevelDecl,
     model: Option<&SemanticModel<'_>>,
-) -> Vec<ApiDeclaration<'a>> {
+    mut emit: impl FnMut(ApiDeclaration<'a>),
+) {
     let is_internal = |annotations: &[Annotation]| {
         model.is_some_and(|model| has_meta_annotation(annotations, "internal", model))
     };
-    let mut result = Vec::new();
-    let mut candidates = Vec::new();
-    for decl in &program.declarations {
-        let (name, annotations, members, closed) = match decl {
-            TopLevelDecl::Class(n) => (
-                Some(&n.name),
-                n.annotations.as_slice(),
-                n.members.as_slice(),
-                match n.modifiers.restriction {
-                    Some(ClassRestriction::Sealed) => true,
-                    Some(ClassRestriction::Final | ClassRestriction::Interface) => {
-                        n.modifiers.is_abstract
-                    }
-                    _ => false,
-                },
-            ),
-            TopLevelDecl::ClassTypeAlias(n) => {
-                (Some(&n.name), n.annotations.as_slice(), &[][..], false)
+    let (name, annotations) = match decl {
+        TopLevelDecl::Class(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::ClassTypeAlias(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::Mixin(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::MixinClass(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::Enum(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::Extension(n) => (n.name.as_ref(), n.annotations.as_slice()),
+        TopLevelDecl::ExtensionType(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::Function(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::TypeAlias(n) => (Some(&n.name), n.annotations.as_slice()),
+        TopLevelDecl::Variable(n) => {
+            let internal = is_internal(&n.annotations);
+            for v in &n.declarators {
+                emit(ApiDeclaration {
+                    internal,
+                    ..candidate(&v.name, n.span.start, &n.annotations, None, None, true)
+                });
             }
-            TopLevelDecl::Mixin(n) => (
-                Some(&n.name),
-                n.annotations.as_slice(),
-                n.members.as_slice(),
-                false,
-            ),
-            TopLevelDecl::MixinClass(n) => (
-                Some(&n.name),
-                n.annotations.as_slice(),
-                n.members.as_slice(),
-                false,
-            ),
-            TopLevelDecl::Enum(n) => (
-                Some(&n.name),
-                n.annotations.as_slice(),
-                n.members.as_slice(),
-                true,
-            ),
-            TopLevelDecl::Extension(n) => (
-                n.name.as_ref(),
-                n.annotations.as_slice(),
-                n.members.as_slice(),
-                false,
-            ),
-            TopLevelDecl::ExtensionType(n) => (
-                Some(&n.name),
-                n.annotations.as_slice(),
-                n.members.as_slice(),
-                false,
-            ),
-            TopLevelDecl::Function(n) => (Some(&n.name), n.annotations.as_slice(), &[][..], false),
-            TopLevelDecl::TypeAlias(n) => (Some(&n.name), n.annotations.as_slice(), &[][..], false),
-            TopLevelDecl::Variable(n) => {
-                for v in &n.declarators {
-                    result.push(ApiDeclaration {
-                        internal: is_internal(&n.annotations),
-                        ..candidate(&v.name, n.span.start, &n.annotations, None, None, true)
-                    });
-                }
-                continue;
-            }
-            TopLevelDecl::Error(_) => continue,
-        };
-        let Some(name) = name.filter(|n| !n.name.starts_with('_')) else {
-            continue;
-        };
-        let mut top = candidate(name, decl.span().start, annotations, None, None, true);
-        top.internal = is_internal(annotations);
-        if let TopLevelDecl::Function(n) = decl {
-            top.is_top_level_function = true;
-            top.kind = match n.kind {
-                FunctionKind::Getter => Some(MemberKind::Getter),
-                FunctionKind::Setter(_) => Some(MemberKind::Setter),
-                FunctionKind::Function(_) => None,
-            };
+            return;
         }
-        let internal = top.internal;
-        result.push(top);
-        let elements = match decl {
-            TopLevelDecl::Class(n) => Some(n.element_members()),
-            TopLevelDecl::MixinClass(n) => Some(n.element_members()),
-            _ => None,
+        TopLevelDecl::Error(_) => return,
+    };
+    let Some(name) = name.filter(|n| !n.name.starts_with('_')) else {
+        return;
+    };
+    let mut top = candidate(name, decl.span().start, annotations, None, None, true);
+    top.internal = is_internal(annotations);
+    if let TopLevelDecl::Function(n) = decl {
+        top.is_top_level_function = true;
+        top.kind = match n.kind {
+            FunctionKind::Getter => Some(MemberKind::Getter),
+            FunctionKind::Setter(_) => Some(MemberKind::Setter),
+            FunctionKind::Function(_) => None,
         };
-        if let Some(elements) = elements
-            && let Some(primary) = elements.primary
-        {
-            let constructor = elements.constructors().find(|c| c.is_primary).unwrap();
-            let body = members.iter().find_map(|member| match member {
-                ClassMember::PrimaryConstructorBody(body) => Some(body),
-                _ => None,
-            });
+    }
+    let internal = top.internal;
+    emit(top);
+    let elements = match decl {
+        TopLevelDecl::Class(n) => Some(n.element_members()),
+        TopLevelDecl::MixinClass(n) => Some(n.element_members()),
+        _ => None,
+    };
+    if let Some(elements) = elements
+        && let Some(primary) = elements.primary
+    {
+        let constructor = elements.constructors().find(|c| c.is_primary).unwrap();
+        let body = elements.declared.iter().find_map(|member| match member {
+            ClassMember::PrimaryConstructorBody(body) => Some(body),
+            _ => None,
+        });
+        let mut c = candidate(
+            primary.constructor_name.as_ref().unwrap_or(name),
+            body.map_or(primary.span.start, |body| body.span.start),
+            constructor.annotations,
+            Some(&name.name),
+            None,
+            true,
+        );
+        if let Some(body) = body {
+            c.span = body.this_span;
+            c.internal = internal;
+        }
+        emit(c);
+    }
+}
+
+fn member_candidates<'a>(
+    member: &'a ClassMember,
+    name: &'a str,
+    internal: bool,
+    closed: bool,
+    extension: bool,
+    syntax: &falcon_syntax::SyntaxStore,
+    mut emit: impl FnMut(ApiDeclaration<'a>),
+) {
+    let mut report = |mut declaration: ApiDeclaration<'a>| {
+        declaration.internal = internal;
+        if extension {
+            declaration.is_static = true;
+        }
+        emit(declaration);
+    };
+    match member {
+        ClassMember::Field(n) => {
+            for v in &n.declarators {
+                report(candidate(
+                    &v.name,
+                    n.span.start,
+                    &n.annotations,
+                    Some(name),
+                    Some(MemberKind::field(n, v)),
+                    n.is_static,
+                ));
+            }
+        }
+        ClassMember::Method(n) => report(candidate(
+            &n.name,
+            n.span.start,
+            &n.annotations,
+            Some(name),
+            Some(MemberKind::Method),
+            n.is_static,
+        )),
+        ClassMember::Getter(n) => report(candidate(
+            &n.name,
+            n.span.start,
+            &n.annotations,
+            Some(name),
+            Some(MemberKind::Getter),
+            n.is_static,
+        )),
+        ClassMember::Setter(n) => report(candidate(
+            &n.name,
+            n.span.start,
+            &n.annotations,
+            Some(name),
+            Some(MemberKind::Setter),
+            n.is_static,
+        )),
+        ClassMember::Constructor(n) => {
             let mut c = candidate(
-                primary.constructor_name.as_ref().unwrap_or(name),
-                body.map_or(primary.span.start, |body| body.span.start),
-                constructor.annotations,
-                Some(&name.name),
+                n.constructor_name.as_ref().unwrap_or(&n.name),
+                n.span.start,
+                &n.annotations,
+                Some(name),
                 None,
                 true,
             );
-            if let Some(body) = body {
-                c.span = body.this_span;
-                c.internal = internal;
-            }
-            result.push(c);
+            c.exempt_constructor = closed;
+            report(c);
         }
-        if let TopLevelDecl::Enum(n) = decl {
-            for v in &n.variants {
-                let mut c = candidate(
-                    &v.name,
-                    v.span.start,
-                    &v.annotations,
-                    Some(&name.name),
-                    None,
-                    true,
-                );
-                c.internal = internal;
-                result.push(c);
-            }
-        }
-        for member in members {
-            candidates.clear();
-            match member {
-                ClassMember::Field(n) => {
-                    for v in &n.declarators {
-                        candidates.push(candidate(
-                            &v.name,
-                            n.span.start,
-                            &n.annotations,
-                            Some(&name.name),
-                            Some(MemberKind::field(n, v)),
-                            n.is_static,
-                        ));
-                    }
-                }
-                ClassMember::Method(n) => candidates.push(candidate(
-                    &n.name,
-                    n.span.start,
-                    &n.annotations,
-                    Some(&name.name),
-                    Some(MemberKind::Method),
-                    n.is_static,
-                )),
-                ClassMember::Getter(n) => candidates.push(candidate(
-                    &n.name,
-                    n.span.start,
-                    &n.annotations,
-                    Some(&name.name),
-                    Some(MemberKind::Getter),
-                    n.is_static,
-                )),
-                ClassMember::Setter(n) => candidates.push(candidate(
-                    &n.name,
-                    n.span.start,
-                    &n.annotations,
-                    Some(&name.name),
-                    Some(MemberKind::Setter),
-                    n.is_static,
-                )),
-                ClassMember::Constructor(n) => {
-                    let mut c = candidate(
-                        n.constructor_name.as_ref().unwrap_or(&n.name),
-                        n.span.start,
-                        &n.annotations,
-                        Some(&name.name),
-                        None,
-                        true,
-                    );
-                    c.exempt_constructor = closed;
-                    candidates.push(c);
-                }
-                ClassMember::Operator(n) => candidates.push(ApiDeclaration {
-                    name: n.lookup_name(),
-                    span: crate::lint::declarations::operator_token_span(n, syntax),
-                    start: n.annotations.first().map_or(n.span.start, |a| a.span.start),
-                    annotations: &n.annotations,
-                    owner: Some(&name.name),
-                    kind: Some(MemberKind::Operator),
-                    is_static: false,
-                    is_top_level_function: false,
-                    exempt_constructor: false,
-                    internal,
-                }),
-                ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
-            }
-            for mut c in candidates.drain(..) {
-                c.internal = internal;
-                if matches!(decl, TopLevelDecl::Extension(_)) {
-                    c.is_static = true;
-                }
-                result.push(c);
-            }
-        }
+        ClassMember::Operator(n) => report(ApiDeclaration {
+            name: n.lookup_name(),
+            span: crate::lint::declarations::operator_token_span(n, syntax),
+            start: n.annotations.first().map_or(n.span.start, |a| a.span.start),
+            annotations: &n.annotations,
+            owner: Some(name),
+            kind: Some(MemberKind::Operator),
+            is_static: false,
+            is_top_level_function: false,
+            exempt_constructor: false,
+            internal,
+        }),
+        ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
     }
-    result
 }
 
 fn candidate<'a>(
@@ -309,7 +265,7 @@ fn candidate<'a>(
 impl Rule for PublicMemberApiDocs {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if crate::cross_file::lib_dir_package(ctx.file_path).is_none() {
@@ -318,81 +274,189 @@ impl Rule for PublicMemberApiDocs {
         let model = ctx
             .identities
             .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
-        let declarations = api_declarations(program, ctx.syntax, model.as_ref());
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model,
+            owner: None,
+            pending: Vec::new(),
+        }))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Owner<'a> {
+    name: &'a str,
+    internal: bool,
+    closed: bool,
+    extension: bool,
+}
+
+struct PendingDoc<'a> {
+    name: &'a str,
+    owner: Option<&'a str>,
+    kind: Option<MemberKind>,
+    span: Span,
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: Option<SemanticModel<'a>>,
+    owner: Option<Owner<'a>>,
+    pending: Vec<PendingDoc<'a>>,
+}
+
+impl Collector<'_> {
+    fn missing(&self, d: &ApiDeclaration<'_>) -> bool {
+        let ctx = self.ctx;
+        let model = self.model.as_ref();
         let tokens = ctx.tokens();
-        let missing = |d: &ApiDeclaration<'_>| {
-            if d.name.starts_with('_')
-                || d.internal
-                || d.exempt_constructor
-                || (d.is_top_level_function && d.name == "main")
-                || d.documented(tokens)
-            {
+        if d.name.starts_with('_')
+            || d.internal
+            || d.exempt_constructor
+            || (d.is_top_level_function && d.name == "main")
+            || d.documented(tokens)
+        {
+            return false;
+        }
+        if !d.is_static
+            && let (Some(owner), Some(kind)) = (d.owner, d.kind)
+        {
+            let (Some(model), Some(signatures)) = (model, ctx.signatures) else {
+                return false;
+            };
+            let Some(identity) = model.resolve_name(owner) else {
+                return false;
+            };
+            let Some(facts) = signatures.inherited_member_facts(&identity, d.name) else {
+                return false;
+            };
+            // Like the analyzer's `overriddenMember`, a setter overrides
+            // inherited setters; anything else overrides the inherited
+            // member of its name, so a field never counts as overriding a
+            // setter.
+            if facts.iter().any(|f| {
+                let matches = if kind == MemberKind::Setter {
+                    f.kind.has_setter()
+                } else {
+                    f.kind != MemberKind::Setter
+                };
+                matches
+                    && signatures.has_combined_inherited_member(
+                        &identity,
+                        d.name,
+                        if kind == MemberKind::Setter {
+                            MemberKind::Setter
+                        } else {
+                            f.kind
+                        },
+                        model,
+                    )
+            }) {
                 return false;
             }
-            if !d.is_static
-                && let (Some(owner), Some(kind)) = (d.owner, d.kind)
-            {
-                let (Some(model), Some(signatures)) = (model.as_ref(), ctx.signatures) else {
-                    return false;
-                };
-                let Some(identity) = model.resolve_name(owner) else {
-                    return false;
-                };
-                let Some(facts) = signatures.inherited_member_facts(&identity, d.name) else {
-                    return false;
-                };
-                // Like the analyzer's `overriddenMember`, a setter overrides
-                // inherited setters; anything else overrides the inherited
-                // member of its name, so a field never counts as overriding a
-                // setter.
-                if facts.iter().any(|f| {
-                    let matches = if kind == MemberKind::Setter {
-                        f.kind.has_setter()
-                    } else {
-                        f.kind != MemberKind::Setter
-                    };
-                    matches
-                        && signatures.has_combined_inherited_member(
-                            &identity,
-                            d.name,
-                            if kind == MemberKind::Setter {
-                                MemberKind::Setter
-                            } else {
-                                f.kind
-                            },
-                            model,
-                        )
-                }) {
-                    return false;
-                }
+        }
+        true
+    }
+
+    fn record(&mut self, d: &ApiDeclaration<'_>) {
+        if self.missing(d) {
+            self.pending.push(PendingDoc {
+                name: &self.ctx.source[d.span.start..d.span.end],
+                owner: d
+                    .owner
+                    .map(|_| self.owner.as_ref().expect("member owner").name),
+                kind: d.kind,
+                span: d.span,
+            });
+        }
+    }
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        self.owner = None;
+        let model = self.model;
+        declaration_candidates(decl, model.as_ref(), |declaration| {
+            if declaration.owner.is_none() {
+                self.owner = Some(Owner {
+                    name: &self.ctx.source[declaration.span.start..declaration.span.end],
+                    internal: declaration.internal,
+                    closed: match decl {
+                        TopLevelDecl::Class(n) => match n.modifiers.restriction {
+                            Some(ClassRestriction::Sealed) => true,
+                            Some(ClassRestriction::Final | ClassRestriction::Interface) => {
+                                n.modifiers.is_abstract
+                            }
+                            _ => false,
+                        },
+                        TopLevelDecl::Enum(_) => true,
+                        _ => false,
+                    },
+                    extension: matches!(decl, TopLevelDecl::Extension(_)),
+                });
             }
-            true
-        };
-        let mut diagnostics: Vec<_> = declarations
-            .iter()
-            .filter(|d| missing(d))
+            self.record(&declaration);
+        });
+        if self.owner.is_none() {
+            return StructuralTraversal::SkipChildren;
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        if let Some(owner) = self.owner {
+            member_candidates(
+                member,
+                owner.name,
+                owner.internal,
+                owner.closed,
+                owner.extension,
+                self.ctx.syntax,
+                |declaration| self.record(&declaration),
+            );
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_enum_variant(&mut self, variant: &EnumVariant) -> StructuralTraversal {
+        if let Some(owner) = self.owner {
+            let mut declaration = candidate(
+                &variant.name,
+                variant.span.start,
+                &variant.annotations,
+                Some(owner.name),
+                None,
+                true,
+            );
+            declaration.internal = owner.internal;
+            self.record(&declaration);
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let mut diagnostics: Vec<_> = self.pending.iter()
             .filter(|d| {
                 d.kind != Some(MemberKind::Setter)
-                    || declarations.iter().any(|getter| {
+                    || self.pending.iter().any(|getter| {
                         getter.owner == d.owner
                             && getter.name == d.name
                             && getter.kind == Some(MemberKind::Getter)
-                            && missing(getter)
                     })
             })
-            .map(|d| {
-                ctx.diagnostic(
-                    "public-member-api-docs",
-                    "Missing documentation for a public member.",
-                    d.span,
-                )
-            })
+            .map(|d| self.ctx.diagnostic(
+                "public-member-api-docs",
+                "Missing documentation for a public member.",
+                d.span,
+            ))
             .collect();
         // A type and its unnamed primary header are consecutive declarations
         // at the same token. Analyzer reports that diagnostic only once.
         diagnostics.dedup_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
-        RulePreparation::Diagnostics(diagnostics)
+        diagnostics
     }
+}
 }
 
 #[cfg(test)]
@@ -437,7 +501,10 @@ mod tests {
             syntax,
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let declarations = api_declarations(&program, &syntax, None);
+        let mut declarations = Vec::with_capacity(program.declarations.len() * 2);
+        for decl in &program.declarations {
+            declaration_candidates(decl, None, |declaration| declarations.push(declaration));
+        }
         let tokens = syntax.tokens();
         let constructor = declarations.iter().find(|d| d.name == "named").unwrap();
         assert_eq!(
@@ -491,5 +558,52 @@ mod tests {
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
             .collect();
         assert_eq!(names, ["A", "B", "named", "C", "M"]);
+    }
+
+    #[test]
+    fn reports_paired_accessors_in_declaration_order() {
+        use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex};
+
+        let source = r"
+/// Documented class.
+class Accessors {
+  set value(int next) {}
+  int get value => 0;
+}
+set top(int next) {}
+int get top => 0;
+";
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let config = falcon_config::FalconConfig::default();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/corpus/public-member-api-docs/project/lib/accessor_order.dart");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path: &path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let model = SemanticModel::new(&path, &identities, None);
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
+            .with_identities(&identities)
+            .with_signatures(&signatures);
+        let diagnostics = PublicMemberApiDocs.analyze(&program, &ctx);
+        let spans: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
+            .collect();
+        let expected = ["value(int", "value =>", "top(int", "top =>"].map(|needle| {
+            let start = source.find(needle).unwrap();
+            (start, start + needle.find(['(', ' ']).unwrap())
+        });
+        assert_eq!(spans, expected);
     }
 }

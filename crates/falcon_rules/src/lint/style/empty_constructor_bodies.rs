@@ -5,7 +5,9 @@
 //! Prefer `Foo();` over `Foo() {}`. Only a block body containing no statements
 //! is reported; a constructor whose body does something is left alone.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -15,22 +17,39 @@ pub struct EmptyConstructorBodies;
 impl Rule for EmptyConstructorBodies {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let Some(members) = crate::lint::declarations::members_of(decl) else {
-                continue;
-            };
-            for member in members {
-                if let ClassMember::Constructor(c) = member {
-                    check_constructor(c, &mut diags, ctx);
-                }
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let Some(members) = crate::lint::declarations::members_of(decl) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        for member in members {
+            if let ClassMember::Constructor(c) = member {
+                check_constructor(c, &mut self.diags, self.ctx);
             }
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn check_constructor(ctor: &ConstructorDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

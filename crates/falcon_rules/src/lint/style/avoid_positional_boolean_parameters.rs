@@ -24,15 +24,11 @@
 //! Adopted from the official `avoid_positional_boolean_parameters` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
+    StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_dart_type, walk_function_decl, walk_primary_constructor,
-    walk_stmt,
-};
 
 use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
 
@@ -51,18 +47,14 @@ impl Rule for AvoidPositionalBooleanParameters {
         let Some(state) = SemanticState::new(program, ctx) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: &state.model,
-            signatures: &state.signatures,
+            state,
+            program,
+            next_declaration: 0,
             container: None,
             diags: Vec::new(),
-        };
-        for declaration in &program.declarations {
-            collector.container = collector.enter(declaration);
-            collector.visit_top_level_decl(declaration);
-        }
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -78,8 +70,9 @@ struct Container<'p> {
 
 struct Collector<'a, 'ctx, 'p> {
     ctx: &'a AnalyzeContext<'ctx>,
-    model: &'a SemanticModel<'a>,
-    signatures: &'a SignatureIndex,
+    state: SemanticState<'a>,
+    program: &'p Program,
+    next_declaration: usize,
     container: Option<Container<'p>>,
     diags: Vec<Diagnostic>,
 }
@@ -119,7 +112,8 @@ impl<'p> Collector<'_, '_, 'p> {
         let Some(identity) = &container.identity else {
             return true;
         };
-        self.signatures
+        self.state
+            .signatures
             .inherited_member_facts(identity, name)
             .is_none_or(|facts| !facts.is_empty())
     }
@@ -134,12 +128,12 @@ impl<'p> Collector<'_, '_, 'p> {
             return false;
         }
         if let Some(ty) = &param.param_type {
-            return is_core_bool(&self.model.resolve_type(ty));
+            return is_core_bool(&self.state.model.resolve_type(ty));
         }
         match param.initializing {
             Some(InitializingFormal::This) => self
                 .field_type(&param.name.name)
-                .is_some_and(|ty| is_core_bool(&self.model.resolve_type(ty))),
+                .is_some_and(|ty| is_core_bool(&self.state.model.resolve_type(ty))),
             Some(InitializingFormal::Super) => {
                 let Some(container) = &self.container else {
                     return false;
@@ -149,14 +143,14 @@ impl<'p> Collector<'_, '_, 'p> {
                 else {
                     return false;
                 };
-                let superclass = self.model.resolve_type(superclass);
+                let superclass = self.state.model.resolve_type(superclass);
                 resolved_super_param_type(
                     param,
                     params,
                     &superclass,
                     constructor,
-                    self.signatures,
-                    self.model,
+                    &self.state.signatures,
+                    &self.state.model,
                 )
                 .is_some_and(|ty| is_core_bool(&ty))
             }
@@ -192,7 +186,7 @@ impl<'p> Collector<'_, '_, 'p> {
 
     fn enter(&self, declaration: &'p TopLevelDecl) -> Option<Container<'p>> {
         let interface = |name: &Identifier, members, superclass| Container {
-            identity: self.model.resolve_name(name.name.as_str()),
+            identity: self.state.model.resolve_name(name.name.as_str()),
             is_interface: true,
             members,
             superclass,
@@ -223,8 +217,37 @@ impl<'p> Collector<'_, '_, 'p> {
     }
 }
 
-impl Visitor for Collector<'_, '_, '_> {
-    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_library_directive(&mut self, _: &LibraryDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_part_of_directive(&mut self, _: &PartOfDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_part_directive(&mut self, _: &PartDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_import(&mut self, _: &ImportDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_export(&mut self, _: &ExportDirective) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_top_level_decl(&mut self, _: &TopLevelDecl) -> StructuralTraversal {
+        self.container = self.enter(&self.program.declarations[self.next_declaration]);
+        self.next_declaration += 1;
+        StructuralTraversal::Continue
+    }
+
+    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) -> StructuralTraversal {
         if !node
             .constructor_name
             .as_ref()
@@ -245,19 +268,19 @@ impl Visitor for Collector<'_, '_, '_> {
             });
             self.check_params(&node.params, Some(target.unwrap_or("new")));
         }
-        walk_primary_constructor(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if !node.name.name.starts_with('_')
             && let Some(params) = node.params()
         {
             self.check_params(params, None);
         }
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         match node {
             ClassMember::Constructor(constructor) => {
                 let private = constructor
@@ -292,22 +315,22 @@ impl Visitor for Collector<'_, '_, '_> {
             | ClassMember::PrimaryConstructorBody(_)
             | ClassMember::Error(_) => {}
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node
             && !function.name.name.starts_with('_')
         {
             self.check_params(&function.params, None);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Function(function) = node {
             let first = function.params.iter().find(|param| {
-                !param.is_named && is_core_bool(&self.model.resolve_type(&param.param_type))
+                !param.is_named && is_core_bool(&self.state.model.resolve_type(&param.param_type))
             });
             if let Some(first) = first {
                 let start = first.param_type.span().start;
@@ -319,6 +342,7 @@ impl Visitor for Collector<'_, '_, '_> {
                     .push(self.ctx.diagnostic(RULE, MESSAGE, DiagSpan { start, end }));
             }
         }
-        walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

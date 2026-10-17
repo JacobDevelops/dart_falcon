@@ -44,16 +44,13 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, SemanticModel, resolve_call_constructor,
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, for_each_expr, walk_class_member, walk_constructor_decl, walk_expr, walk_field_decl,
-    walk_function_decl, walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
-    walk_switch_case, walk_top_level_decl,
-};
+use falcon_syntax::visitor::for_each_expr;
 
 use crate::lint::expressions::is_parenthesized;
 
@@ -66,7 +63,7 @@ impl Rule for UnnecessaryParenthesis {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             model: ctx
                 .identities
@@ -80,8 +77,7 @@ impl Rule for UnnecessaryParenthesis {
             method_callees: HashSet::new(),
             diagnostics: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -697,56 +693,59 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_switch_case(&mut self, node: &SwitchCase) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn visit_switch_case(&mut self, node: &SwitchCase) -> StructuralTraversal {
         for case in &node.cases {
             if let SwitchCaseKind::Expr(expression) = case {
                 self.check(expression, Parent::OtherNode);
             }
         }
-        walk_switch_case(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(variable) = node {
             self.check_declarators(variable.var_type.as_ref(), &variable.declarators);
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         self.check_declarators(node.field_type.as_ref(), &node.declarators);
-        walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_getter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         self.check_body(node.body.as_ref());
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             self.check_body(operator.body.as_ref());
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) -> StructuralTraversal {
         for initializer in &node.initializers {
             match initializer {
                 ConstructorInitializer::SuperCall { args, .. }
@@ -766,10 +765,10 @@ impl Visitor for Collector<'_> {
             }
         }
         self.check_body(node.body.as_ref());
-        walk_constructor_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         // A statement is the nearest statement-or-cascade ancestor of everything
         // inside it, including its own direct expressions.
         self.in_cascade.push(false);
@@ -810,13 +809,16 @@ impl Visitor for Collector<'_> {
             Stmt::LocalFunc(function) => self.check_body(Some(&function.body)),
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_stmt(&mut self, _node: &Stmt) {
         self.bare.pop();
         self.in_cascade.pop();
         self.statement_start.pop();
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         let bare = if self.field_init_values.contains(&key(node.span())) {
             true
         } else if is_function_boundary(node) {
@@ -829,10 +831,14 @@ impl Visitor for Collector<'_> {
         self.bare.push(bare);
         self.in_cascade.push(in_cascade);
         self.check_children(node);
-        walk_expr(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
         self.in_cascade.pop();
         self.bare.pop();
     }
+}
 }
 
 /// A function expression, or a method invocation (whose argument parentheses

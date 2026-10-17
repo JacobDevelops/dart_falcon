@@ -86,7 +86,11 @@ notes, is in
    This writes the rule module and empty `bad.dart` / `good.dart` fixtures, then
    prints the exact follow-up steps.
 
-2. **Implement** the rule. Derive `Default` and implement `Rule` from `falcon_analyze`, or `CrossFileRule` for project-wide analysis. Use `falcon_syntax::visitor::Visitor` and its `walk_*` helpers rather than a rule-local recursive walker. Call the matching walker from an overridden hook to visit children.
+2. **Implement** the rule. Derive `Default` and implement `Rule` from `falcon_analyze`, or `CrossFileRule` for project-wide analysis. The required `prepare` hook selects exactly one analysis kind:
+
+   - `RulePreparation::Structural`: syntax rules return an independent `StructuralRuleVisitor` collector. Wrap the complete trait implementation in `falcon_analyze::structural_visitor!` so callback subscriptions are derived from its methods, not maintained separately. All enabled collectors share the source-order structural walk. Inspect nodes in `visit_*` callbacks, restore scoped state in matching `exit_*` callbacks, and return diagnostics from consuming `finish`. Do not recurse from callbacks. `StructuralTraversal::SkipChildren` and `route_child` suppress callbacks only for that collector, never for other rules.
+   - `RulePreparation::Semantic`: type- or flow-aware rules return a `SemanticRuleVisitor` collector for the shared evaluation-order semantic walk.
+   - `RulePreparation::Diagnostics`: reserve immediate diagnostics for genuine whole-file, source/token, path, or directive checks, or for a rule gated off before collection. Do not run a rule-local primary AST traversal here.
 
    Use the parsed `SyntaxStore` through `ctx.syntax` for tokens, delimiters, and comments; don't re-lex the file. Pass the parser's store to `AnalyzeContext::new(path, source, config, &syntax)`. Token ids belong to their store, so use `syntax_for_span(span)` for nested interpolations. Preserve literal spelling when comparing expressions.
 

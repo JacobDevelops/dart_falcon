@@ -17,7 +17,10 @@
 //!
 //! Adopted from the official `avoid_private_typedef_functions` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_dart_type};
 
@@ -30,11 +33,11 @@ impl Rule for AvoidPrivateTypedefFunctions {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let candidates: Vec<&Identifier> = program
+        let mut candidates: Vec<(&Identifier, usize)> = program
             .declarations
             .iter()
             .filter_map(|declaration| match declaration {
-                TopLevelDecl::TypeAlias(alias) if is_candidate(alias) => Some(&alias.name),
+                TopLevelDecl::TypeAlias(alias) if is_candidate(alias) => Some((&alias.name, 0)),
                 _ => None,
             })
             .collect();
@@ -49,29 +52,13 @@ impl Rule for AvoidPrivateTypedefFunctions {
             _ => &[],
         };
 
-        RulePreparation::Diagnostics(
-            candidates
-                .into_iter()
-                .filter(|name| {
-                    let mut counter = UseCounter {
-                        name: &name.name,
-                        count: 0,
-                    };
-                    counter.visit_program(program);
-                    for sibling in siblings {
-                        counter.visit_program(sibling);
-                    }
-                    counter.count <= 1
-                })
-                .map(|name| {
-                    ctx.diagnostic(
-                        "avoid-private-typedef-functions",
-                        "The typedef is unnecessary because it is only used in one place.",
-                        name.span,
-                    )
-                })
-                .collect(),
-        )
+        let mut counter = UseCounter {
+            candidates: &mut candidates,
+        };
+        for sibling in siblings {
+            counter.visit_program(sibling);
+        }
+        RulePreparation::Structural(Box::new(Collector { ctx, candidates }))
     }
 }
 
@@ -88,22 +75,52 @@ fn is_candidate(alias: &TypeAliasDecl) -> bool {
     legacy || alias.type_params.is_empty()
 }
 
-/// Counts type annotations naming the typedef.
-struct UseCounter<'a> {
-    name: &'a str,
-    count: usize,
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    candidates: Vec<(&'a Identifier, usize)>,
 }
 
-impl Visitor for UseCounter<'_> {
-    fn visit_dart_type(&mut self, node: &DartType) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+        UseCounter::count_type(&mut self.candidates, node);
+        StructuralTraversal::Continue
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.candidates.into_iter().filter(|(_, count)| *count <= 1).map(|(name, _)| {
+            self.ctx.diagnostic(
+                "avoid-private-typedef-functions",
+                "The typedef is unnecessary because it is only used in one place.",
+                name.span,
+            )
+        }).collect()
+    }
+}
+}
+
+/// Counts type annotations naming the candidate typedefs.
+struct UseCounter<'a, 'p> {
+    candidates: &'a mut [(&'p Identifier, usize)],
+}
+
+impl UseCounter<'_, '_> {
+    fn count_type(candidates: &mut [(&Identifier, usize)], node: &DartType) {
         if let DartType::Named(named) = node
-            && named
-                .segments
-                .last()
-                .is_some_and(|segment| segment.name == self.name)
+            && let Some(segment) = named.segments.last()
         {
-            self.count += 1;
+            for (name, count) in candidates {
+                if segment.name == name.name {
+                    *count += 1;
+                }
+            }
         }
+    }
+}
+
+impl Visitor for UseCounter<'_, '_> {
+    fn visit_dart_type(&mut self, node: &DartType) {
+        Self::count_type(self.candidates, node);
         walk_dart_type(self, node);
     }
 }

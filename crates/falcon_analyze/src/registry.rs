@@ -1,4 +1,5 @@
 use crate::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program};
+use crate::structural_scope;
 use crate::{AnalyzeContext, FileSuppressions, Rule, RuleLookup, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::{
@@ -87,7 +88,9 @@ impl RuleRegistry {
         ctx: &AnalyzeContext,
     ) -> Vec<Diagnostic> {
         let mut diagnostics_by_rule = Vec::with_capacity(self.rules.len());
-        let mut visitors = SemanticVisitors(Vec::new());
+        let mut visitors = SemanticVisitors(Vec::with_capacity(self.rules.len()));
+        let mut structural_visitors = Vec::with_capacity(self.rules.len());
+        let mut structural_indices = Vec::with_capacity(self.rules.len());
         for (index, (name, rule)) in self.rules.iter().enumerate() {
             let span = debug_span!("run_rule", rule = name);
             let _enter = span.enter();
@@ -98,7 +101,22 @@ impl RuleRegistry {
                     diagnostics_by_rule.push(Vec::new());
                     visitors.0.push((index, visitor));
                 }
+                RulePreparation::Structural(visitor) => {
+                    diagnostics_by_rule.push(Vec::new());
+                    structural_indices.push(index);
+                    structural_visitors.push(visitor);
+                }
             }
+        }
+        for (index, diagnostics) in
+            structural_indices
+                .into_iter()
+                .zip(structural_scope::visit_program(
+                    program,
+                    structural_visitors,
+                ))
+        {
+            diagnostics_by_rule[index].extend(diagnostics);
         }
         if !visitors.0.is_empty() {
             if let Some(state) = SemanticState::new(program, ctx) {

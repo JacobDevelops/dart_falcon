@@ -7,7 +7,9 @@
 //! treated as a wildcard and never flagged.
 
 use crate::lint::naming::is_upper_camel_case;
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -17,23 +19,42 @@ pub struct CamelCaseTypes;
 impl Rule for CamelCaseTypes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Class(c) => check(&c.name, &mut diags, ctx),
-                TopLevelDecl::MixinClass(c) => check(&c.name, &mut diags, ctx),
-                TopLevelDecl::Mixin(m) => check(&m.name, &mut diags, ctx),
-                TopLevelDecl::Enum(e) => check(&e.name, &mut diags, ctx),
-                TopLevelDecl::ExtensionType(x) => check(&x.name, &mut diags, ctx),
-                TopLevelDecl::TypeAlias(t) => check(&t.name, &mut diags, ctx),
-                _ => {}
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
+        let diags = &mut self.diags;
+        match decl {
+            TopLevelDecl::Class(c) => check(&c.name, diags, ctx),
+            TopLevelDecl::MixinClass(c) => check(&c.name, diags, ctx),
+            TopLevelDecl::Mixin(m) => check(&m.name, diags, ctx),
+            TopLevelDecl::Enum(e) => check(&e.name, diags, ctx),
+            TopLevelDecl::ExtensionType(x) => check(&x.name, diags, ctx),
+            TopLevelDecl::TypeAlias(t) => check(&t.name, diags, ctx),
+            _ => {}
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 const MESSAGE: &str = "Name types using UpperCamelCase.";

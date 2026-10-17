@@ -51,3 +51,7 @@ void containersRegression(int rcount, bool flag) {
   final rg = (p: !!flag, q: 0); /* expect: avoid-inverted-boolean-expressions */
   print([ra, rc, rd, re, rf, rg]);
 }
+
+bool nestedChains(bool a, bool b) =>
+    !!(a && /* expect: avoid-inverted-boolean-expressions */
+        !!b); /* expect: avoid-inverted-boolean-expressions */

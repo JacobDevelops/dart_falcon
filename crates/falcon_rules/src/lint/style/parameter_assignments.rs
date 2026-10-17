@@ -26,13 +26,12 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, for_each_expr_in_program, walk_class_member, walk_expr, walk_function_decl,
-    walk_method_decl, walk_setter_decl, walk_stmt,
-};
 
 use falcon_analyze::resolve::lexical_usage::{LocalWrite, LocalWriteKind};
 
@@ -58,34 +57,14 @@ impl Rule for ParameterAssignments {
         if writes.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut assignments = Vec::new();
-        for_each_expr_in_program(program, |expr| match expr {
-            Expr::Assign { span, .. } => assignments.push(*span),
-            // A cascade section ending in an assignment is an assignment
-            // expression to the analyzer.
-            Expr::Cascade { sections, .. } => assignments.extend(
-                sections
-                    .iter()
-                    .filter(|section| {
-                        matches!(
-                            section.ops.last(),
-                            Some(CascadeOp::Assign(..) | CascadeOp::IndexAssign(..))
-                        )
-                    })
-                    .map(|section| section.span),
-            ),
-            _ => {}
-        });
-        assignments.sort_unstable_by_key(|span| span.start);
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             ctx,
             writes,
-            assignments,
+            assignments: Vec::new(),
             assignment_targets,
+            parameters: Vec::new(),
             diagnostics: Vec::new(),
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        }))
     }
 }
 
@@ -97,6 +76,7 @@ struct Collector<'a, 'ctx> {
     /// The local declaration each assignment writes, when its target is one.
     assignment_targets: HashMap<Span, usize>,
     diagnostics: Vec<Diagnostic>,
+    parameters: Vec<(Span, bool, Option<Span>)>,
 }
 
 impl Collector<'_, '_> {
@@ -121,8 +101,8 @@ impl Collector<'_, '_> {
 
     /// Reports the writes of parameter `name` inside `scope` (the whole
     /// function when `None`).
-    fn check_param(&mut self, name: &Identifier, defaults_to_null: bool, scope: Option<Span>) {
-        let Some(writes) = self.writes.remove(&name.span.start) else {
+    fn report_param(&mut self, name: Span, defaults_to_null: bool, scope: Option<Span>) {
+        let Some(writes) = self.writes.remove(&name.start) else {
             return;
         };
         let mut defaulted = false;
@@ -145,10 +125,19 @@ impl Collector<'_, '_> {
             if report {
                 self.diagnostics.push(self.ctx.diagnostic(
                     RULE,
-                    format!("Invalid assignment to the parameter '{}'.", name.name),
+                    format!(
+                        "Invalid assignment to the parameter '{}'.",
+                        &self.ctx.source[name.start..name.end]
+                    ),
                     write.span,
                 ));
             }
+        }
+    }
+
+    fn check_param(&mut self, name: &Identifier, defaults_to_null: bool, scope: Option<Span>) {
+        if self.writes.contains_key(&name.span.start) {
+            self.parameters.push((name.span, defaults_to_null, scope));
         }
     }
 
@@ -167,49 +156,70 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        self.assignments.sort_unstable_by_key(|span| span.start);
+        for (name, defaults_to_null, scope) in std::mem::take(&mut self.parameters) {
+            self.report_param(name, defaults_to_null, scope);
+        }
+        self.diagnostics
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if let Some(params) = node.params() {
             self.check(params, None);
         }
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check(&node.params, None);
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         self.check_param(&node.param, false, None);
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             self.check(&operator.params, None);
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         let body = node
             .body
             .map_or(Span::new(node.span.end, node.span.end), |body| *body.span());
         self.check(node.params, Some(body));
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
             self.check(&function.params, None);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        match node {
+            Expr::Assign { span, .. } => self.assignments.push(*span),
+            Expr::Cascade { sections, .. } => self.assignments.extend(
+                sections.iter().filter(|section| matches!(
+                    section.ops.last(),
+                    Some(CascadeOp::Assign(..) | CascadeOp::IndexAssign(..))
+                )).map(|section| section.span),
+            ),
+            _ => {}
+        }
         if let Expr::FuncExpr { params, .. } = node {
             self.check(params, None);
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

@@ -50,3 +50,10 @@ void nestedInOwnAssignment(int count, [int? limit]) {
   limit = limit ??= 2; /* expect: parameter-assignments */
   print('$count$limit');
 }
+
+class ConstructorBody {
+  final int value;
+  ConstructorBody(int input) : value = input++ {
+    input++; /* expect: parameter-assignments */
+  }
+}

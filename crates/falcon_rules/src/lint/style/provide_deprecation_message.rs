@@ -9,10 +9,11 @@
 //! also inspects field-level annotations, which the generic AST walk would
 //! otherwise skip.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 #[derive(Default)]
 pub struct ProvideDeprecationMessage;
@@ -20,15 +21,14 @@ pub struct ProvideDeprecationMessage;
 impl Rule for ProvideDeprecationMessage {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -37,10 +37,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_annotation(&mut self, node: &Annotation) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_annotation(&mut self, node: &Annotation) -> StructuralTraversal {
         let Some(last) = node.name.last() else {
-            return;
+            return StructuralTraversal::SkipChildren;
         };
         let flagged = match last.name.as_str() {
             // `@deprecated`: the predefined constant, never carries a message.
@@ -64,5 +67,7 @@ impl Visitor for Collector<'_> {
                 node.span,
             ));
         }
+        StructuralTraversal::SkipChildren
     }
+}
 }

@@ -20,10 +20,11 @@
 //! lint.
 
 use crate::lint::string_lit::{LiteralPart, decoded_text, literal_parts};
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct MissingWhitespaceBetweenAdjacentStrings;
@@ -31,16 +32,15 @@ pub struct MissingWhitespaceBetweenAdjacentStrings;
 impl Rule for MissingWhitespaceBetweenAdjacentStrings {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             exempt: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -101,11 +101,13 @@ struct Collector<'a> {
     exempt: Vec<Span>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
+            return StructuralTraversal::Continue;
         }
         if let Some(args) = is_pattern_call(node) {
             self.exempt.extend(args.positional.iter().filter_map(
@@ -115,12 +117,12 @@ impl Visitor for Collector<'_> {
                 },
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
+    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
         if !node.is_adjacent || self.exempt.contains(&node.span) {
-            return;
+            return StructuralTraversal::SkipChildren;
         }
         let seams: Vec<(Seam, Span)> = node
             .segments()
@@ -142,5 +144,7 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
+        StructuralTraversal::SkipChildren
     }
+}
 }

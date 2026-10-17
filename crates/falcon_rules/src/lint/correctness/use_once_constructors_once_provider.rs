@@ -11,13 +11,11 @@
 //! Checks calls throughout declarations, including initializers, callbacks,
 //! collection literals, conditions, and nested call receivers.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_annotation, walk_class_member, walk_enum_decl, walk_expr, walk_field_decl,
-    walk_local_var, walk_pattern, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct UseOnceConstructorsOnceProvider;
@@ -25,16 +23,16 @@ pub struct UseOnceConstructorsOnceProvider;
 impl Rule for UseOnceConstructorsOnceProvider {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             in_const: false,
+            const_stack: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -44,10 +42,12 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     in_const: bool,
+    const_stack: Vec<bool>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if !self.in_const
             && let Expr::Call { callee, .. } = node
             && let Expr::Ident(id) = callee.unparenthesized()
@@ -59,7 +59,7 @@ impl Visitor for Collector<'_> {
                 *node.span(),
             ));
         }
-        let previous = self.in_const;
+        self.const_stack.push(self.in_const);
         self.in_const |= matches!(
             node,
             Expr::New { is_const: true, .. }
@@ -68,58 +68,87 @@ impl Visitor for Collector<'_> {
                 | Expr::Map { is_const: true, .. }
                 | Expr::Record { is_const: true, .. }
         );
-        walk_expr(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        let previous = self.in_const;
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
         self.in_const |= node.keyword == VarKeyword::Const;
-        walk_local_var(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        let previous = self.in_const;
+    fn exit_local_var(&mut self, _node: &LocalVarDecl) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
         self.in_const |= node.keyword == VarKeyword::Const;
-        walk_field_decl(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        let previous = self.in_const;
+    fn exit_field_decl(&mut self, _node: &FieldDecl) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
         if let TopLevelDecl::Variable(variable) = node {
             self.in_const |= variable.keyword == VarKeyword::Const;
         }
-        walk_top_level_decl(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
-        let previous = self.in_const;
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn visit_annotation(&mut self, _node: &Annotation) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
         self.in_const = true;
-        walk_annotation(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
-        let previous = self.in_const;
+    fn exit_annotation(&mut self, _node: &Annotation) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
         self.in_const |= matches!(node, Pattern::Const(_));
-        walk_pattern(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
-        let previous = self.in_const;
+    fn exit_pattern(&mut self, _node: &Pattern) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn visit_enum_decl(&mut self, _node: &EnumDecl) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
         self.in_const = true;
-        walk_enum_decl(self, node);
-        self.in_const = previous;
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
-        let previous = self.in_const;
-        self.in_const = false;
-        walk_class_member(self, node);
-        self.in_const = previous;
+    fn exit_enum_decl(&mut self, _node: &EnumDecl) {
+        self.in_const = self.const_stack.pop().unwrap();
     }
+
+    fn visit_class_member(&mut self, _node: &ClassMember) -> StructuralTraversal {
+        self.const_stack.push(self.in_const);
+        self.in_const = false;
+        StructuralTraversal::Continue
+    }
+
+    fn exit_class_member(&mut self, _node: &ClassMember) {
+        self.in_const = self.const_stack.pop().unwrap();
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

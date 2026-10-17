@@ -26,8 +26,9 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, TypeParameterScope,
+    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -42,33 +43,60 @@ impl Rule for UseSettersToChangeProperties {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let (owner_type, members, unresolved_super, extension) = match decl {
+        RulePreparation::Structural(Box::new(Collector {
+            program,
+            ctx,
+            signatures,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            next_decl: 0,
+            owner: None,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a, 'ctx> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'ctx>,
+    signatures: &'a SignatureIndex,
+    model: SemanticModel<'a>,
+    next_decl: usize,
+    owner: Option<(usize, ResolvedType, bool, bool)>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let index = self.next_decl;
+        self.next_decl += 1;
+        self.owner = None;
+        let model = &self.model;
+            let (owner_type, unresolved_super, extension) = match decl {
                 TopLevelDecl::Extension(node) => {
                     // Extension members resolve `this` against the `on` type
                     // and never override.
                     let mut parameters = TypeParameterScope::default();
-                    parameters.push(&node.type_params, &model);
+                    parameters.push(&node.type_params, model);
                     (
                         model.resolve_type_in(&node.on_type, &parameters),
-                        &node.members,
                         false,
                         true,
                     )
                 }
                 _ => {
-                    let (name, members) = match decl {
-                        TopLevelDecl::Class(node) => (&node.name.name, &node.members),
-                        TopLevelDecl::MixinClass(node) => (&node.name.name, &node.members),
-                        TopLevelDecl::Mixin(node) => (&node.name.name, &node.members),
-                        TopLevelDecl::Enum(node) => (&node.name.name, &node.members),
-                        TopLevelDecl::ExtensionType(node) => (&node.name.name, &node.members),
-                        _ => continue,
+                    let name = match decl {
+                        TopLevelDecl::Class(node) => &node.name.name,
+                        TopLevelDecl::MixinClass(node) => &node.name.name,
+                        TopLevelDecl::Mixin(node) => &node.name.name,
+                        TopLevelDecl::Enum(node) => &node.name.name,
+                        TopLevelDecl::ExtensionType(node) => &node.name.name,
+                        _ => return StructuralTraversal::Continue,
                     };
                     let Some(owner) = model.resolve_name(name.as_str()) else {
-                        continue;
+                        return StructuralTraversal::Continue;
                     };
                     let unresolved_super = match decl {
                         TopLevelDecl::Class(class) => class.extends.as_ref().is_some_and(|ty| {
@@ -78,35 +106,32 @@ impl Rule for UseSettersToChangeProperties {
                     };
                     (
                         ResolvedType::interface_identity(owner),
-                        members,
                         unresolved_super,
                         false,
                     )
                 }
             };
-            for member in members {
-                let ClassMember::Method(method) = member else {
-                    continue;
-                };
-                if changes_property(
-                    method,
-                    members,
-                    &owner_type,
-                    signatures,
-                    &model,
-                    unresolved_super,
-                    extension,
-                ) {
-                    diags.push(ctx.diagnostic(
+        self.owner = Some((index, owner_type, unresolved_super, extension));
+        StructuralTraversal::Continue
+    }
+
+    fn visit_method_decl(&mut self, method: &MethodDecl) -> StructuralTraversal {
+        if let Some((index, owner_type, unresolved_super, extension)) = &self.owner
+            && let Some(members) = crate::lint::declarations::members_of(&self.program.declarations[*index])
+            && changes_property(
+                method, members, owner_type, self.signatures, &self.model,
+                *unresolved_super, *extension,
+            )
+        {
+                    self.diags.push(self.ctx.diagnostic(
                         "use-setters-to-change-properties",
                         "The method is used to change a property.",
                         method.name.span,
                     ));
                 }
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::Continue
     }
+}
 }
 
 fn changes_property(

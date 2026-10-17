@@ -9,13 +9,11 @@
 //! to name a deliberately unused binding.
 
 use crate::lint::naming::has_leading_underscore;
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_dart_type, walk_formal_param_list, walk_pattern, walk_primary_constructor,
-    walk_setter_decl, walk_stmt, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct NoLeadingUnderscoresForLocalIdentifiers;
@@ -23,18 +21,18 @@ pub struct NoLeadingUnderscoresForLocalIdentifiers;
 impl Rule for NoLeadingUnderscoresForLocalIdentifiers {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             primary_params: None,
             representation_params: None,
             field_shortcuts: Vec::new(),
+            shortcut_lengths: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -46,6 +44,7 @@ struct Collector<'a> {
     primary_params: Option<usize>,
     representation_params: Option<usize>,
     field_shortcuts: Vec<usize>,
+    shortcut_lengths: Vec<usize>,
 }
 
 impl Collector<'_> {
@@ -60,24 +59,30 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         self.representation_params = match node {
             TopLevelDecl::ExtensionType(extension) => {
                 Some(extension.primary_constructor.params.span.start)
             }
             _ => None,
         };
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) {
+    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) -> StructuralTraversal {
         self.primary_params = Some(node.params.span.start);
-        walk_primary_constructor(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_primary_constructor(&mut self, _node: &PrimaryConstructor) {
         self.primary_params = None;
     }
 
-    fn visit_formal_param_list(&mut self, node: &FormalParamList) {
+    fn visit_formal_param_list(&mut self, node: &FormalParamList) -> StructuralTraversal {
         if self.representation_params != Some(node.span.start) {
             for parameter in &node.params {
                 if parameter.initializing.is_some()
@@ -91,10 +96,10 @@ impl Visitor for Collector<'_> {
                 }
             }
         }
-        walk_formal_param_list(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Function(function) = node {
             for parameter in &function.params {
                 if !parameter.is_named
@@ -104,24 +109,24 @@ impl Visitor for Collector<'_> {
                 }
             }
         }
-        walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
 
     /// A class setter's value parameter is not part of a `FormalParamList`, so
     /// it needs its own check.
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         self.check(&node.param);
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
         for declarator in &node.declarators {
             self.check(&declarator.name);
         }
-        falcon_syntax::visitor::walk_local_var(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             // Local declarations and pattern bindings use their dedicated hooks.
             Stmt::LocalFunc(function) => self.check(&function.name),
@@ -147,13 +152,13 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
     /// Declared variable patterns bind locals: `final (_a, _b) = pair`,
     /// `case final _x`, `for (final (_a, _b) in xs)`.
-    fn visit_pattern(&mut self, node: &Pattern) {
-        let shortcuts = self.field_shortcuts.len();
+    fn visit_pattern(&mut self, node: &Pattern) -> StructuralTraversal {
+        self.shortcut_lengths.push(self.field_shortcuts.len());
         if let Pattern::Object(object) = node {
             for field in &object.fields {
                 if self.ctx.source.as_bytes().get(field.span.start) == Some(&b':') {
@@ -166,9 +171,13 @@ impl Visitor for Collector<'_> {
         {
             self.check(name);
         }
-        walk_pattern(self, node);
-        self.field_shortcuts.truncate(shortcuts);
+        StructuralTraversal::Continue
     }
+
+    fn exit_pattern(&mut self, _node: &Pattern) {
+        self.field_shortcuts.truncate(self.shortcut_lengths.pop().unwrap());
+    }
+}
 }
 
 #[cfg(test)]

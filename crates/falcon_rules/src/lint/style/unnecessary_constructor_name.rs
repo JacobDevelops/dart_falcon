@@ -7,10 +7,11 @@
 //! A bare `X.new` constructor tear-off that is not invoked is deliberately left alone:
 //! there the `.new` is required to reference the constructor as a value.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct UnnecessaryConstructorName;
@@ -18,15 +19,14 @@ pub struct UnnecessaryConstructorName;
 impl Rule for UnnecessaryConstructorName {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -35,9 +35,14 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     // `class A { A.new(); }` — declaring the default constructor as `.new`.
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         if let Some(name) = &node.constructor_name
             && name.name == "new"
         {
@@ -47,9 +52,10 @@ impl Visitor for Collector<'_> {
                 name.span,
             ));
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             // `X.new(...)` — the invocation form parses as a call whose callee is a
             // `.new` field access. The bare tear-off `X.new` is a `Field` not wrapped
@@ -78,6 +84,7 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

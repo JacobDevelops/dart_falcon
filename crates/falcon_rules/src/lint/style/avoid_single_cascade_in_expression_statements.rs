@@ -5,9 +5,11 @@
 //! obscures intent. Rewrite `foo..bar()` as `foo.bar()`. Cascades with two or
 //! more sections are the idiomatic form and are not flagged.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_stmt_in_program;
 
 #[derive(Default)]
 pub struct AvoidSingleCascadeInExpressionStatements;
@@ -15,22 +17,39 @@ pub struct AvoidSingleCascadeInExpressionStatements;
 impl Rule for AvoidSingleCascadeInExpressionStatements {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_stmt_in_program(program, |node| {
-            if let Stmt::Expr(e) = node
-                && let Expr::Cascade { sections, span, .. } = e.expr.unparenthesized()
-                && sections.len() == 1
-            {
-                diags.push(ctx.diagnostic(
-                    "avoid-single-cascade-in-expression-statements",
-                    "Single cascade in an expression statement — use `.` instead of `..`",
-                    *span,
-                ));
-            }
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        if let Stmt::Expr(e) = node
+            && let Expr::Cascade { sections, span, .. } = e.expr.unparenthesized()
+            && sections.len() == 1
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-single-cascade-in-expression-statements",
+                "Single cascade in an expression statement — use `.` instead of `..`",
+                *span,
+            ));
+        }
+        StructuralTraversal::Continue
+    }
+}
 }

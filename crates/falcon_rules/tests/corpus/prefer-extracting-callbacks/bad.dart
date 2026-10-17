@@ -40,3 +40,15 @@ class PrefixedWidget extends f.StatelessWidget {
 }
 
 void doSomething(Object? x) {}
+
+class NestedClosureReturn extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => ElevatedButton(
+    onPressed: () { /* expect: prefer-extracting-callbacks */
+      final nested = () {
+        return const Text('nested');
+      };
+      doSomething(nested);
+    },
+  );
+}

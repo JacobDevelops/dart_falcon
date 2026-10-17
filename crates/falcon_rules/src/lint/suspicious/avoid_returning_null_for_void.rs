@@ -10,13 +10,11 @@
 //! its own return type, so an inner closure is not tainted by an enclosing void
 //! frame.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_constructor_decl, walk_expr, walk_function_decl, walk_getter_decl,
-    walk_method_decl, walk_setter_decl, walk_stmt,
-};
 
 #[derive(Default)]
 pub struct AvoidReturningNullForVoid;
@@ -24,16 +22,15 @@ pub struct AvoidReturningNullForVoid;
 impl Rule for AvoidReturningNullForVoid {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             void_stack: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -77,59 +74,80 @@ fn is_void_return(rt: &Option<DartType>, marker: AsyncMarker) -> bool {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_class_member(&mut self, node: &ClassMember) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             let is_void = is_void_return(&operator.return_type, operator.async_marker);
             self.check_arrow(operator.body.as_ref(), is_void);
             self.void_stack.push(is_void);
-            falcon_syntax::visitor::walk_class_member(self, node);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_class_member(&mut self, node: &ClassMember) {
+        if matches!(node, ClassMember::Operator(_)) {
             self.void_stack.pop();
-        } else {
-            falcon_syntax::visitor::walk_class_member(self, node);
         }
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         let is_void = is_void_return(&node.return_type, node.async_marker);
         self.check_arrow(node.body.as_ref(), is_void);
         self.void_stack.push(is_void);
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
         self.void_stack.pop();
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         let is_void = is_void_return(&node.return_type, node.async_marker);
         self.check_arrow(node.body.as_ref(), is_void);
         self.void_stack.push(is_void);
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_method_decl(&mut self, _node: &MethodDecl) {
         self.void_stack.pop();
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
         let is_void = is_void_return(&node.return_type, node.async_marker);
         self.check_arrow(node.body.as_ref(), is_void);
         self.void_stack.push(is_void);
-        walk_getter_decl(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_getter_decl(&mut self, _node: &GetterDecl) {
         self.void_stack.pop();
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         // Setters are always void-returning.
         self.check_arrow(node.body.as_ref(), true);
         self.void_stack.push(true);
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_setter_decl(&mut self, _node: &SetterDecl) {
         self.void_stack.pop();
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+    fn visit_constructor_decl(&mut self, _node: &ConstructorDecl) -> StructuralTraversal {
         // Constructors don't return values; never flag inside one.
         self.void_stack.push(false);
-        walk_constructor_decl(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_constructor_decl(&mut self, _node: &ConstructorDecl) {
         self.void_stack.pop();
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             Stmt::Return(r) => {
                 if self.void_stack.last() == Some(&true)
@@ -141,29 +159,37 @@ impl Visitor for Collector<'_> {
                         r.span,
                     ));
                 }
-                walk_stmt(self, node);
             }
             Stmt::LocalFunc(lf) => {
                 let is_void = is_void_return(&lf.return_type, lf.async_marker);
                 self.check_arrow(Some(&lf.body), is_void);
                 self.void_stack.push(is_void);
-                walk_stmt(self, node);
-                self.void_stack.pop();
             }
-            _ => walk_stmt(self, node),
+            _ => {}
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if matches!(node, Stmt::LocalFunc(_)) {
+            self.void_stack.pop();
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::FuncExpr { body, .. } = node {
             // Function expressions have no written return type, so they can never
             // be declared `void`.
             self.check_arrow(Some(body), false);
             self.void_stack.push(false);
-            walk_expr(self, node);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::FuncExpr { .. }) {
             self.void_stack.pop();
-        } else {
-            walk_expr(self, node);
         }
     }
+}
 }

@@ -16,13 +16,11 @@
 //!
 //! Adopted from the official `always_put_required_named_parameters_first` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_dart_type, walk_expr, walk_formal_param, walk_function_decl,
-    walk_method_decl, walk_stmt, walk_type_alias_decl,
-};
 
 const RULE: &str = "always-put-required-named-parameters-first";
 const MESSAGE: &str = "Required named parameters should be before optional named parameters.";
@@ -33,15 +31,14 @@ pub struct AlwaysPutRequiredNamedParametersFirst;
 impl Rule for AlwaysPutRequiredNamedParametersFirst {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -80,61 +77,65 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if let Some(params) = node.params() {
             self.check(params);
         }
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check(&node.params);
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         self.check(node.params);
+        StructuralTraversal::Continue
     }
 
-    fn visit_type_alias_decl(&mut self, node: &TypeAliasDecl) {
+    fn visit_type_alias_decl(&mut self, node: &TypeAliasDecl) -> StructuralTraversal {
         // The shared alias callback visits legacy formals once, separately
         // from the return type and modern function-type syntax.
         if let Some(params) = &node.legacy_params {
             self.check(params);
         }
-        walk_type_alias_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             self.check(&operator.params);
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(func) = node {
             self.check(&func.params);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::FuncExpr { params, .. } = node {
             self.check(params);
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if let Some(params) = &node.function_params {
             self.check(params);
         }
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Function(function) = node {
             let mut optional_seen = false;
             for param in function.params.iter().filter(|param| param.is_named) {
@@ -148,6 +149,7 @@ impl Visitor for Collector<'_, '_> {
                 }
             }
         }
-        walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

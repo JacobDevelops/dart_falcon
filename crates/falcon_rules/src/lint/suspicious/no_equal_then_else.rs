@@ -8,10 +8,11 @@
 //! the branch that was supposed to differ. Applies to both `if`/`else` statements
 //! and `?:` ternary expressions.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct NoEqualThenElse;
@@ -19,15 +20,14 @@ pub struct NoEqualThenElse;
 impl Rule for NoEqualThenElse {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -71,8 +71,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Conditional {
             then_expr,
             else_expr,
@@ -87,10 +92,10 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::If(i) = node
             && let Some(else_branch) = &i.else_branch
             && normalize(self.ctx, *i.then_branch.span())
@@ -103,8 +108,9 @@ impl Visitor for Collector<'_> {
                 *last,
             ));
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 #[cfg(test)]

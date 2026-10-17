@@ -10,7 +10,10 @@
 //! Checks each comparison once throughout the program, including parenthesized
 //! expressions, initializers, and collections.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -19,11 +22,24 @@ pub struct BinaryExpressionOperandOrder;
 impl Rule for BinaryExpressionOperandOrder {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, expr: &Expr) -> StructuralTraversal {
             if let Expr::Binary {
                 op,
                 left,
@@ -40,16 +56,20 @@ impl Rule for BinaryExpressionOperandOrder {
                     && left_is_literal
                     && !(left_is_null && right_is_literal)
                 {
-                    diags.push(ctx.diagnostic(
+                    self.diags.push(self.ctx.diagnostic(
                 "binary-expression-operand-order",
                 "Avoid placing literal or constant operand on the left side of a binary expression",
                 *span,
             ));
                 }
             }
-        });
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn is_literal_or_const(expr: &Expr) -> bool {

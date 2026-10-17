@@ -8,10 +8,11 @@
 //! branches reduce to a single return, or to a single assignment to the same
 //! variable. Local functions, closures, and labeled statements are included.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct PreferConditionalExpressions;
@@ -19,17 +20,15 @@ pub struct PreferConditionalExpressions;
 impl Rule for PreferConditionalExpressions {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        ConditionalExpressions {
-            diags: &mut diags,
+        RulePreparation::Structural(Box::new(ConditionalExpressions {
+            diags: Vec::new(),
             ctx,
             parent_is_if: false,
-        }
-        .visit_program(program);
-        RulePreparation::Diagnostics(diags)
+            parents: Vec::new(),
+        }))
     }
 }
 
@@ -59,13 +58,19 @@ fn assign_target_name(stmt: &Stmt) -> Option<&str> {
 }
 
 struct ConditionalExpressions<'a, 'ctx> {
-    diags: &'a mut Vec<Diagnostic>,
+    diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
     parent_is_if: bool,
+    parents: Vec<bool>,
 }
 
-impl Visitor for ConditionalExpressions<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for ConditionalExpressions<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::If(n) = node
             && let Some(else_branch) = &n.else_branch
             && !self.parent_is_if
@@ -84,16 +89,23 @@ impl Visitor for ConditionalExpressions<'_, '_> {
                 ));
             }
         }
-        let parent = self.parent_is_if;
+        self.parents.push(self.parent_is_if);
         self.parent_is_if = matches!(node, Stmt::If(_));
-        walk_stmt(self, node);
-        self.parent_is_if = parent;
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        let parent = self.parent_is_if;
-        self.parent_is_if = false;
-        walk_expr(self, node);
-        self.parent_is_if = parent;
+    fn exit_stmt(&mut self, _node: &Stmt) {
+        self.parent_is_if = self.parents.pop().unwrap();
     }
+
+    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+        self.parents.push(self.parent_is_if);
+        self.parent_is_if = false;
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.parent_is_if = self.parents.pop().unwrap();
+    }
+}
 }

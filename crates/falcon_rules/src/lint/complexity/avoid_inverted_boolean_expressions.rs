@@ -7,10 +7,11 @@
 //! bangs. Despite the rule's name, it targets only stacked negations — it does
 //! not rewrite `!(a == b)` into `a != b`.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct AvoidInvertedBooleanExpressions;
@@ -18,15 +19,16 @@ pub struct AvoidInvertedBooleanExpressions;
 impl Rule for AvoidInvertedBooleanExpressions {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
+            skipping_chain: false,
+            chain_contexts: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -35,10 +37,22 @@ impl Rule for AvoidInvertedBooleanExpressions {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    skipping_chain: bool,
+    chain_contexts: Vec<bool>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.chain_contexts.push(self.skipping_chain);
+        if self.skipping_chain && (is_bang_unary(node) || matches!(node, Expr::Paren { .. })) {
+            return StructuralTraversal::Continue;
+        }
+        self.skipping_chain = false;
         if let Expr::Unary {
             op: UnaryOp::Bang,
             operand,
@@ -51,21 +65,15 @@ impl Visitor for Collector<'_> {
                 "Avoid inverted boolean expressions. Simplify the double negation.",
                 *span,
             ));
-            // Resume below the whole bang chain so inner bangs are not re-flagged.
-            let mut current = operand.as_ref();
-            while let Expr::Unary {
-                op: UnaryOp::Bang,
-                operand: next,
-                ..
-            } = current.unparenthesized()
-            {
-                current = next.as_ref();
-            }
-            self.visit_expr(current);
-            return;
+            self.skipping_chain = true;
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.skipping_chain = self.chain_contexts.pop().unwrap();
+    }
+}
 }
 
 /// True for a `!`-prefixed expression — the inner half of a `!!` double negation.

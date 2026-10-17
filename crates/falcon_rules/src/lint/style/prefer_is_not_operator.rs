@@ -6,9 +6,11 @@
 //! fires on a logical-not applied to a non-negated `is` expression; a test that
 //! already uses `is!` produces no negation to flag.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct PreferIsNotOperator;
@@ -16,25 +18,42 @@ pub struct PreferIsNotOperator;
 impl Rule for PreferIsNotOperator {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_expr_in_program(program, |node| {
-            if let Expr::Unary {
-                op: UnaryOp::Bang,
-                operand,
-                span,
-            } = node.unparenthesized()
-                && matches!(operand.unparenthesized(), Expr::Is { negated: false, .. })
-            {
-                diags.push(ctx.diagnostic(
-                    "prefer-is-not-operator",
-                    "Prefer using the 'is!' operator.",
-                    *span,
-                ));
-            }
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if let Expr::Unary {
+            op: UnaryOp::Bang,
+            operand,
+            span,
+        } = node.unparenthesized()
+            && matches!(operand.unparenthesized(), Expr::Is { negated: false, .. })
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "prefer-is-not-operator",
+                "Prefer using the 'is!' operator.",
+                *span,
+            ));
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

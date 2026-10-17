@@ -4,11 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, evaluate_constant,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, evaluate_constant,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt};
 
 #[derive(Default)]
 pub struct NoDuplicateCaseValues;
@@ -16,43 +15,44 @@ pub struct NoDuplicateCaseValues;
 impl Rule for NoDuplicateCaseValues {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut collector = Collector {
-            model: &model,
+        let collector = Collector {
+            model,
             signatures,
             owner: None,
             fields: HashMap::new(),
             ctx,
             diags: Vec::new(),
+            class_context: Vec::new(),
+            function_context: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
 struct Collector<'a> {
-    model: &'a SemanticModel<'a>,
+    model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     owner: Option<DeclarationIdentity>,
     fields: HashMap<String, Expr>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
+    class_context: Vec<(Option<DeclarationIdentity>, HashMap<String, Expr>)>,
+    function_context: Vec<Option<DeclarationIdentity>>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_class_decl(&mut self, node: &ClassDecl) {
-        let saved_owner = self.owner.clone();
-        let saved_fields = std::mem::take(&mut self.fields);
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_class_decl(&mut self, node: &ClassDecl) -> StructuralTraversal {
+        self.class_context.push((self.owner.clone(), std::mem::take(&mut self.fields)));
         let Some(owner) = self.model.resolve_name(&node.name.name) else {
-            walk_class_decl(self, node);
-            self.fields = saved_fields;
-            return;
+            return StructuralTraversal::Continue;
         };
         self.owner = Some(owner);
         self.fields = node
@@ -75,21 +75,28 @@ impl Visitor for Collector<'_> {
                 })
             })
             .collect();
-        walk_class_decl(self, node);
-        self.owner = saved_owner;
-        self.fields = saved_fields;
+        StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        let saved = self.owner.clone();
+    fn exit_class_decl(&mut self, _node: &ClassDecl) {
+        let (owner, fields) = self.class_context.pop().unwrap();
+        self.owner = owner;
+        self.fields = fields;
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.function_context.push(self.owner.clone());
         if let Some(owner) = self.model.resolve_value(&node.name.name) {
             self.owner = Some(owner);
         }
-        walk_function_decl(self, node);
-        self.owner = saved;
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn exit_function_decl(&mut self, _node: &FunctionDecl) {
+        self.owner = self.function_context.pop().unwrap();
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::Switch(switch) = node {
             let patterns = switch
                 .cases
@@ -107,15 +114,20 @@ impl Visitor for Collector<'_> {
                 },
             ));
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Switch { arms, .. } = node {
             self.check_patterns(arms.iter().map(|arm| &arm.pattern));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 impl Collector<'_> {
@@ -135,7 +147,7 @@ impl Collector<'_> {
                 expression,
                 self.owner.as_ref(),
                 &fields,
-                self.model,
+                &self.model,
                 self.signatures,
             ) && !seen.insert(value)
             {
@@ -160,7 +172,7 @@ impl Collector<'_> {
                 pattern,
                 self.owner.as_ref(),
                 &field_refs,
-                self.model,
+                &self.model,
                 self.signatures,
             ) {
                 if !seen.insert(value) {

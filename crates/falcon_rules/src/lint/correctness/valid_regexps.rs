@@ -6,10 +6,10 @@
 use crate::lint::string_lit::{has_interpolation, literal_parts, multiline_lead_len};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct ValidRegexps;
@@ -17,19 +17,18 @@ pub struct ValidRegexps;
 impl Rule for ValidRegexps {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let mut collector = Collector {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
             model: SemanticModel::new(ctx.file_path, identities, ctx.types),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -81,8 +80,9 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             Expr::Call { callee, args, .. } if self.sdk_regexp_name(callee) => self.check(args),
             Expr::New {
@@ -92,8 +92,13 @@ impl Visitor for Collector<'_> {
             }
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+}
 }
 
 fn extractable_pattern(expr: &Expr) -> Option<Vec<u32>> {

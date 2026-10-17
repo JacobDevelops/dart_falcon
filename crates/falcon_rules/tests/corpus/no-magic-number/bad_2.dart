@@ -20,3 +20,14 @@ int classify(int x) {
 void check(int n) {
   assert(n < 500); /* expect: no-magic-number */
 }
+
+void restoreExemptions(List<int> values) {
+  print(const [23]);
+  print(24); /* expect: no-magic-number */
+  print(values[25]);
+  print(26); /* expect: no-magic-number */
+  print(DateTime(2024, 2, 3));
+  print(27); /* expect: no-magic-number */
+  print([28, compute(29)]); /* expect: no-magic-number */
+  values..[30] = 31; /* expect: no-magic-number */
+}

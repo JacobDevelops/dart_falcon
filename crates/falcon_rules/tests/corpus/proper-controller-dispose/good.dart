@@ -68,3 +68,59 @@ class G extends State<StatefulWidget> {
     super.dispose();
   }
 }
+
+class CollectionIfCases extends State<StatefulWidget> {
+  final controller = TextEditingController();
+
+  @override
+  void dispose() {
+    final value = widget;
+    final list = [if (value case final controller?) controller];
+    final set = <Object>{if (value case final controller?) controller};
+    final map = <Object, Object>{
+      if (value case final controller?) controller: controller,
+    };
+    controller.dispose();
+    super.dispose();
+  }
+}
+
+class RestoredBodyScopes extends State<StatefulWidget> {
+  final controller = TextEditingController();
+
+  @override
+  void dispose() {
+    {
+      final controller = TextEditingController();
+      controller.dispose();
+    }
+    for (final controller in <TextEditingController>[]) {
+      controller.dispose();
+    }
+    for (final [controller] in <List<TextEditingController>>[]) {
+      controller.dispose();
+    }
+    if (widget case final controller?) {
+      final list = [if (widget case final nested?) nested];
+    } else {
+      controller.dispose();
+    }
+    try {
+      throw widget;
+    } catch (controller) {}
+    final callback = (TextEditingController controller) {
+      controller.dispose();
+    };
+    void local(TextEditingController controller) {
+      controller.dispose();
+    }
+    controller.dispose();
+    super.dispose();
+  }
+}
+
+class InitializerIsNotBodyOwnership extends State<StatefulWidget> {
+  final TextEditingController controller;
+
+  InitializerIsNotBodyOwnership() : controller = TextEditingController();
+}

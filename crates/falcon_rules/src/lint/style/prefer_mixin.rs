@@ -18,7 +18,11 @@
 //! Adopted from the official `prefer_mixin` lint.
 
 use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -27,40 +31,65 @@ pub struct PreferMixin;
 impl Rule for PreferMixin {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            let with_clause = match decl {
-                TopLevelDecl::Class(node) => &node.with_clause,
-                TopLevelDecl::ClassTypeAlias(node) => &node.with_clause,
-                TopLevelDecl::MixinClass(node) => &node.with_clause,
-                TopLevelDecl::Enum(node) => &node.with_clause,
-                _ => continue,
-            };
-            for mixin in with_clause {
-                let is_plain_class = match model.resolve_type(mixin) {
-                    ResolvedType::Interface { identity, .. } => {
-                        signatures.type_kind(&identity) == Some(TypeKind::Class)
-                    }
-                    _ => false,
-                };
-                if is_plain_class {
-                    diags.push(ctx.diagnostic(
-                        "prefer-mixin",
-                        "Only mixins should be mixed in.",
-                        *mixin.span(),
-                    ));
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model,
+            signatures,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
+        let model = &self.model;
+        let signatures = self.signatures;
+        let diags = &mut self.diags;
+        let with_clause = match decl {
+            TopLevelDecl::Class(node) => &node.with_clause,
+            TopLevelDecl::ClassTypeAlias(node) => &node.with_clause,
+            TopLevelDecl::MixinClass(node) => &node.with_clause,
+            TopLevelDecl::Enum(node) => &node.with_clause,
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        for mixin in with_clause {
+            let is_plain_class = match model.resolve_type(mixin) {
+                ResolvedType::Interface { identity, .. } => {
+                    signatures.type_kind(&identity) == Some(TypeKind::Class)
                 }
+                _ => false,
+            };
+            if is_plain_class {
+                diags.push(ctx.diagnostic(
+                    "prefer-mixin",
+                    "Only mixins should be mixed in.",
+                    *mixin.span(),
+                ));
             }
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 #[cfg(test)]

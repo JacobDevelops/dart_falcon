@@ -8,11 +8,12 @@
 //! as soon as it carries a type annotation. It covers local variables, fields,
 //! and top-level variables.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{self, Visitor};
 
 #[derive(Default)]
 pub struct PreferTypingUninitializedVariables;
@@ -20,15 +21,14 @@ pub struct PreferTypingUninitializedVariables;
 impl Rule for PreferTypingUninitializedVariables {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -54,23 +54,29 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_program(&mut self, node: &Program) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_program(&mut self, node: &Program) -> StructuralTraversal {
         for decl in &node.declarations {
             if let TopLevelDecl::Variable(var) = decl {
                 self.check(var.var_type.is_some(), &var.declarators);
             }
         }
-        visitor::walk_program(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         self.check(node.field_type.is_some(), &node.declarators);
-        visitor::walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+    fn visit_local_var(&mut self, local: &LocalVarDecl) -> StructuralTraversal {
         self.check(local.var_type.is_some(), &local.declarators);
-        visitor::walk_local_var(self, local);
+        StructuralTraversal::Continue
     }
+}
 }

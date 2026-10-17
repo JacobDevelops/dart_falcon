@@ -18,13 +18,13 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, bound_names, walk_enum_decl, walk_field_decl, walk_getter_decl, walk_local_var,
-    walk_setter_decl, walk_stmt, walk_top_level_decl,
-};
+use falcon_syntax::visitor::bound_names;
 
 #[derive(Default)]
 pub struct PreferCorrectIdentifierLength;
@@ -56,16 +56,14 @@ fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
 impl Rule for PreferCorrectIdentifierLength {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Names {
+        RulePreparation::Structural(Box::new(Names {
             diags: Vec::new(),
             ctx,
             cfg: ident_cfg(ctx),
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -102,55 +100,59 @@ impl Names<'_, '_> {
     }
 }
 
-impl Visitor for Names<'_, '_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+structural_visitor! {
+impl StructuralRuleVisitor for Names<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(variable) = node {
             for declarator in &variable.declarators {
                 self.check(&declarator.name);
             }
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
         for variant in &node.variants {
             self.check(&variant.name);
         }
-        walk_enum_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         for declarator in &node.declarators {
             self.check(&declarator.name);
         }
-        walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
         self.check(&node.name);
-        walk_getter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         self.check(&node.name);
-        walk_setter_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
         for declarator in &node.declarators {
             self.check(&declarator.name);
         }
-        walk_local_var(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::PatternDecl(declaration) = node {
             for name in bound_names(&declaration.pattern) {
                 self.check(name);
             }
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &IdentCfg) -> Diagnostic {

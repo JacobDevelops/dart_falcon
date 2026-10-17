@@ -17,10 +17,11 @@
 //!
 //! Adopted from the official `throw_in_finally` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct ThrowInFinally;
@@ -28,16 +29,17 @@ pub struct ThrowInFinally;
 impl Rule for ThrowInFinally {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut finder = Finder {
+        let finder = Finder {
             ctx,
             diagnostics: Vec::new(),
             in_finally: false,
+            states: Vec::new(),
+            finally_blocks: Vec::new(),
         };
-        finder.visit_program(program);
-        RulePreparation::Diagnostics(finder.diagnostics)
+        RulePreparation::Structural(Box::new(finder))
     }
 }
 
@@ -47,15 +49,11 @@ struct Finder<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     diagnostics: Vec<Diagnostic>,
     in_finally: bool,
+    states: Vec<bool>,
+    finally_blocks: Vec<Option<Span>>,
 }
 
 impl Finder<'_, '_> {
-    fn with_finally(&mut self, in_finally: bool, walk: impl FnOnce(&mut Self)) {
-        let saved = std::mem::replace(&mut self.in_finally, in_finally);
-        walk(self);
-        self.in_finally = saved;
-    }
-
     fn report(&mut self, span: Span) {
         if self.in_finally {
             self.diagnostics.push(self.ctx.diagnostic(
@@ -65,54 +63,58 @@ impl Finder<'_, '_> {
             ));
         }
     }
-
-    /// Visits a `try` statement: its body and catch clauses are outside any
-    /// finally of this (now innermost) `try`; its finally block is inside one.
-    fn visit_try(&mut self, try_catch: &TryCatchStmt) {
-        self.with_finally(false, |this| {
-            for stmt in &try_catch.body.stmts {
-                this.visit_stmt(stmt);
-            }
-            for catch in &try_catch.catches {
-                for stmt in &catch.body.stmts {
-                    this.visit_stmt(stmt);
-                }
-            }
-        });
-        if let Some(finally) = &try_catch.finally {
-            self.with_finally(true, |this| {
-                for stmt in &finally.stmts {
-                    this.visit_stmt(stmt);
-                }
-            });
-        }
-    }
 }
 
-impl Visitor for Finder<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Finder<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.states.push(self.in_finally);
         match node {
-            Stmt::TryCatch(try_catch) => self.visit_try(try_catch),
-            Stmt::Throw(throw) => {
-                self.report(Span {
-                    start: throw.span.start,
-                    end: throw.value.span().end,
-                });
-                walk_stmt(self, node);
+            Stmt::TryCatch(try_catch) => {
+                self.finally_blocks.push(try_catch.finally.as_ref().map(|block| block.span));
+                self.in_finally = false;
             }
-            Stmt::LocalFunc(_) => self.with_finally(false, |this| walk_stmt(this, node)),
-            _ => walk_stmt(self, node),
+            Stmt::Throw(throw) => self.report(Span {
+                start: throw.span.start,
+                end: throw.value.span().end,
+            }),
+            Stmt::LocalFunc(_) => self.in_finally = false,
+            _ => {}
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        match node {
-            Expr::Throw { span, .. } => {
-                self.report(*span);
-                walk_expr(self, node);
-            }
-            Expr::FuncExpr { .. } => self.with_finally(false, |this| walk_expr(this, node)),
-            _ => walk_expr(self, node),
-        }
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if matches!(node, Stmt::TryCatch(_)) { self.finally_blocks.pop(); }
+        self.in_finally = self.states.pop().unwrap();
     }
+
+    fn visit_block(&mut self, node: &Block) -> StructuralTraversal {
+        self.states.push(self.in_finally);
+        if self.finally_blocks.last() == Some(&Some(node.span)) {
+            self.in_finally = true;
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_block(&mut self, _node: &Block) {
+        self.in_finally = self.states.pop().unwrap();
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.states.push(self.in_finally);
+        match node {
+            Expr::Throw { span, .. } => self.report(*span),
+            Expr::FuncExpr { .. } => self.in_finally = false,
+            _ => {}
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.in_finally = self.states.pop().unwrap();
+    }
+}
 }

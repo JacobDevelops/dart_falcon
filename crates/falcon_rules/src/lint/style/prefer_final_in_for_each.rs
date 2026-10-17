@@ -16,10 +16,11 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, for_each_declared_body, walk_expr, walk_stmt};
 
 use crate::lint::lexical_usage::collection_for_inits;
 
@@ -35,18 +36,13 @@ impl Rule for PreferFinalInForEach {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mutated = ctx.mutated_declarations(program);
-        let mut bodies = Vec::new();
-        for_each_declared_body(program, ctx.source, &mut |body, _, _| {
-            bodies.push(*body.span());
-        });
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             mutated,
             diagnostics: Vec::new(),
-            bodies,
+            bodies: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -147,17 +143,45 @@ fn top_level_variables(pattern: &Pattern) -> Option<Vec<&Identifier>> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        if let TopLevelDecl::Function(function) = node
+            && let Some(body) = &function.body
+        {
+            self.bodies.push(*body.span());
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        let body = match node {
+            ClassMember::Method(node) => &node.body,
+            ClassMember::Constructor(node) => &node.body,
+            ClassMember::Getter(node) => &node.body,
+            ClassMember::Setter(node) => &node.body,
+            ClassMember::Operator(node) => &node.body,
+            ClassMember::PrimaryConstructorBody(node) => &node.body,
+            ClassMember::Field(_) | ClassMember::Error(_) => {
+                return StructuralTraversal::Continue;
+            }
+        };
+        if let Some(body) = body {
+            self.bodies.push(*body.span());
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::For(statement) = node
             && let Some(init) = &statement.header.init
         {
             self.check(init);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::FuncExpr { body, .. } = node {
             self.bodies.push(*body.span());
         }
@@ -165,6 +189,11 @@ impl Visitor for Collector<'_, '_> {
         for init in collection_for_inits(node) {
             self.check(init);
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+}
 }

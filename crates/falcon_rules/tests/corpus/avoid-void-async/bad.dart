@@ -18,3 +18,8 @@ void outer() {
 mixin Loader {
   void load() async {} /* expect: avoid-void-async */
 }
+
+void main() async {
+  void callback() async {} /* expect: avoid-void-async */
+  [callback].forEach((run) => run());
+}

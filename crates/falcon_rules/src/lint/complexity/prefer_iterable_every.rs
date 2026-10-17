@@ -5,10 +5,11 @@
 //! failure. The rule matches a negated `.where(...).isEmpty` and a
 //! `.where(...).length` compared for equality against a `.length`.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferIterableEvery;
@@ -16,15 +17,14 @@ pub struct PreferIterableEvery;
 impl Rule for PreferIterableEvery {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -93,11 +93,15 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
+            return StructuralTraversal::Continue;
         }
         if let Some(span) =
             is_negated_where_is_empty(node).or_else(|| is_where_length_eq_length(node))
@@ -108,6 +112,7 @@ impl Visitor for Collector<'_> {
                 span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

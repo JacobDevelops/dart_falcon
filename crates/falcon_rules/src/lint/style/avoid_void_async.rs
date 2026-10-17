@@ -14,14 +14,13 @@
 //!
 //! Adopted from the official `avoid_void_async` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralNode, StructuralRuleVisitor,
+    StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_function_body, walk_function_decl, walk_getter_decl,
-    walk_method_decl, walk_stmt,
-};
 
 #[derive(Default)]
 pub struct AvoidVoidAsync;
@@ -29,26 +28,14 @@ pub struct AvoidVoidAsync;
 impl Rule for AvoidVoidAsync {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
         };
-        for declaration in &program.declarations {
-            if let TopLevelDecl::Function(function) = declaration
-                && function.name.name == "main"
-            {
-                // The entry point itself is exempt; its body is still inspected.
-                if let Some(body) = &function.body {
-                    walk_function_body(&mut collector, body);
-                }
-                continue;
-            }
-            collector.visit_top_level_decl(declaration);
-        }
-        RulePreparation::Diagnostics(collector.diagnostics)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -70,23 +57,39 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
-        walk_function_decl(self, node);
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
-        walk_method_decl(self, node);
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        if let StructuralNode::FunctionDecl(function) = parent
+            && function.name.name == "main"
+        {
+            return matches!(child, StructuralNode::FunctionBody(_));
+        }
+        true
     }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
-        walk_getter_decl(self, node);
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        if node.name.name != "main" {
+            self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
+        }
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
+        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
+        self.check(node.async_marker, node.return_type.as_ref(), node.name.span);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
             // Report at the `operator` keyword, standing in for the name token.
             let span = self
@@ -102,10 +105,10 @@ impl Visitor for Collector<'_> {
                 });
             self.check(operator.async_marker, operator.return_type.as_ref(), span);
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
             self.check(
                 function.async_marker,
@@ -113,6 +116,7 @@ impl Visitor for Collector<'_> {
                 function.name.span,
             );
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

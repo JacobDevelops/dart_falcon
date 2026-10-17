@@ -110,3 +110,14 @@ class EmptyDocumentation {
 
 /**/
 void emptyDocumentation() {}
+
+/// Later getter documentation also covers an earlier setter.
+class DocumentedLaterGetter {
+  set later(int value) {}
+  /// The public value.
+  int get later => 0;
+}
+
+set documentedLaterTopLevel(int value) {}
+/// The public top-level value.
+int get documentedLaterTopLevel => 0;

@@ -22,11 +22,12 @@
 //!
 //! Adopted from the official `unnecessary_breaks` lint.
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Feature, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_switch_case};
 
 #[derive(Default)]
 pub struct UnnecessaryBreaks;
@@ -34,18 +35,17 @@ pub struct UnnecessaryBreaks;
 impl Rule for UnnecessaryBreaks {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if !ctx.language_version().supports(Feature::Patterns) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -54,8 +54,9 @@ struct Collector<'a, 'ctx> {
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_switch_case(&mut self, case: &SwitchCase) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn visit_switch_case(&mut self, case: &SwitchCase) -> StructuralTraversal {
         if let [_, .., Stmt::Break(BreakStmt { label: None, span })] = case.body.as_slice() {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-breaks",
@@ -63,6 +64,11 @@ impl Visitor for Collector<'_, '_> {
                 *span,
             ));
         }
-        walk_switch_case(self, case);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

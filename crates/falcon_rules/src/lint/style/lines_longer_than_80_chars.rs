@@ -25,10 +25,11 @@
 
 use crate::lint::string_lit::decode_escapes;
 use crate::lint::tokens::comment_tokens;
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_diagnostics::Span as DiagSpan;
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
 
 const MAX_LENGTH: usize = 80;
 
@@ -38,7 +39,7 @@ pub struct LinesLongerThan80Chars;
 impl Rule for LinesLongerThan80Chars {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let source = ctx.source;
@@ -55,28 +56,13 @@ impl Rule for LinesLongerThan80Chars {
         }
 
         let mut allowed = vec![false; lines.starts.len()];
-        let mut strings = AllowedStrings {
-            lines: &lines,
-            allowed: &mut allowed,
-            syntax: ctx.syntax,
-        };
-        strings.visit_program(program);
         allow_comment_lines(ctx, &lines, &mut allowed);
-
-        RulePreparation::Diagnostics(
-            long_lines
-                .into_iter()
-                .filter(|&(index, _)| !allowed[index])
-                .map(|(index, wrap)| {
-                    let (_, end) = lines.content_range(index);
-                    ctx.diagnostic(
-                        "lines-longer-than-80-chars",
-                        "The line length exceeds the 80-character limit.",
-                        DiagSpan { start: wrap, end },
-                    )
-                })
-                .collect(),
-        )
+        RulePreparation::Structural(Box::new(AllowedStrings {
+            ctx,
+            lines,
+            allowed,
+            long_lines,
+        }))
     }
 }
 
@@ -152,27 +138,48 @@ fn looks_like_uri_or_path(text: &str) -> bool {
     text.contains(['/', '\\'])
 }
 
-struct AllowedStrings<'a, 'b> {
-    lines: &'a Lines<'a>,
-    allowed: &'b mut [bool],
-    syntax: &'a falcon_syntax::SyntaxStore,
+struct AllowedStrings<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    lines: Lines<'a>,
+    allowed: Vec<bool>,
+    long_lines: Vec<(usize, usize)>,
 }
 
-impl Visitor for AllowedStrings<'_, '_> {
-    // Interpolated paths cannot exempt their surrounding line.
-    fn visit_string_interpolation(&mut self, _node: &StringInterpolation) {}
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for AllowedStrings<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.long_lines
+            .iter()
+            .filter(|&&(index, _)| !self.allowed[index])
+            .map(|&(index, wrap)| {
+                let (_, end) = self.lines.content_range(index);
+                self.ctx.diagnostic(
+                    "lines-longer-than-80-chars",
+                    "The line length exceeds the 80-character limit.",
+                    DiagSpan { start: wrap, end },
+                )
+            })
+            .collect()
+    }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
+    // Interpolated paths cannot exempt their surrounding line.
+    fn visit_string_interpolation(&mut self, _node: &StringInterpolation) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
         for (lit, span) in node.segments() {
             let first = self.lines.line_of(span.start);
             if lit.triple {
                 let last = self.lines.line_of(span.end);
                 self.allowed[first..=last].fill(true);
-            } else if literal_contains_path(&lit, span.start + lit.content_offset, self.syntax) {
+            } else if literal_contains_path(&lit, span.start + lit.content_offset, self.ctx.syntax) {
                 self.allowed[first] = true;
             }
         }
+        StructuralTraversal::Continue
     }
+}
 }
 
 /// Only literal text counts: a path inside an interpolated expression does not.

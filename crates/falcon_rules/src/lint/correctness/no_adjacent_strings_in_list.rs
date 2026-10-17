@@ -19,10 +19,11 @@
 //!
 //! Adopted from the official `no_adjacent_strings_in_list` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct NoAdjacentStringsInList;
@@ -30,21 +31,24 @@ pub struct NoAdjacentStringsInList;
 impl Rule for NoAdjacentStringsInList {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
+            nested: false,
+            nested_stack: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    nested: bool,
+    nested_stack: Vec<bool>,
 }
 
 impl Collector<'_> {
@@ -70,30 +74,18 @@ impl Collector<'_> {
         }
     }
 
-    /// Checks `for` / `if` element bodies at any depth below a list or set.
-    fn check_nested(&mut self, element: &CollectionElement) {
+    /// Checks only the eligible direct branch; shared callbacks handle descendants.
+    fn check_branch(&mut self, element: &CollectionElement) {
         match element {
             CollectionElement::If {
                 then_elem,
                 else_elem,
                 ..
             } => {
-                match else_elem {
-                    None => self.check(then_elem),
-                    Some(else_elem) => self.check(else_elem),
-                }
-                self.check_nested(then_elem);
-                if let Some(else_elem) = else_elem {
-                    self.check_nested(else_elem);
-                }
+                self.check(else_elem.as_deref().unwrap_or(then_elem));
             }
-            CollectionElement::For { element, .. } => {
-                self.check(element);
-                self.check_nested(element);
-            }
-            CollectionElement::Expr(_)
-            | CollectionElement::NullAware { .. }
-            | CollectionElement::Spread { .. } => {}
+            CollectionElement::For { element, .. } => self.check(element),
+            _ => {}
         }
     }
 
@@ -130,18 +122,39 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.nested_stack.push(self.nested);
+        self.nested = matches!(node, Expr::List { .. } | Expr::Set { .. });
         if let Expr::List { elements, .. } | Expr::Set { elements, .. } = node {
             for element in elements {
                 self.check(element);
-                self.check_nested(element);
             }
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.nested = self.nested_stack.pop().unwrap();
+    }
+
+    fn visit_collection_element(&mut self, node: &CollectionElement) -> StructuralTraversal {
+        self.nested_stack.push(self.nested);
+        if self.nested {
+            self.check_branch(node);
+            self.nested = matches!(node, CollectionElement::If { .. } | CollectionElement::For { .. });
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_collection_element(&mut self, _node: &CollectionElement) {
+        self.nested = self.nested_stack.pop().unwrap();
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::Switch(switch) = node {
             for case in &switch.cases {
                 for kind in &case.cases {
@@ -151,6 +164,7 @@ impl Visitor for Collector<'_> {
                 }
             }
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

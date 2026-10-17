@@ -5,11 +5,11 @@ use std::collections::HashSet;
 use crate::lint::lexical_usage::NameScopes;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, Truth,
+    SemanticModel, SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
+    Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_pattern, walk_stmt};
 
 #[derive(Default)]
 pub struct ProperControllerDispose;
@@ -17,26 +17,28 @@ pub struct ProperControllerDispose;
 impl Rule for ProperControllerDispose {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diagnostics = Vec::new();
-        for declaration in &program.declarations {
-            let (name, members) = match declaration {
-                TopLevelDecl::Class(class) => (&class.name.name, class.members.as_slice()),
-                TopLevelDecl::MixinClass(class) => (&class.name.name, class.members.as_slice()),
-                _ => continue,
-            };
-            if !is_flutter_state(name, signatures, &model) {
-                continue;
-            }
-            check_class(members, &model, ctx, &mut diagnostics);
-        }
-        RulePreparation::Diagnostics(diagnostics)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            signatures,
+            diagnostics: Vec::new(),
+            fields: HashSet::new(),
+            owned: HashSet::new(),
+            disposed: HashSet::new(),
+            scopes: NameScopes::default(),
+            in_dispose: false,
+            active_owner: false,
+            case_patterns: Vec::new(),
+            if_conditions: Vec::new(),
+            statement_header: false,
+            headers: Vec::new(),
+        }))
     }
 }
 
@@ -49,137 +51,24 @@ fn is_flutter_state(name: &str, signatures: &SignatureIndex, model: &SemanticMod
     signatures.is_subtype_of(&ty, &state, model) == Truth::Yes
 }
 
-fn check_class(
-    members: &[ClassMember],
-    model: &SemanticModel<'_>,
-    ctx: &AnalyzeContext,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let fields: HashSet<String> = members
-        .iter()
-        .filter_map(|member| match member {
-            ClassMember::Field(field) if !field.is_static => Some(field),
-            _ => None,
-        })
-        .flat_map(|field| {
-            field
-                .declarators
-                .iter()
-                .map(|declarator| declarator.name.name.clone())
-        })
-        .collect();
-    let mut owned = HashSet::new();
-    let mut disposed = HashSet::new();
-
-    for member in members {
-        if let ClassMember::Field(field) = member {
-            for declarator in &field.declarators {
-                if declarator
-                    .initializer
-                    .as_ref()
-                    .is_some_and(|initializer| constructs_controller(initializer, model))
-                {
-                    owned.insert(declarator.name.name.clone());
-                }
-            }
-        }
-    }
-
-    for member in members {
-        let (params, body, in_dispose) = match member {
-            ClassMember::Method(method) => (
-                Some(&method.params),
-                method.body.as_ref(),
-                method.name.name == "dispose",
-            ),
-            ClassMember::Constructor(constructor) => {
-                (Some(&constructor.params), constructor.body.as_ref(), false)
-            }
-            ClassMember::Getter(getter) => (None, getter.body.as_ref(), false),
-            ClassMember::Setter(setter) => {
-                let Some(body) = setter.body.as_ref() else {
-                    continue;
-                };
-                let mut scan = Scan::new(&fields, model, &mut owned, &mut disposed, false);
-                scan.scopes.declare(&setter.param.name);
-                walk_function_body(&mut scan, body);
-                continue;
-            }
-            ClassMember::Operator(operator) => {
-                (Some(&operator.params), operator.body.as_ref(), false)
-            }
-            _ => continue,
-        };
-        let Some(body) = body else {
-            continue;
-        };
-        let mut scan = Scan::new(&fields, model, &mut owned, &mut disposed, in_dispose);
-        if let Some(params) = params {
-            scan.scopes.params(params);
-        }
-        walk_function_body(&mut scan, body);
-    }
-
-    for member in members {
-        let ClassMember::Field(field) = member else {
-            continue;
-        };
-        for declarator in &field.declarators {
-            if owned.contains(&declarator.name.name) && !disposed.contains(&declarator.name.name) {
-                diagnostics.push(ctx.diagnostic("proper-controller-dispose", "This controller is never disposed; dispose it in the State's dispose() method.", declarator.name.span));
-            }
-        }
-    }
-}
-
-struct Scan<'a, 'model> {
-    fields: &'a HashSet<String>,
-    model: &'model SemanticModel<'model>,
-    owned: &'a mut HashSet<String>,
-    disposed: &'a mut HashSet<String>,
-    in_dispose: bool,
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    diagnostics: Vec<Diagnostic>,
+    fields: HashSet<String>,
+    owned: HashSet<String>,
+    disposed: HashSet<String>,
     scopes: NameScopes,
+    in_dispose: bool,
+    active_owner: bool,
+    case_patterns: Vec<Span>,
+    if_conditions: Vec<*const IfCondition>,
+    statement_header: bool,
+    headers: Vec<bool>,
 }
 
-impl<'a, 'model> Scan<'a, 'model> {
-    fn new(
-        fields: &'a HashSet<String>,
-        model: &'model SemanticModel<'model>,
-        owned: &'a mut HashSet<String>,
-        disposed: &'a mut HashSet<String>,
-        in_dispose: bool,
-    ) -> Self {
-        Self {
-            fields,
-            model,
-            owned,
-            disposed,
-            in_dispose,
-            scopes: NameScopes::default(),
-        }
-    }
-
-    fn nested_function(&mut self, params: &FormalParamList, body: &FunctionBody) {
-        self.scopes.push();
-        self.scopes.params(params);
-        walk_function_body(self, body);
-        self.scopes.pop();
-    }
-
-    fn local(&mut self, declaration: &LocalVarDecl) {
-        for declarator in &declaration.declarators {
-            if let Some(initializer) = &declarator.initializer {
-                self.visit_expr(initializer);
-            }
-            self.scopes.declare(&declarator.name.name);
-        }
-    }
-
-    fn pattern(&mut self, pattern: &Pattern) {
-        walk_pattern(self, pattern);
-        self.scopes.pattern(pattern);
-    }
-
+impl Collector<'_> {
     fn field_target<'b>(&self, expression: &'b Expr) -> Option<&'b str> {
         match expression.unparenthesized() {
             Expr::Field { object, field, .. }
@@ -197,126 +86,256 @@ impl<'a, 'model> Scan<'a, 'model> {
             _ => None,
         }
     }
-
-    fn for_init(&mut self, init: &ForInit) {
-        match init {
-            ForInit::VarDecl(declaration) => self.local(declaration),
-            ForInit::ForIn {
-                declares_variable,
-                name,
-                iterable,
-                ..
-            } => {
-                self.visit_expr(iterable);
-                if *declares_variable {
-                    self.scopes.declare(&name.name);
-                }
-            }
-            ForInit::PatternForIn {
-                pattern, iterable, ..
-            } => {
-                self.visit_expr(iterable);
-                self.pattern(pattern);
-            }
-            ForInit::Exprs(expressions) => {
-                for expression in expressions {
-                    self.visit_expr(expression);
-                }
-            }
-        }
-    }
 }
 
-impl Visitor for Scan<'_, '_> {
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        self.local(node);
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::Block(block) => {
-                self.scopes.push();
-                for statement in &block.stmts {
-                    self.visit_stmt(statement);
-                }
-                self.scopes.pop();
-            }
-            Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
-            Stmt::LocalFunc(function) => {
-                self.scopes.declare(&function.name.name);
-                self.nested_function(&function.params, &function.body);
-            }
-            Stmt::PatternDecl(declaration) => {
-                self.visit_expr(&declaration.init);
-                self.pattern(&declaration.pattern);
-            }
-            Stmt::If(statement) => match &statement.condition {
-                IfCondition::Expr(condition) => {
-                    self.visit_expr(condition);
-                    self.visit_stmt(&statement.then_branch);
-                    if let Some(branch) = &statement.else_branch {
-                        self.visit_stmt(branch);
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.active_owner = false;
+        let (name, members) = match node {
+            TopLevelDecl::Class(class) => (&class.name.name, &class.members),
+            TopLevelDecl::MixinClass(class) => (&class.name.name, &class.members),
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        if !is_flutter_state(name, self.signatures, &self.model) {
+            return StructuralTraversal::SkipChildren;
+        }
+        self.fields.clear();
+        self.owned.clear();
+        self.active_owner = true;
+        self.disposed.clear();
+        // Member names and initial ownership must be available before any body.
+        for member in members {
+            if let ClassMember::Field(field) = member {
+                for declarator in &field.declarators {
+                    if !field.is_static {
+                        self.fields.insert(declarator.name.name.clone());
                     }
-                }
-                IfCondition::Case(value, pattern, guard) => {
-                    self.visit_expr(value);
-                    self.scopes.push();
-                    self.pattern(pattern);
-                    if let Some(guard) = guard {
-                        self.visit_expr(guard);
-                    }
-                    self.visit_stmt(&statement.then_branch);
-                    self.scopes.pop();
-                    if let Some(branch) = &statement.else_branch {
-                        self.visit_stmt(branch);
-                    }
-                }
-            },
-            Stmt::For(statement) => {
-                self.scopes.push();
-                if let Some(init) = &statement.header.init {
-                    self.for_init(init);
-                }
-                if let Some(condition) = &statement.header.condition {
-                    self.visit_expr(condition);
-                }
-                for update in &statement.header.updates {
-                    self.visit_expr(update);
-                }
-                self.visit_stmt(&statement.body);
-                self.scopes.pop();
-            }
-            Stmt::TryCatch(statement) => {
-                for statement in &statement.body.stmts {
-                    self.visit_stmt(statement);
-                }
-                for catch in &statement.catches {
-                    self.scopes.push();
-                    if let Some(name) = &catch.exception_var {
-                        self.scopes.declare(&name.name);
-                    }
-                    if let Some(name) = &catch.stack_trace_var {
-                        self.scopes.declare(&name.name);
-                    }
-                    for statement in &catch.body.stmts {
-                        self.visit_stmt(statement);
-                    }
-                    self.scopes.pop();
-                }
-                if let Some(finally) = &statement.finally {
-                    for statement in &finally.stmts {
-                        self.visit_stmt(statement);
+                    if declarator.initializer.as_ref().is_some_and(|initializer| {
+                        constructs_controller(initializer, &self.model)
+                    }) {
+                        self.owned.insert(declarator.name.name.clone());
                     }
                 }
             }
-            _ => walk_stmt(self, node),
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        let members = match node {
+            TopLevelDecl::Class(class) => &class.members,
+            TopLevelDecl::MixinClass(class) => &class.members,
+            _ => return,
+        };
+        if !self.active_owner {
+            return;
+        }
+        for member in members {
+            if let ClassMember::Field(field) = member {
+                for declarator in &field.declarators {
+                    if self.owned.contains(&declarator.name.name)
+                        && !self.disposed.contains(&declarator.name.name)
+                    {
+                        self.diagnostics.push(self.ctx.diagnostic("proper-controller-dispose", "This controller is never disposed; dispose it in the State's dispose() method.", declarator.name.span));
+                    }
+                }
+            }
         }
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        let body = match node {
+            ClassMember::Method(method) => method.body.as_ref(),
+            ClassMember::Constructor(constructor) => constructor.body.as_ref(),
+            ClassMember::Getter(getter) => getter.body.as_ref(),
+            ClassMember::Setter(setter) => setter.body.as_ref(),
+            ClassMember::Operator(operator) => operator.body.as_ref(),
+            _ => None,
+        };
+        if body.is_none() {
+            return StructuralTraversal::SkipChildren;
+        }
+        self.scopes.push();
+        self.in_dispose = false;
+        let params = match node {
+            ClassMember::Method(method) => {
+                self.in_dispose = method.name.name == "dispose";
+                Some(&method.params)
+            }
+            ClassMember::Constructor(constructor) => Some(&constructor.params),
+            ClassMember::Operator(operator) => Some(&operator.params),
+            ClassMember::Setter(setter) => {
+                self.scopes.declare(&setter.param.name);
+                None
+            }
+            ClassMember::Getter(_) => None,
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        if let Some(params) = params {
+            self.scopes.params(params);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_class_member(&mut self, node: &ClassMember) {
+        let has_body = match node {
+            ClassMember::Method(method) => method.body.is_some(),
+            ClassMember::Constructor(constructor) => constructor.body.is_some(),
+            ClassMember::Getter(getter) => getter.body.is_some(),
+            ClassMember::Setter(setter) => setter.body.is_some(),
+            ClassMember::Operator(operator) => operator.body.is_some(),
+            _ => false,
+        };
+        if has_body {
+            self.scopes.pop();
+        }
+    }
+
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        match parent {
+            StructuralNode::Program(_) => matches!(child, StructuralNode::TopLevelDecl(_)),
+            StructuralNode::ClassDecl(_) | StructuralNode::MixinClass(_) => {
+                matches!(child, StructuralNode::ClassMember(_))
+            }
+            StructuralNode::MethodDecl(_)
+            | StructuralNode::ConstructorDecl(_)
+            | StructuralNode::GetterDecl(_)
+            | StructuralNode::SetterDecl(_)
+            | StructuralNode::OperatorDecl(_)
+            | StructuralNode::LocalFuncDecl(_)
+            | StructuralNode::Expr(Expr::FuncExpr { .. }) => {
+                matches!(child, StructuralNode::FunctionBody(_))
+            }
+            StructuralNode::CatchClause(_) => matches!(child, StructuralNode::Block(_)),
+            StructuralNode::LocalVar(_) => matches!(child, StructuralNode::VarDeclarator(_)),
+            StructuralNode::ForStmt(_) => {
+                if matches!(child, StructuralNode::ForHeader(_)) {
+                    self.statement_header = true;
+                }
+                true
+            }
+            StructuralNode::ForInit(_) if self.headers.last() == Some(&true) => {
+                !matches!(child, StructuralNode::Annotation(_) | StructuralNode::DartType(_))
+            }
+            StructuralNode::PatternDeclaration(_) => {
+                !matches!(child, StructuralNode::Annotation(_))
+            }
+            StructuralNode::IfCondition(condition @ IfCondition::Case(..))
+                if self.if_conditions.last().copied() == Some(std::ptr::from_ref(condition)) =>
+            {
+                if let StructuralNode::Pattern(pattern) = child {
+                    self.scopes.push();
+                    self.case_patterns.push(*pattern.span());
+                }
+                true
+            }
+            StructuralNode::IfStmt(statement) => {
+                if let StructuralNode::Stmt(branch) = child
+                    && matches!(&statement.condition, IfCondition::Case(..))
+                    && statement.else_branch.as_deref().is_some_and(|otherwise| {
+                        std::ptr::eq(otherwise, branch)
+                    })
+                {
+                    self.scopes.pop();
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        if let Stmt::If(statement) = node {
+            self.if_conditions.push(std::ptr::from_ref(&statement.condition));
+        }
+        match node {
+            Stmt::Block(_) | Stmt::For(_) => self.scopes.push(),
+            Stmt::LocalFunc(function) => {
+                self.scopes.declare(&function.name.name);
+                self.scopes.push();
+                self.scopes.params(&function.params);
+            }
+            _ => {}
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if matches!(node, Stmt::If(_)) {
+            self.if_conditions.pop();
+        }
+        if matches!(node, Stmt::Block(_) | Stmt::For(_) | Stmt::LocalFunc(_)) {
+            self.scopes.pop();
+        }
+    }
+
+    fn exit_if_stmt(&mut self, node: &IfStmt) {
+        if matches!(&node.condition, IfCondition::Case(..)) && node.else_branch.is_none() {
+            self.scopes.pop();
+        }
+    }
+
+    fn visit_catch_clause(&mut self, node: &CatchClause) -> StructuralTraversal {
+        self.scopes.push();
+        if let Some(name) = &node.exception_var {
+            self.scopes.declare(&name.name);
+        }
+        if let Some(name) = &node.stack_trace_var {
+            self.scopes.declare(&name.name);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_catch_clause(&mut self, _node: &CatchClause) {
+        self.scopes.pop();
+    }
+
+    fn exit_var_declarator(&mut self, node: &VarDeclarator) {
+        self.scopes.declare(&node.name.name);
+    }
+
+    fn exit_pattern(&mut self, node: &Pattern) {
+        if self.case_patterns.last() == Some(node.span()) {
+            self.case_patterns.pop();
+            self.scopes.pattern(node);
+        }
+    }
+
+    fn exit_pattern_declaration(&mut self, node: &PatternDeclaration) {
+        self.scopes.pattern(&node.pattern);
+    }
+
+    fn visit_for_header(&mut self, _node: &ForHeader) -> StructuralTraversal {
+        self.headers.push(std::mem::take(&mut self.statement_header));
+        StructuralTraversal::Continue
+    }
+
+    fn exit_for_header(&mut self, _node: &ForHeader) {
+        self.headers.pop();
+    }
+
+    fn exit_for_init(&mut self, node: &ForInit) {
+        if self.headers.last() != Some(&true) {
+            return;
+        }
+        match node {
+            ForInit::ForIn { declares_variable: true, name, .. } => {
+                self.scopes.declare(&name.name);
+            }
+            ForInit::PatternForIn { pattern, .. } => self.scopes.pattern(pattern),
+            _ => {}
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             Expr::Assign { target, value, .. }
-                if constructs_controller(value, self.model) =>
+                if constructs_controller(value, &self.model) =>
             {
                 if let Some(field) = self.field_target(target) {
                     self.owned.insert(field.to_string());
@@ -330,10 +349,8 @@ impl Visitor for Scan<'_, '_> {
                     self.disposed.insert(controller.to_string());
                 }
             }
-            Expr::Cascade {
-                object, sections, ..
-            } if self.in_dispose
-                && sections.iter().any(|section| {
+            Expr::Cascade { object, sections, .. }
+                if self.in_dispose && sections.iter().any(|section| {
                     matches!(section.ops.first(), Some(CascadeOp::Call(name, _, _)) if name.name == "dispose")
                 }) =>
             {
@@ -341,14 +358,21 @@ impl Visitor for Scan<'_, '_> {
                     self.disposed.insert(controller.to_string());
                 }
             }
-            Expr::FuncExpr { params, body, .. } => {
-                self.nested_function(params, body);
-                return;
+            Expr::FuncExpr { params, .. } => {
+                self.scopes.push();
+                self.scopes.params(params);
             }
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn exit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.scopes.pop();
+        }
+    }
+}
 }
 
 fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<DeclarationIdentity> {

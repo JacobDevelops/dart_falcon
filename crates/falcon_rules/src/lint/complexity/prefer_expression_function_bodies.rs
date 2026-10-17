@@ -11,13 +11,12 @@
 //!
 //! Adopted from the official `prefer_expression_function_bodies` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_expr, walk_function_decl, walk_stmt,
-};
 
 #[derive(Default)]
 pub struct PreferExpressionFunctionBodies;
@@ -25,15 +24,13 @@ pub struct PreferExpressionFunctionBodies;
 impl Rule for PreferExpressionFunctionBodies {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -79,13 +76,18 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.check(node.body.as_ref(), node.async_marker);
-        walk_function_decl(self, node);
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.check(node.body.as_ref(), node.async_marker);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         let (body, marker) = match node {
             ClassMember::Method(member) => (member.body.as_ref(), member.async_marker),
             ClassMember::Getter(member) => (member.body.as_ref(), member.async_marker),
@@ -98,25 +100,26 @@ impl Visitor for Collector<'_, '_> {
             ClassMember::Field(_) | ClassMember::Error(_) => (None, AsyncMarker::Sync),
         };
         self.check(body, marker);
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node {
             self.check(Some(&function.body), function.async_marker);
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::FuncExpr {
             body, async_marker, ..
         } = node
         {
             self.check(Some(body), *async_marker);
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 #[cfg(test)]

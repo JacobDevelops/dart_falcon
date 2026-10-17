@@ -17,3 +17,22 @@ extension Values on int {
     }
   }
 }
+
+String? ignoresDelayedNullReturns() { /* expect: unnecessary-nullable-return-type */
+  String? local() {
+    return null;
+  }
+  final callback = () {
+    return null;
+  };
+  return 'outer';
+}
+
+class NestedReturnScopes {
+  String? get description { /* expect: unnecessary-nullable-return-type */
+    final callback = () {
+      return null;
+    };
+    return 'description';
+  }
+}

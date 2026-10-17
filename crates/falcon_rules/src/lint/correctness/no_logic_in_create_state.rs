@@ -7,8 +7,9 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, Truth,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -17,7 +18,7 @@ pub struct NoLogicInCreateState;
 impl Rule for NoLogicInCreateState {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -26,52 +27,83 @@ impl Rule for NoLogicInCreateState {
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let stateful_widget = DeclarationIdentity::flutter("StatefulWidget");
         let state = DeclarationIdentity::flutter("State");
-        let mut diags = Vec::new();
-        for declaration in &program.declarations {
-            let TopLevelDecl::Class(class) = declaration else {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model,
+            signatures,
+            stateful_widget,
+            state,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    stateful_widget: DeclarationIdentity,
+    state: DeclarationIdentity,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
+        let model = &self.model;
+        let signatures = self.signatures;
+        let stateful_widget = &self.stateful_widget;
+        let state = &self.state;
+        let diags = &mut self.diags;
+        let TopLevelDecl::Class(class) = declaration else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let Some(identity) = model.resolve_name(&class.name.name) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        if signatures.is_subtype_of(
+            &ResolvedType::interface_identity(identity),
+            stateful_widget,
+            model,
+        ) != Truth::Yes
+        {
+            return StructuralTraversal::SkipChildren;
+        }
+        for member in &class.members {
+            let ClassMember::Method(method) = member else {
                 continue;
             };
-            let Some(identity) = model.resolve_name(&class.name.name) else {
+            if method.name.name != "createState" {
+                continue;
+            }
+            let Some(return_type) = &method.return_type else {
                 continue;
             };
-            if signatures.is_subtype_of(
-                &ResolvedType::interface_identity(identity),
-                &stateful_widget,
-                &model,
-            ) != Truth::Yes
+            if signatures.is_subtype_of(&model.resolve_type(return_type), state, model)
+                != Truth::Yes
             {
                 continue;
             }
-            for member in &class.members {
-                let ClassMember::Method(method) = member else {
-                    continue;
-                };
-                if method.name.name != "createState" {
-                    continue;
-                }
-                let Some(return_type) = &method.return_type else {
-                    continue;
-                };
-                if signatures.is_subtype_of(&model.resolve_type(return_type), &state, &model)
-                    != Truth::Yes
-                {
-                    continue;
-                }
-                let Some(body) = &method.body else {
-                    continue;
-                };
-                if body_result(body, &model, signatures, &state) != BodyResult::Violation {
-                    continue;
-                }
-                diags.push(ctx.diagnostic(
-                    "no-logic-in-create-state",
-                    "Avoid logic in createState; it should only return a new State instance.",
-                    violation_span(body),
-                ));
+            let Some(body) = &method.body else {
+                continue;
+            };
+            if body_result(body, model, signatures, state) != BodyResult::Violation {
+                continue;
             }
+            diags.push(ctx.diagnostic(
+                "no-logic-in-create-state",
+                "Avoid logic in createState; it should only return a new State instance.",
+                violation_span(body),
+            ));
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn violation_span(body: &FunctionBody) -> Span {

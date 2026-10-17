@@ -3,10 +3,12 @@ use falcon_syntax::Program;
 
 use crate::AnalyzeContext;
 use crate::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use crate::structural_scope::{self, StructuralRuleVisitor};
 
 pub enum RulePreparation<'a> {
     Diagnostics(Vec<Diagnostic>),
     Semantic(Box<dyn SemanticRuleVisitor + 'a>),
+    Structural(Box<dyn StructuralRuleVisitor + 'a>),
 }
 
 /// Trait implemented by every lint rule.
@@ -35,6 +37,12 @@ impl<T: Rule + ?Sized> RuleAnalysis for T {
                     visit_program(&mut *visitor, program, state);
                 }
                 visitor.finish()
+            }
+            RulePreparation::Structural(visitor) => {
+                structural_scope::visit_program(program, vec![visitor])
+                    .into_iter()
+                    .flatten()
+                    .collect()
             }
         }
     }

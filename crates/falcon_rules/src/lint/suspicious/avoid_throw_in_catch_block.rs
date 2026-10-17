@@ -8,10 +8,11 @@
 //! values; `rethrow` is always exempt. Delayed local functions and closures are
 //! separate execution scopes and are not part of the surrounding catch.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct AvoidThrowInCatchBlock;
@@ -19,74 +20,136 @@ pub struct AvoidThrowInCatchBlock;
 impl Rule for AvoidThrowInCatchBlock {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+            next_group: 0,
+            try_groups: Vec::new(),
+            active_group: None,
+            scopes: Vec::new(),
+        }))
     }
 }
 
 struct Collector<'a, 'ctx> {
-    diags: Vec<Diagnostic>,
+    diags: Vec<(usize, Diagnostic)>,
     ctx: &'a AnalyzeContext<'ctx>,
+    next_group: usize,
+    try_groups: Vec<usize>,
+    active_group: Option<usize>,
+    scopes: Vec<Option<usize>>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::TryCatch(try_catch) = node {
-            for catch in &try_catch.catches {
-                let mut catch_scan = CatchScan {
-                    diags: &mut self.diags,
-                    ctx: self.ctx,
-                };
-                for stmt in &catch.body.stmts {
-                    catch_scan.visit_stmt(stmt);
-                }
-            }
-        }
-        walk_stmt(self, node);
-    }
-}
-
-struct CatchScan<'a, 'ctx> {
-    diags: &'a mut Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'ctx>,
-}
-
-impl Visitor for CatchScan<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if matches!(node, Stmt::LocalFunc(_)) {
-            return;
-        }
-        if let Stmt::TryCatch(try_catch) = node {
-            for stmt in &try_catch.body.stmts {
-                self.visit_stmt(stmt);
-            }
-            if let Some(finally) = &try_catch.finally {
-                for stmt in &finally.stmts {
-                    self.visit_stmt(stmt);
-                }
-            }
-            return;
-        }
-        if let Stmt::Throw(throw_stmt) = node {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-throw-in-catch-block",
-                "Avoid throwing exceptions within catch blocks",
-                throw_stmt.span,
-            ));
-        }
-        walk_stmt(self, node);
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        // The former catch scans ran before descending into each try statement.
+        self.diags.sort_unstable_by_key(|(group, diagnostic)| (*group, diagnostic.span.start));
+        self.diags.into_iter().map(|(_, diagnostic)| diagnostic).collect()
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if !matches!(node, Expr::FuncExpr { .. }) {
-            walk_expr(self, node);
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        match node {
+            Stmt::TryCatch(try_catch) => {
+                self.try_groups.push(self.next_group);
+                self.next_group += try_catch.catches.len();
+            }
+            Stmt::LocalFunc(_) => {
+                self.scopes.push(self.active_group.take());
+            }
+            Stmt::Throw(throw_stmt) => {
+                if let Some(group) = self.active_group {
+                    self.diags.push((group, self.ctx.diagnostic(
+                        "avoid-throw-in-catch-block",
+                        "Avoid throwing exceptions within catch blocks",
+                        throw_stmt.span,
+                    )));
+                }
+            }
+            _ => {}
         }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::TryCatch(_) => {
+                self.try_groups.pop();
+            }
+            Stmt::LocalFunc(_) => {
+                self.active_group = self.scopes.pop().unwrap();
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_catch_clause(&mut self, _node: &CatchClause) -> StructuralTraversal {
+        self.scopes.push(self.active_group);
+        let group = self.try_groups.last_mut().unwrap();
+        self.active_group = Some(*group);
+        *group += 1;
+        StructuralTraversal::Continue
+    }
+
+    fn exit_catch_clause(&mut self, _node: &CatchClause) {
+        self.active_group = self.scopes.pop().unwrap();
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.scopes.push(self.active_group.take());
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.active_group = self.scopes.pop().unwrap();
+        }
+    }
+}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AvoidThrowInCatchBlock;
+    use falcon_analyze::{AnalyzeContext, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn preserves_catch_scan_order_across_nested_and_delayed_scopes() {
+        let source =
+            include_str!("../../../tests/corpus/avoid-throw-in-catch-block/bad_traversal.dart");
+        let parsed = parse(source);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(
+            Path::new("catch_order.dart"),
+            source,
+            &config,
+            &parsed.syntax,
+        );
+        let actual: Vec<_> = AvoidThrowInCatchBlock
+            .analyze(&parsed.program, &ctx)
+            .into_iter()
+            .map(|diagnostic| diagnostic.span.start)
+            .collect();
+        let expected: Vec<_> = [
+            "throw StateError('$error')",
+            "throw StateError('nested try')",
+            "throw StateError('nested finally')",
+            "throw StateError('$nested')",
+            "throw StateError('outer restored')",
+            "throw StateError('local catch')",
+            "throw StateError('closure catch')",
+        ]
+        .into_iter()
+        .map(|statement| source.find(statement).unwrap())
+        .collect();
+        assert_eq!(actual, expected);
     }
 }

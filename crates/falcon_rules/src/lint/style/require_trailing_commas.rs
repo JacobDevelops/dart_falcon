@@ -31,14 +31,13 @@
 //!
 //! Adopted from the official `require_trailing_commas` lint.
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Feature, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
-use falcon_syntax::visitor::{
-    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_enum_decl, walk_expr,
-    walk_formal_param, walk_function_decl, walk_method_decl, walk_stmt,
-};
 
 use crate::lint::tokens::significant_tokens;
 
@@ -48,19 +47,17 @@ pub struct RequireTrailingCommas;
 impl Rule for RequireTrailingCommas {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if ctx.language_version().supports(Feature::TallStyle) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             ctx,
             tokens: significant_tokens(ctx).collect(),
             diags: Vec::new(),
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -248,8 +245,11 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         match node {
             Expr::Call { args, .. } | Expr::New { args, .. } => self.check_args(args),
             Expr::Cascade { sections, .. } => {
@@ -274,17 +274,17 @@ impl Visitor for Collector<'_, '_> {
             Expr::FuncExpr { params, .. } => self.check_param_list(params),
             _ => {}
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
+    fn visit_annotation(&mut self, node: &Annotation) -> StructuralTraversal {
         if let Some(args) = &node.args {
             self.check_args(args);
         }
-        walk_annotation(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         self.check_param_list(node.params);
         for initializer in node.initializers {
             match initializer {
@@ -298,9 +298,10 @@ impl Visitor for Collector<'_, '_> {
                 ConstructorInitializer::FieldInit { .. } => {}
             }
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
         for args in node
             .variants
             .iter()
@@ -308,10 +309,10 @@ impl Visitor for Collector<'_, '_> {
         {
             self.check_args(args);
         }
-        walk_enum_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             Stmt::Assert(stmt) => {
                 self.check_assert(&stmt.span, &stmt.condition, stmt.message.as_ref());
@@ -319,22 +320,22 @@ impl Visitor for Collector<'_, '_> {
             Stmt::LocalFunc(func) => self.check_param_list(&func.params),
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if let Some(params) = node.params() {
             self.check_param_list(params);
         }
-        walk_function_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
         self.check_param_list(&node.params);
-        walk_method_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         match node {
             ClassMember::Operator(operator) => self.check_param_list(&operator.params),
             ClassMember::Setter(setter) => {
@@ -343,17 +344,17 @@ impl Visitor for Collector<'_, '_> {
             }
             _ => {}
         }
-        walk_class_member(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, node: &FormalParam) {
+    fn visit_formal_param(&mut self, node: &FormalParam) -> StructuralTraversal {
         if let Some(params) = &node.function_params {
             self.check_param_list(params);
         }
-        walk_formal_param(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_dart_type(&mut self, node: &DartType) {
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
         if let DartType::Function(function) = node
             && !function.params.is_empty()
         {
@@ -382,6 +383,7 @@ impl Visitor for Collector<'_, '_> {
                 self.check_params(open);
             }
         }
-        walk_dart_type(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

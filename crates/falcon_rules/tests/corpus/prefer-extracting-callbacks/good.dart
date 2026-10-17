@@ -60,3 +60,15 @@ class MyWidget extends StatelessWidget {
 }
 
 void doSomething() {}
+
+class LocalFunctionReturn extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Builder(
+    builder: (BuildContext context) {
+      Widget local() {
+        return const Text('local');
+      }
+      return local();
+    },
+  );
+}

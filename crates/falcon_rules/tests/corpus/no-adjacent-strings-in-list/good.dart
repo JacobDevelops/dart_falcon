@@ -13,3 +13,20 @@ void main(bool flag, List<String> xs) {
       break;
   }
 }
+
+void collectionContextsDoNotLeak(bool flag, List<String> xs) {
+  use([
+    if (('condition' 'text').isNotEmpty) 'body',
+    for (final x in ('header' 'text').split('')) x,
+    ...('spread' 'text').split(''),
+    if (flag)
+      'outerThen' 'excluded'
+    else
+      if (flag) 'innerThen' else 'innerElse',
+  ]);
+  use([
+    if (flag) 'excluded' 'then' else 'included',
+    for (final x in xs) ('parenthesized' 'body'),
+  ]);
+  use('outside' 'collection');
+}

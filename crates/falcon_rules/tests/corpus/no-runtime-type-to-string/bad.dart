@@ -29,3 +29,39 @@ enum Color {
 extension on Point {
   String tag() => runtimeType.toString(); /* expect: no-runtime-type-to-string */
 }
+
+class ExplicitDespiteShadow {
+  String describe() => this.runtimeType.toString(); /* expect: no-runtime-type-to-string */
+
+  void unrelated(String runtimeType) {}
+}
+
+class ExemptionRestoration {
+  ExemptionRestoration()
+      : assert(runtimeType.toString().isNotEmpty) {
+    print('$runtimeType'); /* expect: no-runtime-type-to-string */
+  }
+
+  void inspect() {
+    try {
+      print('$runtimeType'); /* expect: no-runtime-type-to-string */
+    } catch (error) {
+      print('$runtimeType');
+    } finally {
+      print('$runtimeType'); /* expect: no-runtime-type-to-string */
+    }
+    print('$runtimeType'); /* expect: no-runtime-type-to-string */
+  }
+}
+
+class PrimaryInitializer(int value) {
+  this : assert(runtimeType.toString().isNotEmpty); /* expect: no-runtime-type-to-string */
+}
+
+abstract class ExemptBeforeConcrete {
+  String describe() => '$runtimeType';
+}
+
+class CheckedAfterAbstract {
+  String describe() => '$runtimeType'; /* expect: no-runtime-type-to-string */
+}

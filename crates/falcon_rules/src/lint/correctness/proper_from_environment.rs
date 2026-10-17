@@ -8,10 +8,12 @@
 //! with no error. Prefix the call with `const`, or place it somewhere already
 //! const — a `const` variable initializer or an annotation argument.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralNode, StructuralRuleVisitor,
+    StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct ProperFromEnvironment;
@@ -19,16 +21,16 @@ pub struct ProperFromEnvironment;
 impl Rule for ProperFromEnvironment {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             in_const: false,
+            contexts: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -38,26 +40,30 @@ struct Collector<'a> {
     /// True while visiting a const context (const initializer / const literal /
     /// const construction), where `*.fromEnvironment` is evaluated at compile time.
     in_const: bool,
+    contexts: Vec<bool>,
 }
 
 impl Collector<'_> {
-    fn visit_initializers(&mut self, declarators: &[VarDeclarator], is_const: bool) {
-        let prev = self.in_const;
-        self.in_const = self.in_const || is_const;
-        for d in declarators {
-            if let Some(init) = &d.initializer {
-                self.visit_expr(init);
-            }
-        }
-        self.in_const = prev;
+    fn enter_const(&mut self, is_const: bool) {
+        self.contexts.push(self.in_const);
+        self.in_const |= is_const;
+    }
+
+    fn leave_const(&mut self) {
+        self.in_const = self.contexts.pop().unwrap();
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.contexts.push(self.in_const);
         if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
+            return StructuralTraversal::Continue;
         }
         if let Some((span, is_const_ctor)) = from_environment_invocation(node)
             && !is_const_ctor
@@ -66,7 +72,6 @@ impl Visitor for Collector<'_> {
             self.diags.push(self.ctx.diagnostic("proper-from-environment", "*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.", *span));
         }
 
-        let prev = self.in_const;
         match node {
             Expr::New { is_const: true, .. }
             | Expr::List { is_const: true, .. }
@@ -74,49 +79,61 @@ impl Visitor for Collector<'_> {
             | Expr::Map { is_const: true, .. } => self.in_const = true,
             _ => {}
         }
-        walk_expr(self, node);
-        self.in_const = prev;
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
-        self.visit_initializers(
-            &lv.declarators,
-            lv.keyword == falcon_syntax::ast::VarKeyword::Const,
-        );
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.leave_const();
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.visit_initializers(
-            &node.declarators,
-            node.keyword == falcon_syntax::ast::VarKeyword::Const,
-        );
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
+        self.enter_const(node.keyword == VarKeyword::Const);
+        StructuralTraversal::Continue
     }
 
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        if let TopLevelDecl::Variable(v) = node {
-            self.visit_initializers(
-                &v.declarators,
-                v.keyword == falcon_syntax::ast::VarKeyword::Const,
-            );
-            return;
-        }
-        walk_top_level_decl(self, node);
+    fn exit_local_var(&mut self, _node: &LocalVarDecl) {
+        self.leave_const();
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {
-        // Annotation arguments are always a const context.
-        if let Some(args) = &node.args {
-            let prev = self.in_const;
-            self.in_const = true;
-            for a in &args.positional {
-                self.visit_expr(a);
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
+        self.enter_const(node.keyword == VarKeyword::Const);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_field_decl(&mut self, _node: &FieldDecl) {
+        self.leave_const();
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        self.enter_const(matches!(node, TopLevelDecl::Variable(v) if v.keyword == VarKeyword::Const));
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, _node: &TopLevelDecl) {
+        self.leave_const();
+    }
+
+    fn visit_annotation(&mut self, _node: &Annotation) -> StructuralTraversal {
+        self.enter_const(true);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_annotation(&mut self, _node: &Annotation) {
+        self.leave_const();
+    }
+
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        match parent {
+            StructuralNode::LocalVar(_) | StructuralNode::FieldDecl(_)
+            | StructuralNode::TopLevelVar(_) => {
+                matches!(child, StructuralNode::VarDeclarator(_))
             }
-            for a in &args.named {
-                self.visit_expr(&a.value);
-            }
-            self.in_const = prev;
+            StructuralNode::VarDeclarator(_) => matches!(child, StructuralNode::Expr(_)),
+            StructuralNode::Annotation(_) => matches!(child, StructuralNode::ArgList(_)),
+            _ => true,
         }
     }
+}
 }
 
 /// Detect a `String`/`int`/`bool` `.fromEnvironment(...)` invocation, in either

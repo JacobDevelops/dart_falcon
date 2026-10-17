@@ -2,7 +2,11 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, QualifiedName, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -21,35 +25,83 @@ impl Rule for LibraryAnnotations {
         let library_annotations = library_annotation_names(program, ctx);
         let declared_names = declared_names(program, ctx);
         let first_directive = first_non_library_directive(program);
-        let mut diags = Vec::new();
-        for (span, annotations) in directive_annotations(program) {
-            let is_first = first_directive.is_some_and(|start| start == span.start);
-            for annotation in annotations {
-                if (is_first
-                    && is_library_annotation(annotation, program, &library_annotations, ctx))
-                    || late_trust_pragma(annotation, &declared_names, ctx)
-                {
-                    diags.push(ctx.diagnostic(
-                        "library-annotations",
-                        "Attach library annotations to a library directive.",
-                        annotation.span,
-                    ));
-                }
-            }
-        }
-        for declaration in &program.declarations {
-            for annotation in declaration_annotations(declaration) {
-                if late_trust_pragma(annotation, &declared_names, ctx) {
-                    diags.push(ctx.diagnostic(
-                        "library-annotations",
-                        "Attach library annotations to a library directive.",
-                        annotation.span,
-                    ));
-                }
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            program,
+            library_annotations,
+            declared_names,
+            first_directive,
+            diagnostics: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    program: &'a Program,
+    library_annotations: HashSet<String>,
+    declared_names: HashSet<String>,
+    first_directive: Option<usize>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl Collector<'_> {
+    fn directive(&mut self, span: Span, annotations: &[Annotation]) {
+        let is_first = self.first_directive == Some(span.start);
+        for annotation in annotations {
+            if (is_first
+                && is_library_annotation(
+                    annotation,
+                    self.program,
+                    &self.library_annotations,
+                    self.ctx,
+                ))
+                || late_trust_pragma(annotation, &self.declared_names, self.ctx)
+            {
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "library-annotations",
+                    "Attach library annotations to a library directive.",
+                    annotation.span,
+                ));
+            }
+        }
+    }
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_part_directive(&mut self, node: &PartDirective) -> StructuralTraversal {
+        self.directive(node.span, &node.annotations);
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_import(&mut self, node: &ImportDirective) -> StructuralTraversal {
+        self.directive(node.span, &node.annotations);
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_export(&mut self, node: &ExportDirective) -> StructuralTraversal {
+        self.directive(node.span, &node.annotations);
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        for annotation in declaration_annotations(node) {
+            if late_trust_pragma(annotation, &self.declared_names, self.ctx) {
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "library-annotations",
+                    "Attach library annotations to a library directive.",
+                    annotation.span,
+                ));
+            }
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+}
 }
 
 fn first_non_library_directive(program: &Program) -> Option<usize> {
@@ -60,26 +112,6 @@ fn first_non_library_directive(program: &Program) -> Option<usize> {
         .chain(program.imports.iter().map(|d| d.span.start))
         .chain(program.exports.iter().map(|d| d.span.start))
         .min()
-}
-
-fn directive_annotations(program: &Program) -> Vec<(&Span, &[Annotation])> {
-    program
-        .part_directives
-        .iter()
-        .map(|d| (&d.span, d.annotations.as_slice()))
-        .chain(
-            program
-                .imports
-                .iter()
-                .map(|d| (&d.span, d.annotations.as_slice())),
-        )
-        .chain(
-            program
-                .exports
-                .iter()
-                .map(|d| (&d.span, d.annotations.as_slice())),
-        )
-        .collect()
 }
 
 fn declaration_annotations(decl: &TopLevelDecl) -> &[Annotation] {

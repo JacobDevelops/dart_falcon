@@ -7,9 +7,11 @@
 //! adjacency cannot express that. Prefer writing the pieces side by side, which
 //! also reads naturally when splitting a long string across lines.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct PreferAdjacentStringConcatenation;
@@ -17,28 +19,45 @@ pub struct PreferAdjacentStringConcatenation;
 impl Rule for PreferAdjacentStringConcatenation {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_expr_in_program(program, |node| {
-            if let Expr::Binary {
-                op: BinaryOp::Add,
-                left,
-                right,
-                span,
-                ..
-            } = node.unparenthesized()
-                && matches!(left.unparenthesized(), Expr::StringLit(_))
-                && matches!(right.unparenthesized(), Expr::StringLit(_))
-            {
-                diags.push(ctx.diagnostic(
-                    "prefer-adjacent-string-concatenation",
-                    "Use adjacent string literals instead of the `+` operator.",
-                    *span,
-                ));
-            }
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if let Expr::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+            span,
+            ..
+        } = node.unparenthesized()
+            && matches!(left.unparenthesized(), Expr::StringLit(_))
+            && matches!(right.unparenthesized(), Expr::StringLit(_))
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "prefer-adjacent-string-concatenation",
+                "Use adjacent string literals instead of the `+` operator.",
+                *span,
+            ));
+        }
+        StructuralTraversal::Continue
+    }
+}
 }

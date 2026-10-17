@@ -14,11 +14,12 @@
 //! `max_nesting` (integer, default: 5) — flag when the nesting depth exceeds
 //! this.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralNode, StructuralRuleVisitor,
+    StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::for_each_declared_body;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_stmt};
 
 #[derive(Default)]
 pub struct MaximumNestingLevel;
@@ -26,14 +27,20 @@ pub struct MaximumNestingLevel;
 impl Rule for MaximumNestingLevel {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for_each_declared_body(program, ctx.source, &mut |body, name, _| {
-            check_function(body, name, &mut diags, ctx);
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Nesting {
+            ctx,
+            diags: Vec::new(),
+            name: None,
+            body_depth: 0,
+            depth: 0,
+            max: 0,
+            else_if: None,
+            statements: Vec::new(),
+            expressions: Vec::new(),
+        }))
     }
 }
 
@@ -46,44 +53,78 @@ fn max_nesting_option(ctx: &AnalyzeContext) -> usize {
     .unwrap_or(5)
 }
 
-/// Compute the deepest control-flow nesting level within one function body and
-/// emit a diagnostic at `name_span` when it exceeds the configured threshold.
-///
-/// Only control structures (if/for/while/do-while/switch/try) increase depth;
-/// a plain block does not. Nested local functions start a fresh depth of 0.
-fn check_function(
-    body: &FunctionBody,
-    name_span: &Span,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    let threshold = max_nesting_option(ctx);
-    let mut nesting = Nesting {
-        depth: 0,
-        max: 0,
-        else_if: None,
-    };
-    walk_function_body(&mut nesting, body);
-    let max = nesting.max;
-    if max > threshold {
-        diags.push(ctx.diagnostic(
-            "maximum-nesting-level",
-            format!("Function has a nesting level of {max} (max {threshold})."),
-            *name_span,
-        ));
-    }
-}
-
-struct Nesting {
+struct Nesting<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+    name: Option<Span>,
+    body_depth: usize,
     depth: usize,
     max: usize,
     else_if: Option<usize>,
+    statements: Vec<(usize, Option<usize>)>,
+    expressions: Vec<usize>,
 }
 
-impl Visitor for Nesting {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        let outer = self.depth;
-        let outer_else_if = self.else_if;
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Nesting<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.name = node.body.as_ref().map(|_| node.name.span);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
+        self.name = falcon_syntax::visitor::declared_member_name(node, self.ctx.source);
+        if self.name.is_some() { StructuralTraversal::Continue } else { StructuralTraversal::SkipChildren }
+    }
+
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        match parent {
+            StructuralNode::FunctionDecl(_) | StructuralNode::MethodDecl(_)
+            | StructuralNode::ConstructorDecl(_) | StructuralNode::GetterDecl(_)
+            | StructuralNode::SetterDecl(_) | StructuralNode::OperatorDecl(_)
+            | StructuralNode::PrimaryConstructorBody(_) => matches!(child, StructuralNode::FunctionBody(_)),
+            _ => true,
+        }
+    }
+
+    fn visit_function_body(&mut self, _node: &FunctionBody) -> StructuralTraversal {
+        if self.name.is_none() {
+            return StructuralTraversal::SkipChildren;
+        }
+        if self.body_depth == 0 {
+            self.depth = 0;
+            self.max = 0;
+            self.else_if = None;
+        }
+        self.body_depth += 1;
+        StructuralTraversal::Continue
+    }
+
+    fn exit_function_body(&mut self, _node: &FunctionBody) {
+        if self.name.is_none() {
+            return;
+        }
+        self.body_depth -= 1;
+        if self.body_depth == 0 {
+            let max = self.max;
+            let threshold = max_nesting_option(self.ctx);
+            if max > threshold {
+                self.diags.push(self.ctx.diagnostic(
+                    "maximum-nesting-level",
+                    format!("Function has a nesting level of {max} (max {threshold})."),
+                    self.name.unwrap(),
+                ));
+            }
+            self.name = None;
+        }
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        self.statements.push((self.depth, self.else_if));
         if matches!(node, Stmt::LocalFunc(_)) {
             self.depth = 0;
         } else if matches!(
@@ -107,17 +148,23 @@ impl Visitor for Nesting {
                 _ => None,
             });
         }
-        walk_stmt(self, node);
-        self.else_if = outer_else_if;
-        self.depth = outer;
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        let outer = self.depth;
+    fn exit_stmt(&mut self, _node: &Stmt) {
+        (self.depth, self.else_if) = self.statements.pop().unwrap();
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.expressions.push(self.depth);
         if matches!(node, Expr::FuncExpr { .. }) {
             self.depth = 0;
         }
-        walk_expr(self, node);
-        self.depth = outer;
+        StructuralTraversal::Continue
     }
+
+    fn exit_expr(&mut self, _node: &Expr) {
+        self.depth = self.expressions.pop().unwrap();
+    }
+}
 }

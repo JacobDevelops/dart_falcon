@@ -8,12 +8,11 @@
 //! permitted.
 
 use crate::lint::naming::is_lower_camel_case;
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_enum_decl, walk_field_decl, walk_local_var, walk_top_level_decl,
-};
 
 #[derive(Default)]
 pub struct ConstantIdentifierNames;
@@ -21,15 +20,14 @@ pub struct ConstantIdentifierNames;
 impl Rule for ConstantIdentifierNames {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -57,36 +55,42 @@ impl Collector<'_> {
     }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = node
             && v.keyword == falcon_syntax::ast::VarKeyword::Const
         {
             self.check_declarators(&v.declarators);
         }
-        walk_top_level_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
+    fn visit_field_decl(&mut self, node: &FieldDecl) -> StructuralTraversal {
         if node.keyword == falcon_syntax::ast::VarKeyword::Const {
             self.check_declarators(&node.declarators);
         }
-        walk_field_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+    fn visit_enum_decl(&mut self, node: &EnumDecl) -> StructuralTraversal {
         for variant in &node.variants {
             self.check(&variant.name);
         }
-        walk_enum_decl(self, node);
+        StructuralTraversal::Continue
     }
 
-    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) -> StructuralTraversal {
         if node.keyword == falcon_syntax::ast::VarKeyword::Const {
             self.check_declarators(&node.declarators);
         }
-        walk_local_var(self, node);
+        StructuralTraversal::Continue
     }
+}
 }
 
 #[cfg(test)]

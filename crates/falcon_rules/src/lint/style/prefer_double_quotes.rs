@@ -27,17 +27,16 @@ pub struct PreferDoubleQuotes;
 impl Rule for PreferDoubleQuotes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Diagnostics(QuoteVisitor::run(
-            program,
+        RulePreparation::Structural(Box::new(QuoteVisitor::new(
             ctx,
             QuotePreference {
                 rule: "prefer-double-quotes",
                 message: "Unnecessary use of single quotes.",
                 preferred: b'"',
             },
-        ))
+        )))
     }
 }

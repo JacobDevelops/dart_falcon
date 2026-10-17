@@ -25,8 +25,10 @@
 //! lint.
 
 use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, SemanticModel, Truth, has_immutable_annotation,
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal, Truth, has_immutable_annotation,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::declarations::first_token_after_annotations;
@@ -40,8 +42,24 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
         program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
+        RulePreparation::Structural(Box::new(Collector {
+            program,
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let ctx = self.ctx;
             let (name, annotations, members, has_supertypes) = match decl {
                 TopLevelDecl::Class(class) => (
                     &class.name.name,
@@ -59,7 +77,7 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                         || !class.with_clause.is_empty()
                         || !class.implements.is_empty(),
                 ),
-                _ => continue,
+                _ => return StructuralTraversal::SkipChildren,
             };
             let immutable = match (ctx.identities, ctx.signatures) {
                 (Some(identities), Some(signatures)) => {
@@ -69,12 +87,12 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                             signatures.has_immutable_supertype(&identity, false)
                         })
                 }
-                _ if has_immutable_annotation(annotations, program) => Truth::Yes,
+                _ if has_immutable_annotation(annotations, self.program) => Truth::Yes,
                 _ if !has_supertypes => Truth::No,
                 _ => Truth::Unknown,
             };
             if immutable != Truth::No {
-                continue;
+                return StructuralTraversal::SkipChildren;
             }
             for member in members {
                 let (member_name, annotations, span) = match member {
@@ -88,7 +106,7 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                     _ => continue,
                 };
                 let start = first_token_after_annotations(annotations, span, ctx.syntax);
-                diags.push(ctx.diagnostic(
+                self.diags.push(ctx.diagnostic(
             "avoid-equals-and-hash-code-on-mutable-classes",
             format!(
                 "The method '{member_name}' should not be overridden in classes not annotated with '@immutable'."
@@ -102,9 +120,13 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
             ),
         ));
             }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 #[cfg(test)]

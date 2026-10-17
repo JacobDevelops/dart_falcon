@@ -11,12 +11,12 @@
 //! All explicit type positions are checked, including record fields, type
 //! aliases, generic bounds, patterns, and types inside initializers.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralNode, StructuralRuleVisitor,
+    StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_arg_list, walk_dart_type, walk_expr, walk_map_element, walk_pattern,
-};
 
 #[derive(Default)]
 pub struct AvoidDynamic;
@@ -24,15 +24,14 @@ pub struct AvoidDynamic;
 impl Rule for AvoidDynamic {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut visitor = DynamicVisitor {
+        let visitor = DynamicVisitor {
             diagnostics: Vec::new(),
             ctx,
         };
-        visitor.visit_program(program);
-        RulePreparation::Diagnostics(visitor.diagnostics)
+        RulePreparation::Structural(Box::new(visitor))
     }
 }
 
@@ -41,79 +40,52 @@ struct DynamicVisitor<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
 }
 
-impl DynamicVisitor<'_, '_> {
-    fn visit_map_arguments(&mut self, arguments: &[DartType]) {
-        for argument in arguments {
-            if !matches!(argument, DartType::Dynamic { .. }) {
-                self.visit_dart_type(argument);
-            }
-        }
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for DynamicVisitor<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
     }
-}
 
-impl Visitor for DynamicVisitor<'_, '_> {
-    fn visit_dart_type(&mut self, node: &DartType) {
-        match node {
-            DartType::Dynamic { span } => self.diagnostics.push(self.ctx.diagnostic(
+    fn visit_dart_type(&mut self, node: &DartType) -> StructuralTraversal {
+        if let DartType::Dynamic { span } = node {
+            self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-dynamic",
                 "Avoid using the 'dynamic' type",
                 *span,
-            )),
-            DartType::Named(named)
-                if named
-                    .segments
-                    .last()
-                    .is_some_and(|segment| segment.name == "Map") =>
-            {
-                self.visit_map_arguments(&named.type_args);
-            }
-            _ => walk_dart_type(self, node),
+            ));
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Map {
-            type_args,
-            elements,
-            ..
-        } = node
-        {
-            self.visit_map_arguments(type_args);
-            for element in elements {
-                walk_map_element(self, element);
+    fn route_child(&mut self, parent: StructuralNode<'_>, child: StructuralNode<'_>) -> bool {
+        let map_arguments = match parent {
+            StructuralNode::NamedType(named) => named
+                .segments
+                .last()
+                .is_some_and(|segment| segment.name == "Map"),
+            StructuralNode::Expr(Expr::Map { .. })
+            | StructuralNode::MapPattern(_) => true,
+            StructuralNode::Expr(Expr::Call { callee, .. }) if is_map_name(callee) => {
+                if let StructuralNode::Expr(expr) = child
+                    && std::ptr::eq(expr, callee.as_ref())
+                {
+                    return false;
+                }
+                true
             }
-        } else if let Expr::Call {
-            callee,
-            type_args,
-            args,
-            ..
-        } = node
-            && is_map_name(callee)
-        {
-            self.visit_map_arguments(type_args);
-            walk_arg_list(self, args);
-        } else if let Expr::GenericInstantiation {
-            target, type_args, ..
-        } = node
-            && is_map_name(target)
-        {
-            self.visit_map_arguments(type_args);
-        } else {
-            walk_expr(self, node);
-        }
-    }
-
-    fn visit_pattern(&mut self, node: &Pattern) {
-        if let Pattern::Map(map) = node {
-            self.visit_map_arguments(&map.type_args);
-            for entry in &map.entries {
-                self.visit_expr(&entry.key);
-                self.visit_pattern(&entry.pattern);
+            StructuralNode::Expr(Expr::GenericInstantiation { target, .. }) if is_map_name(target) => {
+                if let StructuralNode::Expr(expr) = child
+                    && std::ptr::eq(expr, target.as_ref())
+                {
+                    return false;
+                }
+                true
             }
-        } else {
-            walk_pattern(self, node);
-        }
+            _ => false,
+        };
+        !map_arguments || !matches!(child, StructuralNode::DartType(DartType::Dynamic { .. }))
     }
+}
 }
 
 fn is_map_name(expr: &Expr) -> bool {

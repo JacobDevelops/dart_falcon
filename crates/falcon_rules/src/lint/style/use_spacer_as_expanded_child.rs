@@ -10,7 +10,9 @@
 //! with `Spacer()`, moving any `flex:` across.
 //! Checks constructions throughout the program, including initializers and closures.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -20,19 +22,36 @@ pub struct UseSpacerAsExpandedChild;
 impl Rule for UseSpacerAsExpandedChild {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
-            if is_unqualified_construction(expr)
-                && let Some((name, args, span)) = crate::lint::flutter::widget_construction(expr)
-            {
-                check_expanded(name, args, span, &mut diags, ctx);
-            }
-        });
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) -> StructuralTraversal {
+        if is_unqualified_construction(expr)
+            && let Some((name, args, span)) = crate::lint::flutter::widget_construction(expr)
+        {
+            check_expanded(name, args, span, &mut self.diags, self.ctx);
+        }
+        StructuralTraversal::Continue
+    }
+}
 }
 
 fn check_expanded(

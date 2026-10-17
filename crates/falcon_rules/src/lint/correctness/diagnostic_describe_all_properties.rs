@@ -31,11 +31,11 @@ use std::collections::HashSet;
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, Truth, TypeParameterScope,
+    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
+    TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
 /// Public instance fields and getters that `Object`, `Widget`, and `State`
 /// declare; a subclass member with one of these names overrides it.
@@ -63,31 +63,32 @@ impl Rule for DiagnosticDescribeAllProperties {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let checker = Checker {
-            model: &model,
-            signatures,
-            ctx,
-        };
-        let mut diags = Vec::new();
-        for declaration in &program.declarations {
-            if let TopLevelDecl::Class(class) = declaration {
-                checker.check_class(class, &mut diags);
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            checker: Checker {
+                model,
+                signatures,
+                ctx,
+            },
+            declarations: program.declarations.iter(),
+            properties: Vec::new(),
+            described: Described(HashSet::new()),
+            debug_method: false,
+            body_depth: 0,
+            diags: Vec::new(),
+        }))
     }
 }
 
 struct Checker<'a> {
-    model: &'a SemanticModel<'a>,
+    model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     ctx: &'a AnalyzeContext<'a>,
 }
 
 impl Checker<'_> {
-    fn check_class(&self, class: &ClassDecl, diags: &mut Vec<Diagnostic>) {
+    fn properties<'n>(&self, class: &'n ClassDecl) -> Vec<&'n Identifier> {
         let Some(identity) = self.model.resolve_name(&class.name.name) else {
-            return;
+            return Vec::new();
         };
         let diagnosticable = |supertype: &DeclarationIdentity| {
             supertype.name() == "Diagnosticable"
@@ -100,10 +101,10 @@ impl Checker<'_> {
             .supertype_matches(&identity, &diagnosticable)
             != Truth::Yes
         {
-            return;
+            return Vec::new();
         }
         let mut parameters = TypeParameterScope::default();
-        parameters.push(&class.type_params, self.model);
+        parameters.push(&class.type_params, &self.model);
         let mut properties: Vec<&Identifier> = Vec::new();
         for parameter in (EffectiveMembers {
             declared: &class.members,
@@ -152,30 +153,7 @@ impl Checker<'_> {
                 _ => {}
             }
         }
-        if properties.is_empty() {
-            return;
-        }
-        let mut described = Described(HashSet::new());
-        for member in &class.members {
-            if let ClassMember::Method(method) = member
-                && matches!(
-                    method.name.name.as_str(),
-                    "debugFillProperties" | "debugDescribeChildren"
-                )
-                && let Some(body) = &method.body
-            {
-                walk_function_body(&mut described, body);
-            }
-        }
-        for property in properties {
-            if !described.0.contains(&property.name) {
-                diags.push(self.ctx.diagnostic(
-                    "diagnostic-describe-all-properties",
-                    "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'.",
-                    property.span,
-                ));
-            }
-        }
+        properties
     }
 
     /// Public, non-overriding, and of a type proven not to be a widget property.
@@ -229,7 +207,7 @@ impl Checker<'_> {
                 if self.signatures.is_subtype_of(
                     ty,
                     &DeclarationIdentity::flutter("Widget"),
-                    self.model,
+                    &self.model,
                 ) == Truth::Yes
                 {
                     return Some(true);
@@ -305,12 +283,8 @@ fn change_first<I: Iterator<Item = char>>(text: &str, change: impl Fn(char) -> I
         .map_or_else(String::new, |first| change(first).chain(chars).collect())
 }
 
-impl Visitor for Described {
-    fn visit_identifier(&mut self, node: &Identifier) {
-        self.reference(&node.name);
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
+impl Described {
+    fn expression(&mut self, node: &Expr) {
         match node {
             Expr::Field { field, .. } => self.reference(&field.name),
             Expr::Cascade { sections, .. } => {
@@ -322,6 +296,81 @@ impl Visitor for Described {
             }
             _ => {}
         }
-        walk_expr(self, node);
     }
+}
+
+struct Collector<'a> {
+    checker: Checker<'a>,
+    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    properties: Vec<&'a Identifier>,
+    described: Described,
+    debug_method: bool,
+    body_depth: usize,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_class_decl(&mut self, _node: &ClassDecl) -> StructuralTraversal {
+        let class = self.declarations.find_map(|declaration| match declaration {
+            TopLevelDecl::Class(class) => Some(class),
+            _ => None,
+        }).unwrap();
+        self.properties = self.checker.properties(class);
+        self.described.0.clear();
+        if self.properties.is_empty() {
+            StructuralTraversal::SkipChildren
+        } else {
+            StructuralTraversal::Continue
+        }
+    }
+
+    fn visit_method_decl(&mut self, method: &MethodDecl) -> StructuralTraversal {
+        self.debug_method = matches!(method.name.name.as_str(), "debugFillProperties" | "debugDescribeChildren");
+        StructuralTraversal::Continue
+    }
+
+    fn exit_method_decl(&mut self, _method: &MethodDecl) {
+        self.debug_method = false;
+    }
+
+    fn visit_function_body(&mut self, _body: &FunctionBody) -> StructuralTraversal {
+        self.body_depth += 1;
+        StructuralTraversal::Continue
+    }
+
+    fn exit_function_body(&mut self, _body: &FunctionBody) {
+        self.body_depth -= 1;
+    }
+
+    fn visit_identifier(&mut self, node: &Identifier) -> StructuralTraversal {
+        if self.debug_method && self.body_depth > 0 {
+            self.described.reference(&node.name);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if self.debug_method && self.body_depth > 0 {
+            self.described.expression(node);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_class_decl(&mut self, _node: &ClassDecl) {
+        for property in self.properties.drain(..) {
+            if !self.described.0.contains(&property.name) {
+                self.diags.push(self.checker.ctx.diagnostic(
+                    "diagnostic-describe-all-properties",
+                    "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'.",
+                    property.span,
+                ));
+            }
+        }
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }

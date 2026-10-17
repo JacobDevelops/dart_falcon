@@ -3,10 +3,10 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, Rule, RulePreparation, SemanticModel,
+    StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct UseFullHexValuesForFlutterColors;
@@ -14,36 +14,34 @@ pub struct UseFullHexValuesForFlutterColors;
 impl Rule for UseFullHexValuesForFlutterColors {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut collector = Collector {
-            model: &model,
+        let collector = Collector {
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
 struct Collector<'a> {
-    model: &'a SemanticModel<'a>,
+    model: SemanticModel<'a>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if matches!(node, Expr::Paren { .. }) {
-            falcon_syntax::visitor::walk_expr(self, node);
-            return;
+            return StructuralTraversal::Continue;
         }
-        if let Some((identity, constructor, args)) = construction(node, self.model)
+        if let Some((identity, constructor, args)) = construction(node, &self.model)
             && constructor == "new"
             && is_color(&identity)
             && let Some(Expr::IntLit { value, span }) =
@@ -56,8 +54,13 @@ impl Visitor for Collector<'_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn construction<'a>(

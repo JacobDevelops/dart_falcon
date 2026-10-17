@@ -22,10 +22,12 @@ pub use dcl::NoMagicNumber;
 mod dcl {
     use std::collections::HashSet;
 
-    use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+    use falcon_analyze::{
+        AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+        structural_visitor,
+    };
     use falcon_diagnostics::Diagnostic;
     use falcon_syntax::ast::*;
-    use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
     #[derive(Default)]
     pub struct NoMagicNumber;
@@ -48,19 +50,16 @@ mod dcl {
     impl Rule for NoMagicNumber {
         fn prepare<'a>(
             &self,
-            program: &'a Program,
+            _program: &'a Program,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
-            let cfg = cfg(ctx);
-            let mut collector = Collector {
+            RulePreparation::Structural(Box::new(Collector {
                 diags: Vec::new(),
                 ctx,
-                cfg: &cfg,
-                in_const: false,
+                cfg: cfg(ctx),
+                in_const: 0,
                 exempt_literals: HashSet::new(),
-            };
-            collector.visit_program(program);
-            RulePreparation::Diagnostics(collector.diags)
+            }))
         }
     }
 
@@ -108,37 +107,19 @@ mod dcl {
         }
     }
 
-    struct Collector<'a, 'ctx, 'cfg> {
+    struct Collector<'a, 'ctx> {
         diags: Vec<Diagnostic>,
         ctx: &'a AnalyzeContext<'ctx>,
-        cfg: &'cfg Cfg,
-        in_const: bool,
+        cfg: Cfg,
+        in_const: usize,
         exempt_literals: HashSet<usize>,
     }
 
-    impl Collector<'_, '_, '_> {
-        fn with_const(&mut self, is_const: bool, walk: impl FnOnce(&mut Self)) {
-            let previous = self.in_const;
-            self.in_const |= is_const;
-            walk(self);
-            self.in_const = previous;
-        }
-
-        fn with_exempt_literals(
-            &mut self,
-            spans: impl IntoIterator<Item = usize>,
-            walk: impl FnOnce(&mut Self),
-        ) {
-            let previous = self.exempt_literals.clone();
-            self.exempt_literals.extend(spans);
-            walk(self);
-            self.exempt_literals = previous;
-        }
-
+    impl Collector<'_, '_> {
         fn flag(&mut self, value: &str, span: &Span) {
-            if self.in_const
+            if self.in_const != 0
                 || self.exempt_literals.contains(&span.start)
-                || is_allowed(value, self.cfg)
+                || is_allowed(value, &self.cfg)
             {
                 return;
             }
@@ -150,75 +131,77 @@ mod dcl {
         }
     }
 
-    impl Visitor for Collector<'_, '_, '_> {
-        fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-            if !matches!(node, TopLevelDecl::Variable(_)) {
-                walk_top_level_decl(self, node);
+    structural_visitor! {
+    impl StructuralRuleVisitor for Collector<'_, '_> {
+        fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+        fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+            if matches!(node, TopLevelDecl::Variable(_)) {
+                StructuralTraversal::SkipChildren
+            } else {
+                StructuralTraversal::Continue
             }
         }
 
-        fn visit_field_decl(&mut self, _node: &FieldDecl) {}
-
-        fn visit_formal_param(&mut self, _node: &FormalParam) {}
-
-        fn visit_local_var(&mut self, _node: &LocalVarDecl) {}
-
-        fn visit_stmt(&mut self, node: &Stmt) {
-            if !matches!(node, Stmt::PatternDecl(_)) {
-                walk_stmt(self, node);
+        fn visit_field_decl(&mut self, _node: &FieldDecl) -> StructuralTraversal {
+            StructuralTraversal::SkipChildren
+        }
+        fn visit_formal_param(&mut self, _node: &FormalParam) -> StructuralTraversal {
+            StructuralTraversal::SkipChildren
+        }
+        fn visit_local_var(&mut self, _node: &LocalVarDecl) -> StructuralTraversal {
+            StructuralTraversal::SkipChildren
+        }
+        fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+            if matches!(node, Stmt::PatternDecl(_)) {
+                StructuralTraversal::SkipChildren
+            } else {
+                StructuralTraversal::Continue
             }
         }
 
-        fn visit_expr(&mut self, node: &Expr) {
+        fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+            if matches!(node, Expr::New { is_const: true, .. } | Expr::List { is_const: true, .. } | Expr::Set { is_const: true, .. } | Expr::Map { is_const: true, .. }) {
+                self.in_const += 1;
+            }
             match node {
                 Expr::IntLit { value, span } | Expr::DoubleLit { value, span } => {
                     self.flag(value, span);
                 }
-                Expr::Call { callee, .. } if root_name(callee) == Some("DateTime") => {}
-                Expr::New {
-                    is_const,
-                    dart_type,
-                    ..
-                } if type_base_name(dart_type) != Some("DateTime") => {
-                    self.with_const(*is_const, |this| walk_expr(this, node));
+                Expr::Call { callee, .. } if root_name(callee) == Some("DateTime") => {
+                    return StructuralTraversal::SkipChildren;
                 }
-                Expr::New { .. } => {}
-                Expr::List {
-                    is_const, elements, ..
+                Expr::New { dart_type, .. } if type_base_name(dart_type) == Some("DateTime") => {
+                    return StructuralTraversal::SkipChildren;
                 }
-                | Expr::Set {
-                    is_const, elements, ..
-                } => {
-                    let direct = elements.iter().filter_map(|element| match element {
+                Expr::List { elements, .. } | Expr::Set { elements, .. } => {
+                    self.exempt_literals.extend(elements.iter().filter_map(|element| match element {
                         CollectionElement::Expr(expr) => direct_literal_span(expr),
                         _ => None,
-                    });
-                    let spans: Vec<_> = direct.collect();
-                    self.with_exempt_literals(spans, |this| {
-                        this.with_const(*is_const, |this| walk_expr(this, node));
-                    });
-                }
-                Expr::Map { is_const, .. } => {
-                    self.with_const(*is_const, |this| walk_expr(this, node));
+                    }));
                 }
                 Expr::Index { index, .. } => {
-                    self.with_exempt_literals(direct_literal_span(index), |this| {
-                        walk_expr(this, node)
-                    });
+                    self.exempt_literals.extend(direct_literal_span(index));
                 }
                 Expr::Cascade { sections, .. } => {
-                    let spans = sections.iter().flat_map(|section| {
+                    self.exempt_literals.extend(sections.iter().flat_map(|section| {
                         section.ops.iter().filter_map(|op| match op {
                             CascadeOp::Index { index, .. }
                             | CascadeOp::IndexAssign(index, _, _) => direct_literal_span(index),
                             _ => None,
                         })
-                    });
-                    let spans: Vec<_> = spans.collect();
-                    self.with_exempt_literals(spans, |this| walk_expr(this, node));
+                    }));
                 }
-                _ => walk_expr(self, node),
+                _ => {}
+            }
+            StructuralTraversal::Continue
+        }
+
+        fn exit_expr(&mut self, node: &Expr) {
+            if matches!(node, Expr::New { is_const: true, .. } | Expr::List { is_const: true, .. } | Expr::Set { is_const: true, .. } | Expr::Map { is_const: true, .. }) {
+                self.in_const -= 1;
             }
         }
+    }
     }
 }

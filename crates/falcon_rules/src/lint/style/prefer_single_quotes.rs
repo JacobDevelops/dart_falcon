@@ -17,10 +17,12 @@
 //! Adopted from the official `prefer_single_quotes` lint.
 
 use crate::lint::string_lit::{LiteralPart, decoded_text, literal_parts};
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_string_interpolation};
 
 #[derive(Default)]
 pub struct PreferSingleQuotes;
@@ -28,18 +30,17 @@ pub struct PreferSingleQuotes;
 impl Rule for PreferSingleQuotes {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Diagnostics(QuoteVisitor::run(
-            program,
+        RulePreparation::Structural(Box::new(QuoteVisitor::new(
             ctx,
             QuotePreference {
                 rule: "prefer-single-quotes",
                 message: "Unnecessary use of double quotes.",
                 preferred: b'\'',
             },
-        ))
+        )))
     }
 }
 
@@ -59,32 +60,32 @@ pub(crate) struct QuoteVisitor<'a> {
 }
 
 impl<'a> QuoteVisitor<'a> {
-    pub(crate) fn run(
-        program: &Program,
-        ctx: &'a AnalyzeContext<'a>,
-        preference: QuotePreference,
-    ) -> Vec<Diagnostic> {
-        let mut visitor = QuoteVisitor {
+    pub(crate) fn new(ctx: &'a AnalyzeContext<'a>, preference: QuotePreference) -> Self {
+        QuoteVisitor {
             diags: Vec::new(),
             ctx,
             preference,
             interpolation_depth: 0,
-        };
-        visitor.visit_program(program);
-        visitor.diags
+        }
     }
 }
 
-impl Visitor for QuoteVisitor<'_> {
-    fn visit_string_interpolation(&mut self, node: &StringInterpolation) {
+structural_visitor! {
+impl StructuralRuleVisitor for QuoteVisitor<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_string_interpolation(&mut self, _node: &StringInterpolation) -> StructuralTraversal {
         self.interpolation_depth += 1;
-        walk_string_interpolation(self, node);
+        StructuralTraversal::Continue
+    }
+
+    fn exit_string_interpolation(&mut self, _node: &StringInterpolation) {
         self.interpolation_depth -= 1;
     }
 
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
+    fn visit_string_lit(&mut self, node: &StringLitNode) -> StructuralTraversal {
         if self.interpolation_depth > 0 {
-            return;
+            return StructuralTraversal::Continue;
         }
         let preferred = self.preference.preferred;
         let preferred_char = char::from(preferred);
@@ -108,5 +109,7 @@ impl Visitor for QuoteVisitor<'_> {
                 span,
             ));
         }
+        StructuralTraversal::Continue
     }
+}
 }

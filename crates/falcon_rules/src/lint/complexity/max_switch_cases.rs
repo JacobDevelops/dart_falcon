@@ -11,10 +11,11 @@
 //! `max_cases` (integer, default: 10) — flag when the number of non-default
 //! cases exceeds this.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
 
 #[derive(Default)]
 pub struct MaxSwitchCases;
@@ -22,16 +23,14 @@ pub struct MaxSwitchCases;
 impl Rule for MaxSwitchCases {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             threshold: max_cases_option(ctx),
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        }))
     }
 }
 
@@ -59,8 +58,13 @@ struct Collector<'a, 'ctx> {
     threshold: usize,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         if let Stmt::Switch(switch_stmt) = node
             && count_non_default_cases(switch_stmt) > self.threshold
         {
@@ -73,6 +77,7 @@ impl Visitor for Collector<'_, '_> {
                 switch_stmt.span,
             ));
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

@@ -61,3 +61,19 @@ String? withNullBranch(bool flag) {
   }
   return null;
 }
+
+String? onlyDelayedReturns() {
+  String? local() {
+    return 'local';
+  }
+  final callback = () {
+    return 'callback';
+  };
+}
+
+String? nullableOuterAfterNonNullClosure() {
+  final callback = () {
+    return 'callback';
+  };
+  return null;
+}

@@ -22,7 +22,9 @@
 //! diagnostic for the file is suppressed rather than risk a false positive. A
 //! standalone file with no part directives keeps the exact single-file behavior.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -56,31 +58,64 @@ impl Rule for PreferFinalFields {
         let mut written = Written {
             names: HashSet::new(),
         };
-        written.visit_program(program);
         if let Some(lib) = ctx.library {
             for sibling in lib.siblings() {
                 written.visit_program(sibling);
             }
         }
 
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            if matches!(decl, TopLevelDecl::Enum(_)) {
-                continue;
-            }
-            if let Some(members) = crate::lint::declarations::members_of(decl) {
-                check_class(members, &written.names, ctx, &mut diags);
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            written,
+            candidates: Vec::new(),
+        }))
     }
 }
 
-fn check_class(
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    written: Written,
+    candidates: Vec<(&'a str, Span)>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        if !matches!(decl, TopLevelDecl::Enum(_))
+            && let Some(members) = crate::lint::declarations::members_of(decl)
+        {
+            // Initialization eligibility is local; write eligibility is known
+            // only after every expression in this file has been observed.
+            check_class(members, self.ctx.source, &mut self.candidates);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        self.written.record_expr(node);
+        StructuralTraversal::Continue
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.candidates
+            .into_iter()
+            .filter(|(name, _)| !self.written.names.contains(*name))
+            .map(|(name, span)| {
+                self.ctx.diagnostic(
+                    "prefer-final-fields",
+                    format!("The private field '{name}' could be 'final'."),
+                    span,
+                )
+            })
+            .collect()
+    }
+}
+}
+
+fn check_class<'a>(
     members: &[ClassMember],
-    written: &HashSet<String>,
-    ctx: &AnalyzeContext,
-    diags: &mut Vec<Diagnostic>,
+    source: &'a str,
+    candidates: &mut Vec<(&'a str, Span)>,
 ) {
     // The analyzer requires every declared constructor to initialize a field
     // when any constructor does, including redirecting and factory constructors.
@@ -105,7 +140,7 @@ fn check_class(
         }
         for d in &field.declarators {
             let name = d.name.name.as_str();
-            if !name.starts_with('_') || written.contains(name) {
+            if !name.starts_with('_') {
                 continue;
             }
             let has_decl_init = d.initializer.is_some();
@@ -118,11 +153,8 @@ fn check_class(
             };
 
             if ok {
-                diags.push(ctx.diagnostic(
-                    "prefer-final-fields",
-                    format!("The private field '{name}' could be 'final'."),
-                    d.name.span,
-                ));
+                let span = d.name.span;
+                candidates.push((&source[span.start..span.end], span));
             }
         }
     }
@@ -161,8 +193,8 @@ impl Written {
     }
 }
 
-impl Visitor for Written {
-    fn visit_expr(&mut self, node: &Expr) {
+impl Written {
+    fn record_expr(&mut self, node: &Expr) {
         match node {
             Expr::Assign { target, .. } => self.record_target(target),
             Expr::PostfixIncDec { operand, .. } => self.record_target(operand),
@@ -182,6 +214,12 @@ impl Visitor for Written {
             }
             _ => {}
         }
+    }
+}
+
+impl Visitor for Written {
+    fn visit_expr(&mut self, node: &Expr) {
+        self.record_expr(node);
         visitor::walk_expr(self, node);
     }
 }

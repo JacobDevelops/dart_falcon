@@ -25,7 +25,11 @@
 //!
 //! Adopted from the official `matching_super_parameters` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -34,37 +38,53 @@ pub struct MatchingSuperParameters;
 impl Rule for MatchingSuperParameters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
+            signatures,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
             let TopLevelDecl::Class(class) = decl else {
-                continue;
+                return StructuralTraversal::SkipChildren;
             };
             let Some(superclass) = &class.extends else {
-                continue;
+                return StructuralTraversal::SkipChildren;
             };
-            let ResolvedType::Interface { identity, .. } = model.resolve_type(superclass) else {
-                continue;
+            let ResolvedType::Interface { identity, .. } = self.model.resolve_type(superclass) else {
+                return StructuralTraversal::SkipChildren;
             };
-            let Some(facts) = signatures.declaration(&identity) else {
-                continue;
+            let Some(facts) = self.signatures.declaration(&identity) else {
+                return StructuralTraversal::SkipChildren;
             };
             for (params, initializers) in constructor_inputs(class) {
-                let super_params: Vec<&FormalParam> = params
+                let super_params = params
                     .params
                     .iter()
                     .filter(|param| {
                         param.initializing == Some(InitializingFormal::Super)
                             && !matches!(param.kind, ParamKind::Named { .. })
-                    })
-                    .collect();
-                if super_params.is_empty() {
+                    });
+                let count = super_params.clone().count();
+                if count == 0 {
                     continue;
                 }
                 let target = initializers
@@ -83,18 +103,17 @@ impl Rule for MatchingSuperParameters {
                 else {
                     continue;
                 };
-                let super_positional: Vec<&str> = super_constructor
+                let super_positional = super_constructor
                     .parameters
                     .iter()
                     .filter(|parameter| !parameter.is_named)
-                    .map(|parameter| parameter.name.as_str())
-                    .collect();
-                if super_positional.len() < super_params.len() {
+                    .map(|parameter| parameter.name.as_str());
+                if super_positional.clone().count() < count {
                     continue;
                 }
-                for (param, expected) in super_params.iter().zip(&super_positional) {
-                    if param.name.name != *expected {
-                        diags.push(ctx.diagnostic(
+                for (param, expected) in super_params.zip(super_positional) {
+                    if param.name.name != expected {
+                        self.diags.push(self.ctx.diagnostic(
                     "matching-super-parameters",
                     format!(
                         "The super parameter named '{}' does not share the same name as the corresponding parameter in the super constructor, '{expected}'.",
@@ -105,9 +124,13 @@ impl Rule for MatchingSuperParameters {
                     }
                 }
             }
-        }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn constructor_inputs(

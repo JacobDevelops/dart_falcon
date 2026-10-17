@@ -12,7 +12,10 @@
 //!
 //! Adopted from the official `one_member_abstracts` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -22,13 +25,29 @@ pub struct OneMemberAbstracts;
 impl Rule for OneMemberAbstracts {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Diagnostics(program
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_top_level_decl(&mut self, declaration: &TopLevelDecl) -> StructuralTraversal {
+        let candidate = match declaration {
             TopLevelDecl::Class(class)
                 if class.modifiers.is_abstract
                     && class.extends.is_none()
@@ -46,19 +65,21 @@ impl Rule for OneMemberAbstracts {
                 Some((&class.name, class.members.as_slice()))
             }
             _ => None,
-        })
-        .filter_map(|(name, members)| {
-            let method = single_abstract_method(members)?;
-            Some(ctx.diagnostic(
+        };
+        if let Some((name, members)) = candidate
+            && let Some(method) = single_abstract_method(members)
+        {
+            self.diags.push(self.ctx.diagnostic(
                 "one-member-abstracts",
                 format!(
                     "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
                 ),
                 name.span,
-            ))
-        })
-        .collect())
+            ));
+        }
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 /// The name of the class's only method when it is abstract and the class has

@@ -8,7 +8,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ParameterContract, ResolvedType, Rule,
-    RulePreparation, SemanticModel, SignatureIndex,
+    RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -19,37 +19,62 @@ pub struct UnnecessaryOverrides;
 impl Rule for UnnecessaryOverrides {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
+        let diags = Vec::new();
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return RulePreparation::Diagnostics(diags);
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let docs = ctx.syntax.doc_blocks(ctx.source).collect::<Vec<_>>();
-        for decl in &program.declarations {
-            let Some(members) = crate::lint::declarations::members_of(decl) else {
-                continue;
-            };
-            let name = match decl {
-                TopLevelDecl::Class(node) => &node.name.name,
-                TopLevelDecl::MixinClass(node) => &node.name.name,
-                TopLevelDecl::Mixin(node) => &node.name.name,
-                TopLevelDecl::Enum(node) => &node.name.name,
-                _ => continue,
-            };
-            let Some(identity) = model.resolve_name(name) else {
-                continue;
-            };
-            for member in members {
-                check_member(
-                    member, &identity, &model, signatures, &docs, &mut diags, ctx,
-                );
-            }
-        }
-        RulePreparation::Diagnostics(diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model,
+            signatures,
+            docs,
+            diags,
+        }))
     }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    docs: Vec<falcon_syntax::token::DocBlock<'a>>,
+    diags: Vec<Diagnostic>,
+}
+
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
+        let model = &self.model;
+        let Some(members) = crate::lint::declarations::members_of(decl) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        let name = match decl {
+            TopLevelDecl::Class(node) => &node.name.name,
+            TopLevelDecl::MixinClass(node) => &node.name.name,
+            TopLevelDecl::Mixin(node) => &node.name.name,
+            TopLevelDecl::Enum(node) => &node.name.name,
+            _ => return StructuralTraversal::SkipChildren,
+        };
+        let Some(identity) = model.resolve_name(name) else {
+            return StructuralTraversal::SkipChildren;
+        };
+        for member in members {
+            check_member(
+                member, &identity, model, self.signatures, &self.docs, &mut self.diags, self.ctx,
+            );
+        }
+        StructuralTraversal::SkipChildren
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+}
 }
 
 fn check_member(

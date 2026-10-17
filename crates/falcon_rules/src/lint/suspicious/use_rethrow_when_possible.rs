@@ -7,10 +7,11 @@
 //! exception parameter's spelling; binding identity is not resolved. Throws
 //! inside a nested closure or a nested `try`/`catch` are skipped.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct UseRethrowWhenPossible;
@@ -18,42 +19,33 @@ pub struct UseRethrowWhenPossible;
 impl Rule for UseRethrowWhenPossible {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
+            target: None,
+            targets: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    target: Option<&'a str>,
+    targets: Vec<Option<&'a str>>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::TryCatch(tc) = node {
-            for catch in &tc.catches {
-                if let Some(var) = &catch.exception_var {
-                    let mut scan = CatchScan {
-                        target: &var.name,
-                        ctx: self.ctx,
-                        diags: &mut self.diags,
-                    };
-                    for stmt in &catch.body.stmts {
-                        scan.visit_stmt(stmt);
-                    }
-                }
-            }
-        }
-        // Continue walking so nested try/catch statements (including those inside a
-        // catch body, which `CatchScan` deliberately skips) get their own analysis.
-        walk_stmt(self, node);
+impl Collector<'_> {
+    fn report(&mut self, span: Span) {
+        self.diags.push(self.ctx.diagnostic(
+            "use-rethrow-when-possible",
+            "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
+            span,
+        ));
     }
 }
 
@@ -61,42 +53,58 @@ fn is_target(expr: &Expr, target: &str) -> bool {
     matches!(expr.unparenthesized(), Expr::Ident(id) if id.name == target)
 }
 
-/// Walks a single catch body looking for `throw <exception>`. Stops at closures and
-/// nested try/catch statements, where `rethrow` would not apply to `target`.
-struct CatchScan<'a> {
-    target: &'a str,
-    ctx: &'a AnalyzeContext<'a>,
-    diags: &'a mut Vec<Diagnostic>,
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_catch_clause(&mut self, node: &CatchClause) -> StructuralTraversal {
+        self.targets.push(self.target.take());
+        self.target = node.exception_var.as_ref()
+            .and_then(|var| self.ctx.syntax.tokens_in(var.span).next())
+            .map(|token| token.text(self.ctx.source));
+        StructuralTraversal::Continue
+    }
+
+    fn exit_catch_clause(&mut self, _node: &CatchClause) {
+        self.target = self.targets.pop().unwrap();
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        if matches!(node, Stmt::TryCatch(_) | Stmt::LocalFunc(_)) {
+            self.targets.push(self.target.take());
+        }
+        if let Stmt::Throw(throw) = node
+            && self.target.as_ref().is_some_and(|target| is_target(&throw.value, target))
+        {
+            self.report(throw.span);
+            return StructuralTraversal::SkipChildren;
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if matches!(node, Stmt::TryCatch(_) | Stmt::LocalFunc(_)) {
+            self.target = self.targets.pop().unwrap();
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.targets.push(self.target.take());
+        }
+        if let Expr::Throw { expr, span } = node
+            && self.target.as_ref().is_some_and(|target| is_target(expr, target))
+        {
+            self.report(*span);
+            return StructuralTraversal::SkipChildren;
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            self.target = self.targets.pop().unwrap();
+        }
+    }
 }
-
-impl Visitor for CatchScan<'_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::Throw(t) if is_target(&t.value, self.target) => {
-                self.diags.push(self.ctx.diagnostic(
-                    "use-rethrow-when-possible",
-                    "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
-                    t.span,
-                ));
-            }
-            // Do not descend: a different exception binding / rethrow not valid here.
-            Stmt::TryCatch(_) | Stmt::LocalFunc(_) => {}
-            _ => walk_stmt(self, node),
-        }
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        match node {
-            Expr::Throw { expr, span } if is_target(expr, self.target) => {
-                self.diags.push(self.ctx.diagnostic(
-                    "use-rethrow-when-possible",
-                    "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
-                    *span,
-                ));
-            }
-            // Closures capture the exception but `rethrow` is illegal inside them.
-            Expr::FuncExpr { .. } => {}
-            _ => walk_expr(self, node),
-        }
-    }
 }

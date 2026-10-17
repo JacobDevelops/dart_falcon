@@ -8,10 +8,11 @@
 //! wildcard is fine; only uses in expression position are reported. Give the
 //! binding a real name if you actually need its value.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct NoWildcardVariableUses;
@@ -19,15 +20,14 @@ pub struct NoWildcardVariableUses;
 impl Rule for NoWildcardVariableUses {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut visitor = WildcardUseVisitor {
+        let visitor = WildcardUseVisitor {
             diags: Vec::new(),
             ctx,
         };
-        visitor.visit_program(program);
-        RulePreparation::Diagnostics(visitor.diags)
+        RulePreparation::Structural(Box::new(visitor))
     }
 }
 
@@ -42,8 +42,13 @@ struct WildcardUseVisitor<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
 }
 
-impl Visitor for WildcardUseVisitor<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for WildcardUseVisitor<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if let Expr::Ident(id) = node
             && is_wildcard(&id.name)
         {
@@ -52,6 +57,7 @@ impl Visitor for WildcardUseVisitor<'_, '_> {
                     .diagnostic("no-wildcard-variable-uses", MESSAGE, id.span),
             );
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

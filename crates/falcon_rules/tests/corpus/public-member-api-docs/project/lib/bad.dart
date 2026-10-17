@@ -64,3 +64,12 @@ void annotatedFunction() {} /* expect: public-member-api-docs */
 
 /* Ordinary block comments are not documentation. */
 class PlainComment {} /* expect: public-member-api-docs */
+
+/// Setter diagnostics retain declaration order even when their getter comes later.
+class SetterBeforeGetter {
+  set later(int value) {} /* expect: public-member-api-docs */
+  int get later => 0; /* expect: public-member-api-docs */
+}
+
+set laterTopLevel(int value) {} /* expect: public-member-api-docs */
+int get laterTopLevel => 0; /* expect: public-member-api-docs */

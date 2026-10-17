@@ -989,10 +989,15 @@ fn primary_constructor_declared_body_name_excludes_annotations() {
         program, errors, ..
     } = parse(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let mut names = Vec::new();
-    falcon_syntax::visitor::for_each_declared_body(&program, source, &mut |_, name, _| {
-        names.push(&source[name.start..name.end]);
-    });
+    let TopLevelDecl::Class(class) = &program.declarations[0] else {
+        panic!("expected class");
+    };
+    let names: Vec<_> = class
+        .members
+        .iter()
+        .filter_map(|member| falcon_syntax::visitor::declared_member_name(member, source))
+        .map(|name| &source[name.start..name.end])
+        .collect();
     assert_eq!(names, ["this"]);
 }
 

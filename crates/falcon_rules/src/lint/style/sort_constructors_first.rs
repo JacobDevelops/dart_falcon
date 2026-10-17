@@ -18,8 +18,11 @@
 //!
 //! Adopted from the official `sort_constructors_first` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_diagnostics::Span as DiagSpan;
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -28,21 +31,33 @@ pub struct SortConstructorsFirst;
 impl Rule for SortConstructorsFirst {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut diags = Vec::new();
-        for members in program
-            .declarations
-            .iter()
-            .filter_map(constructor_container)
-        {
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+}
+
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) -> StructuralTraversal {
+        if let Some(members) = constructor_container(node) {
             let mut other = false;
             for member in members {
                 match member {
                     ClassMember::Constructor(constructor) => {
                         if other {
-                            diags.push(ctx.diagnostic(
+                            self.diags.push(self.ctx.diagnostic(
                                 "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
                          declarations.",
@@ -52,7 +67,7 @@ impl Rule for SortConstructorsFirst {
                     }
                     ClassMember::PrimaryConstructorBody(body) => {
                         if other {
-                            diags.push(ctx.diagnostic(
+                            self.diags.push(self.ctx.diagnostic(
                                 "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
                          declarations.",
@@ -64,8 +79,9 @@ impl Rule for SortConstructorsFirst {
                 }
             }
         }
-        RulePreparation::Diagnostics(diags)
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 /// Members of the declarations the analyzer checks: classes (including mixin

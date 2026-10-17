@@ -14,3 +14,11 @@ const list = [
 ];
 
 String get env => const String.fromEnvironment('ENV');
+
+class EnvironmentValue {
+  final String value;
+  const EnvironmentValue(this.value);
+}
+
+@EnvironmentValue(String.fromEnvironment('ANNOTATED'))
+void annotated() {}

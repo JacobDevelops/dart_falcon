@@ -17,11 +17,12 @@
 //!
 //! Adopted from the official `always_put_control_body_on_new_line` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::Token;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
 
 #[derive(Default)]
 pub struct AlwaysPutControlBodyOnNewLine;
@@ -29,7 +30,7 @@ pub struct AlwaysPutControlBodyOnNewLine;
 impl Rule for AlwaysPutControlBodyOnNewLine {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let tokens: Vec<Token> = ctx
@@ -38,13 +39,12 @@ impl Rule for AlwaysPutControlBodyOnNewLine {
             .copied()
             .filter(|token| !token.is_trivia())
             .collect();
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             tokens,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -92,8 +92,11 @@ impl Collector<'_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
         match node {
             Stmt::If(stmt) => {
                 self.check(&stmt.then_branch);
@@ -108,6 +111,7 @@ impl Visitor for Collector<'_, '_> {
             Stmt::DoWhile(stmt) => self.check(&stmt.body),
             _ => {}
         }
-        walk_stmt(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

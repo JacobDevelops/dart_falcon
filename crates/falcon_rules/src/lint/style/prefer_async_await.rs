@@ -9,13 +9,12 @@
 //! identity is required before unrelated user-defined `then` methods can be
 //! excluded reliably.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    structural_visitor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
-    walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
-};
 
 #[derive(Default)]
 pub struct PreferAsyncAwait;
@@ -23,78 +22,90 @@ pub struct PreferAsyncAwait;
 impl Rule for PreferAsyncAwait {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        RulePreparation::Structural(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-            suppress: false,
-        };
-        collector.visit_program(program);
-        RulePreparation::Diagnostics(collector.diags)
+            arrow_depth: 0,
+        }))
     }
 }
 
 struct Collector<'a, 'ctx> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
-    suppress: bool,
+    arrow_depth: usize,
 }
 
 impl Collector<'_, '_> {
-    fn with_body_suppression(&mut self, body: Option<&FunctionBody>, walk: impl FnOnce(&mut Self)) {
-        let previous = self.suppress;
-        self.suppress |= matches!(body, Some(FunctionBody::Arrow(..)));
-        walk(self);
-        self.suppress = previous;
+    fn enter_body(&mut self, body: Option<&FunctionBody>) {
+        self.arrow_depth += usize::from(matches!(body, Some(FunctionBody::Arrow(..))));
+    }
+
+    fn exit_body(&mut self, body: Option<&FunctionBody>) {
+        self.arrow_depth -= usize::from(matches!(body, Some(FunctionBody::Arrow(..))));
     }
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.with_body_suppression(node.body.as_ref(), |this| walk_function_decl(this, node));
-    }
+structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.with_body_suppression(node.body.as_ref(), |this| walk_constructor_decl(this, node));
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
+        self.enter_body(node.body.as_ref());
+        StructuralTraversal::Continue
     }
+    fn exit_function_decl(&mut self, node: &FunctionDecl) { self.exit_body(node.body.as_ref()); }
 
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.with_body_suppression(node.body.as_ref(), |this| walk_method_decl(this, node));
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) -> StructuralTraversal {
+        self.enter_body(node.body.as_ref());
+        StructuralTraversal::Continue
     }
+    fn exit_constructor_decl(&mut self, node: &ConstructorDecl) { self.exit_body(node.body.as_ref()); }
 
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        self.with_body_suppression(node.body.as_ref(), |this| walk_getter_decl(this, node));
+    fn visit_method_decl(&mut self, node: &MethodDecl) -> StructuralTraversal {
+        self.enter_body(node.body.as_ref());
+        StructuralTraversal::Continue
     }
+    fn exit_method_decl(&mut self, node: &MethodDecl) { self.exit_body(node.body.as_ref()); }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        self.with_body_suppression(node.body.as_ref(), |this| walk_setter_decl(this, node));
+    fn visit_getter_decl(&mut self, node: &GetterDecl) -> StructuralTraversal {
+        self.enter_body(node.body.as_ref());
+        StructuralTraversal::Continue
     }
+    fn exit_getter_decl(&mut self, node: &GetterDecl) { self.exit_body(node.body.as_ref()); }
 
-    fn visit_class_member(&mut self, node: &ClassMember) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
+        self.enter_body(node.body.as_ref());
+        StructuralTraversal::Continue
+    }
+    fn exit_setter_decl(&mut self, node: &SetterDecl) { self.exit_body(node.body.as_ref()); }
+
+    fn visit_class_member(&mut self, node: &ClassMember) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            self.with_body_suppression(operator.body.as_ref(), |this| {
-                walk_class_member(this, node)
-            });
-        } else {
-            walk_class_member(self, node);
+            self.enter_body(operator.body.as_ref());
         }
+        StructuralTraversal::Continue
+    }
+    fn exit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Operator(operator) = node { self.exit_body(operator.body.as_ref()); }
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalFunc(local) = node {
-            self.with_body_suppression(Some(&local.body), |this| walk_stmt(this, node));
-        } else {
-            walk_stmt(self, node);
-        }
+    fn visit_stmt(&mut self, node: &Stmt) -> StructuralTraversal {
+        if let Stmt::LocalFunc(local) = node { self.enter_body(Some(&local.body)); }
+        StructuralTraversal::Continue
+    }
+    fn exit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::LocalFunc(local) = node { self.exit_body(Some(&local.body)); }
     }
 
-    fn visit_expr(&mut self, node: &Expr) {
+    fn visit_expr(&mut self, node: &Expr) -> StructuralTraversal {
         if matches!(node, Expr::FuncExpr { .. }) {
-            return;
+            return StructuralTraversal::SkipChildren;
         }
-        if !self.suppress
+        if self.arrow_depth == 0
             && let Expr::Call { callee, span, .. } = node
             && let Expr::Field { field, .. } = callee.unparenthesized()
             && field.name == "then"
@@ -105,6 +116,7 @@ impl Visitor for Collector<'_, '_> {
                 *span,
             ));
         }
-        walk_expr(self, node);
+        StructuralTraversal::Continue
     }
+}
 }

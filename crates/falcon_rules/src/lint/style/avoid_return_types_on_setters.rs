@@ -6,10 +6,11 @@
 //! setters and setters declared in classes, mixins, enums, and extensions are
 //! checked.
 
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 use falcon_syntax::{Program, TokenKind};
 
 #[derive(Default)]
@@ -18,16 +19,14 @@ pub struct AvoidReturnTypesOnSetters;
 impl Rule for AvoidReturnTypesOnSetters {
     fn prepare<'a>(
         &self,
-        program: &'a Program,
+        _program: &'a Program,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let mut collector = Collector {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
-
-        RulePreparation::Diagnostics(collector.diags)
+        RulePreparation::Structural(Box::new(collector))
     }
 }
 
@@ -36,29 +35,36 @@ struct Collector<'a, 'ctx> {
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_, '_> {
-    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl StructuralRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
+
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) -> StructuralTraversal {
         match decl {
-            TopLevelDecl::Function(function) => self.visit_function_decl(function),
-            TopLevelDecl::Class(_)
+            TopLevelDecl::Function(_)
+            | TopLevelDecl::Class(_)
             | TopLevelDecl::Mixin(_)
             | TopLevelDecl::MixinClass(_)
             | TopLevelDecl::Enum(_)
             | TopLevelDecl::Extension(_)
-            | TopLevelDecl::ExtensionType(_) => walk_top_level_decl(self, decl),
-            _ => {}
+            | TopLevelDecl::ExtensionType(_) => StructuralTraversal::Continue,
+            _ => StructuralTraversal::SkipChildren,
         }
     }
 
-    fn visit_class_member(&mut self, member: &ClassMember) {
-        if let ClassMember::Setter(setter) = member {
-            self.visit_setter_decl(setter);
+    fn visit_class_member(&mut self, member: &ClassMember) -> StructuralTraversal {
+        if matches!(member, ClassMember::Setter(_)) {
+            StructuralTraversal::Continue
+        } else {
+            StructuralTraversal::SkipChildren
         }
     }
 
-    fn visit_expr(&mut self, _: &Expr) {}
-
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) -> StructuralTraversal {
         if matches!(node.kind, FunctionKind::Setter(_)) && node.return_type.is_some() {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
@@ -66,9 +72,10 @@ impl Visitor for Collector<'_, '_> {
                 node.name.span,
             ));
         }
+        StructuralTraversal::SkipChildren
     }
 
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+    fn visit_setter_decl(&mut self, node: &SetterDecl) -> StructuralTraversal {
         if setter_has_return_type(node, self.ctx.syntax) {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
@@ -76,7 +83,9 @@ impl Visitor for Collector<'_, '_> {
                 node.name.span,
             ));
         }
+        StructuralTraversal::SkipChildren
     }
+}
 }
 
 fn setter_has_return_type(setter: &SetterDecl, syntax: &falcon_syntax::SyntaxStore) -> bool {

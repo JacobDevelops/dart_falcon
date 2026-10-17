@@ -29,10 +29,10 @@
 
 use falcon_analyze::{
     AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePreparation, SemanticModel,
+    StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_formal_param, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct DeprecatedConsistency;
@@ -46,13 +46,15 @@ impl Rule for DeprecatedConsistency {
         let Some(identities) = ctx.identities else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let mut visitor = Declarations {
+        let visitor = Declarations {
             ctx,
             model: SemanticModel::new(ctx.file_path, identities, ctx.types),
             diagnostics: Vec::new(),
+            deprecated: false,
+            fields: Vec::new(),
+            declarations: program.declarations.iter(),
         };
-        visitor.visit_program(program);
-        RulePreparation::Diagnostics(visitor.diagnostics)
+        RulePreparation::Structural(Box::new(visitor))
     }
 }
 
@@ -60,42 +62,63 @@ struct Declarations<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     diagnostics: Vec<Diagnostic>,
+    deprecated: bool,
+    declarations: std::slice::Iter<'a, TopLevelDecl>,
+    fields: Vec<(&'a str, &'a [Annotation], Option<Span>)>,
 }
 
-impl Visitor for Declarations<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+falcon_analyze::structural_visitor! {
+impl<'a> StructuralRuleVisitor for Declarations<'a> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
+    fn visit_top_level_decl(&mut self, _node: &TopLevelDecl) -> StructuralTraversal {
+        // Top-level callbacks follow the program's declaration order.
+        let Some(node) = self.declarations.next() else {
+            return StructuralTraversal::SkipChildren;
+        };
         let (annotations, elements) = match node {
             TopLevelDecl::Class(node) => (&node.annotations, node.element_members()),
             TopLevelDecl::MixinClass(node) => (&node.annotations, node.element_members()),
             TopLevelDecl::Enum(node) => (&node.annotations, node.element_members()),
             TopLevelDecl::ExtensionType(node) => (&node.annotations, node.element_members()),
-            _ => return,
+            _ => return StructuralTraversal::SkipChildren,
         };
-        let mut visitor = Members {
-            ctx: self.ctx,
-            model: self.model,
-            deprecated: has_deprecated(annotations, self.model),
-            elements,
-            diagnostics: &mut self.diagnostics,
-        };
-        walk_top_level_decl(&mut visitor, node);
+        self.deprecated = has_deprecated(annotations, self.model);
+        self.fields.clear();
+        for member in elements.declared {
+            if let ClassMember::Field(field) = member
+                && !field.is_static
+            {
+                for declarator in &field.declarators {
+                    self.fields.push((
+                        declarator.name.name.as_str(),
+                        &field.annotations,
+                        Some(declarator.name.span),
+                    ));
+                }
+            }
+        }
+        for field in elements.declaring_params() {
+            self.fields.push((
+                field.name.name.as_str(),
+                &field.annotations,
+                (!elements.representation).then_some(field.name.span),
+            ));
+        }
+        StructuralTraversal::Continue
     }
-}
 
-struct Members<'a, 'b> {
-    ctx: &'a AnalyzeContext<'a>,
-    model: SemanticModel<'a>,
-    deprecated: bool,
-    elements: EffectiveMembers<'b>,
-    diagnostics: &'b mut Vec<Diagnostic>,
-}
+    fn visit_expr(&mut self, _node: &Expr) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
 
-impl Visitor for Members<'_, '_> {
-    fn visit_expr(&mut self, _node: &Expr) {}
+    fn visit_function_body(&mut self, _node: &FunctionBody) -> StructuralTraversal {
+        StructuralTraversal::SkipChildren
+    }
 
-    fn visit_function_body(&mut self, _node: &FunctionBody) {}
-
-    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) -> StructuralTraversal {
         if self.deprecated && !has_deprecated(node.annotations, self.model) {
             let end = node
                 .constructor_name
@@ -107,60 +130,37 @@ impl Visitor for Members<'_, '_> {
                 Span::new(node.name_span.start, end),
             ));
         }
+        StructuralTraversal::Continue
     }
 
-    fn visit_formal_param(&mut self, param: &FormalParam) {
-        if param.initializing == Some(InitializingFormal::This) && !param.name.name.starts_with('_')
+    fn visit_formal_param(&mut self, param: &FormalParam) -> StructuralTraversal {
+        if param.initializing == Some(InitializingFormal::This)
+            && !param.name.name.starts_with('_')
+            && let Some((_, field_annotations, field_span)) = self.fields.iter()
+                .find(|(name, _, _)| *name == param.name.name.as_str())
         {
-            let field = self
-                .elements
-                .declared
-                .iter()
-                .find_map(|member| match member {
-                    ClassMember::Field(field) if !field.is_static => field
-                        .declarators
-                        .iter()
-                        .find(|declarator| declarator.name.name == param.name.name)
-                        .map(|declarator| {
-                            (field.annotations.as_slice(), Some(declarator.name.span))
-                        }),
-                    _ => None,
-                })
-                .or_else(|| {
-                    self.elements
-                        .declaring_params()
-                        .find(|field| field.name.name == param.name.name)
-                        // Representation fields have no reportable declaration name.
-                        .map(|field| {
-                            (
-                                field.annotations.as_slice(),
-                                (!self.elements.representation).then_some(field.name.span),
-                            )
-                        })
-                });
-            if let Some((annotations, field_span)) = field {
-                let field_deprecated = has_deprecated(annotations, self.model);
-                let parameter_deprecated = has_deprecated(&param.annotations, self.model);
-                if field_deprecated && !parameter_deprecated {
-                    self.diagnostics.push(self.ctx.diagnostic(
-                        "deprecated-consistency",
-                        "Parameters that initialize a deprecated field should be deprecated.",
-                        param.span,
-                    ));
-                } else if !field_deprecated
-                    && parameter_deprecated
-                    && let Some(field_span) = field_span
-                {
-                    self.diagnostics.push(self.ctx.diagnostic(
-                        "deprecated-consistency",
-                        "Fields that are initialized by a deprecated parameter should be deprecated.",
-                        field_span,
-                    ));
-                }
+            let field_deprecated = has_deprecated(field_annotations, self.model);
+            let parameter_deprecated = has_deprecated(&param.annotations, self.model);
+            if field_deprecated && !parameter_deprecated {
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "deprecated-consistency",
+                    "Parameters that initialize a deprecated field should be deprecated.",
+                    param.span,
+                ));
+            } else if !field_deprecated
+                && parameter_deprecated
+                && let Some(field_span) = field_span
+            {
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "deprecated-consistency",
+                    "Fields that are initialized by a deprecated parameter should be deprecated.",
+                    *field_span,
+                ));
             }
         }
-        walk_formal_param(self, param);
+        StructuralTraversal::Continue
     }
+}
 }
 
 fn has_deprecated(annotations: &[Annotation], model: SemanticModel<'_>) -> bool {
