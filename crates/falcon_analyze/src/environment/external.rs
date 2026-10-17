@@ -271,25 +271,22 @@ impl ExternalLibraries {
                 .map_init(StringInterner::default, |interner, (path, context)| {
                     let origin = environment.origin(context, &path, interner);
                     let local = matches!(origin, ExternalOrigin::Project);
-                    let loaded = load_library(environment, &path, context, origin)
-                        .map_err(|error| (error, context));
-                    (path, local, loaded)
+                    let loaded = load_library(environment, &path, context, origin);
+                    (path, context, local, loaded)
                 })
                 .collect();
-            for (path, local, loaded) in loaded {
+            for (path, context, local, loaded) in loaded {
                 if local {
                     self.attempted_project_paths.insert(path.clone());
                 }
-                let Some((library, context, dependencies)) =
-                    loaded.unwrap_or_else(|(error, context)| {
-                        warn!(
-                            "could not start parser thread for {}: {error}",
-                            path.display()
-                        );
-                        self.retry.push((path, context));
-                        None
-                    })
-                else {
+                let Some((library, dependencies)) = loaded.unwrap_or_else(|error| {
+                    warn!(
+                        "could not start parser thread for {}: {error}",
+                        path.display()
+                    );
+                    self.retry.push((path, context));
+                    None
+                }) else {
                     continue;
                 };
                 let mut project_owned = false;
@@ -435,9 +432,6 @@ fn dependencies(
         .collect()
 }
 
-/// A loaded library, its package-configuration context and its dependencies.
-type LoadedLibrary = (ExternalLibrary, Option<usize>, Vec<PathBuf>);
-
 /// Read and parse the library defined at `path` with its parts; `None` when
 /// the file is unreadable, exceeds the source-size limit or is itself a part.
 ///
@@ -450,7 +444,7 @@ fn load_library(
     path: &Path,
     context: Option<usize>,
     origin: ExternalOrigin,
-) -> std::io::Result<Option<LoadedLibrary>> {
+) -> std::io::Result<Option<(ExternalLibrary, Vec<PathBuf>)>> {
     // Each file parses at its package's language version (SDK: current).
     let read = |path: &Path| {
         let package_version =
@@ -502,7 +496,6 @@ fn load_library(
             files,
             has_unresolved_parts,
         },
-        context,
         dependencies,
     )))
 }
@@ -728,12 +721,13 @@ mod tests {
     #[test]
     fn oversized_import_outside_explicit_root_is_unavailable() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("selected");
+        let directory_path = directory.path().canonicalize().unwrap();
+        let root = directory_path.join("selected");
         std::fs::create_dir(&root).unwrap();
         let path = root.join("main.dart");
         let source = "import '../oversized.dart';";
         std::fs::write(&path, source).unwrap();
-        let imported = directory.path().join("oversized.dart");
+        let imported = directory_path.join("oversized.dart");
         std::fs::File::create(&imported)
             .unwrap()
             .set_len(u64::from(u32::MAX) + 1)
@@ -851,8 +845,9 @@ mod tests {
     #[test]
     fn snapshot_rebuild_evicts_unreferenced_companion_sources() {
         let directory = tempfile::tempdir().unwrap();
-        let owner = directory.path().join("owner.dart");
-        let part = directory.path().join("part.dart");
+        let directory_path = directory.path().canonicalize().unwrap();
+        let owner = directory_path.join("owner.dart");
+        let part = directory_path.join("part.dart");
         let source = "part 'part.dart';";
         std::fs::write(&owner, source).unwrap();
         std::fs::write(&part, "part of 'owner.dart';").unwrap();
