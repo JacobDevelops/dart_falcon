@@ -132,7 +132,7 @@ pub(crate) fn known_type_arity(identity: &DeclarationIdentity) -> Option<usize> 
                 _ => 0,
             })
         }
-        DeclarationIdentity::Package { package, name } => Some(usize::from(
+        DeclarationIdentity::Package { package, name, .. } => Some(usize::from(
             package.as_str() == "flutter" && name.as_str() == "State",
         )),
         DeclarationIdentity::Project { .. } => None,

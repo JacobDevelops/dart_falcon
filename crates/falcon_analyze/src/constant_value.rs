@@ -50,7 +50,7 @@ pub enum ConstantValue {
 pub enum ConstantDeclaration {
     Project(crate::LibraryId, String),
     Sdk(crate::InternedString, crate::InternedString),
-    Package(crate::InternedString, crate::InternedString),
+    Package(crate::InternedString, crate::InternedString, Option<u32>),
 }
 
 /// Resolved type identity retained in explicitly typed constants.
@@ -388,10 +388,11 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                             library: library.clone(),
                             name: name.clone(),
                         },
-                        ConstantDeclaration::Package(package, name) => {
+                        ConstantDeclaration::Package(package, name, copy) => {
                             DeclarationIdentity::Package {
                                 package: package.clone(),
                                 name: name.clone(),
+                                copy: *copy,
                             }
                         }
                     };
@@ -632,9 +633,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     library: library.clone(),
                     name: name.clone(),
                 },
-                ConstantDeclaration::Package(package, name) => DeclarationIdentity::Package {
+                ConstantDeclaration::Package(package, name, copy) => DeclarationIdentity::Package {
                     package: package.clone(),
                     name: name.clone(),
+                    copy: *copy,
                 },
             },
             arguments: Vec::new().into(),
@@ -1836,9 +1838,11 @@ fn declaration_key(identity: &DeclarationIdentity) -> ConstantDeclaration {
         DeclarationIdentity::Sdk { library, name } => {
             ConstantDeclaration::Sdk(library.clone(), name.clone())
         }
-        DeclarationIdentity::Package { package, name } => {
-            ConstantDeclaration::Package(package.clone(), name.clone())
-        }
+        DeclarationIdentity::Package {
+            package,
+            name,
+            copy,
+        } => ConstantDeclaration::Package(package.clone(), name.clone(), *copy),
     }
 }
 
@@ -1920,9 +1924,10 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
                     library: library.clone(),
                     name: name.clone(),
                 },
-                ConstantDeclaration::Package(package, name) => DeclarationIdentity::Package {
+                ConstantDeclaration::Package(package, name, copy) => DeclarationIdentity::Package {
                     package: package.clone(),
                     name: name.clone(),
+                    copy: *copy,
                 },
             },
             arguments: arguments.iter().map(resolved_constant_type).collect(),

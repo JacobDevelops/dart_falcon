@@ -15,7 +15,8 @@ use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalOrigin,
     ExternalSources, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
     PackageIdentity, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex, TypeIndex,
-    canonical_or_lexical, group_libraries, import_path, library_unit, syntax_error_diagnostics,
+    canonical_or_lexical, environment::ExternalTarget, group_libraries, import_path, library_unit,
+    syntax_error_diagnostics,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::{lex_syntax, parse_for_package};
@@ -78,11 +79,79 @@ struct SemanticSnapshot {
     reverse_dependencies: Vec<Vec<usize>>,
 }
 
-/// Reachability metadata survives even when project back-edges prevent layering.
+/// Reachability and instance contexts survive layering fallback to invalidate cached identities.
 struct ExternalTopology {
     library_count: usize,
-    paths: Vec<PathBuf>,
+    paths: Vec<(PathBuf, Option<usize>, Option<usize>)>,
     project_dependency_targets: HashSet<PathBuf>,
+}
+
+impl ExternalTopology {
+    fn matches(&self, external: &ExternalLibraries) -> bool {
+        self.library_count == external.libraries().len()
+            && self
+                .paths
+                .iter()
+                .map(|(path, context, copy_context)| (path.as_path(), *context, *copy_context))
+                .eq(external.libraries().iter().flat_map(|library| {
+                    library.files.iter().map(move |file| {
+                        (file.path.as_path(), library.context, library.copy_context)
+                    })
+                }))
+    }
+
+    /// Resolve immutable graph edges once, including each instance's project back-edges.
+    fn build(external: &ExternalLibraries, environment: &AnalysisEnvironment) -> Self {
+        let capacity = external
+            .libraries()
+            .iter()
+            .flat_map(|library| library.files.iter())
+            .map(|file| {
+                1 + file.facts.imports.len() + file.facts.exports.len() + file.doc_imports.len()
+            })
+            .sum();
+        let mut targets = HashSet::with_capacity(capacity);
+        for (instance, library) in external.libraries().iter().enumerate() {
+            for file in library.files.iter() {
+                if !targets.contains(&file.path) {
+                    targets.insert(file.path.clone());
+                }
+                for uri in file
+                    .facts
+                    .imports
+                    .iter()
+                    .map(|import| import.uri.value.as_str())
+                    .chain(
+                        file.facts
+                            .exports
+                            .iter()
+                            .map(|export| export.uri.value.as_str()),
+                    )
+                    .chain(file.doc_imports.iter().map(String::as_str))
+                {
+                    if let Some(ExternalTarget::Path(path)) =
+                        external.resolve_target(environment, &file.path, Some(instance), uri)
+                    {
+                        targets.insert(path);
+                    }
+                }
+            }
+        }
+        Self {
+            library_count: external.libraries().len(),
+            paths: external
+                .libraries()
+                .iter()
+                .flat_map(|library| {
+                    library
+                        .files
+                        .iter()
+                        .map(move |file| (file.path.clone(), library.context, library.copy_context))
+                })
+                .collect(),
+            project_dependency_targets: targets,
+        }
+    }
 }
 
 /// External-only facts are shared by successive project overlays.
@@ -200,7 +269,7 @@ impl LspState {
             .libraries()
             .iter()
             .filter(|library| library.origin == ExternalOrigin::Project)
-            .flat_map(|library| &library.files)
+            .flat_map(|library| library.files.iter())
             .map(|file| file.path.as_path())
             .chain(self.external_libraries.project_companions())
             .chain(self.external_libraries.attempted_project_paths())
@@ -923,15 +992,10 @@ impl LspState {
         // A dependency importing a project file depends on mutable buffer facts.
         // Keep the ordinary combined build for that graph instead of freezing
         // unresolved/project references into the immutable external layer.
-        let topology_matches = self.external_topology.as_ref().is_some_and(|cache| {
-            cache.library_count == self.external_libraries.libraries().len()
-                && cache.paths.iter().map(PathBuf::as_path).eq(self
-                    .external_libraries
-                    .libraries()
-                    .iter()
-                    .flat_map(|library| &library.files)
-                    .map(|file| file.path.as_path()))
-        });
+        let topology_matches = self
+            .external_topology
+            .as_ref()
+            .is_some_and(|cache| cache.matches(&self.external_libraries));
         let mut local_sources: Vec<_> = self.loaded_project_paths().collect();
         local_sources.sort_unstable();
         local_sources.dedup();
@@ -956,68 +1020,17 @@ impl LspState {
         }
         // URI resolution can canonicalize paths. Retain these immutable graph
         // edges rather than repeating filesystem work for every text edit.
-        let new_targets = (!topology_matches).then(|| {
-            let capacity = self
-                .external_libraries
-                .libraries()
-                .iter()
-                .flat_map(|library| &library.files)
-                .map(|file| {
-                    1 + file.facts.imports.len() + file.facts.exports.len() + file.doc_imports.len()
-                })
-                .sum();
-            let mut targets = HashSet::with_capacity(capacity);
-            for file in self
-                .external_libraries
-                .libraries()
-                .iter()
-                .flat_map(|library| &library.files)
-            {
-                targets.insert(file.path.clone());
-                for uri in file
-                    .facts
-                    .imports
-                    .iter()
-                    .map(|import| import.uri.value.as_str())
-                    .chain(
-                        file.facts
-                            .exports
-                            .iter()
-                            .map(|export| export.uri.value.as_str()),
-                    )
-                    .chain(file.doc_imports.iter().map(String::as_str))
-                {
-                    if let Some(path) =
-                        self.external_libraries
-                            .resolve_uri(&self.environment, &file.path, uri)
-                    {
-                        targets.insert(path);
-                    }
-                }
-            }
-            targets
-        });
-        let external_depends_on_project = new_targets
-            .as_ref()
-            .or_else(|| {
-                self.external_topology
-                    .as_ref()
-                    .map(|cache| &cache.project_dependency_targets)
-            })
-            .is_some_and(|targets| files.iter().any(|file| targets.contains(&file.path)));
-        if let Some(project_dependency_targets) = new_targets {
-            self.external_topology = Some(ExternalTopology {
-                library_count: self.external_libraries.libraries().len(),
-                paths: self
-                    .external_libraries
-                    .libraries()
-                    .iter()
-                    .flat_map(|library| &library.files)
-                    .map(|file| file.path.clone())
-                    .collect(),
-                project_dependency_targets,
-            });
+        if !topology_matches {
+            self.external_topology = Some(ExternalTopology::build(
+                &self.external_libraries,
+                &self.environment,
+            ));
         }
+        let external_depends_on_project = self.external_topology.as_ref().is_some_and(|cache| {
+            files
+                .iter()
+                .any(|file| cache.project_dependency_targets.contains(&file.path))
+        });
         if external_depends_on_project {
             self.external_indexes = None;
         } else if !topology_matches || self.external_indexes.is_none() {
@@ -2410,7 +2423,7 @@ mod environment_regressions {
     }
 
     fn has_external_class(state: &LspState, name: &str) -> bool {
-        state.external_libraries.libraries().iter().flat_map(|library| &library.files)
+        state.external_libraries.libraries().iter().flat_map(|library| library.files.iter())
             .flat_map(|file| &file.facts.declarations).any(|declaration| {
                 matches!(declaration, falcon_syntax::ast::TopLevelDecl::Class(class) if class.name.name == name)
             })
@@ -2577,7 +2590,8 @@ mod environment_regressions {
                 .as_ref()
                 .unwrap()
                 .paths
-                .contains(&companion)
+                .iter()
+                .any(|(path, _, _)| path == &companion)
         );
         assert!(
             state
@@ -2950,6 +2964,215 @@ mod environment_regressions {
         state.ensure_semantic_snapshot();
         assert!(state.external_libraries.libraries().is_empty());
         assert!(!state.environment.has_sdk());
+    }
+
+    #[test]
+    fn divergent_shared_dependency_survives_snapshot_edits_open_close_and_regroup() {
+        use falcon_analyze::{ResolvedType, SemanticModel};
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let shared = root.join("shared/lib/bar.dart");
+        std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+        let shared_source = "import 'package:foo/foo.dart'; Foo makeValue() => Foo();";
+        std::fs::write(&shared, shared_source).unwrap();
+        for copy in ["first", "second"] {
+            let foo = root.join(format!("deps/{copy}/lib/foo.dart"));
+            std::fs::create_dir_all(foo.parent().unwrap()).unwrap();
+            std::fs::write(foo, "class Foo {}").unwrap();
+        }
+        let configure = |app: &str, copy: &str| {
+            let directory = root.join(format!("{app}/.dart_tool"));
+            std::fs::create_dir_all(&directory).unwrap();
+            let path = directory.join("package_config.json");
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"configVersion":2,"packages":[
+                        {{"name":"foo","rootUri":"../../deps/{copy}","packageUri":"lib/"}},
+                        {{"name":"bar","rootUri":"../../shared","packageUri":"lib/"}}
+                    ]}}"#
+                ),
+            )
+            .unwrap();
+            path
+        };
+        let source = "import 'package:foo/foo.dart'; import 'package:bar/bar.dart'; void main() {}";
+        let apps = ["first", "second", "third"].map(|app| {
+            configure(app, if app == "first" { "first" } else { "second" });
+            let path = root.join(format!("{app}/main.dart"));
+            std::fs::write(&path, source).unwrap();
+            canonical_or_lexical(&path)
+        });
+        let uris = apps
+            .each_ref()
+            .map(|path| format!("file://{}", path.display()));
+        let shared = canonical_or_lexical(&shared);
+        let shared_uri = format!("file://{}", shared.display());
+        let mut state = state(root);
+        state.config.files.includes.extend_excludes(&[
+            format!("{}/**", canonical_or_lexical(&root.join("deps")).display()),
+            format!(
+                "{}/**",
+                canonical_or_lexical(&root.join("shared")).display()
+            ),
+        ]);
+        for uri in &uris {
+            state.open(uri, source.into(), Some(1));
+        }
+        state.ensure_semantic_snapshot();
+
+        let assert_aliases = |state: &LspState, copies: [&str; 3]| {
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            let indexes = &snapshot.indexes;
+            let functions = apps.each_ref().map(|app| {
+                let model = SemanticModel::new(app, &indexes.identities, Some(&indexes.types));
+                let foo = model.resolve_name("Foo").unwrap();
+                let function = model.resolve_value("makeValue").unwrap();
+                assert!(foo.is_package("foo", "Foo"));
+                assert!(function.is_package("bar", "makeValue"));
+                assert_eq!(
+                    indexes.signatures.function(&function).unwrap().return_type,
+                    ResolvedType::interface_identity(foo)
+                );
+                function
+            });
+            for (app, copy) in apps.iter().zip(copies) {
+                let model = SemanticModel::new(app, &indexes.identities, Some(&indexes.types));
+                let foo = model.resolve_name("Foo").unwrap();
+                let expected =
+                    canonical_or_lexical(&root.join(format!("deps/{copy}/lib/foo.dart")));
+                assert_eq!(
+                    indexes.identities.declaration_library(&foo),
+                    Some(
+                        indexes
+                            .identities
+                            .library(indexes.identities.file(&expected).unwrap())
+                    )
+                );
+            }
+            assert_ne!(functions[0], functions[1]);
+            if copies[2] == copies[0] {
+                assert_eq!(functions[2], functions[0]);
+            } else {
+                assert_eq!(functions[2], functions[1]);
+            }
+        };
+        assert_aliases(&state, ["first", "second", "second"]);
+
+        let assert_reused_after_edit = |state: &mut LspState, version| {
+            let topology = state.external_topology.as_ref().unwrap().paths.as_ptr();
+            let cache = state.external_indexes.as_ref().unwrap();
+            let identities = Arc::clone(&cache.identities);
+            let types = Arc::clone(&cache.types);
+            let signatures = Arc::clone(&cache.signatures);
+            let builds = state.external_index_build_count;
+            assert!(state.change(&uris[0], format!("{source} // {version}"), Some(version)));
+            state.analyze(&uris[0]);
+            assert_eq!(
+                topology,
+                state.external_topology.as_ref().unwrap().paths.as_ptr()
+            );
+            let cache = state.external_indexes.as_ref().unwrap();
+            assert!(Arc::ptr_eq(&identities, &cache.identities));
+            assert!(Arc::ptr_eq(&types, &cache.types));
+            assert!(Arc::ptr_eq(&signatures, &cache.signatures));
+            assert_eq!(state.external_index_build_count, builds);
+        };
+        assert_reused_after_edit(&mut state, 2);
+        assert_aliases(&state, ["first", "second", "second"]);
+
+        let buffered = "class Buffered {} Buffered makeValue() => Buffered();";
+        state.open(&shared_uri, buffered.into(), Some(1));
+        for version in [1, 2] {
+            if version == 2 {
+                assert!(state.change(&shared_uri, format!("{buffered} // edited"), Some(version)));
+            }
+            state.ensure_semantic_snapshot();
+            assert!(
+                state
+                    .external_libraries
+                    .libraries()
+                    .iter()
+                    .all(|library| { library.files.iter().all(|file| file.path != shared) })
+            );
+            let indexes = &state.semantic_snapshot.as_ref().unwrap().indexes;
+            let owner = SemanticModel::new(&shared, &indexes.identities, Some(&indexes.types));
+            let buffered = owner.resolve_name("Buffered").unwrap();
+            let function = owner.resolve_value("makeValue").unwrap();
+            for app in &apps {
+                let model = SemanticModel::new(app, &indexes.identities, Some(&indexes.types));
+                assert_eq!(model.resolve_name("Buffered"), Some(buffered.clone()));
+                assert_eq!(model.resolve_value("makeValue"), Some(function.clone()));
+                assert_eq!(
+                    indexes.signatures.function(&function).unwrap().return_type,
+                    ResolvedType::interface_identity(buffered.clone())
+                );
+            }
+        }
+        state.close(&shared_uri);
+        state.ensure_semantic_snapshot();
+        assert_aliases(&state, ["first", "second", "second"]);
+        assert_reused_after_edit(&mut state, 3);
+
+        let configuration = configure("third", "first");
+        state.watched_files_changed(&[configuration]);
+        state.ensure_semantic_snapshot();
+        assert_aliases(&state, ["first", "second", "first"]);
+        assert_reused_after_edit(&mut state, 4);
+        assert_aliases(&state, ["first", "second", "first"]);
+
+        for uri in &uris {
+            state.close(uri);
+        }
+        configure("third", "second");
+        let foo_only = "import 'package:foo/foo.dart';";
+        for (app, text) in apps.iter().zip([foo_only, foo_only, source]) {
+            std::fs::write(app, text).unwrap();
+        }
+        std::fs::write(
+            shared.with_file_name("other.dart"),
+            "import 'package:foo/foo.dart'; Foo otherValue() => Foo();",
+        )
+        .unwrap();
+        state.reset_external_environment();
+        state.refresh_environment(apps.iter().map(PathBuf::as_path));
+        state.open(&uris[2], source.into(), Some(1));
+        let first_source =
+            format!("{foo_only} import 'package:bar/bar.dart'; import 'package:bar/other.dart';");
+        state.open(&uris[0], first_source, Some(1));
+        let second_source = format!("{foo_only} import 'package:bar/other.dart';");
+        state.open(&uris[1], second_source.clone(), Some(1));
+        state.ensure_semantic_snapshot();
+        let primary_function = |state: &LspState| {
+            let indexes = &state.semantic_snapshot.as_ref().unwrap().indexes;
+            SemanticModel::new(&apps[2], &indexes.identities, Some(&indexes.types))
+                .resolve_value("makeValue")
+                .unwrap()
+        };
+        let before = primary_function(&state);
+        let builds = state.external_index_build_count;
+        let library_count = state.external_libraries.libraries().len();
+        assert!(state.change(
+            &uris[1],
+            format!("{second_source} import 'package:bar/bar.dart';"),
+            Some(2),
+        ));
+        state.ensure_semantic_snapshot();
+        assert_eq!(state.external_libraries.libraries().len(), library_count);
+        assert!(state.external_index_build_count > builds);
+        let after = primary_function(&state);
+        assert_ne!(before, after);
+        let fresh = IdentityIndex::build_external(ExternalSources {
+            libraries: &state.external_libraries,
+            environment: &state.environment,
+        });
+        assert_eq!(
+            after,
+            SemanticModel::new(&shared, &fresh, None)
+                .resolve_value("makeValue")
+                .unwrap()
+        );
     }
 
     #[test]

@@ -101,6 +101,10 @@ impl PackageConfig {
     /// The package whose root is the longest ancestor of `path`.
     pub fn package_containing(&self, path: &Path) -> Option<&ConfiguredPackage> {
         let path = canonical_or_lexical(&absolute(path));
+        self.package_containing_canonical(&path)
+    }
+
+    pub(crate) fn package_containing_canonical(&self, path: &Path) -> Option<&ConfiguredPackage> {
         self.packages
             .iter()
             .filter(|package| path.starts_with(&package.root))
@@ -110,6 +114,13 @@ impl PackageConfig {
     /// The package whose library root is the longest ancestor of `path`.
     pub fn package_library_containing(&self, path: &Path) -> Option<&ConfiguredPackage> {
         let path = canonical_or_lexical(&absolute(path));
+        self.package_library_containing_canonical(&path)
+    }
+
+    pub(crate) fn package_library_containing_canonical(
+        &self,
+        path: &Path,
+    ) -> Option<&ConfiguredPackage> {
         self.packages
             .iter()
             .filter(|package| path.starts_with(&package.lib_root))
@@ -129,6 +140,10 @@ impl PackageConfig {
     /// analyzer applies [`LanguageVersion::CURRENT`] when there is none.
     pub fn language_version(&self, path: &Path) -> Option<LanguageVersion> {
         self.package_containing(path)?.language_version
+    }
+
+    pub(crate) fn language_version_canonical(&self, path: &Path) -> Option<LanguageVersion> {
+        self.package_containing_canonical(path)?.language_version
     }
 }
 

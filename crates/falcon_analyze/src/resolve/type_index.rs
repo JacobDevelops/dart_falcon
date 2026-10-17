@@ -34,7 +34,7 @@ use std::sync::{Arc, OnceLock};
 use falcon_syntax::ast::*;
 
 use super::Truth;
-use super::{DeclarationIdentity, IdentityIndex, QualifiedName};
+use super::{DeclarationIdentity, FileId, IdentityIndex, QualifiedName};
 use crate::environment::ExternalLibraries;
 use std::path::Path;
 
@@ -175,7 +175,7 @@ impl TypeIndex {
         };
         for (path, file) in files {
             index.add_resolved_program(
-                path,
+                identities.file(path),
                 file.program,
                 file.has_parse_errors,
                 file.has_unresolved_parts,
@@ -204,7 +204,7 @@ impl TypeIndex {
 
     fn add_resolved_program(
         &mut self,
-        path: &Path,
+        file: Option<FileId>,
         program: &Program,
         has_parse_errors: bool,
         has_unresolved_parts: bool,
@@ -213,7 +213,7 @@ impl TypeIndex {
         if has_parse_errors {
             return;
         }
-        let Some(file) = identities.file(path) else {
+        let Some(file) = file else {
             return;
         };
         let library = identities.library(file);
@@ -357,7 +357,7 @@ impl TypeIndex {
         if self.declarations.is_empty() && !self.types.is_empty() {
             return self.is_subtype(sub.name(), super_.name());
         }
-        self.supertype_matches_identity(sub, |identity| identity == super_)
+        self.supertype_matches_identity(sub, |identity| identity.matches(super_))
     }
 
     /// Whether `sub` or any of its supertypes satisfies `matches`; `No` only
@@ -507,10 +507,10 @@ impl TypeIndex {
     /// incomplete libraries remain unknown, without poisoning other libraries.
     pub fn add_external(&mut self, external: &ExternalLibraries, identities: &IdentityIndex) {
         self.has_sdk_sources = identities.has_sdk_sources();
-        for library in external.libraries() {
-            for file in &library.files {
+        for (instance, library) in external.libraries().iter().enumerate() {
+            for (ordinal, file) in library.files.iter().enumerate() {
                 self.add_resolved_program(
-                    &file.path,
+                    identities.external_file(instance, ordinal),
                     &file.facts,
                     file.has_parse_errors,
                     library.has_unresolved_parts,

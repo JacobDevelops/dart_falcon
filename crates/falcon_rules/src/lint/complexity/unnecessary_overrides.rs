@@ -150,7 +150,8 @@ fn check_member(
             matches_accessor
                 && fact
                     .annotations
-                    .contains(&DeclarationIdentity::package("meta", "protected"))
+                    .iter()
+                    .any(|annotation| annotation.is_package("meta", "protected"))
         });
     let own_protected =
         crate::lint::declarations::has_meta_annotation(annotations, "protected", model);

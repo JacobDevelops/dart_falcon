@@ -15,7 +15,7 @@
 //!
 //! Adopted from the official `use_colored_box` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -98,7 +98,7 @@ fn non_nullable_color(color: &Expr, state: &SemanticState<'_>) -> bool {
             if matches!(object.as_ref(), Expr::Ident(prefix)
                 if !state.environment.is_bound(&prefix.name)
                     && state.model.resolve_name(&prefix.name)
-                        == Some(DeclarationIdentity::flutter("Colors")))
+                        .is_some_and(|identity| identity.is_package("flutter", "Colors")))
     )
 }
 

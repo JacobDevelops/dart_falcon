@@ -172,10 +172,8 @@ impl CallbackCollector<'_> {
         }
         let builder_parameter = params.params.first().is_none_or(|first| {
             first.param_type.as_ref().is_none_or(|ty| {
-                self.model.resolve_type(ty)
-                    == ResolvedType::interface_identity(DeclarationIdentity::flutter(
-                        "BuildContext",
-                    ))
+                matches!(self.model.resolve_type(ty), ResolvedType::Interface { identity, nullable: false, .. }
+                    if identity.is_package("flutter", "BuildContext"))
             })
         });
         if builder_parameter {

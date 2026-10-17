@@ -80,7 +80,7 @@ thread_local! {
 fn mark_alias_cycle() {
     ALIAS_CYCLE_GENERATION.with(|generation| generation.set(generation.get().wrapping_add(1)));
 }
-type IndexedProgram<'a> = (&'a Path, &'a Program, &'a [(usize, usize)]);
+type IndexedProgram<'a> = (Option<FileId>, &'a Program, &'a [(usize, usize)]);
 
 /// Whether a selector/call chain starts with an implicit dot-shorthand receiver.
 /// Argument expressions do not establish the receiver's inference context.
@@ -2476,7 +2476,15 @@ pub struct SemanticModel<'a> {
 
 impl<'a> SemanticModel<'a> {
     pub fn new(file: &Path, identities: &'a IdentityIndex, types: Option<&'a TypeIndex>) -> Self {
-        let file = identities.file(file);
+        Self::from_file(identities.file(file), identities, types)
+    }
+
+    /// Resolve in an indexed file's instance rather than its primary path instance.
+    pub(crate) fn from_file(
+        file: Option<FileId>,
+        identities: &'a IdentityIndex,
+        types: Option<&'a TypeIndex>,
+    ) -> Self {
         Self {
             file,
             library: file.map(|file| identities.library(file)),
@@ -4308,7 +4316,7 @@ impl SignatureIndex {
         let index = Self::borrowing_external(external);
         let all = files
             .iter()
-            .map(|(path, program)| (path.as_path(), *program, &[] as &[(usize, usize)]))
+            .map(|(path, program)| (identities.file(path), *program, &[] as &[(usize, usize)]))
             .collect();
         Self::build_programs(index, all, identities, types)
     }
@@ -4322,23 +4330,28 @@ impl SignatureIndex {
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        let all: Vec<IndexedProgram<'_>> = external
-            .into_iter()
-            .flat_map(ExternalLibraries::libraries)
-            .flat_map(|library| &library.files)
-            .map(|file| {
-                (
-                    file.path.as_path(),
-                    &file.facts,
-                    file.concrete_operators.as_slice(),
-                )
-            })
-            .chain(
-                files
-                    .iter()
-                    .map(|(path, program)| (path.as_path(), *program, &[] as &[(usize, usize)])),
-            )
-            .collect();
+        let all: Vec<IndexedProgram<'_>> =
+            external
+                .into_iter()
+                .flat_map(ExternalLibraries::libraries)
+                .enumerate()
+                .flat_map(|(instance, library)| {
+                    library
+                        .files
+                        .iter()
+                        .enumerate()
+                        .map(move |(ordinal, file)| {
+                            (
+                                identities.external_file(instance, ordinal),
+                                &file.facts,
+                                file.concrete_operators.as_slice(),
+                            )
+                        })
+                })
+                .chain(files.iter().map(|(path, program)| {
+                    (identities.file(path), *program, &[] as &[(usize, usize)])
+                }))
+                .collect();
         Self::build_programs(Self::default(), all, identities, types)
     }
 
@@ -4348,8 +4361,8 @@ impl SignatureIndex {
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        for (path, program, concrete_operators) in &all {
-            let model = SemanticModel::new(path, identities, Some(types));
+        for (file, program, concrete_operators) in &all {
+            let model = SemanticModel::from_file(*file, identities, Some(types));
             index.add_declarations(program, &model);
             // Compact external facts have no bodies: operator abstractness
             // therefore comes from their explicit retained presence metadata.
@@ -4392,7 +4405,12 @@ impl SignatureIndex {
         index.finish();
         let programs: Vec<_> = all
             .iter()
-            .map(|(path, program, _)| (*program, SemanticModel::new(path, identities, Some(types))))
+            .map(|(file, program, _)| {
+                (
+                    *program,
+                    SemanticModel::from_file(*file, identities, Some(types)),
+                )
+            })
             .collect();
         index.infer_programs(&programs);
         index.mark_library_subclasses();
@@ -8378,7 +8396,7 @@ impl SignatureIndex {
     ) -> Option<ResolvedType> {
         self.instantiated_matching(
             ty,
-            &|identity| identity == target,
+            &|identity| identity.matches(target),
             model,
             &mut FxHashSet::default(),
         )
@@ -9957,9 +9975,17 @@ fn same_library(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool
     ) || matches!(
         (left, right),
         (
-            DeclarationIdentity::Package { package: left, .. },
-            DeclarationIdentity::Package { package: right, .. }
-        ) if left == right
+            DeclarationIdentity::Package {
+                package: left,
+                copy: left_copy,
+                ..
+            },
+            DeclarationIdentity::Package {
+                package: right,
+                copy: right_copy,
+                ..
+            }
+        ) if left == right && left_copy == right_copy
     )
 }
 
@@ -14417,7 +14443,7 @@ fn fixnum_and_int(fixnum: &ResolvedType, int: &ResolvedType) -> bool {
     matches!(
         fixnum,
         ResolvedType::Interface {
-            identity: DeclarationIdentity::Package { package, name },
+            identity: DeclarationIdentity::Package { package, name, .. },
             ..
         } if package.as_str() == "fixnum" && matches!(name.as_str(), "Int32" | "Int64")
     ) && int.interface("dart:core", "int")
@@ -14435,7 +14461,7 @@ mod tests {
     #[test]
     fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path();
+        let root = &directory.path().canonicalize().unwrap();
         let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
         let embedded = root.join("embedder/lib");
         std::fs::create_dir_all(&sdk).unwrap();
