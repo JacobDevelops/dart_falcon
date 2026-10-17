@@ -33,7 +33,7 @@ pub use parallel::{
     analyze_parallel_collecting_resolving, analyze_sequential, analyze_sequential_collecting,
     analyze_sequential_collecting_resolving, syntax_error_diagnostics,
 };
-pub use registry::{RuleRegistry, with_rules_stack};
+pub use registry::{RuleRegistry, rules_thread_diagnostic, with_rules_stack};
 pub use resolve::{
     DeclarationFacts, DeclarationIdentity, DefaultSyntaxKey, DocImport, DocName, ExternalSources,
     IdentityIndex, IdentitySource, InferenceContext, LibraryGrouping, LibraryId, LibrarySource,

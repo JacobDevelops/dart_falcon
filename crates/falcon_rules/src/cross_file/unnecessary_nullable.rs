@@ -697,7 +697,7 @@ mod tests {
                 has_parse_errors: false,
             });
             for indexes in [None, indexes.as_ref()] {
-                let diagnostics = registry.run_all(&files, &config, indexes);
+                let diagnostics = registry.run_all(&files, &config, indexes).unwrap();
                 assert_eq!(
                     diagnostics.len(),
                     expected,

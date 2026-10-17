@@ -54,23 +54,21 @@ impl CrossFileRuleRegistry {
     }
 
     /// Callers apply inline suppression and per-path severity resolution.
+    ///
+    /// # Errors
+    ///
+    /// Returns the spawn error when the rules thread cannot start; callers
+    /// choose which files report it with [`crate::rules_thread_diagnostic`].
     pub fn run_all(
         &self,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
-    ) -> Vec<Diagnostic> {
+    ) -> std::io::Result<Vec<Diagnostic>> {
         crate::registry::with_rules_stack(|| {
             self.rules
                 .iter()
                 .flat_map(|rule| rule.analyze_project(files, config, indexes))
-                .collect()
-        })
-        .unwrap_or_else(|error| {
-            files
-                .first()
-                .map(|file| crate::registry::rules_thread_diagnostic(&file.path, &error))
-                .into_iter()
                 .collect()
         })
     }

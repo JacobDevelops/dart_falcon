@@ -5,8 +5,8 @@ Everything here must be resolved before falcon 1.0. Engine items are checked off
 ## Engine
 
 - [ ] **Per-package-context library identity.** When one repository holds several package contexts that resolve the same `package:` URI to different copies (for example two apps pinned to different versions of a dependency), every file must resolve against the copy from its own package context. Today the lexically last copy wins for all files: deterministic, but a two-app reproduction (`foo` 1.0 vs 2.0) still produces one false positive in the app whose copy loses.
-- [ ] **Don't cache failed parser-thread spawns.** If the parser thread can't start while loading a dependency or companion part, the empty result is cached as a real parse (companion directive cache, external-load "attempted" set). The LSP then keeps that library unresolved until the environment resets, and a part's import/part edges stay empty until its text changes.
-- [ ] **Surface cross-file thread spawn failures in the LSP.** The error is attached to the first collected file only; when that file isn't an open document, the error never shows and cross-file rules silently report nothing.
+- [x] **Don't cache failed parser-thread spawns.** If the parser thread can't start while loading a dependency or companion part, the empty result is cached as a real parse (companion directive cache, external-load "attempted" set). The LSP then keeps that library unresolved until the environment resets, and a part's import/part edges stay empty until its text changes.
+- [x] **Surface cross-file thread spawn failures in the LSP.** The error is attached to the first collected file only; when that file isn't an open document, the error never shows and cross-file rules silently report nothing.
 - [ ] **Concrete syntax tree.** Replace the AST plus retained token stream with an arena CST that keeps every token and trivia, so new rules read syntax from one tree and never need parser changes.
 
 ## Priorities
