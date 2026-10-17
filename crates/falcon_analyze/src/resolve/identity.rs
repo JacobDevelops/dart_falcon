@@ -22,7 +22,7 @@ use falcon_syntax::ast::{FunctionKind, Identifier, ImportCombinator, Program, Sp
 
 use super::group_libraries;
 use super::library::canonical_or_lexical;
-use crate::environment::{AnalysisEnvironment, ExternalLibraries, ExternalOrigin};
+use crate::environment::{AnalysisEnvironment, ExternalLibraries, ExternalOrigin, ExternalTarget};
 use crate::intern::StringInterner;
 use crate::memo::NameMemo;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -172,8 +172,8 @@ pub enum DeclarationIdentity {
     Package {
         package: InternedString,
         name: InternedString,
-        /// Which physical copy of the package this is, by library-root path
-        /// order, when package contexts load several; `None` when only one is.
+        /// Which library-root/context copy of the package this is, in sorted
+        /// order; `None` when only one copy is loaded.
         copy: Option<u32>,
     },
 }
@@ -322,7 +322,9 @@ pub struct IdentityIndex {
     libraries: Vec<Library>,
     file_library: Vec<LibraryId>,
     by_path: HashMap<PathBuf, FileId>,
-    /// `by_path` inverted, indexed by [`FileId`].
+    /// File ranges for external instances, in loader order, including an end sentinel.
+    external_file_offsets: Vec<usize>,
+    /// Source paths indexed by [`FileId`], including non-primary instances.
     paths: Vec<Option<PathBuf>>,
     source_annotations: SourceAnnotations,
     /// The loaded `dart:core`, when external libraries are indexed.
@@ -382,6 +384,154 @@ pub struct ExternalSources<'a> {
     pub environment: &'a AnalysisEnvironment,
 }
 
+/// Translate source-graph targets into IDs without losing external instances.
+struct LibraryResolver<'a> {
+    by_path: &'a HashMap<PathBuf, FileId>,
+    file_library: &'a [LibraryId],
+    packages: &'a [PackageIdentity],
+    external: Option<ExternalSources<'a>>,
+    base: Option<&'a IdentityIndex>,
+    external_file_offsets: &'a [usize],
+    project_library_count: usize,
+}
+
+impl LibraryResolver<'_> {
+    fn resolve(&self, from: &Path, instance: Option<usize>, uri: &str) -> ImportTarget {
+        let fallback = if instance.is_none() {
+            resolve_uri(from, uri, self.by_path, self.file_library, self.packages)
+        } else if uri.starts_with("dart:") {
+            ImportTarget::Sdk(uri.to_string())
+        } else if let Some((package, _)) = uri
+            .strip_prefix("package:")
+            .and_then(|rest| rest.split_once('/'))
+            .filter(|(package, _)| {
+                !self
+                    .packages
+                    .iter()
+                    .any(|candidate| candidate.name == *package)
+            })
+        {
+            ImportTarget::Package(package.to_string())
+        } else {
+            ImportTarget::Unknown
+        };
+        if instance.is_none()
+            && matches!(fallback, ImportTarget::Library(id) if id.0 < self.project_library_count
+                || self.external.is_none_or(|external| !external.libraries.has_aliases()))
+        {
+            return fallback;
+        }
+        self.external
+            .and_then(|external| {
+                external
+                    .libraries
+                    .resolve_target(external.environment, from, instance, uri)
+            })
+            .and_then(|target| self.library(target))
+            .map_or(fallback, ImportTarget::Library)
+    }
+
+    fn doc_uri_missing(&self, from: &Path, instance: usize, uri: &str) -> bool {
+        let Some(external) = self.external else {
+            return false;
+        };
+        if let Some(rest) = uri.strip_prefix("package:") {
+            let context = external.libraries.libraries()[instance].context;
+            let package = rest.split('/').next().unwrap_or(rest);
+            return external
+                .environment
+                .config_in(context)
+                .is_some_and(|config| config.package(package).is_none());
+        }
+        if uri.starts_with("dart:") {
+            let context = external.libraries.resolution_context(
+                external.environment,
+                from,
+                Some(instance),
+                uri,
+            );
+            return external
+                .environment
+                .sdk_in(context)
+                .is_some_and(|sdk| sdk.library(uri).is_none());
+        }
+        uri_missing(external.environment, from, uri)
+    }
+
+    fn library(&self, target: ExternalTarget) -> Option<LibraryId> {
+        match target {
+            ExternalTarget::Instance(instance) => {
+                if let Some(base) = self.base {
+                    base.external_library(instance)
+                } else {
+                    let file = *self.external_file_offsets.get(instance)?;
+                    self.file_library.get(file).copied()
+                }
+            }
+            ExternalTarget::Path(path) => self
+                .by_path
+                .get(&path)
+                .map(|file| self.file_library[file.0])
+                .or_else(|| {
+                    let base = self.base?;
+                    base.file_canonical(&path).map(|file| base.library(file))
+                }),
+        }
+    }
+}
+
+struct PackageInstance<'a> {
+    library: LibraryId,
+    package: &'a str,
+    root: &'a Path,
+    path: &'a Path,
+    context: Option<usize>,
+}
+
+/// A root needs context-specific copies only when one of its paths splits.
+fn assign_package_copies(
+    libraries: &mut [Library],
+    instances: &mut [PackageInstance<'_>],
+    has_aliases: bool,
+) {
+    let mut split_roots = FxHashSet::default();
+    if has_aliases {
+        let mut paths = FxHashMap::default();
+        for instance in instances.iter() {
+            if paths
+                .insert((instance.path, instance.package, instance.root), ())
+                .is_some()
+            {
+                split_roots.insert((instance.package, instance.root));
+            }
+        }
+    }
+    let mut package_roots: FxHashMap<&str, BTreeSet<(&Path, Option<usize>)>> = FxHashMap::default();
+    for instance in instances.iter_mut() {
+        if !split_roots.contains(&(instance.package, instance.root)) {
+            instance.context = None;
+        }
+        package_roots
+            .entry(instance.package)
+            .or_default()
+            .insert((instance.root, instance.context));
+    }
+    let copies: FxHashMap<(&str, &Path, Option<usize>), u32> = package_roots
+        .iter()
+        .filter(|(_, roots)| roots.len() > 1)
+        .flat_map(|(&package, roots)| {
+            (0..)
+                .zip(roots)
+                .map(move |(copy, &(root, context))| ((package, root, context), copy))
+        })
+        .collect();
+    for instance in instances {
+        libraries[instance.library.0].copy = copies
+            .get(&(instance.package, instance.root, instance.context))
+            .copied();
+    }
+}
+
 impl IdentityIndex {
     pub fn from_project_files(files: &[IdentitySource<'_>], packages: &[PackageIdentity]) -> Self {
         Self::build(files, &[], packages, None)
@@ -410,6 +560,9 @@ impl IdentityIndex {
         }
         for file in index.by_path.values_mut() {
             file.0 |= EXTERNAL_ID;
+        }
+        for offset in &mut index.external_file_offsets {
+            *offset |= EXTERNAL_ID;
         }
         for library in &mut index.libraries {
             for (_, file) in library.declarations.values_mut() {
@@ -515,12 +668,19 @@ impl IdentityIndex {
             .collect();
         let mut core = base.as_ref().and_then(|index| index.core);
         let mut package_copies = Vec::new();
+        let external_library_start = libraries.len();
+        let external_count = external
+            .filter(|_| base.is_none())
+            .map_or(0, |external| external.libraries.libraries().len());
+        let mut external_file_offsets =
+            Vec::with_capacity(external_count + usize::from(external_count != 0));
         for library in external
             .iter()
             .filter(|_| base.is_none())
             .flat_map(|external| external.libraries.libraries())
         {
             let id = LibraryId(libraries.len());
+            external_file_offsets.push(all.len());
             libraries.push(Library {
                 declarations: FxHashMap::default(),
                 imports: Vec::new(),
@@ -535,7 +695,7 @@ impl IdentityIndex {
                 uri: external.and_then(|external| {
                     external
                         .libraries
-                        .package_uri(external.environment, &library.files.first()?.path)
+                        .package_uri(external.environment, library)
                 }),
                 copy: None,
                 named: false,
@@ -547,43 +707,59 @@ impl IdentityIndex {
                 && let Some(configured) = external.and_then(|external| {
                     external
                         .libraries
-                        .package_library(external.environment, &library.files.first()?.path)
+                        .package_library(external.environment, library)
                 })
             {
-                package_copies.push((id, package.as_str(), configured.lib_root.as_path()));
+                package_copies.push(PackageInstance {
+                    library: id,
+                    package: package.as_str(),
+                    root: configured.lib_root.as_path(),
+                    path: &library.files[0].path,
+                    context: library.copy_context,
+                });
             }
-            for file in &library.files {
+            for file in library.files.iter() {
                 file_library.push(id);
                 all.push((&file.path, &file.facts, file.has_parse_errors));
             }
         }
-        // Contexts resolving a package to different library roots see different declarations.
-        let mut package_roots: FxHashMap<&str, BTreeSet<&Path>> = FxHashMap::default();
-        for &(_, package, root) in &package_copies {
-            package_roots.entry(package).or_default().insert(root);
+        if !external_file_offsets.is_empty() {
+            external_file_offsets.push(all.len());
         }
-        let copies: FxHashMap<(&str, &Path), u32> = package_roots
-            .iter()
-            .filter(|(_, roots)| roots.len() > 1)
-            .flat_map(|(&package, roots)| {
-                (0..)
-                    .zip(roots)
-                    .map(move |(copy, &root)| ((package, root), copy))
-            })
-            .collect();
-        for (id, package, root) in package_copies {
-            libraries[id.0].copy = copies.get(&(package, root)).copied();
-        }
+        assign_package_copies(
+            &mut libraries,
+            &mut package_copies,
+            external.is_some_and(|external| external.libraries.has_aliases()),
+        );
 
         let mut interner = StringInterner::default();
         let mut by_path = HashMap::new();
+        let mut paths = Vec::with_capacity(all.len());
         // Accessors share one value declaration, unlike duplicate variables or
         // functions. Keep these flags only while collecting declarations.
         let mut accessors = FxHashMap::default();
+        let mut previous_library = None;
+        let mut primary = true;
         for (index, (&(path, program, has_parse_errors), &library)) in
             all.iter().zip(&file_library).enumerate()
         {
-            by_path.insert(canonical_or_lexical(path), FileId(index));
+            let canonical = canonical_or_lexical(path);
+            if previous_library != Some(library) {
+                previous_library = Some(library);
+                primary = library
+                    .0
+                    .checked_sub(external_library_start)
+                    .is_none_or(|instance| {
+                        external.is_some_and(|external| {
+                            !external.libraries.has_aliases()
+                                || external.libraries.is_primary(instance)
+                        })
+                    });
+            }
+            if primary {
+                by_path.insert(canonical.clone(), FileId(index));
+            }
+            paths.push(Some(canonical));
             let library_id = library;
             let library = &mut libraries[library.0];
             library.incomplete |= has_parse_errors;
@@ -631,30 +807,17 @@ impl IdentityIndex {
         }
         drop(interner);
 
-        let resolve = |from: &Path, uri: &str| {
-            let target = resolve_uri(from, uri, &by_path, &file_library, packages);
-            if matches!(target, ImportTarget::Library(_)) {
-                return target;
-            }
-            external
-                .and_then(|external| {
-                    external
-                        .libraries
-                        .resolve_uri(external.environment, from, uri)
-                })
-                .and_then(|path| {
-                    by_path
-                        .get(&path)
-                        .map(|file| file_library[file.0])
-                        .or_else(|| {
-                            base.as_ref().and_then(|index| {
-                                index.file_canonical(&path).map(|file| index.library(file))
-                            })
-                        })
-                })
-                .map_or(target, ImportTarget::Library)
+        let resolver = LibraryResolver {
+            by_path: &by_path,
+            file_library: &file_library,
+            packages,
+            external,
+            base: base.as_deref(),
+            external_file_offsets: &external_file_offsets,
+            project_library_count: external_library_start,
         };
         for (&(path, program, _), &library) in all.iter().zip(&file_library) {
+            let external_instance = library.0.checked_sub(external_library_start);
             let mut imports = Vec::with_capacity(program.imports.len());
             let mut implicit_core = true;
             for import in &program.imports {
@@ -662,13 +825,13 @@ impl IdentityIndex {
                     implicit_core = false;
                 }
                 imports.push(Import {
-                    target: resolve(path, &import.uri.value),
+                    target: resolver.resolve(path, external_instance, &import.uri.value),
                     prefix: import.as_name.as_ref().map(|id| id.name.clone()),
                     combinators: import.combinators.clone(),
                 });
             }
             let exports = program.exports.iter().map(|export| Export {
-                target: resolve(path, &export.uri.value),
+                target: resolver.resolve(path, external_instance, &export.uri.value),
                 combinators: export.combinators.clone(),
             });
             let library = &mut libraries[library.0];
@@ -683,27 +846,22 @@ impl IdentityIndex {
                     !external
                         .is_some_and(|external| uri_missing(external.environment, file.path, uri))
                 })
-                .map(|uri| resolve(file.path, uri));
+                .map(|uri| resolver.resolve(file.path, None, uri));
             libraries[library.0].doc_imports.extend(targets);
         }
         if base.is_none()
             && let Some(external) = external
         {
-            for file in external
-                .libraries
-                .libraries()
-                .iter()
-                .flat_map(|library| &library.files)
-            {
-                let Some(id) = by_path.get(&file.path) else {
-                    continue;
-                };
-                let targets = file
-                    .doc_imports
-                    .iter()
-                    .filter(|uri| !uri_missing(external.environment, &file.path, uri))
-                    .map(|uri| resolve(&file.path, uri));
-                libraries[file_library[id.0].0].doc_imports.extend(targets);
+            for (instance, library) in external.libraries.libraries().iter().enumerate() {
+                let id = file_library[external_file_offsets[instance]];
+                for file in library.files.iter() {
+                    let targets = file
+                        .doc_imports
+                        .iter()
+                        .filter(|uri| !resolver.doc_uri_missing(&file.path, instance, uri))
+                        .map(|uri| resolver.resolve(&file.path, Some(instance), uri));
+                    libraries[id.0].doc_imports.extend(targets);
+                }
             }
         }
         let mut source_annotations = HashMap::new();
@@ -721,37 +879,38 @@ impl IdentityIndex {
                 &mut source_annotations,
             );
         }
-        let mut paths = vec![None; all.len()];
-        for (path, file) in &by_path {
-            paths[file.0] = Some(path.clone());
-        }
         let mut declared_by = FxHashMap::default();
-        for library in &libraries {
-            // SDK URI/name identities are canonical even when package contexts
-            // load both an SDK and an embedder's physical copy of its libraries.
-            if let Some(origin @ ExternalOrigin::Package(_)) = &library.origin {
-                for name in library.declarations.keys().chain(library.extensions.iter()) {
-                    let uri = library.uri.as_deref();
-                    declared_by
-                        .entry((origin, library.copy, name))
-                        .and_modify(|(first, colliding)| {
-                            *colliding |= uri.is_none() || *first != uri;
-                        })
-                        .or_insert((uri, false));
-                }
+        for instance in &package_copies {
+            let library = &libraries[instance.library.0];
+            let Some(origin) = &library.origin else {
+                continue;
+            };
+            for name in library.declarations.keys().chain(library.extensions.iter()) {
+                declared_by
+                    .entry((origin, instance.root, name))
+                    .and_modify(|(first, colliding)| {
+                        *colliding |= *first != instance.path;
+                    })
+                    .or_insert((instance.path, false));
             }
         }
         let mut colliding: FxHashMap<ExternalOrigin, FxHashMap<Option<u32>, FxHashSet<_>>> =
             FxHashMap::default();
         let declaration_capacity = declared_by.len();
-        for ((origin, copy, name), (_, has_collision)) in declared_by {
-            if has_collision {
-                colliding
-                    .entry(origin.clone())
-                    .or_default()
-                    .entry(copy)
-                    .or_default()
-                    .insert(name.clone());
+        for instance in &package_copies {
+            let library = &libraries[instance.library.0];
+            let Some(origin) = &library.origin else {
+                continue;
+            };
+            for name in library.declarations.keys().chain(library.extensions.iter()) {
+                if declared_by[&(origin, instance.root, name)].1 {
+                    colliding
+                        .entry(origin.clone())
+                        .or_default()
+                        .entry(library.copy)
+                        .or_default()
+                        .insert(name.clone());
+                }
             }
         }
 
@@ -759,6 +918,7 @@ impl IdentityIndex {
             libraries,
             file_library,
             by_path,
+            external_file_offsets,
             paths,
             source_annotations,
             core,
@@ -938,6 +1098,22 @@ impl IdentityIndex {
             .get(path)
             .copied()
             .or_else(|| self.external.as_ref()?.file_canonical(path))
+    }
+
+    /// The library of a loaded external instance, in loader order.
+    pub(crate) fn external_library(&self, instance: usize) -> Option<LibraryId> {
+        self.external_file(instance, 0)
+            .map(|file| self.library(file))
+    }
+
+    /// A file within a loaded external instance, in that instance's file order.
+    pub(crate) fn external_file(&self, instance: usize, ordinal: usize) -> Option<FileId> {
+        if let Some(base) = &self.external {
+            return base.external_file(instance, ordinal);
+        }
+        let start = *self.external_file_offsets.get(instance)?;
+        let end = *self.external_file_offsets.get(instance + 1)?;
+        (ordinal < end - start).then(|| FileId(start + ordinal))
     }
 
     pub fn library(&self, file: FileId) -> LibraryId {
@@ -2767,6 +2943,177 @@ mod tests {
             assert_eq!(unique_declaration(candidates), Some(package.clone()));
         }
         assert_eq!(unique_declaration([package, other_package, sdk]), None);
+    }
+
+    #[test]
+    fn split_package_libraries_keep_collisions_with_unsplit_siblings() {
+        let root = tempfile::tempdir().unwrap();
+        let shared = root.path().join("meta/lib");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(
+            shared.join("meta.dart"),
+            "import 'package:foo/foo.dart'; class Marker {} const annotation = 0;",
+        )
+        .unwrap();
+        std::fs::write(
+            shared.join("other.dart"),
+            "class Marker {} const annotation = 0;",
+        )
+        .unwrap();
+        let source = "import 'package:meta/meta.dart' as split; \
+                      import 'package:meta/other.dart' as sibling;";
+        let paths = ["a", "b"].map(|context| {
+            let directory = root.path().join(context);
+            std::fs::create_dir_all(directory.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(directory.join("foo/lib")).unwrap();
+            std::fs::write(directory.join("foo/lib/foo.dart"), "class Foo {}").unwrap();
+            std::fs::write(
+                directory.join(".dart_tool/package_config.json"),
+                r#"{"configVersion":2,"packages":[
+                    {"name":"meta","rootUri":"../../meta","packageUri":"lib/"},
+                    {"name":"foo","rootUri":"../foo","packageUri":"lib/"}
+                ]}"#,
+            )
+            .unwrap();
+            let path = directory.join("main.dart");
+            std::fs::write(&path, source).unwrap();
+            path
+        });
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            paths.iter().map(PathBuf::as_path),
+            |_| None,
+        );
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let project = paths
+            .each_ref()
+            .map(|path| (path.as_path(), &program, source));
+        let libraries = ExternalLibraries::load(&environment, &project, |_| false);
+        let sources = paths.each_ref().map(|path| IdentitySource {
+            path,
+            program: &program,
+            has_parse_errors: false,
+        });
+        let external = ExternalSources {
+            libraries: &libraries,
+            environment: &environment,
+        };
+        let monolithic = IdentityIndex::build(&sources, &[source; 2], &[], Some(external));
+        let overlay = IdentityIndex::with_external(
+            &sources,
+            &[source; 2],
+            &[],
+            external,
+            Arc::new(IdentityIndex::build_external(external)),
+        );
+        for index in [&monolithic, &overlay] {
+            for path in &paths {
+                let library = index.library(index.file(path).unwrap());
+                for name in ["Marker", "annotation"] {
+                    let resolve = |prefix| {
+                        let qualified = QualifiedName::prefixed(prefix, name);
+                        if name == "Marker" {
+                            index.resolve_declaration(library, qualified)
+                        } else {
+                            index.resolve_imported_member(library, qualified)
+                        }
+                        .unwrap()
+                    };
+                    let split = resolve("split");
+                    let sibling = resolve("sibling");
+                    assert!(matches!(split, DeclarationIdentity::Project { .. }));
+                    assert!(matches!(sibling, DeclarationIdentity::Project { .. }));
+                    assert_ne!(split, sibling);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_root_package_copies_survive_interleaved_package_names() {
+        let root = tempfile::tempdir().unwrap();
+        let shared = root.path().join("shared/lib");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(
+            shared.join("shared.dart"),
+            "import 'package:foo/foo.dart'; class Marker {}",
+        )
+        .unwrap();
+        let packages = ["bar", "baz", "bar"];
+        let sources = packages.map(|name| format!("import 'package:{name}/shared.dart';"));
+        let paths = std::array::from_fn::<_, 3, _>(|context| {
+            let directory = root.path().join(context.to_string());
+            std::fs::create_dir_all(directory.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(directory.join("foo/lib")).unwrap();
+            std::fs::write(directory.join("foo/lib/foo.dart"), "class Foo {}").unwrap();
+            std::fs::write(
+                directory.join(".dart_tool/package_config.json"),
+                format!(
+                    r#"{{"configVersion":2,"packages":[
+                        {{"name":"{}","rootUri":"../../shared","packageUri":"lib/"}},
+                        {{"name":"foo","rootUri":"../foo","packageUri":"lib/"}}
+                    ]}}"#,
+                    packages[context],
+                ),
+            )
+            .unwrap();
+            let path = directory.join("main.dart");
+            std::fs::write(&path, &sources[context]).unwrap();
+            path
+        });
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            paths.iter().map(PathBuf::as_path),
+            |_| None,
+        );
+        let programs = sources.each_ref().map(|source| {
+            let parsed = parse(source);
+            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+            parsed.program
+        });
+        let project = std::array::from_fn::<_, 3, _>(|index| {
+            (
+                paths[index].as_path(),
+                &programs[index],
+                sources[index].as_str(),
+            )
+        });
+        let libraries = ExternalLibraries::load(&environment, &project, |_| false);
+        let inputs = std::array::from_fn::<_, 3, _>(|index| IdentitySource {
+            path: &paths[index],
+            program: &programs[index],
+            has_parse_errors: false,
+        });
+        let external = ExternalSources {
+            libraries: &libraries,
+            environment: &environment,
+        };
+        let texts = sources.each_ref().map(String::as_str);
+        let monolithic = IdentityIndex::build(&inputs, &texts, &[], Some(external));
+        let overlay = IdentityIndex::with_external(
+            &inputs,
+            &texts,
+            &[],
+            external,
+            Arc::new(IdentityIndex::build_external(external)),
+        );
+        for index in [&monolithic, &overlay] {
+            let identities = paths.each_ref().map(|path| {
+                index
+                    .resolve_declaration(index.library(index.file(path).unwrap()), "Marker".into())
+                    .unwrap()
+            });
+            assert!(matches!(
+                identities[0],
+                DeclarationIdentity::Package { copy: Some(_), .. }
+            ));
+            assert!(matches!(
+                identities[2],
+                DeclarationIdentity::Package { copy: Some(_), .. }
+            ));
+            assert_ne!(identities[0], identities[2]);
+        }
     }
 
     #[test]

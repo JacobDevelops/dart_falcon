@@ -80,7 +80,7 @@ thread_local! {
 fn mark_alias_cycle() {
     ALIAS_CYCLE_GENERATION.with(|generation| generation.set(generation.get().wrapping_add(1)));
 }
-type IndexedProgram<'a> = (&'a Path, &'a Program, &'a [(usize, usize)]);
+type IndexedProgram<'a> = (Option<FileId>, &'a Program, &'a [(usize, usize)]);
 
 /// Whether a selector/call chain starts with an implicit dot-shorthand receiver.
 /// Argument expressions do not establish the receiver's inference context.
@@ -2476,7 +2476,15 @@ pub struct SemanticModel<'a> {
 
 impl<'a> SemanticModel<'a> {
     pub fn new(file: &Path, identities: &'a IdentityIndex, types: Option<&'a TypeIndex>) -> Self {
-        let file = identities.file(file);
+        Self::from_file(identities.file(file), identities, types)
+    }
+
+    /// Resolve in an indexed file's instance rather than its primary path instance.
+    pub(crate) fn from_file(
+        file: Option<FileId>,
+        identities: &'a IdentityIndex,
+        types: Option<&'a TypeIndex>,
+    ) -> Self {
         Self {
             file,
             library: file.map(|file| identities.library(file)),
@@ -4308,7 +4316,7 @@ impl SignatureIndex {
         let index = Self::borrowing_external(external);
         let all = files
             .iter()
-            .map(|(path, program)| (path.as_path(), *program, &[] as &[(usize, usize)]))
+            .map(|(path, program)| (identities.file(path), *program, &[] as &[(usize, usize)]))
             .collect();
         Self::build_programs(index, all, identities, types)
     }
@@ -4322,23 +4330,28 @@ impl SignatureIndex {
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        let all: Vec<IndexedProgram<'_>> = external
-            .into_iter()
-            .flat_map(ExternalLibraries::libraries)
-            .flat_map(|library| &library.files)
-            .map(|file| {
-                (
-                    file.path.as_path(),
-                    &file.facts,
-                    file.concrete_operators.as_slice(),
-                )
-            })
-            .chain(
-                files
-                    .iter()
-                    .map(|(path, program)| (path.as_path(), *program, &[] as &[(usize, usize)])),
-            )
-            .collect();
+        let all: Vec<IndexedProgram<'_>> =
+            external
+                .into_iter()
+                .flat_map(ExternalLibraries::libraries)
+                .enumerate()
+                .flat_map(|(instance, library)| {
+                    library
+                        .files
+                        .iter()
+                        .enumerate()
+                        .map(move |(ordinal, file)| {
+                            (
+                                identities.external_file(instance, ordinal),
+                                &file.facts,
+                                file.concrete_operators.as_slice(),
+                            )
+                        })
+                })
+                .chain(files.iter().map(|(path, program)| {
+                    (identities.file(path), *program, &[] as &[(usize, usize)])
+                }))
+                .collect();
         Self::build_programs(Self::default(), all, identities, types)
     }
 
@@ -4348,8 +4361,8 @@ impl SignatureIndex {
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        for (path, program, concrete_operators) in &all {
-            let model = SemanticModel::new(path, identities, Some(types));
+        for (file, program, concrete_operators) in &all {
+            let model = SemanticModel::from_file(*file, identities, Some(types));
             index.add_declarations(program, &model);
             // Compact external facts have no bodies: operator abstractness
             // therefore comes from their explicit retained presence metadata.
@@ -4392,7 +4405,12 @@ impl SignatureIndex {
         index.finish();
         let programs: Vec<_> = all
             .iter()
-            .map(|(path, program, _)| (*program, SemanticModel::new(path, identities, Some(types))))
+            .map(|(file, program, _)| {
+                (
+                    *program,
+                    SemanticModel::from_file(*file, identities, Some(types)),
+                )
+            })
             .collect();
         index.infer_programs(&programs);
         index.mark_library_subclasses();

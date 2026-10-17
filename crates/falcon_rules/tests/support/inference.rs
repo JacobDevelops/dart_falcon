@@ -63,7 +63,7 @@ pub fn analyze(
     assert!(!externals.libraries().is_empty());
     for library in externals.libraries() {
         assert!(!library.has_unresolved_parts);
-        for file in &library.files {
+        for file in library.files.iter() {
             assert!(!file.has_parse_errors, "{}", file.path.display());
         }
     }

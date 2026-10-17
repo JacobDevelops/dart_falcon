@@ -9,7 +9,9 @@ mod sdk;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub use external::{ExternalFile, ExternalLibraries, ExternalLibrary, ExternalOrigin};
+pub use external::{
+    ExternalFile, ExternalLibraries, ExternalLibrary, ExternalOrigin, ExternalTarget,
+};
 pub use falcon_syntax::language_version::{Feature, LanguageVersion};
 pub use package_config::{ConfiguredPackage, PackageConfig, percent_decode, percent_encode};
 pub use sdk::{DartSdk, Embedder};
@@ -247,11 +249,11 @@ impl AnalysisEnvironment {
         self.directories.get(&directory).copied().flatten()
     }
 
-    fn config_in(&self, context: Option<usize>) -> Option<&PackageConfig> {
+    pub(crate) fn config_in(&self, context: Option<usize>) -> Option<&PackageConfig> {
         context.map(|index| &self.contexts[index].config)
     }
 
-    fn sdk_in(&self, context: Option<usize>) -> Option<&DartSdk> {
+    pub(crate) fn sdk_in(&self, context: Option<usize>) -> Option<&DartSdk> {
         match context {
             Some(index) => self.contexts[index].sdk.as_ref(),
             None => self.default_sdk.as_ref()?.as_ref(),
