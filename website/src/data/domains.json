@@ -74,7 +74,11 @@
       "avoid-ref-read-inside-build",
       "avoid-ref-watch-outside-build",
       "avoid-unnecessary-consumer-widgets",
-      "prefer-ref-read-for-methods"
+      "dispose-provided-instances",
+      "dispose-provider-resources",
+      "prefer-ref-read-for-methods",
+      "use-ref-and-state-synchronously",
+      "use-ref-read-synchronously"
     ]
   },
   {

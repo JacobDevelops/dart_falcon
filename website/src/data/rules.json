@@ -7296,6 +7296,156 @@
   },
   {
     "crossFile": false,
+    "description": "Flags provider-created instances with a dispose method that lack ref.onDispose cleanup.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 15,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 18,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 20,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 24,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 32,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 37,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 42,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      }
+    ],
+    "docs": "Flags provider-created instances with a dispose method that lack ref.onDispose cleanup.\n\nRiverpod autoDispose destroys provider state, not arbitrary disposable objects.\nRegister each owned instance's dispose method with the provider's ref.onDispose.\nOnly package-confirmed Provider/FutureProvider/StreamProvider callbacks and\nresolved constructor-created resources are checked. Nested deferred closures,\nborrowed values, unknown types, and types without a recognized release method\nare excluded. Direct cleanup and named local callbacks are recognized; opaque\ncleanup calls mentioning the resource conservatively count as registration.\nBorrowed factory returns are recognized only when their simple body is visible\nin this file; constructor metadata does not expose bodies from other libraries.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Service {\n  Service();\n  Service.named();\n  void dispose() {}\n}\nclass Child extends Service {}\n\nfinal plain = Provider((ref) {\n  final service = Service();\n  return service;\n});\nfinal automatic = Provider.autoDispose((ref) {\n  final service = Service();\n  return service;\n});\nfinal arrow = Provider((ref) => Service());\nfinal explicitNew = Provider((ref) {\n  final service = new Service();\n  return service;\n});\nfinal named = Provider((ref) {\n  final service = Service.named();\n  return service;\n});\nfinal inherited = Provider((ref) {\n  final service = Child();\n  return service;\n});\nfinal wrongInstance = Provider((ref) {\n  final owned = Service();\n  ref.onDispose(() {});\n  return owned;\n});\nfinal mereMention = Provider((ref) {\n  final service = Service();\n  ref.onDispose(() { service.dispose; });\n  return service;\n});\nfinal deferred = Provider((ref) {\n  final service = Service();\n  ref.onDispose(() { final later = () => service.dispose(); });\n  return service;\n});",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart';\n\nclass Service { Service(); void dispose() {} }\nclass Value { Value(); }\nfinal shared = Service();\nfinal tearOff = Provider((ref) {\n  final service = Service();\n  ref.onDispose(service.dispose);\n  return service;\n});\nfinal arrowCleanup = Provider((ref) {\n  final service = Service();\n  ref.onDispose(() => service.dispose());\n  return service;\n});\nfinal blockCleanup = Provider.autoDispose((ref) {\n  final service = Service();\n  ref.onDispose(() { service.dispose(); });\n  return service;\n});\nfinal borrowed = Provider((ref) => shared);\nfinal immutable = Provider((ref) => Value());\nfinal deferred = Provider((ref) => () => Service());\nfinal twoInstances = Provider((ref) {\n  final first = Service();\n  final second = Service();\n  ref.onDispose(first.dispose);\n  ref.onDispose(() { second.dispose(); });\n  return first;\n});\nService outsideProvider() => Service();\nvoid ordinaryCallback(Object Function(Ref) callback) {}\nvoid unrelatedApi() { ordinaryCallback((ref) => Service()); }"
+    },
+    "group": "correctness",
+    "name": "dispose-provided-instances",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags provider-created resources without autoDispose or ref.onDispose cleanup.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 15,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 17,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 21,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 25,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 29,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 34,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      }
+    ],
+    "docs": "Flags provider-created resources without autoDispose or ref.onDispose cleanup.\n\nResources created in a long-lived Riverpod provider need an explicit lifetime.\nUse an autoDispose provider or register the resource's cleanup with ref.onDispose.\nChecks package-confirmed Provider, FutureProvider and StreamProvider callbacks\nfor resolved constructor-created instances with a zero-required-argument\ndispose, close or cancel method. Borrowed values, deferred closures and unknown\ntypes are excluded. This lifetime policy is separate from disposing arbitrary\nprovided instances: autoDispose alone does not invoke an object's dispose.\nSDK sinks, sockets and subscriptions are left to the shipped leak rules unless\nreturned as provider state. Simple source-visible factories returning borrowed\nvalues are excluded, while allocating factories remain eligible.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); Channel.named(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Child extends Channel {}\nfinal channel = Provider((ref) {\n  final resource = Channel();\n  return resource;\n});\nfinal subscription = Provider((ref) {\n  final resource = Subscription();\n  return resource;\n});\nfinal disposable = Provider((ref) => Service());\nfinal named = Provider((ref) {\n  final resource = Channel.named();\n  return resource;\n});\nfinal explicitNew = Provider((ref) {\n  final resource = new Channel();\n  return resource;\n});\nfinal inherited = Provider((ref) {\n  final resource = Child();\n  return resource;\n});\nfinal emptyCleanup = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(() {});\n  return resource;\n});\nfinal wrongCleanup = Provider((ref) {\n  final first = Channel();\n  final second = Channel();\n  ref.onDispose(second.close);\n  return first;\n});",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Value { Value(); }\nfinal shared = Channel();\nfinal automatic = Provider.autoDispose((ref) => Channel());\nfinal automaticSubscription = Provider.autoDispose((ref) => Subscription());\nfinal registered = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(resource.close);\n  return resource;\n});\nfinal blockCleanup = Provider((ref) {\n  final resource = Subscription();\n  ref.onDispose(() { resource.cancel(); });\n  return resource;\n});\nfinal disposed = Provider((ref) {\n  final resource = Service();\n  ref.onDispose(() => resource.dispose());\n  return resource;\n});\nfinal borrowed = Provider((ref) => shared);\nfinal value = Provider((ref) => Value());\nfinal deferred = Provider((ref) => () => Channel());\nChannel outsideProvider() => Channel();\nvoid ordinaryCallback(Object Function(Ref) callback) {}\nvoid unrelatedApi() { ordinaryCallback((ref) => Channel()); }"
+    },
+    "group": "correctness",
+    "name": "dispose-provider-resources",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires cleanup callbacks for disposable values created by package:provider's Provider.",
     "diagnostics": [
       {
@@ -11015,6 +11165,132 @@
       "label": "Pyramid Lint",
       "upstreamId": "use_once_constructors_once_provider",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags notifier ref and state accesses after an async gap without ref.mounted.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 32,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 38,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      }
+    ],
+    "docs": "Flags notifier ref and state accesses after an async gap without ref.mounted.\n\nA notifier may be disposed while its asynchronous method is suspended. Guard\nsubsequent accesses with ref.mounted. Only Riverpod 3 AnyNotifier-declared\nref and state members are checked; older APIs without ref.mounted, shadowed\nlocals, unrelated classes, and mounted checks themselves are excluded.\nNested function bodies form independent async boundaries.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Count extends Notifier<int> {\n  Future<void> increment() async {\n    await pause();\n    state += 1;\n  }\n  Future<void> explicitThis() async {\n    await pause();\n    this.state = 2;\n  }\n  Future<void> read() async {\n    await pause();\n    ref.read(provider);\n  }\n  Future<void> staleGuard() async {\n    if (!ref.mounted) return;\n    await pause();\n    state = 3;\n  }\n  Future<void> secondGap() async {\n    await pause();\n    if (!ref.mounted) return;\n    await pause();\n    state = 4;\n  }\n}\nabstract class AsyncCount extends AsyncNotifier<int> {\n  Future<void> increment() async {\n    await pause();\n    state = 5;\n  }\n}\nabstract class StreamCount extends StreamNotifier<int> {\n  Future<void> increment() async {\n    await pause();\n    state = 6;\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Count extends Notifier<int> {\n  Future<void> beforeAwait() async {\n    state += 1;\n    await pause();\n  }\n  Future<void> guarded() async {\n    await pause();\n    if (ref.mounted) state += 1;\n  }\n  Future<void> earlyReturn() async {\n    await pause();\n    if (!ref.mounted) return;\n    state += 1;\n    ref.read(provider);\n  }\n  Future<void> explicitGuard() async {\n    await pause();\n    if (!this.ref.mounted) return;\n    this.state = 1;\n  }\n  Future<void> shortCircuit() async {\n    await pause();\n    if (ref.mounted && state > 0) state = 2;\n  }\n  Future<void> shadowed() async {\n    int state = 1;\n    await pause();\n    state += 1;\n  }\n  Future<void> nested() async {\n    await pause();\n    void callback() { state = 1; }\n    callback();\n  }\n  Future<void> parenthesizedGuard() async {\n    await pause();\n    if (!(ref).mounted) return;\n    state = 1;\n  }\n}\nclass Unrelated {\n  int state = 0;\n  Future<void> update() async {\n    await pause();\n    state += 1;\n  }\n}\nabstract class OlderNotifier extends BuildlessNotifier<int> {\n  Future<void> update() async {\n    await pause();\n    state = 1;\n  }\n}\nconst alive = true;\nabstract class ConstantGuard extends Notifier<int> {\n  Future<void> update() async {\n    await pause();\n    if (ref.mounted == alive) state = 1;\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "use-ref-and-state-synchronously",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Riverpod WidgetRef.read calls after an async gap without a mounted guard.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 31,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      }
+    ],
+    "docs": "Flags Riverpod WidgetRef.read calls after an async gap without a mounted guard.\n\nA widget may be disposed while awaiting a future. Check Flutter mounted before\nreading a provider. Only resolved Riverpod WidgetRef receivers are checked;\nnotifier references are handled by use-ref-and-state-synchronously. Nested\nfunction bodies form independent async boundaries.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Example extends ConsumerState<Object> {\n  Future<void> afterAwait() async {\n    await pause();\n    ref.read(provider);\n  }\n  Future<void> explicitThis() async {\n    await pause();\n    this.ref.read(provider);\n  }\n  Future<void> staleGuard() async {\n    if (!mounted) return;\n    await pause();\n    ref.read(provider);\n  }\n  Future<void> branch(bool condition) async {\n    if (condition) await pause();\n    ref.read(provider);\n  }\n  Future<void> secondGap() async {\n    await pause();\n    if (!mounted) return;\n    await pause();\n    ref.read(provider);\n  }\n}\nFuture<void> parameter(WidgetRef ref) async {\n  await pause();\n  ref.read(provider);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:flutter/widgets.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Example extends ConsumerState<Object> {\n  Future<void> beforeAwait() async {\n    ref.read(provider);\n    await pause();\n  }\n  Future<void> guarded() async {\n    await pause();\n    if (mounted) ref.read(provider);\n  }\n  Future<void> earlyReturn() async {\n    await pause();\n    if (!mounted) return;\n    ref.read(provider);\n  }\n  Future<void> nested() async {\n    await pause();\n    void callback() { ref.read(provider); }\n    callback();\n  }\n  Future<void> contextGuard(BuildContext context) async {\n    await pause();\n    if (!context.mounted) return;\n    ref.read(provider);\n  }\n}\nclass Unrelated {\n  Object read(Object provider) => provider;\n}\nFuture<void> unrelated(Unrelated ref) async {\n  await pause();\n  ref.read(provider);\n}\nabstract class Count extends Notifier<int> {\n  Future<void> notifierHandledElsewhere() async {\n    await pause();\n    ref.read(provider);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "use-ref-read-synchronously",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

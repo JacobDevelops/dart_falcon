@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 10 | 132 | 24 | 166 |
+| DCM-inspired | 7 | 132 | 24 | 163 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 2 | 7 | 3 | 12 |
-| **Total** | **12** | **143** | **31** | **186** |
+| Additional rules | 1 | 7 | 3 | 11 |
+| **Total** | **8** | **143** | **31** | **182** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (166)
+## Planned DCM-inspired rules (163)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -266,10 +266,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `use-ref-read-synchronously` | correctness | FT | paid | Ref used after await without mounted. | must-have |
-| `use-ref-and-state-synchronously` | correctness | FT | paid | Ref/state used after await without mounted. | must-have |
-| `dispose-provided-instances` | correctness | FT | paid | Provided disposables not disposed. | must-have |
-| `dispose-provider-resources` | correctness | FT | n/a | Provider-created resources must use autoDispose or ref.onDispose for cleanup; avoid misleading scope-leak terminology. | must-have |
 | `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
 | `avoid-ref-inside-state-dispose` | correctness | FT | paid | ref used in dispose. | nice-to-have |
 | `avoid-public-notifier-properties` | style | LT | paid | Notifier exposing mutable state. | nice-to-have |

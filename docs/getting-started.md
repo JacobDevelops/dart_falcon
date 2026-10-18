@@ -32,7 +32,7 @@ Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
 ## Configuration
 
 falcon runs with **zero configuration**: with no `falcon.json` present, its
-**203 recommended rules out of 364 shipped rules** run at their default severity
+**207 recommended rules out of 368 shipped rules** run at their default severity
 (warning). Falcon chooses this set independently of upstream presets.
 
 ```sh

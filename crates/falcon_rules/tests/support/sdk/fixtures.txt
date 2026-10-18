@@ -59,6 +59,12 @@ avoid-print/debug_mode_boundaries.dart
 unnecessary-overrides/bad.dart
 unnecessary-overrides/good.dart
 cast-nullable-to-non-nullable/contextual_callbacks.dart
+use-ref-read-synchronously/bad.dart
+use-ref-read-synchronously/good.dart
+use-ref-and-state-synchronously/bad.dart
+use-ref-and-state-synchronously/good.dart
+dispose-provider-resources/bad_sdk_returned.dart
+dispose-provider-resources/good_sdk_overlap.dart
 avoid-ref-watch-outside-build/bad.dart
 avoid-ref-watch-outside-build/good.dart
 avoid-ref-read-inside-build/bad.dart

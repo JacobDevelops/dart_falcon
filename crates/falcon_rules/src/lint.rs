@@ -21,6 +21,7 @@ pub(crate) mod package_layout;
 pub mod performance;
 pub(crate) mod resource_leaks;
 pub(crate) mod riverpod;
+pub(crate) mod riverpod_async;
 pub mod security;
 #[cfg(test)]
 mod semantic_scope_tests;

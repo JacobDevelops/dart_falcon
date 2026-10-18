@@ -398,6 +398,12 @@
                 "dispose-focus-node-and-timer": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "dispose-provided-instances": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-provider-resources": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "dispose-providers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -504,6 +510,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-once-constructors-once-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-ref-and-state-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-ref-read-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-setstate-synchronously": {
@@ -1750,6 +1762,12 @@
                 "dispose-focus-node-and-timer": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "dispose-provided-instances": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-provider-resources": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "dispose-providers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1856,6 +1874,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-once-constructors-once-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-ref-and-state-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-ref-read-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-setstate-synchronously": {

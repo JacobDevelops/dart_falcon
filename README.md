@@ -12,7 +12,7 @@ falcon is a standalone linter for Dart and Flutter, written in Rust. It parses D
 
 When separate apps load physical copies of the same package or SDK library, falcon uses the copy with the lexicographically last canonical defining-file path consistently, independent of traversal or editor-open order. This deterministic fallback does not provide version-specific member resolution for each app; check apps separately when dependency versions differ. Unrequested local libraries contribute type and deprecation metadata without becoming lint targets.
 
-falcon ships **364 rules**, with **203 recommended** by default, across seven groups: `a11y`, `complexity`, `correctness`, `performance`, `security`, `style`, and `suspicious`. The shipped rules include cross-file checks and 142 official lints from the 1.0 catalog. Falcon chooses its recommended set independently of upstream presets.
+falcon ships **368 rules**, with **207 recommended** by default, across seven groups: `a11y`, `complexity`, `correctness`, `performance`, `security`, `style`, and `suspicious`. The shipped rules include cross-file checks and 142 official lints from the 1.0 catalog. Falcon chooses its recommended set independently of upstream presets.
 
 Enabled semantic rules share one scope-aware traversal per file, with independent per-rule collectors and diagnostics. Syntax-only rules and dependency-ordered library analyses retain their specialized traversals.
 

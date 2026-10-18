@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 203 of 364 shipped
+If no config is found, falcon enables its own recommended set: 207 of 368 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
