@@ -1,6 +1,8 @@
 //! Performance lint rules.
 
 pub mod avoid_slow_async_io;
+pub mod avoid_slow_collection_methods;
+pub mod move_variable_outside_iteration;
 pub mod noop_primitive_operations;
 pub mod prefer_const_border_radius;
 pub mod prefer_contains;

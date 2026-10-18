@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 55 | 132 | 24 | 211 |
+| DCM-inspired | 50 | 132 | 24 | 206 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
 | Additional rules | 7 | 7 | 3 | 17 |
-| **Total** | **66** | **143** | **31** | **240** |
+| **Total** | **61** | **143** | **31** | **235** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (211)
+## Planned DCM-inspired rules (206)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -155,9 +155,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-complex-conditions` | complexity | S | paid | Boolean-expression complexity limit. | must-have |
-| `avoid-complex-loop-conditions` | complexity | S | paid | Loop-condition complexity limit. | must-have |
-| `avoid-collapsible-if` | complexity | S | paid | Nested if mergeable into one condition. | must-have |
 | `avoid-long-records` | complexity | S | paid | Record size limit (falcon has param-list). | nice-to-have |
 | `avoid-complex-arithmetic-expressions` | complexity | S | paid | Arithmetic expression complexity. | nice-to-have |
 | `avoid-if-with-many-branches` | complexity | S | paid | Long if/else-if chains → switch. | nice-to-have |
@@ -174,8 +171,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-slow-collection-methods` | performance | FT | paid | Slow patterns (`.length == 0`, repeated `.where().first`). | must-have |
-| `move-variable-outside-iteration` | performance | LT | paid | Loop-invariant allocation inside a loop. | must-have |
 | `avoid-unnecessary-collections` | performance | LT | paid | Collection built only to be iterated once. | nice-to-have |
 | `move-variable-closer-to-its-usage` | performance | LT | paid | Hoisted variable used in one branch. | nice-to-have |
 | `avoid-unnecessary-futures` | performance | FT | paid | `async`/Future wrapper that adds no value. | nice-to-have |

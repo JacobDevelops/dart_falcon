@@ -107,6 +107,180 @@
   },
   {
     "crossFile": false,
+    "description": "Flags an else-free `if` whose only then-statement is another else-free `if`.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 2,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 3,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 4,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 5,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 6,
+        "message": "Merge this nested if with its outer condition using &&."
+      }
+    ],
+    "docs": "Flags an else-free `if` whose only then-statement is another else-free `if`.\n\nCombining these conditions with `&&` removes unnecessary nesting without\nchanging evaluation order. Both conditions must be ordinary expressions;\npattern conditions, either `else` branch, and blocks containing other\nstatements are excluded. No automatic edit is made, preserving comments.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool a, bool b) {\n  if (a) { if (b) {} }\n  if (a) if (b) {}\n  if (a || b) { if (!b) return; }\n  if (a) { { if (b) {} } }\n  if (!a) { if (a && b) { print(a); } }\n}",
+      "crossFile": null,
+      "good": "void f(bool a, bool b, Object? value) {\n  if (a && b) {}\n  if (a) { print(a); if (b) {} }\n  if (a) { if (b) {} else {} }\n  if (a) { if (b) {} } else {}\n  if (value case int n) { if (n > 0) {} }\n  if (a) { if (value case int n) { print(n); } }\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-collapsible-if",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags boolean expressions with more logical operands than the configured threshold.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 3,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 6,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 7,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      }
+    ],
+    "docs": "Flags boolean expressions with more logical operands than the configured threshold.\n\nEach operand joined by `&&` or `||` counts as one; parentheses and unary\noperators do not hide logical operands. Calls and comparisons are opaque\noperands, so callback bodies do not inflate their caller's complexity.\nOnly the outermost connected logical expression is reported. Logical\nexpressions inside calls and callbacks are checked independently.\n\n## Options\n\n`threshold` (integer, default: 10) — maximum number of logical operands.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool a, bool b, bool c, bool d) {\n  if (a && b && c && d) {}\n  final x = a || b || c || d;\n  final y = (a && b) || (c && d);\n  if (!(a || b || c || d)) {}\n  final z = a ? (b && c && d && a) : false;\n  final callback = a && [1].any((x) => a && b && c && d);\n  while (a && b && c && d) { break; }\n}",
+      "crossFile": null,
+      "good": "void f(bool a, bool b, bool c) {\n  if (a) {}\n  if (a && b) {}\n  if (a || b || c) {}\n  final x = (a && b) || c;\n  final y = !(a && b);\n  while (a && b && c) { break; }\n  final z = a && b && [1].any((x) => a || c);\n  final fallback = (a ?? b) && c;\n  final bits = (1 & 2) == (3 | 4);\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-complex-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags loop conditions with more logical operands than the configured threshold.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 2,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 3,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 5,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 6,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 35,
+        "file": null,
+        "line": 7,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      }
+    ],
+    "docs": "Flags loop conditions with more logical operands than the configured threshold.\n\nChecks `while`, `do`/`while`, and C-style `for` conditions. Each operand\njoined by `&&` or `||` counts as one; comparisons and calls are opaque.\nFor-in iterables and for-loop initializers and updates are not conditions.\n\n## Options\n\n`threshold` (integer, default: 1) — maximum number of logical operands.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool a, bool b, bool c) {\n  while (a && b && c) { break; }\n  while (a || b || c) { break; }\n  do {} while (a && (b || c));\n  for (; a && b && c;) { break; }\n  for (var i = 0; i < 4 && a && b; i++) {}\n  final values = [for (var i = 0; i < 4 && a && b; i++) i];\n}",
+      "crossFile": null,
+      "good": "void f(bool a, bool b, List<bool> items) {\n  while (a) { break; }\n  while (a && b) { break; }\n  do {} while (a || b);\n  for (var i = 0; i < 2; i++) {}\n  for (final item in items) { if (item && a && b) {} }\n  for (;;) { break; }\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-complex-loop-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a function literal passed to an Iterable's `forEach`.",
     "diagnostics": [
       {
@@ -8051,6 +8225,152 @@
       "label": "Dart lints",
       "upstreamId": "avoid_slow_async_io",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_slow_async_io"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports filtered iterable searches that have a direct search-method alternative.",
+    "diagnostics": [
+      {
+        "column": 26,
+        "file": null,
+        "line": 4,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 5,
+        "message": "With a pure predicate, use 'lastWhere'; predicate evaluation order and count may change."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 6,
+        "message": "Use 'singleWhere' instead of 'where(...).single'."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 7,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 8,
+        "message": "With a pure predicate, use 'lastWhere'; predicate evaluation order and count may change."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 9,
+        "message": "Use 'singleWhere' instead of 'where(...).single'."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 10,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 52,
+        "file": null,
+        "line": 11,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 15,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 16,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 17,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      }
+    ],
+    "docs": "Reports filtered iterable searches that have a direct search-method alternative.\n\nOn confirmed SDK `Iterable` APIs, `where(test).first`, `.last`, and `.single`\ncan use `firstWhere`, `lastWhere`, and `singleWhere` without creating a\nfiltering iterable. The `lastWhere` recommendation requires a pure predicate:\na list may search backward and stop early, changing predicate evaluation\norder and count. No automatic fix is offered. Lazy `expand` calls are not\nreported: eagerly spreading them could change evaluation timing.\n\nOnly explicit, non-null-aware chains with one positional callback match.\nSource overrides, unrelated lookalike APIs, and unresolved receivers are\nexcluded. Arrow closures testing their parameter with `is T` belong to\n`prefer-iterable-where-type`; length and membership checks belong to\n`prefer-is-empty` and `prefer-contains`, respectively. No arbitrary `sync*`\nfunction is classified as slow merely because it is a generator.",
+    "domains": [],
+    "examples": {
+      "bad": "bool positive(int value) => value > 0;\n\nvoid search(Iterable<int> values, List<int> list, Set<int> set) {\n  values.where(positive).first;\n  values.where(positive).last;\n  values.where(positive).single;\n  list.where((value) => value > 2).first;\n  set.where((value) => value.isEven).last;\n  (values.where((value) => value < 10)).single;\n  <int>[1, 2, 3].where(positive).first;\n  values.map((value) => value + 1).where(positive).first;\n}\n\nvoid typeFilters(Iterable<Object> values, Object other) {\n  values.where((value) => value is! String).first;\n  values.where((value) { return value is String; }).first;\n  values.where((value) => other is String).first;\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nbool positive(int value) => value > 0;\n\nclass Query {\n  Query where(bool Function(int) predicate) => this;\n  int get first => 0;\n  int get last => 0;\n  int get single => 0;\n}\n\nabstract class CustomIterable implements Iterable<int> {\n  @override\n  Iterable<int> where(bool Function(int) predicate) => <int>[1];\n}\n\nvoid search(Iterable<int> values, Iterable<Object> objects,\n    Iterable<int>? nullable, dynamic unknown, Query query, CustomIterable custom) {\n  values.firstWhere(positive);\n  values.where(positive);\n  values.first;\n  values.where(positive).isEmpty;\n  values.where(positive).length == 0;\n  objects.where((value) => value is String).first;\n  objects.where((value) => (value is int)).last;\n  objects.where((value) => value is num).single;\n  nullable?.where(positive).first;\n  unknown.where(positive).first;\n  query.where(positive).first;\n  query.where(positive).last;\n  query.where(positive).single;\n  custom.where(positive).first;\n}\n\nvoid membership(List<int> values) {\n  values.indexOf(1) >= 0;\n}\n\nvoid streamSearch(Stream<int> values) {\n  values.where(positive).first;\n}"
+    },
+    "group": "performance",
+    "name": "avoid-slow-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports loop-local final variables whose computation is independent of the loop.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 4,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 14,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 23,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 32,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 41,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 50,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      }
+    ],
+    "docs": "Reports loop-local final variables whose computation is independent of the loop.\n\nMoving a repeated computation before the loop avoids doing the same work on\nevery iteration. This conservative rule checks direct loop-body declarations:\nnon-throwing SDK numeric addition, subtraction and multiplication, and the\nSDK `List.reversed` view of a final local list literal. Dependencies must be\nfinal locals declared before the loop, never reassigned, and used with their\ndeclaration-time type rather than a loop-local promotion. Numeric expressions\nmust depend on a local, not consist entirely of literals. List sources and\nreversed views may only be iterated or have read-only properties inspected;\naliases, escaping identities, mutations and closure captures are excluded.\nCalls, constructors, fresh collection literals, user-defined operators and\ngetters, late declarations and conditional declarations are not candidates.",
+    "domains": [],
+    "examples": {
+      "bad": "void reversedView() {\n  final list = [1, 2, 3];\n  for (final element in list) {\n    final reversed = list.reversed;\n    for (final value in reversed) {\n      print(value + element);\n    }\n  }\n}\n\nvoid addition() {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    final padded = width + 2;\n    print(padded + i);\n  }\n}\n\nvoid multiplication() {\n  final scale = 2.5;\n  var remaining = 3;\n  while (remaining-- > 0) {\n    final doubled = scale * 2;\n    print(doubled);\n  }\n}\n\nvoid subtraction() {\n  final maximum = 100;\n  var remaining = 3;\n  do {\n    final limit = maximum - 1;\n    print(limit);\n  } while (remaining-- > 0);\n}\n\nvoid compound() {\n  final width = 10;\n  final height = 20;\n  for (final value in [1, 2]) {\n    final area = (width + 2) * (height - 1);\n    print(area + value);\n  }\n}\n\nvoid nested() {\n  for (final value in [1, 2]) {\n    final size = value + 1;\n    for (var i = 0; i < 3; i++) {\n      final doubled = size * 2;\n      print(doubled + i);\n    }\n  }\n}",
+      "crossFile": null,
+      "good": "void loopBound() {\n  for (final element in [1, 2, 3]) {\n    final doubled = element * 2;\n    print(doubled);\n  }\n}\n\nvoid mutableBinding() {\n  var width = 10;\n  for (var i = 0; i < 3; i++) {\n    final padded = width + 2;\n    print(padded);\n    width++;\n  }\n}\n\nvoid unwrittenMutableBinding() {\n  var width = 10;\n  for (var i = 0; i < 3; i++) {\n    final padded = width + 2;\n    print(padded);\n  }\n}\n\nvoid mutableResult() {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    var padded = width + 2;\n    print(padded++);\n  }\n}\n\nvoid mutatedSource() {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    list.add(i);\n  }\n}\n\nvoid mutatedLength() {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    list.length--;\n  }\n}\n\nvoid escapingSource() {\n  final list = [1, 2, 3];\n  final alias = list;\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    alias.add(i);\n  }\n}\n\nvoid escapingView(List<Iterable<int>> results) {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    results.add(reversed);\n  }\n}\n\nvoid freshIdentity(List<List<int>> results) {\n  for (var i = 0; i < 3; i++) {\n    final list = <int>[];\n    results.add(list);\n  }\n}\n\nvoid sideEffects(int Function() next) {\n  for (var i = 0; i < 3; i++) {\n    final value = next();\n    print(value);\n  }\n}\n\nvoid closures(List<int Function()> callbacks) {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    final callback = () => width + i;\n    callbacks.add(callback);\n  }\n}\n\nvoid capturedSource(List<void Function()> callbacks) {\n  final list = [1, 2, 3];\n  callbacks.add(() => list.add(4));\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n  }\n}\n\nvoid unknownCollection(List<int> list) {\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n  }\n}\n\nvoid possibleThrow() {\n  final numerator = 10;\n  final denominator = 0;\n  for (var i = 0; i < 3; i++) {\n    final quotient = numerator ~/ denominator;\n    print(quotient);\n  }\n}\n\nvoid conditionalDeclaration(bool enabled) {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    if (enabled) {\n      final padded = width + 2;\n      print(padded);\n    }\n  }\n}\n\nclass Custom {\n  Custom operator +(Custom other) => Custom();\n  Iterable<int> get reversed => [DateTime.now().microsecond];\n}\n\nvoid customOperations() {\n  final value = Custom();\n  for (var i = 0; i < 3; i++) {\n    final sum = value + value;\n    final reversed = value.reversed;\n    print(sum);\n    print(reversed.length);\n  }\n}\n\nvoid alreadyHoisted() {\n  final list = [1, 2, 3];\n  final reversed = list.reversed;\n  for (final element in list) {\n    print(reversed.length + element);\n  }\n}\n\nvoid promotedNullable(int? input) {\n  final width = input;\n  for (var i = 0; i < 3; i++) {\n    if (width == null) continue;\n    final padded = width + 1;\n    print(padded);\n  }\n}\n\nvoid promotedCollection() {\n  final Object list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    if (list is! List<int>) continue;\n    final reversed = list.reversed;\n    print(reversed.length);\n  }\n}\n\nvoid literalArithmetic() {\n  for (var i = 0; i < 3; i++) {\n    final value = (2 + 3) * 4;\n    print(value);\n  }\n}\n\nvoid indexMutation() {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    list[0] = i;\n  }\n}\n\nvoid passingSource(void Function(List<int>) mutate) {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    mutate(list);\n  }\n}"
+    },
+    "group": "performance",
+    "name": "move-variable-outside-iteration",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

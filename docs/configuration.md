@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 170 of 310 shipped
+If no config is found, falcon enables its own recommended set: 170 of 315 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -179,6 +179,8 @@ Option names use `snake_case` inside the `options` object.
 | `max-switch-cases` | `max_cases` | `10` | Flag switch statements with more than this many non-default cases. |
 | `cyclomatic-complexity` | `max_complexity` | `20` | Flag functions whose cyclomatic complexity (1 + decision points: `if`, ternary, `&&`, `\|\|`, `??`, loops, `catch`, non-default `case`, pattern `when` guards) exceeds this value. |
 | `maximum-nesting-level` | `max_nesting` | `5` | Flag functions whose deepest nesting of control-flow blocks (`if`/`for`/`while`/`do`/`switch`/`try`) exceeds this value. |
+| `avoid-complex-conditions` | `threshold` | `10` | Flag a connected `&&`/`\|\|` expression with more operands than this. Parentheses and `!` keep the count; any other expression is one operand. |
+| `avoid-complex-loop-conditions` | `threshold` | `1` | Same counting for `while`, `do`-`while` and C-style `for` conditions, including collection `for`. For-in iterables, initializers and updaters are not counted. |
 
 ### Identifier and naming rules
 

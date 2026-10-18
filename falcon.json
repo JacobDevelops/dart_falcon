@@ -48,7 +48,10 @@
         "avoid-classes-with-only-static-members": "off",
         "cascade-invocations": "off",
         "prefer-if-elements-to-conditional-expressions": "off",
-        "unnecessary-lambdas": "off"
+        "unnecessary-lambdas": "off",
+        "avoid-complex-conditions": "warn",
+        "avoid-complex-loop-conditions": "warn",
+        "avoid-collapsible-if": "warn"
       },
       "correctness": {
         "avoid-web-libraries-in-flutter": "warn",
@@ -118,7 +121,9 @@
         "noop-primitive-operations": "off",
         "prefer-foreach": "off",
         "use-is-even-rather-than-modulo": "off",
-        "use-string-buffers": "off"
+        "use-string-buffers": "off",
+        "avoid-slow-collection-methods": "warn",
+        "move-variable-outside-iteration": "warn"
       },
       "style": {
         "sort-child-properties-last": "warn",

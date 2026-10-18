@@ -59,3 +59,5 @@ avoid-print/debug_mode_boundaries.dart
 unnecessary-overrides/bad.dart
 unnecessary-overrides/good.dart
 cast-nullable-to-non-nullable/contextual_callbacks.dart
+avoid-slow-collection-methods/bad.dart
+avoid-slow-collection-methods/good.dart

@@ -1,6 +1,9 @@
 //! Complexity lint rules.
 
 pub mod avoid_classes_with_only_static_members;
+pub mod avoid_collapsible_if;
+pub mod avoid_complex_conditions;
+pub mod avoid_complex_loop_conditions;
 pub mod avoid_function_literals_in_foreach_calls;
 pub mod avoid_inverted_boolean_expressions;
 pub mod avoid_nested_conditional_expressions;

@@ -117,6 +117,15 @@
                 "avoid-classes-with-only-static-members": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-collapsible-if": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-complex-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-complex-loop-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-function-literals-in-foreach-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -399,6 +408,12 @@
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
                 "avoid-slow-async-io": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "move-variable-outside-iteration": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "noop-primitive-operations": {
@@ -1305,6 +1320,15 @@
                 "avoid-classes-with-only-static-members": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-collapsible-if": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-complex-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-complex-loop-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-function-literals-in-foreach-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1587,6 +1611,12 @@
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
                 "avoid-slow-async-io": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "move-variable-outside-iteration": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "noop-primitive-operations": {
