@@ -1,0 +1,3 @@
+name: app
+dev_dependencies:
+  test_helpers: any

@@ -1575,8 +1575,17 @@ fn docgen() {
 
         let config = docgen_config_for(&corpus_root, meta, &temp_config);
 
-        let bad_path = rule_dir.join("bad.dart");
-        let good_path = rule_dir.join("good.dart");
+        // Test-domain rules only inspect `_test.dart` files, so their examples come from those fixtures.
+        let fixture = |stem: &str| {
+            let test = rule_dir.join(format!("{stem}_test.dart"));
+            if test.exists() {
+                test
+            } else {
+                rule_dir.join(format!("{stem}.dart"))
+            }
+        };
+        let bad_path = fixture("bad");
+        let good_path = fixture("good");
         let bad_example = fs::read_to_string(&bad_path)
             .ok()
             .map(|s| strip_expectations(&s));

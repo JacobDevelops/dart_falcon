@@ -701,7 +701,6 @@ class Bar {
 #[test]
 fn cross_file_corpus_matches_expectations() {
     let corpus = corpus_dir();
-    let config = FalconConfig::default();
     let mut failures: Vec<String> = Vec::new();
     let mut total_expectations = 0usize;
 
@@ -712,6 +711,7 @@ fn cross_file_corpus_matches_expectations() {
             "cross-file rule `{}` is missing its corpus/<rule>/cross-file/ fixture",
             rule_name
         );
+        let config = corpus_config(&corpus.join(rule_name));
 
         for project in cross_file_project_roots(&dir) {
             let fixture_sources: Vec<(PathBuf, String)> =

@@ -6,10 +6,10 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 342);
+    assert_eq!(RULE_METADATA.len(), 351);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
-        187
+        192
     );
 }
 
@@ -312,6 +312,10 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
             "Raw documentation comment lines.",
         ),
         (
+            "avoid-duplicate-test-assertions",
+            "Test filename and framework import eligibility before semantic collection.",
+        ),
+        (
             "avoid-commented-out-code",
             "Raw non-documentation comment tokens.",
         ),
@@ -342,6 +346,10 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         ("library-names", "Library directive name."),
         ("library-prefixes", "Import directive prefixes."),
         ("max-lines-for-file", "Whole-source line count."),
+        (
+            "missing-test-assertion",
+            "Test filename and framework import eligibility before semantic collection.",
+        ),
         (
             "no-leading-underscores-for-library-prefixes",
             "Import directive prefixes.",

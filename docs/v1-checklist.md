@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 25 | 132 | 24 | 181 |
-| Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 5 | 7 | 3 | 15 |
-| **Total** | **34** | **143** | **31** | **208** |
+| DCM-inspired | 21 | 132 | 24 | 177 |
+| Cross-file additions | 0 | 4 | 4 | 8 |
+| Additional rules | 4 | 7 | 3 | 14 |
+| **Total** | **25** | **143** | **31** | **199** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (181)
+## Planned DCM-inspired rules (177)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -220,12 +220,10 @@ not re-added.
 
 ### 2h. test domain (new)
 
-Activated for `*_test.dart`. Falcon ships none of these today.
+Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-duplicate-test-assertions` | correctness | S | paid | Same assertion repeated in a test. | must-have |
-| `missing-test-assertion` | correctness | LT | paid | Test body with no expect/verify. | must-have |
 | `avoid-empty-test-groups` | correctness | S | paid | `group()` with no tests. | nice-to-have |
 | `prefer-unique-test-names` | suspicious | S | paid | Duplicate test descriptions. | nice-to-have |
 | `prefer-correct-test-file-name` | style | X | paid | Test file naming convention. | nice-to-have |
@@ -315,10 +313,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `list-all-equatable-fields` | correctness | FT | paid | Field missing from Equatable props. | must-have |
-| `add-equatable-props` | correctness | FT | paid | Equatable subclass missing a props override. | must-have |
 | `extend-equatable` | style | LT | paid | Value class should extend Equatable; a library preference, not a correctness improvement. | nice-to-have |
-| `avoid-mutable-equatable-subclass-fields` | correctness | FT | n/a | Mutable fields on subclasses inheriting Equatable equality can invalidate equality/hash behavior. | must-have |
 | `prefer-equatable-mixin` | style | LT | paid | Use EquatableMixin where appropriate. | nice-to-have |
 
 ### Deduplication notes
@@ -349,7 +344,7 @@ Additional planned rows cover uncovered disposal cases, accessibility labels and
 
 ---
 
-## Planned cross-file rules (12)
+## Planned cross-file rules (8)
 
 Whole-project / app-wide rules live in the `cross-file` config section.
 The current shipped set is defined by the cross-file entries in `RULE_METADATA`;
@@ -359,16 +354,7 @@ infrastructure: **A** reuses the resolved directive graph / lexical name index;
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four shipped official lints are not counted in the 12 planned additions below.
-
-### 3a. Tier 1: must-have (4)
-
-| rule | falcon group | analysis | difficulty | description |
-|---|---|---|---|---|
-| `unused-dependencies` | correctness | needs-cross-file/project | B | A package in pubspec `dependencies:` that no source file imports via `package:<dep>/…`. |
-| `undeclared-dependencies` | correctness | needs-cross-file/project | B | A `package:<x>/…` import whose `<x>` is neither a declared (dev)dependency nor the package itself. |
-| `no-import-cycles` | correctness | needs-cross-file/project | A | Import/export cycle between library files; report the full cycle chain. |
-| `banned-imports` | correctness | needs-cross-file/project | A | User-configured architecture boundaries: files matching glob X may not import glob Y. |
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `sort-pub-dependencies`, `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, and `banned-imports`. The four shipped official lints are not counted in the 8 planned additions below.
 
 ### 3b. Tier 2: nice-to-have (4)
 

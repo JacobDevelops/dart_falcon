@@ -1,0 +1,6 @@
+name: equatable_fixture
+dependencies:
+  equatable:
+    path: packages/equatable
+  entity_base:
+    path: packages/entity_base

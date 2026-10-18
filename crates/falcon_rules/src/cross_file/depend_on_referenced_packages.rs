@@ -4,6 +4,9 @@
 //! development-only locations such as `test/` and `tool/` may also name a
 //! dev-dependency. SDK imports and imports of the package itself are ignored.
 //! Like the analyzer, only the primary URI is checked, not conditional alternatives.
+//! When `undeclared-dependencies` is enabled for a file, that rule owns missing
+//! declarations and dev-dependencies imported from `lib/`; this rule only adds
+//! its stricter executable/build-hook dependency check, avoiding duplicate reports.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -21,21 +24,22 @@ pub struct DependOnReferencedPackages;
 
 const NAME: &str = "depend-on-referenced-packages";
 
-struct PackageManifest {
-    name: String,
-    dependencies: HashSet<String>,
-    dev_dependencies: HashSet<String>,
+pub(super) struct PackageManifest {
+    pub(super) name: String,
+    pub(super) dependencies: HashSet<String>,
+    pub(super) dev_dependencies: HashSet<String>,
 }
 
 impl CrossFileRule for DependOnReferencedPackages {
     fn analyze_project(
         &self,
         files: &[ProjectFile],
-        _config: &FalconConfig,
+        config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
         let mut manifests: HashMap<PathBuf, Option<PackageManifest>> = HashMap::new();
         let mut diagnostics = Vec::new();
+        let replacement = crate::meta::meta_for("undeclared-dependencies");
 
         for file in files {
             let Some(pubspec) = enclosing_pubspec(&file.path) else {
@@ -48,6 +52,16 @@ impl CrossFileRule for DependOnReferencedPackages {
                 continue;
             };
             let regular_dependency_required = is_public_or_executable(&file.path, &pubspec);
+            let replacement_enabled = replacement.is_some_and(|meta| {
+                config
+                    .resolve_cross_file_rule_for(
+                        &file.path.to_string_lossy(),
+                        meta.group.as_str(),
+                        meta.name,
+                        meta.recommended,
+                    )
+                    .is_some()
+            });
 
             let import_uris = file.program().imports().map(|directive| directive.uri());
             let export_uris = file.program().exports().map(|directive| directive.uri());
@@ -60,6 +74,12 @@ impl CrossFileRule for DependOnReferencedPackages {
                     || manifest.name == package
                     || manifest.dependencies.contains(package)
                     || (!regular_dependency_required && manifest.dev_dependencies.contains(package))
+                {
+                    continue;
+                }
+                if replacement_enabled
+                    && (!manifest.dev_dependencies.contains(package)
+                        || is_library_file(&file.path, &pubspec))
                 {
                     continue;
                 }
@@ -80,7 +100,7 @@ impl CrossFileRule for DependOnReferencedPackages {
     }
 }
 
-fn read_manifest(path: &Path) -> Option<PackageManifest> {
+pub(super) fn read_manifest(path: &Path) -> Option<PackageManifest> {
     let source = std::fs::read_to_string(path).ok()?;
     parse_manifest(&source)
 }
@@ -116,9 +136,15 @@ fn mapping_keys(mapping: &Mapping, key: &str) -> Option<HashSet<String>> {
     }
 }
 
-fn imported_package(uri: &str) -> Option<&str> {
+pub(super) fn imported_package(uri: &str) -> Option<&str> {
     let (package, path) = uri.strip_prefix("package:")?.split_once('/')?;
     (!package.is_empty() && !path.is_empty()).then_some(package)
+}
+
+pub(super) fn is_library_file(file: &Path, pubspec: &Path) -> bool {
+    let file = super::canonical_package_path(file);
+    let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
+    file.starts_with(super::canonical_package_path(&root.join("lib")))
 }
 
 fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
