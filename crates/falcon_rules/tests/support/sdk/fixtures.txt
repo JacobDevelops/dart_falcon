@@ -59,6 +59,12 @@ avoid-print/debug_mode_boundaries.dart
 unnecessary-overrides/bad.dart
 unnecessary-overrides/good.dart
 cast-nullable-to-non-nullable/contextual_callbacks.dart
+prefer-immutable-bloc-events/bad.dart
+prefer-immutable-bloc-events/good.dart
+prefer-immutable-bloc-events/good_prefixed.dart
+prefer-immutable-bloc-state/bad.dart
+prefer-immutable-bloc-state/good.dart
+prefer-immutable-bloc-state/good_prefixed.dart
 use-ref-read-synchronously/bad.dart
 use-ref-read-synchronously/good.dart
 use-ref-and-state-synchronously/bad.dart

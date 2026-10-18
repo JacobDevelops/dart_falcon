@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 7 | 132 | 24 | 163 |
+| DCM-inspired | 0 | 132 | 24 | 156 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 1 | 7 | 3 | 11 |
-| **Total** | **8** | **143** | **31** | **182** |
+| Additional rules | 0 | 7 | 3 | 10 |
+| **Total** | **0** | **143** | **31** | **174** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (163)
+## Planned DCM-inspired rules (156)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -240,19 +240,11 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `emit-new-bloc-state-instances` | correctness | FT | paid | Emitting the same state instance. | must-have |
-| `prefer-sealed-bloc-events` | correctness | FT | paid | Bloc events should be sealed. | must-have |
-| `prefer-sealed-bloc-state` | correctness | FT | paid | Bloc state should be sealed. | must-have |
-| `prefer-immutable-bloc-events` | correctness | FT | paid | Bloc events must be immutable. | must-have |
-| `prefer-immutable-bloc-state` | correctness | FT | paid | Bloc state must be immutable. | must-have |
-| `avoid-duplicate-bloc-event-handlers` | correctness | FT | paid | Same event registered twice. | must-have |
-| `check-is-not-closed-after-async-gap` | correctness | FT | paid | `emit` after await without an isClosed check. | must-have |
 | `handle-bloc-event-subclasses` | correctness | FT | paid | `on<Event>` missing subclass handling. | nice-to-have |
 | `avoid-passing-bloc-to-bloc` | suspicious | FT | paid | Bloc dependency anti-pattern. | nice-to-have |
 | `avoid-passing-build-context-to-blocs` | suspicious | FT | paid | BuildContext leaking into a bloc. | nice-to-have |
 | `avoid-bloc-public-fields` | style | LT | paid | Bloc encapsulation (fields). | nice-to-have |
 | `avoid-bloc-public-methods` | style | LT | paid | Bloc encapsulation (methods). | nice-to-have |
-| `avoid-emit-outside-bloc` | correctness | FT | n/a | Prevent emitting outside a Bloc. | must-have |
 | `avoid-passing-bloc-to-widget` | suspicious | FT | n/a | Avoid passing a Bloc directly to a widget. | nice-to-have |
 | `prefer-bloc-extensions` | style | LT | n/a | Prefer Bloc extensions for supported APIs. | nice-to-have |
 | `prefer-bloc-event-suffix` | style | S | paid | Event naming convention. | nice-to-have |

@@ -272,6 +272,9 @@
                 "avoid-contradictory-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-bloc-event-handlers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-duplicate-collection-elements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -285,6 +288,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-dynamic-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-emit-outside-bloc": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-empty-setstate": {
@@ -371,6 +377,9 @@
                 "cancel-subscriptions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "check-is-not-closed-after-async-gap": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "close-sinks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -405,6 +414,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "dispose-providers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "emit-new-bloc-state-instances": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -452,6 +464,12 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-immutable-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-immutable-bloc-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -459,6 +477,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-relative-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-void-to-null": {
@@ -1636,6 +1660,9 @@
                 "avoid-contradictory-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-bloc-event-handlers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-duplicate-collection-elements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1649,6 +1676,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-dynamic-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-emit-outside-bloc": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-empty-setstate": {
@@ -1735,6 +1765,9 @@
                 "cancel-subscriptions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "check-is-not-closed-after-async-gap": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "close-sinks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1769,6 +1802,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "dispose-providers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "emit-new-bloc-state-instances": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -1816,6 +1852,12 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-immutable-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-immutable-bloc-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1823,6 +1865,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-relative-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-void-to-null": {

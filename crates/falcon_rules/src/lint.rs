@@ -3,6 +3,7 @@
 //! (see `meta.rs`) records its upstream provenance.
 
 pub mod a11y;
+pub(crate) mod bloc;
 pub mod complexity;
 pub(crate) mod const_eval;
 pub(crate) mod core_imports;

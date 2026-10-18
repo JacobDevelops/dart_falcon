@@ -3480,6 +3480,60 @@
   },
   {
     "crossFile": false,
+    "description": "Flags later registrations of the same event type in a Bloc constructor.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 11,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 14,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 16,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 20,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      }
+    ],
+    "docs": "Flags later registrations of the same event type in a Bloc constructor.\n\nBloc permits only one `on<Event>` handler per event type. Combine the handlers\ninstead of registering the same event twice. This rule checks unconditional\nconstructor registrations on `this`, including unqualified calls, separately\nfor each constructor. Deferred callbacks, branches, other receivers, local\n`on` bindings, unresolved generic arguments, opaque mixins and classes\noverriding `on` are excluded. Bloc identity requires package resolution or\na matching bloc/flutter_bloc import and superclass.\n\n### Bad\n```dart\non<Started>((event, emit) {});\non<Started>((event, emit) {}); // A second handler for Started.\n```\n\n### Good\n```dart\non<Started>((event, emit) { initialize(); refresh(); });\n```",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\nfinal class Reset extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Start>((event, emit) {});\n    this.on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n    this.on<Stop>((event, emit) {});\n    on<Reset>((event, emit) {});\n    on<Reset>((event, emit) {});\n  }\n  CounterBloc.named() : super(0) {\n    on<Start>((event, emit) {});\n    on<Start>((event, emit) {});\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CounterBloc.named() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.other(CounterBloc other) : super(0) {\n    on<Start>((event, emit) {});\n    other.on<Start>((event, emit) {});\n  }\n  CounterBloc.local(void Function<T>(Object callback) on) : super(0) {\n    on<Start>((event, emit) {});\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.branch(bool flag) : super(0) {\n    if (flag) {\n      on<Start>((event, emit) {});\n    } else {\n      on<Start>((event, emit) {});\n    }\n  }\n}\n\nclass Registry {\n  Registry() {\n    on<Start>(() {});\n    on<Start>(() {});\n  }\n  void on<T>(Object callback) {}\n}\n\nclass CustomBloc extends Bloc<Event, int> {\n  CustomBloc() : super(0) {\n    on<Start>(() {});\n    on<Start>(() {});\n  }\n  void on<T>(Object callback) {}\n}\n\nclass InheritedCustomBloc extends CustomBloc {\n  InheritedCustomBloc() : super() {\n    on<Start>(() {});\n    on<Start>(() {});\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-bloc-event-handlers",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags repeated scalar literals and stable local reads in list and set literals.",
     "diagnostics": [
       {
@@ -3900,6 +3954,72 @@
       "label": "Dart lints",
       "upstreamId": "avoid_dynamic_calls",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_dynamic_calls"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags external calls and tear-offs of a Bloc or Cubit's `emit` method.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 11,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 13,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 14,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 15,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 15,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 20,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      }
+    ],
+    "docs": "Flags external calls and tear-offs of a Bloc or Cubit's `emit` method.\n\nExternal code should dispatch Bloc events or call a Cubit's public domain\nmethods instead of bypassing its state-transition logic. Receivers must be\nconfirmed through `bloc`/`flutter_bloc` package identity or an imported API\nsuperclass. Ordinary and null-aware method calls, tear-offs and cascade\nsections are checked. Emission inside the owning class through `this`,\n`super`, or a receiver of that owner type is allowed; extensions are outside\nthe owner. Unknown/dynamic receivers and unrelated `emit` methods are not\nreported; no class-name suffix is assumed.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_bloc/flutter_bloc.dart';\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n}\nclass Event {}\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0);\n}\nvoid update(Counter counter, Counter? optional, CounterBloc bloc) {\n  counter.emit(1);\n  optional?.emit(2);\n  bloc.emit(3);\n  counter..emit(4);\n  counter..emit(5)..emit(6);\n}\nclass Presenter {\n  final Counter counter;\n  Presenter(this.counter);\n  void refresh() { counter.emit(7); }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n  void increment() { emit(state + 1); }\n  void explicit() { this.emit(1); }\n  void inherited() { super.emit(2); }\n  void cascade() { this..emit(3); }\n  void internal(Counter other) { other.emit(4); }\n}\nclass Other {\n  void emit(int value) {}\n}\nvoid unrelated(Other other, dynamic unknown, void Function(int) emit) {\n  other.emit(1);\n  unknown.emit(2);\n  emit(3);\n  other..emit(4);\n}\nvoid publicApi(Counter counter) { counter.increment(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-emit-outside-bloc",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -6203,6 +6323,84 @@
   },
   {
     "crossFile": false,
+    "description": "Flags Bloc `add` and `emit` calls after an await without a fresh `isClosed` check.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 22,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 28,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 37,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 38,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 43,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 48,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      }
+    ],
+    "docs": "Flags Bloc `add` and `emit` calls after an await without a fresh `isClosed` check.\n\nA Bloc or Cubit can close while asynchronous work is suspended. Check\n`!isClosed` before dispatching or emitting, or return when `isClosed` is true.\nEach await invalidates earlier checks. Both guarded branches and terminating\nearly-return guards are recognized, and nested functions are independent.\nCalls must target the enclosing package-backed Bloc/Cubit, or an Emitter\nparameter of its event handler. An Emitter also accepts its own `!isDone`\nguard. Unrelated receivers, shadowed names and opaque mixins are ignored.\nAnalysis follows straight-line statements and enclosing if branches;\nuncertain loops, switch/try flow, pattern conditions, conditional collection\nelements and optional/short-circuit evaluation are not treated as proof of\nan unguarded asynchronous path.\n\n### Bad\n```dart\nawait load();\nemit(Loaded());\n```\n\n### Good\n```dart\nawait load();\nif (isClosed) return;\nemit(Loaded());\n```",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  Future<void> unguarded() async {\n    await load();\n    emit(1);\n  }\n  Future<void> explicitReceiver() async {\n    await load();\n    this.emit(2);\n  }\n  Future<void> staleCheck() async {\n    if (!isClosed) {\n      await load();\n      emit(3);\n    }\n  }\n  Future<void> wrongGuard(CounterCubit other) async {\n    await load();\n    if (!other.isClosed) {\n      emit(4);\n    }\n  }\n  Future<void> staleReturn() async {\n    if (isClosed) return;\n    await load();\n    emit(5);\n  }\n  Future<void> load() async {}\n}\n\nclass CounterBloc extends Bloc<int, int> {\n  CounterBloc() : super(0) {\n    on<int>((event, emit) async {\n      await load();\n      add(1);\n      emit(2);\n    });\n  }\n  Future<void> handle(int event, Emitter<int> emit) async {\n    await load();\n    emit(3);\n  }\n  Future<void> shadowedGuard(bool isClosed) async {\n    await load();\n    if (!isClosed) {\n      add(4);\n    }\n  }\n  Future<void> load() async {}\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  void synchronous() { emit(0); }\n  Future<void> branchGuard() async {\n    await load();\n    if (!isClosed) { emit(1); }\n  }\n  Future<void> conjunctionGuard(bool ready) async {\n    await load();\n    if (!isClosed && ready) { emit(1); }\n  }\n  Future<void> disjunctionReturn(bool paused) async {\n    await load();\n    if (isClosed || paused) return;\n    emit(1);\n  }\n  Future<void> returnGuard() async {\n    await load();\n    if (isClosed) return;\n    emit(2);\n  }\n  Future<void> elseGuard() async {\n    await load();\n    if (this.isClosed) { print('closed'); } else { this.emit(3); }\n  }\n  Future<void> throwGuard() async {\n    await load();\n    if (isClosed) { throw StateError('closed'); }\n    emit(4);\n  }\n  Future<void> freshGuard() async {\n    await load();\n    if (isClosed) return;\n    await load();\n    if (isClosed) return;\n    emit(5);\n  }\n  Future<void> nestedIsolation() async {\n    await load();\n    final callback = () { emit(6); };\n    print(callback);\n  }\n  Future<void> nestedAwaitIsolation() async {\n    final callback = () async { await load(); };\n    print(callback);\n    emit(7);\n  }\n  Future<void> unrelatedReceiver(CounterCubit other) async {\n    await load();\n    other.emit(8);\n  }\n  Future<void> localShadow(void Function(int) emit) async {\n    await load();\n    emit(9);\n  }\n  Future<void> shortCircuit() async {\n    await load();\n    !isClosed && send();\n  }\n  bool send() { emit(10); return true; }\n  Future<void> load() async {}\n}\n\nclass Service {\n  Future<void> run() async {\n    await load();\n    emit(1);\n  }\n  void emit(int value) {}\n  Future<void> load() async {}\n}\n\nclass CustomCubit extends Cubit<int> {\n  CustomCubit() : super(0);\n  void emit(int value) {}\n}\n\nclass ChildCustomCubit extends CustomCubit {\n  Future<void> inheritedOverride() async {\n    await Future<void>.value();\n    emit(1);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "check-is-not-closed-after-async-gap",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Close instances of `dart:core` `Sink`.",
     "diagnostics": [
       {
@@ -7526,6 +7724,78 @@
     },
     "group": "correctness",
     "name": "dispose-providers",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc and Cubit emissions that reuse their current state instance.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 10,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 12,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 13,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 14,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 15,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 22,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 23,
+        "message": "Create a new state instance instead of emitting the current state."
+      }
+    ],
+    "docs": "Flags Bloc and Cubit emissions that reuse their current state instance.\n\nRe-emitting the same object, including a cascade that mutates that object,\ncan suppress state updates. Create a new state (for example with `copyWith`)\ninstead. Checks require a confirmed `bloc` or `flutter_bloc` API owner and\nrecognize inherited `emit`, `this.emit`, `super.emit`, and Bloc `on` handler\nemitter parameters, including `Emitter`-typed parameters in tear-off handlers.\nLocal bindings and overridden `emit`/`state` members are\nexcluded. Only direct `state`, `this.state`, `super.state`, parentheses and\ncascades rooted in those reads are checked; arbitrary aliases are not traced.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nclass Snapshot {\n  int count = 0;\n  Snapshot copyWith() => Snapshot();\n}\nclass Counter extends Cubit<Snapshot> {\n  Counter() : super(Snapshot());\n  void unchanged() {\n    emit(state);\n    emit(this.state);\n    this.emit(state);\n    super.emit((state));\n    emit(state..count = 1);\n    emit((this.state)..count = 2);\n  }\n}\nclass Event {}\nclass CounterBloc extends Bloc<Event, Snapshot> {\n  CounterBloc() : super(Snapshot()) {\n    on<Event>((event, emit) {\n      emit(state);\n      emit(this.state..count = 3);\n    });\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nclass Snapshot {\n  int count = 0;\n  Snapshot copyWith() => Snapshot();\n}\nclass Counter extends Cubit<Snapshot> {\n  Counter() : super(Snapshot());\n  void changed() {\n    emit(Snapshot());\n    emit(state.copyWith());\n    emit(Snapshot()..count++);\n  }\n  void shadowedState(Snapshot state) { emit(state); }\n  void shadowedEmit(void Function(Snapshot) emit) { emit(state); }\n  void nested() {\n    void emit(Snapshot value) {}\n    emit(this.state);\n  }\n}\nclass Event {}\nclass CounterBloc extends Bloc<Event, Snapshot> {\n  CounterBloc() : super(Snapshot()) {\n    on<Event>((event, emit) {\n      emit(state.copyWith());\n      void nested(void Function(Snapshot) emit) { emit(state); }\n    });\n  }\n}\nclass Unrelated {\n  final state = Snapshot();\n  void emit(Snapshot value) {}\n  void run() { emit(state); }\n}"
+    },
+    "group": "correctness",
+    "name": "emit-new-bloc-state-instances",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -9086,6 +9356,126 @@
   },
   {
     "crossFile": false,
+    "description": "Flags Bloc event classes without an explicit @immutable annotation.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 18,
+        "message": "Annotate this Bloc event with @immutable."
+      }
+    ],
+    "docs": "Flags Bloc event classes without an explicit @immutable annotation.\n\nImmutable models keep state changes predictable and discourage accidental mutation.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nsuperclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nEach class must carry @immutable or @Immutable itself; inheritance is not enough.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Action {}\nclass First extends Action {}\nclass Second extends Action {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\nclass Another extends fb.Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\n\n@immutable\nclass Annotated extends Action {}\nclass MissingOwnAnnotation extends Annotated {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\n@immutable\nsealed class Action {}\n@immutable\nfinal class First extends Action {}\n@immutable\nfinal class Second extends Action {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\n@immutable\nfinal class Other {}\nclass Another extends Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-immutable-bloc-events",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc state classes without an explicit @immutable annotation.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 18,
+        "message": "Annotate this Bloc state with @immutable."
+      }
+    ],
+    "docs": "Flags Bloc state classes without an explicit @immutable annotation.\n\nImmutable models keep state changes predictable and discourage accidental mutation.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nor Cubit superclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nEach class must carry @immutable or @Immutable itself; inheritance is not enough.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Snapshot {}\nclass First extends Snapshot {}\nclass Second extends Snapshot {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\nclass Another extends fb.Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\n\n@immutable\nclass Annotated extends Snapshot {}\nclass MissingOwnAnnotation extends Annotated {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\n@immutable\nsealed class Snapshot {}\n@immutable\nfinal class First extends Snapshot {}\n@immutable\nfinal class Second extends Snapshot {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\n@immutable\nfinal class Other {}\nclass Another extends Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-immutable-bloc-state",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags void method actions on a listening Provider lookup during build.",
     "diagnostics": [
       {
@@ -9241,6 +9631,114 @@
       "label": "Dart lints",
       "upstreamId": "prefer_relative_imports",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_relative_imports"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc event classes without a sealed or final modifier.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Declare this Bloc event sealed or final."
+      }
+    ],
+    "docs": "Flags Bloc event classes without a sealed or final modifier.\n\nClosed hierarchies make exhaustive handling reliable.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nsuperclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nBoth sealed and final satisfy the rule.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Action {}\nclass First extends Action {}\nclass Second extends Action {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\nclass Another extends fb.Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\nsealed class Action {}\nfinal class First extends Action {}\nfinal class Second extends Action {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\nfinal class Other {}\nclass Another extends Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-sealed-bloc-events",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc state classes without a sealed or final modifier.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Declare this Bloc state sealed or final."
+      }
+    ],
+    "docs": "Flags Bloc state classes without a sealed or final modifier.\n\nClosed hierarchies make exhaustive handling reliable.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nor Cubit superclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nBoth sealed and final satisfy the rule.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Snapshot {}\nclass First extends Snapshot {}\nclass Second extends Snapshot {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\nclass Another extends fb.Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\nsealed class Snapshot {}\nfinal class First extends Snapshot {}\nfinal class Second extends Snapshot {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\nfinal class Other {}\nclass Another extends Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-sealed-bloc-state",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

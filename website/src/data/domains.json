@@ -65,7 +65,16 @@
   },
   {
     "name": "bloc",
-    "rules": []
+    "rules": [
+      "avoid-duplicate-bloc-event-handlers",
+      "avoid-emit-outside-bloc",
+      "check-is-not-closed-after-async-gap",
+      "emit-new-bloc-state-instances",
+      "prefer-immutable-bloc-events",
+      "prefer-immutable-bloc-state",
+      "prefer-sealed-bloc-events",
+      "prefer-sealed-bloc-state"
+    ]
   },
   {
     "name": "riverpod",
