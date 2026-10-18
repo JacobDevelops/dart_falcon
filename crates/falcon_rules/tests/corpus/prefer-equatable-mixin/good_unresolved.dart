@@ -1,0 +1,1 @@
+class NotResolved extends Equatable {}

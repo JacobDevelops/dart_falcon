@@ -428,6 +428,9 @@
                 "avoid-recursive-widget-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-ref-inside-state-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-ref-read-inside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -605,6 +608,9 @@
                 "prefer-immutable-bloc-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-immutable-provider-arguments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -738,6 +744,12 @@
                 "prefer-single-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-use-callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-use-memo": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-using-list-view": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -866,6 +878,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-private-typedef-functions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-public-notifier-properties": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-argument-values": {
@@ -998,6 +1013,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "eol-at-end-of-file": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "extend-equatable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "file-names": {
@@ -1159,6 +1177,12 @@
                 "prefer-correct-identifier-length": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-correct-notifier-file-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-provider-file-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-correct-test-file-name": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1172,6 +1196,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-early-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-equatable-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-final-fields": {
@@ -1253,6 +1280,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-returning-condition": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-riverpod-notifier-suffix": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-riverpod-provider-suffix": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-single-quotes": {
@@ -2155,6 +2188,9 @@
                 "avoid-recursive-widget-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-ref-inside-state-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-ref-read-inside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2332,6 +2368,9 @@
                 "prefer-immutable-bloc-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-immutable-provider-arguments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2465,6 +2504,12 @@
                 "prefer-single-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-use-callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-use-memo": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-using-list-view": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2593,6 +2638,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-private-typedef-functions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-public-notifier-properties": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-argument-values": {
@@ -2725,6 +2773,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "eol-at-end-of-file": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "extend-equatable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "file-names": {
@@ -2886,6 +2937,12 @@
                 "prefer-correct-identifier-length": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-correct-notifier-file-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-provider-file-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-correct-test-file-name": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2899,6 +2956,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-early-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-equatable-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-final-fields": {
@@ -2980,6 +3040,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-returning-condition": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-riverpod-notifier-suffix": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-riverpod-provider-suffix": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-single-quotes": {

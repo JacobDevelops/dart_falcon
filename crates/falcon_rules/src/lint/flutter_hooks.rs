@@ -117,7 +117,10 @@ fn package_hook(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bo
                 .is_some_and(|uri| uri.starts_with("package:flutter_hooks/")))
 }
 
-fn call_identity(expr: Expr<'_>, state: &SemanticState<'_>) -> Option<DeclarationIdentity> {
+pub(crate) fn call_identity(
+    expr: Expr<'_>,
+    state: &SemanticState<'_>,
+) -> Option<DeclarationIdentity> {
     let Expr::Call(call) = expr.unparenthesized() else {
         return None;
     };
@@ -141,13 +144,12 @@ fn call_identity(expr: Expr<'_>, state: &SemanticState<'_>) -> Option<Declaratio
     };
     if state.environment.is_bound(head)
         || state.type_parameters.contains(head)
-        || (name.prefix.is_none()
-            && state.enclosing_type.as_ref().is_some_and(|ty| {
-                matches!(ty, ResolvedType::Interface { identity, .. }
-                if !state.signatures.declared_member_facts(identity, head).is_empty()
-                    || state.signatures.member(identity, head).is_some()
-                    || state.signatures.field(identity, head).is_some())
-            }))
+        || state.enclosing_type.as_ref().is_some_and(|ty| {
+            matches!(ty, ResolvedType::Interface { identity, .. }
+            if !state.signatures.declared_member_facts(identity, head).is_empty()
+                || state.signatures.member(identity, head).is_some()
+                || state.signatures.field(identity, head).is_some())
+        })
     {
         return None;
     }
