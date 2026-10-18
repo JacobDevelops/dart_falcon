@@ -8,7 +8,7 @@
 //!
 //! ## Options
 //!
-//! `include-assertions` is a list of additional assertion function names. These
+//! `include_assertions` is a list of additional assertion function names. These
 //! names explicitly trust project helpers, including local functions; prefixed
 //! names can be supplied as written at their call sites.
 
@@ -34,7 +34,7 @@ impl Rule for MissingTestAssertion {
         }
         let additional = options::strings(
             options::for_rule(ctx, "missing-test-assertion"),
-            "include-assertions",
+            "include_assertions",
         )
         .into_iter()
         .flatten()

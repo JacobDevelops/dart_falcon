@@ -7274,7 +7274,7 @@
     "crossFile": false,
     "description": "Reports inline test callbacks that contain no recognized assertion calls.",
     "diagnostics": [],
-    "docs": "Reports inline test callbacks that contain no recognized assertion calls.\n\nOnly `_test.dart` files importing `test` or `flutter_test` are inspected,\nand `test`/`testWidgets` must resolve to a framework package. Assertions\ninclude framework expectations, asynchronous expectation wrappers, `fail`,\nand mockito/mocktail verification calls. Assertions in unused local closures\nor functions and nested tests do not satisfy the enclosing test.\n\n## Options\n\n`include-assertions` is a list of additional assertion function names. These\nnames explicitly trust project helpers, including local functions; prefixed\nnames can be supplied as written at their call sites.",
+    "docs": "Reports inline test callbacks that contain no recognized assertion calls.\n\nOnly `_test.dart` files importing `test` or `flutter_test` are inspected,\nand `test`/`testWidgets` must resolve to a framework package. Assertions\ninclude framework expectations, asynchronous expectation wrappers, `fail`,\nand mockito/mocktail verification calls. Assertions in unused local closures\nor functions and nested tests do not satisfy the enclosing test.\n\n## Options\n\n`include_assertions` is a list of additional assertion function names. These\nnames explicitly trust project helpers, including local functions; prefixed\nnames can be supplied as written at their call sites.",
     "domains": [
       "test"
     ],
