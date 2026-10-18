@@ -92,6 +92,11 @@ fn braced_interpolation_keeps_sync_body_context() {
         let parsed = parse(&src);
         let node = string_lit(parsed.tree.program(&src));
         assert_eq!(node.interpolations().count(), 0, "{src}");
+        assert_eq!(parsed.errors.len(), 1, "{src}: {:?}", parsed.errors);
+        assert_eq!(
+            parsed.errors[0].message, "expected '}' after interpolation expression",
+            "{src}"
+        );
     }
 }
 
@@ -130,7 +135,12 @@ fn generator_yield_interpolation_inherits_its_body_marker() {
     for body in ["sync*", "async*"] {
         let source = format!("void f() {body} {{ yield '${{await g()}}'; }}");
         let parsed = parse(&source);
-        assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
+        assert_eq!(
+            parsed.errors.len(),
+            usize::from(body == "sync*"),
+            "{source}: {:?}",
+            parsed.errors
+        );
         assert_eq!(
             parsed
                 .tree
