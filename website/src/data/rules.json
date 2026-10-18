@@ -107,6 +107,180 @@
   },
   {
     "crossFile": false,
+    "description": "Flags an else-free `if` whose only then-statement is another else-free `if`.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 2,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 3,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 4,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 5,
+        "message": "Merge this nested if with its outer condition using &&."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 6,
+        "message": "Merge this nested if with its outer condition using &&."
+      }
+    ],
+    "docs": "Flags an else-free `if` whose only then-statement is another else-free `if`.\n\nCombining these conditions with `&&` removes unnecessary nesting without\nchanging evaluation order. Both conditions must be ordinary expressions;\npattern conditions, either `else` branch, and blocks containing other\nstatements are excluded. No automatic edit is made, preserving comments.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool a, bool b) {\n  if (a) { if (b) {} }\n  if (a) if (b) {}\n  if (a || b) { if (!b) return; }\n  if (a) { { if (b) {} } }\n  if (!a) { if (a && b) { print(a); } }\n}",
+      "crossFile": null,
+      "good": "void f(bool a, bool b, Object? value) {\n  if (a && b) {}\n  if (a) { print(a); if (b) {} }\n  if (a) { if (b) {} else {} }\n  if (a) { if (b) {} } else {}\n  if (value case int n) { if (n > 0) {} }\n  if (a) { if (value case int n) { print(n); } }\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-collapsible-if",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags boolean expressions with more logical operands than the configured threshold.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 3,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 6,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 7,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "Condition has 4 logical operands (max 3). Extract a named condition."
+      }
+    ],
+    "docs": "Flags boolean expressions with more logical operands than the configured threshold.\n\nEach operand joined by `&&` or `||` counts as one; parentheses and unary\noperators do not hide logical operands. Calls and comparisons are opaque\noperands, so callback bodies do not inflate their caller's complexity.\nOnly the outermost connected logical expression is reported. Logical\nexpressions inside calls and callbacks are checked independently.\n\n## Options\n\n`threshold` (integer, default: 10) — maximum number of logical operands.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool a, bool b, bool c, bool d) {\n  if (a && b && c && d) {}\n  final x = a || b || c || d;\n  final y = (a && b) || (c && d);\n  if (!(a || b || c || d)) {}\n  final z = a ? (b && c && d && a) : false;\n  final callback = a && [1].any((x) => a && b && c && d);\n  while (a && b && c && d) { break; }\n}",
+      "crossFile": null,
+      "good": "void f(bool a, bool b, bool c) {\n  if (a) {}\n  if (a && b) {}\n  if (a || b || c) {}\n  final x = (a && b) || c;\n  final y = !(a && b);\n  while (a && b && c) { break; }\n  final z = a && b && [1].any((x) => a || c);\n  final fallback = (a ?? b) && c;\n  final bits = (1 & 2) == (3 | 4);\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-complex-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags loop conditions with more logical operands than the configured threshold.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 2,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 3,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 5,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 6,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      },
+      {
+        "column": 35,
+        "file": null,
+        "line": 7,
+        "message": "Loop condition has 3 logical operands (max 2). Extract a named condition."
+      }
+    ],
+    "docs": "Flags loop conditions with more logical operands than the configured threshold.\n\nChecks `while`, `do`/`while`, and C-style `for` conditions. Each operand\njoined by `&&` or `||` counts as one; comparisons and calls are opaque.\nFor-in iterables and for-loop initializers and updates are not conditions.\n\n## Options\n\n`threshold` (integer, default: 1) — maximum number of logical operands.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool a, bool b, bool c) {\n  while (a && b && c) { break; }\n  while (a || b || c) { break; }\n  do {} while (a && (b || c));\n  for (; a && b && c;) { break; }\n  for (var i = 0; i < 4 && a && b; i++) {}\n  final values = [for (var i = 0; i < 4 && a && b; i++) i];\n}",
+      "crossFile": null,
+      "good": "void f(bool a, bool b, List<bool> items) {\n  while (a) { break; }\n  while (a && b) { break; }\n  do {} while (a || b);\n  for (var i = 0; i < 2; i++) {}\n  for (final item in items) { if (item && a && b) {} }\n  for (;;) { break; }\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-complex-loop-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a function literal passed to an Iterable's `forEach`.",
     "diagnostics": [
       {
@@ -2674,6 +2848,380 @@
   },
   {
     "crossFile": false,
+    "description": "Flags equality comparisons between non-constant SDK collections.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 2,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 3,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 4,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 5,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 6,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 7,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      }
+    ],
+    "docs": "Flags equality comparisons between non-constant SDK collections.\n\nList, Set, and Map equality compares identity rather than contents. Use a\ncollection equality helper instead. Comparisons between two constants are\nexempt, as are unrelated types (covered by unrelated-type-equality-checks),\nnull comparisons, and custom collection classes that may override equality.",
+    "domains": [],
+    "examples": {
+      "bad": "void compare(List<int> a, List<int> b, Set<int> c, Set<int> d, Map<String, int> e, Map<String, int> f) {\n  print(a == b);\n  print(a != b);\n  print(c == d);\n  print(e != f);\n  print(a == const [1]);\n  print(<int>[1] == <int>[2]);\n}",
+      "crossFile": null,
+      "good": "void compare(List<int> values, dynamic unknown) {\n  const a = [1];\n  const b = [1];\n  print(a == b);\n  print(const <int>{1} == const <int>{1});\n  print(const <String, int>{'x': 1} == const <String, int>{'x': 1});\n  print(values == null);\n  print(values == unknown);\n  print(values == 1);\n  print(1 == 2);\n  print(identical(values, values));\n}\n\nclass ValueList implements List<int> {\n  @override\n  bool operator ==(Object other) => other is ValueList;\n  @override\n  int get hashCode => 0;\n  @override\n  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);\n}\nvoid custom(ValueList first, ValueList second) { print(first == second); }\nvoid unrelated(List<int> integers, List<String> strings, Set<int> unique) {\n  print(integers == strings);\n  print(integers == unique);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-collection-equality-checks",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags pairs of conditions that are always false with `&&` or true with `||`.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 12,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 14,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 15,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      }
+    ],
+    "docs": "Flags pairs of conditions that are always false with `&&` or true with `||`.\n\nChecks a stable boolean against its negation, complementary primitive equality\ncomparisons, and incompatible integer comparisons against integer literals.\nOnly directly paired conditions (allowing parentheses) are compared. Reads must\nbe local variables or parameters; getters, fields, calls, dynamic values, and\nuser-defined operators are excluded. Integer bounds use exact arithmetic;\nfloating-point bounds are excluded because NaN invalidates total ordering.",
+    "domains": [],
+    "examples": {
+      "bad": "void conditions(bool ready, int count, int other, String name) {\n  if (ready && !ready) {}\n  if (!ready || ready) {}\n  if ((ready) && !(ready)) {}\n  if (count == 2 && count != 2) {}\n  if (count == other && other != count) {}\n  if (name == 'Ada' || 'Ada' != name) {}\n  if (count == 3 && count == 4) {}\n  if (count < 4 && count > 4) {}\n  if (count >= 4 && count < 4) {}\n  if (count > 3 && count < 4) {}\n  if (count <= -2 && count > -1) {}\n  if (4 < count && count <= 4) {}\n  if (count <= 4 || count >= 5) {}\n  if (count != 1 || count != 2) {}\n  if (count == 4 && count > 4) {}\n  if (count >= 9007199254740993 && count < 9007199254740993) {}\n}",
+      "crossFile": null,
+      "good": "void conditions(bool ready, bool other, int count, int limit, double floating,\n    dynamic unknown, String name) {\n  if (ready && !other) {}\n  if (count == 3 || count == 4) {}\n  if (count < 4 && count > 2) {}\n  if (count <= 4 && count >= 4) {}\n  if (count < 4 || count > 4) {}\n  if (count >= 3 && count != 3) {}\n  if (count < 4 && limit > 4) {}\n  if (name == 'a b' && name != 'ab') {}\n  // NaN makes both sides false, so this is not a tautology.\n  if (floating < 4 || floating >= 4) {}\n  if (unknown == 3 && unknown == 4) {}\n  if (next() && !next()) {}\n  if (changing && !changing) {}\n  if (nextNumber() == 3 && nextNumber() != 3) {}\n}\n\nbool next() => DateTime.now().millisecondsSinceEpoch.isEven;\nint nextNumber() => DateTime.now().millisecondsSinceEpoch;\nbool get changing => next();\n\nclass Custom {\n  bool operator <(int other) => next();\n  bool operator >(int other) => next();\n  @override\n  bool operator ==(Object other) => next();\n  @override\n  int get hashCode => 0;\n}\n\nvoid overloaded(Custom value) {\n  if (value < 4 && value > 4) {}\n  if (value == 3 && value != 3) {}\n}\n\nclass Source {\n  bool get ready => next();\n  int get count => nextNumber();\n  void reads() {\n    if (ready && !ready) {}\n    if (count == 3 && count != 3) {}\n  }\n}\n\nclass StoredValues {\n  final bool ready = true;\n  final int count = 0;\n\n  void reads() {\n    if (ready && !ready) {}\n    if (count == 3 && count != 3) {}\n    if (count > 4 && count < 4) {}\n  }\n}\n\nclass ChangingValues extends StoredValues {\n  @override\n  bool get ready => next();\n  @override\n  int get count => nextNumber();\n}\n\nbool globalReady = true;\nint globalCount = 0;\nvoid globals() {\n  if (globalReady && !globalReady) {}\n  if (globalCount > 4 && globalCount < 4) {}\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-contradictory-expressions",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated scalar literals and stable local reads in list and set literals.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 2,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 3,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 4,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 5,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 6,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 7,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 8,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      }
+    ],
+    "docs": "Flags repeated scalar literals and stable local reads in list and set literals.\n\nDuplicate entries often indicate a copy-and-paste mistake. Comparisons retain\nliteral spelling. Calls, getters, spreads, and control-flow elements end the\ncomparison region, since they can change values or contribute unknown items.\nMap keys are covered separately by `avoid-duplicate-map-keys`.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(int value, String text) {\n  final a = [1, 1];\n  final b = {'a', 'a'};\n  final c = [true, true];\n  final d = [null, null];\n  final e = [value, value];\n  final g = [text, text];\n  final h = [1, 2, 1];\n}",
+      "crossFile": null,
+      "good": "int next() => 1;\nvoid f(int value, bool condition, List<int> other) {\n  final a = [1, 2];\n  final b = ['a b', 'ab'];\n  final c = [next(), next()];\n  final d = [value, value++];\n  final e = [value, next(), value];\n  final g = [1, ...other, 1];\n  final h = [if (condition) 1 else 1];\n  final i = [[1], [1]];\n  final j = ['$value', '$value'];\n}\nclass Base {\n  int value = 0;\n  List<int> values() => [value, value];\n}\nclass Changing extends Base {\n  int counter = 0;\n  @override\n  int get value => counter++;\n  @override\n  set value(int next) {}\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-collection-elements",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated literal keys in map literals, including literal spreads and collection `if` entries.",
+    "diagnostics": [
+      {
+        "column": 26,
+        "file": null,
+        "line": 2,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 3,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 4,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 5,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 6,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 7,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 8,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      }
+    ],
+    "docs": "Flags repeated literal keys in map literals, including literal spreads and collection `if` entries.\n\nA later key replaces the earlier value. Only scalar literal keys with equal\ntoken spelling are compared; arbitrary expressions and unknown spreads are\nleft alone. Mutually exclusive `if` branches are checked independently.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool condition) {\n  final first = {'a': 1, 'a': 2};\n  final second = {1: 'a', 1: 'b'};\n  final third = {true: 1, true: 2};\n  final fourth = {null: 1, null: 2};\n  final fifth = {'a': 1, ...{'a': 2}};\n  final sixth = {'a': 1, if (condition) 'a': 2};\n  final seventh = {if (condition) 'a': 1, 'a': 2};\n}",
+      "crossFile": null,
+      "good": "int next() => 1;\nvoid f(bool condition, Map<String, int> other) {\n  final distinct = {'a': 1, 'b': 2};\n  final types = <Object, int>{1: 1, '1': 2};\n  final branches = {if (condition) 'a': 1 else 'a': 2};\n  final unknown = {'a': 1, ...other};\n  final effects = {next(): 1, next(): 2};\n  final spaces = {'a b': 1, 'ab': 2};\n  final scopes = {'a': {'a': 1}};\n  final interpolated = {'$condition': 1, '$condition': 2};\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-map-keys",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated `when` guards on syntactically identical switch patterns.",
+    "diagnostics": [
+      {
+        "column": 14,
+        "file": null,
+        "line": 3,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 5,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 7,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 9,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 15,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 22,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 24,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 26,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      }
+    ],
+    "docs": "Flags repeated `when` guards on syntactically identical switch patterns.\n\nRepeating a pattern and guard usually leaves the later arm unreachable.\nThis rule compares guard and pattern tokens, preserving literal contents;\nConstant, literal, logical-or, and parenthesized patterns are left to\n`no-duplicate-case-values`. Different patterns may legitimately share a guard.\nGuards must use stable primitive variable reads and built-in comparisons;\nunknown getters, overloaded operators, and calls are not considered repeatable.\nThe immutable String properties `length`, `isEmpty`, and `isNotEmpty` are\nsupported on stable String variables.",
+    "domains": [],
+    "examples": {
+      "bad": "int f(Object value, bool ready, int count) => switch (value) {\n  int() when ready => 1,\n  int() when ready => 2,\n  String() when count > 1 => 3,\n  String() when count>1 => 4,\n  bool() when !ready => 5,\n  bool() when !ready => 6,\n  double() when count == 2 => 7,\n  double() when count == 2 => 8,\n  _ => 0,\n};\nvoid g(Object value, bool ready) {\n  switch (value) {\n    case int() when ready: break;\n    case int() when ready: break;\n    default: break;\n  }\n}\n\nint stringGuards(Object value, String text) => switch (value) {\n  int() when text.isEmpty => 1,\n  int() when text.isEmpty => 2,\n  String() when text.length > 2 => 3,\n  String() when text.length > 2 => 4,\n  bool() when text.isNotEmpty => 5,\n  bool() when text.isNotEmpty => 6,\n  _ => 0,\n};",
+      "crossFile": null,
+      "good": "bool next() => true;\nint f(Object value, bool ready, int count) => switch (value) {\n  int() when ready => 1,\n  String() when ready => 2,\n  int() when !ready => 3,\n  double() when count > 1 => 4,\n  double() when count > 2 => 5,\n  bool() when next() => 6,\n  bool() when next() => 7,\n  _ => 0,\n};\nint g(String value) => switch (value) {\n  'a b' => 1,\n  'ab' => 2,\n  _ => 3,\n};\n\nbool get changing => next();\nconst code = 1;\n\nint getterGuard(Object value) => switch (value) {\n  int() when changing => 1,\n  int() when changing => 2,\n  _ => 0,\n};\n\nclass Flags {\n  bool get ready => next();\n}\n\nint customGetter(Object value, Flags flags) => switch (value) {\n  int() when flags.ready => 1,\n  int() when flags.ready => 2,\n  _ => 0,\n};\n\n// Constant cases are owned by no-duplicate-case-values, even with guards.\nint literalCases(int value, bool ready) => switch (value) {\n  1 when ready => 1,\n  1 when ready => 2,\n  code when !ready => 3,\n  code when !ready => 4,\n  2 || 3 when ready => 5,\n  2 || 3 when ready => 6,\n  (4) when ready => 7,\n  (4) when ready => 8,\n  _ => 0,\n};\n\nint dynamicGuard(Object value, dynamic unknown) => switch (value) {\n  int() when unknown == 1 => 1,\n  int() when unknown == 1 => 2,\n  _ => 0,\n};\n\nclass StoredGuard {\n  final bool ready = true;\n  final String text = '';\n\n  int guard(Object value) => switch (value) {\n    int() when ready => 1,\n    int() when ready => 2,\n    String() when text.isEmpty => 3,\n    String() when text.isEmpty => 4,\n    _ => 0,\n  };\n}\n\nclass ChangingGuard extends StoredGuard {\n  @override\n  bool get ready => next();\n  @override\n  String get text => next() ? '' : 'changing';\n}\n\nbool globalReady = true;\nint globalGuard(Object value) => switch (value) {\n  int() when globalReady => 1,\n  int() when globalReady => 2,\n  _ => 0,\n};"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-switch-case-conditions",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid method calls or property accesses on a `dynamic` target.",
     "diagnostics": [
       {
@@ -2893,6 +3441,124 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-global-state",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags missing interpolation around visible String variables or member accesses and calls.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 9,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 10,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 12,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 13,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 14,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 15,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 16,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 17,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 19,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 20,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 24,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 26,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 30,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 33,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      }
+    ],
+    "docs": "Flags missing interpolation around visible String variables or member accesses and calls.\n\nA plain string equal to an in-scope variable name may print the name instead\nof its value. This check requires a positional argument of an unqualified call\nand a local binding with a declared nonnullable `dart:core` String type.\nConstructors, receiver methods, annotations, named arguments, raw/escaped/adjacent\nstrings, and calls whose arguments already read that variable are excluded.\nKeys in maps, indexes, comparisons, and patterns are not positional arguments.\n\nIn `'$object.property'` and `'$function(value)'`, only the identifier is\ninterpolated. The rule requires the receiver to have the named readable\nmember, or a known callable type, before suggesting `${...}`. Unknown members,\ndynamic receivers, filenames such as `'assets/$name.png'`, and string-valued\nmethod names in logs are left alone. Raw and escaped dollars and braced\ninterpolations are never flagged. Reports the first incomplete interpolation\nin each segment, rather than an entire multiline literal.",
+    "domains": [],
+    "examples": {
+      "bad": "class Label {\n  final String value;\n  const Label(this.value);\n}\n\nString render(String value) => value;\n\nvoid example(Label label, String value) {\n  print('value: $label.value');\n  print(\"empty: $label.value.isEmpty\");\n  print('$render(value)');\n  print('rendered: $render()');\n  print('''$label.value''');\n  print('prefix ' '$label.value');\n  print('$value.length and $label.value');\n  print('backslash: \\\\ $label.value');\n  print(\"${'$label.value'}\");\n  print('''prefix\n$label.value''');\n  print('value');\n}\n\nvoid localNames(String parameter) {\n  print('parameter');\n  final String title = 'Heading';\n  print('title');\n  String mutable = 'Current';\n  print(\"mutable\");\n  const String constant = 'Fixed';\n  print('constant');\n  {\n    final String nested = 'Inner';\n    print('nested');\n  }\n}",
+      "crossFile": null,
+      "good": "class Label {\n  final String value;\n  const Label(this.value);\n}\n\nString render(String value) => value;\n\nvoid example(Label label, String value) {\n  print('value: ${label.value}');\n  print('${render(value)}');\n  print(r'$label.value');\n  print(r'$render(value)');\n  print('\\$label.value');\n  print('\\$render(value)');\n  print('$label.');\n  print('$label...');\n  print('$value.42');\n  print('$label .value');\n  print('$render (value)');\n  print('${label}.value');\n  print('${render}(value)');\n  print('$value');\n  print('literal label');\n  print('''literal \\$label.value''');\n  print('$label' '.value');\n  print(r'$label.value' '$value');\n  print(\"${'$label'}.value\");\n  print('${{\"closing\": \"}\"}}.value');\n  print('$label\\u002evalue');\n  print('$render\\u0028value)');\n  final String name = 'avatar';\n  final String domain = 'example';\n  final String methodName = 'render';\n  print('assets/$name.png');\n  print('user@$domain.com');\n  print('logs $methodName()');\n  print(r'value');\n  print('\\u0076alue');\n  print('value' ' suffix');\n  print('$label.unknown');\n  print('$value.png');\n  print('''\n${label.value}.length\n''');\n}\n\nvoid shadowing(String title, String? optional, dynamic unknown) {\n  {\n    final int title = 42;\n    print('title');\n  }\n  print('optional');\n  print('unknown');\n  print('notInScope');\n}\n\nclass Key {\n  final String value;\n  const Key(this.value);\n}\n\nclass Preferences {\n  void setString(String key, String value) {}\n}\n\nvoid named({required String key}) {}\nvoid consume(Object first, Object second) {}\n\nvoid keys(Preferences prefs, Map<String, String> json, String key) {\n  final String email = 'address';\n  final String token = 'secret';\n  final String name = 'person';\n  final fields = {'email': email};\n  prefs.setString('token', token);\n  print(json['name']);\n  print(key == 'name');\n  switch (key) {\n    case 'name':\n      break;\n  }\n  print(Key('email'));\n  print(const Key('email'));\n  named(key: 'email');\n  consume('email', email.length);\n  consume('email', '$email');\n  final String assignment = 'name';\n  print(fields);\n  print(assignment);\n  @Key('email')\n  void annotated() {}\n}\n\nString returnName(String name) => 'name';\n\nclass Cache {\n  String? get(String key) => null;\n  void remove(String key) {}\n}\nvoid storageKeys(Cache prefs, String token, String id) {\n  prefs.remove('token');\n  prefs.get('id');\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-missing-interpolation",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -3134,6 +3800,418 @@
       "label": "Dart lints",
       "upstreamId": "avoid_type_to_string",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_type_to_string"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags local futures first awaited after another await inside a try/catch.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 10,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 18,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 26,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 34,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 42,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 53,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 54,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 63,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 71,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 82,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      }
+    ],
+    "docs": "Flags local futures first awaited after another await inside a try/catch.\n\nA future can complete with an unhandled error while execution is suspended,\nbefore the later await attaches the surrounding catch's error handler. Await\nit immediately or attach an error handler before the first async gap.\n\nThis conservative analysis follows straight-line statements directly in a\ntry body with at least one catch. It tracks resolved Future-returning calls\nand constructors assigned to locals, and reports the later awaited local,\nnot discarded futures. Unknown base types and FutureOr are excluded. Early\ncatchError, onError, and then(onError:) calls are exempt, including handlers\nattached in a separate statement or initializer. Parentheses are transparent.\nBranches, loops, nested blocks, local declarations of functions, and other\nexpression statements end tracking: no control-flow or alias assumptions are\nmade across them. Late and multi-variable declarations are excluded. Nested\nfunctions and shadowed locals cannot consume an outer candidate. Only root\nawait expressions in expression, return, and local-variable statements count\nas gaps; awaits nested in other expressions are outside the matching limits.\nA reference inside a composite await operand conservatively consumes that\ncandidate, covering combinators and forwarding methods without alias guesses.\nA handler protects only the call it terminates, not subsequent chained calls.\nWhen intermediate types are unavailable, only SDK Future method chains\n(then/catchError/onError/timeout/whenComplete) on a proven Future base qualify.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\n\nFuture<int> start() async => 1;\nFuture<void> gap() async {}\n\nFuture<void> inferredLocal() async {\n  try {\n    final pending = start();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> explicitLocal() async {\n  try {\n    Future<int> pending = start();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> parenthesized() async {\n  try {\n    final pending = (start());\n    await (gap());\n    await (pending);\n  } catch (_) {}\n}\n\nFuture<void> initializerGap() async {\n  try {\n    final pending = start();\n    final result = await start();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<int> returnAwait() async {\n  try {\n    final pending = start();\n    await gap();\n    return await pending;\n  } catch (_) {\n    return 0;\n  }\n}\n\nFuture<void> multiplePending() async {\n  try {\n    final first = start();\n    final second = start();\n    await gap();\n    await first;\n    await second;\n  } catch (_) {}\n}\n\nFuture<void> lateHandler() async {\n  try {\n    final pending = start();\n    await gap();\n    pending.catchError((Object error) => 0);\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> laterChainCanFail() async {\n  try {\n    final pending = start().catchError((Object error) => 0).timeout(const Duration(seconds: 1));\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<int> withRetry(Future<int> pending) => pending;\n\nFuture<void> uncalledClosureCannotConsume() async {\n  try {\n    final pending = start();\n    final retry = () async => await withRetry(pending);\n    await gap();\n    await pending;\n  } catch (_) {}\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nFuture<int> start() async => 1;\nFuture<void> gap() async {}\n\nFuture<void> immediatelyAwaited() async {\n  try {\n    final pending = start();\n    await pending;\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> initializerHandler() async {\n  try {\n    final pending = start().catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> typedHandler() async {\n  try {\n    final pending = start().onError<Exception>((error, stack) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> thenHandler() async {\n  try {\n    final pending = start().then((value) => value, onError: (Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> separateHandler() async {\n  try {\n    final pending = start();\n    pending.catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> handlerInitializer() async {\n  try {\n    final pending = start();\n    final handled = pending.catchError((Object error) => 0);\n    await gap();\n    await pending;\n    await handled;\n  } catch (_) {}\n}\n\nFuture<void> dynamicType(dynamic Function() create) async {\n  try {\n    final pending = create();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> noCatch() async {\n  final pending = start();\n  await gap();\n  await pending;\n}\n\nFuture<void> finallyOnly() async {\n  try {\n    final pending = start();\n    await gap();\n    await pending;\n  } finally {}\n}\n\nFuture<void> discarded() async {\n  try {\n    final pending = start();\n    await gap();\n  } catch (_) {}\n}\n\nFuture<void> nestedFunction() async {\n  try {\n    final pending = start();\n    Future<void> later() async {\n      await gap();\n      await pending;\n    }\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> shadowed() async {\n  try {\n    final pending = start();\n    {\n      final pending = start();\n      await pending;\n    }\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> reassigned() async {\n  try {\n    var pending = start();\n    await gap();\n    pending = start();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> aliased() async {\n  try {\n    final pending = start();\n    final alias = pending;\n    alias.catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> lazyInitialization() async {\n  try {\n    late final pending = start();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> multipleDeclarators() async {\n  try {\n    Future<int> first = start(), second = start();\n    await gap();\n    await first;\n    await second;\n  } catch (_) {}\n}\n\nFuture<void> aggregateAwait() async {\n  try {\n    final first = start();\n    final second = start();\n    await Future.wait([first, second]);\n    await first;\n    await second;\n  } catch (_) {}\n}\n\nFuture<void> forwardingAwait() async {\n  try {\n    final pending = start();\n    await pending.timeout(const Duration(seconds: 1));\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> compositeHandlerStatement() async {\n  try {\n    final pending = start();\n    pending.then((value) => value).catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> compositeHandlerInitializer() async {\n  try {\n    final pending = start();\n    final handled = pending.then((value) => value).catchError((Object error) => 0);\n    await gap();\n    await pending;\n    await handled;\n  } catch (_) {}\n}\n\nFutureOr<int> maybeStart() => 1;\nFuture<void> futureOrIsNotProof() async {\n  try {\n    final pending = maybeStart();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> conditionalGap(bool condition) async {\n  try {\n    final pending = start();\n    if (condition) {\n      await gap();\n    }\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> loopBoundary(List<int> values) async {\n  try {\n    final pending = start();\n    for (final value in values) {\n      await gap();\n    }\n    await pending;\n  } catch (_) {}\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-uncaught-future-errors",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags loop conditions whose local scalar inputs are never modified by the loop.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 2,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 15,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 23,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 27,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 33,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 41,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 47,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 54,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      }
+    ],
+    "docs": "Flags loop conditions whose local scalar inputs are never modified by the loop.\n\nA forgotten update can make a `while`, `do` or condition-bearing `for` loop\nrepeat forever. Conditions must consist of resolved local scalar bindings,\nliterals, operators, and immutable String length/emptiness properties. Any\nwrite to a referenced declaration in the body, condition or for-update avoids\na report; initialization and writes after the loop do not count. Shadowed\nnames are distinct bindings. Literal-only conditions belong to other rules.\n\nUnknown types, mutable-object properties, calls in conditions, captured\nwrites, and loops containing a possible break, labeled continue, return,\nthrow, yield, await, or resolved Never-returning call are deliberately ignored.\nExit checks include nested constructs; this is not an infinite-loop proof.",
+    "domains": [],
+    "examples": {
+      "bad": "void unchangedBool(bool running) {\n  while (running) {\n    print(running);\n  }\n}\n\nvoid unchangedComparison(int count, int limit) {\n  while (count < limit) {\n    print(count);\n  }\n  count++;\n}\n\nvoid unchangedString(String text) {\n  while (text.isNotEmpty) {\n    print(text);\n  }\n}\n\nvoid unchangedDo(bool running) {\n  do {\n    print(running);\n  } while (running);\n}\n\nvoid unrelatedUpdate(int count) {\n  for (var index = 0; count > 0; index++) {\n    print(index);\n  }\n}\n\nvoid shadowedWrite(int count) {\n  while (count > 0) {\n    var count = 1;\n    count--;\n    print(count);\n  }\n}\n\nvoid initializationIsNotUpdate() {\n  for (var index = 0; index < 10;) {\n    print(index);\n  }\n}\n\nvoid multipleInputs(int left, int right, bool active) {\n  while (active && left != right) {\n    print(left);\n  }\n}\n\nvoid inferredLiteral() {\n  var running = true;\n  while (!(!running)) {\n    print(running);\n  }\n}",
+      "crossFile": null,
+      "good": "void updatedWhile(int count) {\n  while (count > 0) {\n    count--;\n  }\n}\n\nvoid updatedDo(int count) {\n  do {\n    count -= 1;\n  } while (count > 0);\n}\n\nvoid updatedFor() {\n  for (var index = 0; index < 10; index++) {\n    print(index);\n  }\n}\n\nvoid oneInputChanges(int left, int right) {\n  while (left < right) {\n    right--;\n  }\n}\n\nvoid explicitExit(bool running, bool stop) {\n  while (running) {\n    if (stop) break;\n  }\n}\n\nvoid returns(bool running) {\n  while (running) {\n    return;\n  }\n}\n\nvoid throws(bool running) {\n  while (running) {\n    throw StateError('stopped');\n  }\n}\n\nvoid mutatingCondition(int count) {\n  while (count-- > 0) {\n    print(count);\n  }\n}\n\nvoid unknownCondition(bool Function() next) {\n  while (next()) {\n    print('next');\n  }\n}\n\nvoid mutableProperty(List<int> items) {\n  while (items.isNotEmpty) {\n    items.removeLast();\n  }\n}\n\nvoid dynamicCondition(dynamic running) {\n  while (running) {\n    print(running);\n  }\n}\n\nbool globalRunning = true;\nvoid globalCondition() {\n  while (globalRunning) {\n    print(globalRunning);\n  }\n}\n\nvoid intentionalInfinite() {\n  while (true) {}\n  for (;;) {}\n}\n\nvoid closureWrite() {\n  var running = true;\n  final stop = () { running = false; };\n  while (running) {\n    stop();\n  }\n}\n\nvoid localFunctionWrite() {\n  var running = true;\n  void stop() { running = false; }\n  while (running) {\n    stop();\n  }\n}\n\nFuture<void> asynchronousExit(bool running, Future<void> Function() wait) async {\n  while (running) {\n    await wait();\n  }\n}\n\nvoid patternUpdate(int left, int right) {\n  while (left < right) {\n    (left, right) = (right, left);\n  }\n}\n\nvoid nestedWrite(int count, List<int> items) {\n  while (count > 0) {\n    for (count in items) {\n      print(count);\n    }\n  }\n}\n\nvoid labeledContinue(bool ready) {\n  outer: for (var index = 0; index < 10; index++) {\n    while (ready) {\n      continue outer;\n    }\n  }\n}\n\nNever stop() => throw StateError('stopped');\n\nvoid neverReturningCall(bool ready) {\n  while (ready) {\n    stop();\n  }\n}\n\nclass Terminator {\n  Never terminate() => throw StateError('stopped');\n}\n\nvoid neverReturningMethod(bool ready, Terminator terminator) {\n  while (ready) {\n    terminator.terminate();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unmodified-loop-condition",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags casts between types proven unrelated by canonical type resolution.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 2,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 3,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 4,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 6,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 14,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 17,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      }
+    ],
+    "docs": "Flags casts between types proven unrelated by canonical type resolution.\n\nChecks `as` expressions, cast patterns, and SDK collection `cast<T>()`\nelement/key/value conversions. Dynamic, unresolved, and potentially related\ntypes are not reported. Collection casts are lazy but fail when an element\nof the incompatible type is read.",
+    "domains": [],
+    "examples": {
+      "bad": "void casts(String text, int number, List<int> numbers, Set<int> unique, Map<String, int> map) {\n  print(text as int);\n  print(number as String);\n  print(numbers as List<String>);\n  print(numbers.cast<String>());\n  print(unique.cast<String>());\n  print(map.cast<int, int>());\n  print(map.cast<String, String>());\n}\n\nclass Animal {}\nclass NotAnimal {}\nvoid unrelatedClasses(Animal animal) {\n  print(animal as NotAnimal);\n}\nvoid castPattern(String text) {\n  if (text case final number as int) print(number);\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nvoid casts(Object value, dynamic unknown, List<num> numbers, Map<Object, Object> map) {\n  print(value as String);\n  print(unknown as int);\n  print(numbers as List<int>);\n  print(numbers.cast<int>());\n  print(numbers.cast<Object>());\n  print(map.cast<String, int>());\n}\nclass Custom {\n  Custom cast<T>() => this;\n}\nvoid custom(Custom item) { item.cast<String>(); }\n\nextension type Id(int value) {}\nvoid erasedAndStructural<T>(int number, Object value, Object recordValue, Function callback, T generic, FutureOr<int> futureOr) {\n  print(number as Id);\n  print(value as void Function());\n  print(callback as void Function(int));\n  print(recordValue as (int, String));\n  print((1, 2) as Object);\n  print(generic as void Function());\n  print(futureOr as int);\n  if (value case final callback as void Function()) print(callback);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unrelated-type-casts",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags potentially throwing element access on SDK collections.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 6,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 8,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 9,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 10,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 11,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 12,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 13,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 17,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 20,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 23,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 29,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 30,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 31,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 32,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 42,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 43,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 47,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 51,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 52,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 53,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 53,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 54,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 55,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      }
+    ],
+    "docs": "Flags potentially throwing element access on SDK collections.\n\nIterable first/last/single (including object-pattern getters), predicate\nsearches without an `orElse` fallback, elementAt, and List indexing can\nthrow when an element does not exist. The max/min extension getters are\nincluded only when their resolved extension comes from package:collection.\nPrefer nullable alternatives. Map indexing, unknown receivers, and custom\ncollection implementations are excluded. List indexing is safe in a resolved\nFlutter ListView.builder/GridView.builder's direct, synchronous itemBuilder\nbody when itemCount is the same local list's length (including\n`list?.length ?? 0`) and the index is its second parameter. Both bindings\nmust be unreassigned. The list must otherwise appear only as an index or\nlength receiver: aliases, helper arguments, method calls, setters and cascades\nconservatively disable the exemption. Shadowed bindings and nested callbacks\ndo not inherit it. Other bounds/cardinality proofs are not attempted.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'package:collection/collection.dart';\n\nvoid access(List<int> values, Set<String> names, Iterable<int> items, int index) {\n  print(values.first);\n  print(names.last);\n  print(items.single);\n  print(values[index]);\n  print(items.elementAt(index));\n  print(values.firstWhere((value) => value > 0));\n  print(values.lastWhere((value) => value > 0));\n  print(values.singleWhere((value) => value > 0));\n  values..first;\n  values..firstWhere((value) => value > 0);\n}\n\nvoid objectPatterns(Object value) {\n  if (value case List<int>(first: final first)) {\n    print(first);\n  }\n  if (value case Iterable<int>(last: final last)) {\n    print(last);\n  }\n  if (value case Set<int>(single: final single)) {\n    print(single);\n  }\n}\n\nvoid packageExtrema(Iterable<int> values) {\n  print(values.max);\n  print(values.min);\n  values..max;\n  if (values case Iterable<int>(min: final smallest)) {\n    print(smallest);\n  }\n}\n\nclass NotString {\n  List<int> split(String separator) => [];\n}\n\nvoid customSplit(NotString value) {\n  print(value.split(',').first);\n  print(value.split(',').last);\n}\n\nvoid mutatedSplit(String text) {\n  text.split(',')..clear()..first;\n}\n\nvoid splitResults(String text, Pattern separator) {\n  print(text.split(separator).first);\n  print(text.split(separator).last);\n  text.split(separator)..first..last;\n  print(''.split('').first);\n  print(''.split(RegExp('')).last);\n}",
+      "crossFile": null,
+      "good": "void access(List<int> values, Map<int, String> names, dynamic unknown) {\n  print(names[0]);\n  print(values.firstOrNull);\n  print(values.lastOrNull);\n  print(values.singleOrNull);\n  print(values.firstWhere((value) => value > 0, orElse: () => 0));\n  print(values.lastWhere((value) => value > 0, orElse: () => 0));\n  print(values.singleWhere((value) => value > 0, orElse: () => 0));\n  print(unknown.first);\n}\nclass Custom {\n  int get first => 0;\n  int operator [](int index) => 0;\n}\nvoid custom(Custom value) { print(value.first); print(value[0]); }\n\n\nclass Splittable {\n  Custom split(String separator) => Custom();\n}\n\nvoid customSplit(Splittable value) {\n  print(value.split(',').first);\n}\n\nvoid customPatterns(Object value) {\n  if (value case Custom(first: final first)) {\n    print(first);\n  }\n}\n\nextension LocalExtrema on Iterable<int> {\n  int get max => 0;\n  int get min => 0;\n}\n\nvoid localExtrema(Iterable<int> values) {\n  print(values.max);\n  print(values.min);\n  if (values case Iterable<int>(max: final maximum)) {\n    print(maximum);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unsafe-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -7545,6 +8623,152 @@
   },
   {
     "crossFile": false,
+    "description": "Reports filtered iterable searches that have a direct search-method alternative.",
+    "diagnostics": [
+      {
+        "column": 26,
+        "file": null,
+        "line": 4,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 5,
+        "message": "With a pure predicate, use 'lastWhere'; predicate evaluation order and count may change."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 6,
+        "message": "Use 'singleWhere' instead of 'where(...).single'."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 7,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 8,
+        "message": "With a pure predicate, use 'lastWhere'; predicate evaluation order and count may change."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 9,
+        "message": "Use 'singleWhere' instead of 'where(...).single'."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 10,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 52,
+        "file": null,
+        "line": 11,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 15,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 16,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 17,
+        "message": "Use 'firstWhere' instead of 'where(...).first'."
+      }
+    ],
+    "docs": "Reports filtered iterable searches that have a direct search-method alternative.\n\nOn confirmed SDK `Iterable` APIs, `where(test).first`, `.last`, and `.single`\ncan use `firstWhere`, `lastWhere`, and `singleWhere` without creating a\nfiltering iterable. The `lastWhere` recommendation requires a pure predicate:\na list may search backward and stop early, changing predicate evaluation\norder and count. No automatic fix is offered. Lazy `expand` calls are not\nreported: eagerly spreading them could change evaluation timing.\n\nOnly explicit, non-null-aware chains with one positional callback match.\nSource overrides, unrelated lookalike APIs, and unresolved receivers are\nexcluded. Arrow closures testing their parameter with `is T` belong to\n`prefer-iterable-where-type`; length and membership checks belong to\n`prefer-is-empty` and `prefer-contains`, respectively. No arbitrary `sync*`\nfunction is classified as slow merely because it is a generator.",
+    "domains": [],
+    "examples": {
+      "bad": "bool positive(int value) => value > 0;\n\nvoid search(Iterable<int> values, List<int> list, Set<int> set) {\n  values.where(positive).first;\n  values.where(positive).last;\n  values.where(positive).single;\n  list.where((value) => value > 2).first;\n  set.where((value) => value.isEven).last;\n  (values.where((value) => value < 10)).single;\n  <int>[1, 2, 3].where(positive).first;\n  values.map((value) => value + 1).where(positive).first;\n}\n\nvoid typeFilters(Iterable<Object> values, Object other) {\n  values.where((value) => value is! String).first;\n  values.where((value) { return value is String; }).first;\n  values.where((value) => other is String).first;\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nbool positive(int value) => value > 0;\n\nclass Query {\n  Query where(bool Function(int) predicate) => this;\n  int get first => 0;\n  int get last => 0;\n  int get single => 0;\n}\n\nabstract class CustomIterable implements Iterable<int> {\n  @override\n  Iterable<int> where(bool Function(int) predicate) => <int>[1];\n}\n\nvoid search(Iterable<int> values, Iterable<Object> objects,\n    Iterable<int>? nullable, dynamic unknown, Query query, CustomIterable custom) {\n  values.firstWhere(positive);\n  values.where(positive);\n  values.first;\n  values.where(positive).isEmpty;\n  values.where(positive).length == 0;\n  objects.where((value) => value is String).first;\n  objects.where((value) => (value is int)).last;\n  objects.where((value) => value is num).single;\n  nullable?.where(positive).first;\n  unknown.where(positive).first;\n  query.where(positive).first;\n  query.where(positive).last;\n  query.where(positive).single;\n  custom.where(positive).first;\n}\n\nvoid membership(List<int> values) {\n  values.indexOf(1) >= 0;\n}\n\nvoid streamSearch(Stream<int> values) {\n  values.where(positive).first;\n}"
+    },
+    "group": "performance",
+    "name": "avoid-slow-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports loop-local final variables whose computation is independent of the loop.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 4,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 14,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 23,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 32,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 41,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 50,
+        "message": "This computation is loop-invariant. Move the final variable before the loop."
+      }
+    ],
+    "docs": "Reports loop-local final variables whose computation is independent of the loop.\n\nMoving a repeated computation before the loop avoids doing the same work on\nevery iteration. This conservative rule checks direct loop-body declarations:\nnon-throwing SDK numeric addition, subtraction and multiplication, and the\nSDK `List.reversed` view of a final local list literal. Dependencies must be\nfinal locals declared before the loop, never reassigned, and used with their\ndeclaration-time type rather than a loop-local promotion. Numeric expressions\nmust depend on a local, not consist entirely of literals. List sources and\nreversed views may only be iterated or have read-only properties inspected;\naliases, escaping identities, mutations and closure captures are excluded.\nCalls, constructors, fresh collection literals, user-defined operators and\ngetters, late declarations and conditional declarations are not candidates.",
+    "domains": [],
+    "examples": {
+      "bad": "void reversedView() {\n  final list = [1, 2, 3];\n  for (final element in list) {\n    final reversed = list.reversed;\n    for (final value in reversed) {\n      print(value + element);\n    }\n  }\n}\n\nvoid addition() {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    final padded = width + 2;\n    print(padded + i);\n  }\n}\n\nvoid multiplication() {\n  final scale = 2.5;\n  var remaining = 3;\n  while (remaining-- > 0) {\n    final doubled = scale * 2;\n    print(doubled);\n  }\n}\n\nvoid subtraction() {\n  final maximum = 100;\n  var remaining = 3;\n  do {\n    final limit = maximum - 1;\n    print(limit);\n  } while (remaining-- > 0);\n}\n\nvoid compound() {\n  final width = 10;\n  final height = 20;\n  for (final value in [1, 2]) {\n    final area = (width + 2) * (height - 1);\n    print(area + value);\n  }\n}\n\nvoid nested() {\n  for (final value in [1, 2]) {\n    final size = value + 1;\n    for (var i = 0; i < 3; i++) {\n      final doubled = size * 2;\n      print(doubled + i);\n    }\n  }\n}",
+      "crossFile": null,
+      "good": "void loopBound() {\n  for (final element in [1, 2, 3]) {\n    final doubled = element * 2;\n    print(doubled);\n  }\n}\n\nvoid mutableBinding() {\n  var width = 10;\n  for (var i = 0; i < 3; i++) {\n    final padded = width + 2;\n    print(padded);\n    width++;\n  }\n}\n\nvoid unwrittenMutableBinding() {\n  var width = 10;\n  for (var i = 0; i < 3; i++) {\n    final padded = width + 2;\n    print(padded);\n  }\n}\n\nvoid mutableResult() {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    var padded = width + 2;\n    print(padded++);\n  }\n}\n\nvoid mutatedSource() {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    list.add(i);\n  }\n}\n\nvoid mutatedLength() {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    list.length--;\n  }\n}\n\nvoid escapingSource() {\n  final list = [1, 2, 3];\n  final alias = list;\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    alias.add(i);\n  }\n}\n\nvoid escapingView(List<Iterable<int>> results) {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    results.add(reversed);\n  }\n}\n\nvoid freshIdentity(List<List<int>> results) {\n  for (var i = 0; i < 3; i++) {\n    final list = <int>[];\n    results.add(list);\n  }\n}\n\nvoid sideEffects(int Function() next) {\n  for (var i = 0; i < 3; i++) {\n    final value = next();\n    print(value);\n  }\n}\n\nvoid closures(List<int Function()> callbacks) {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    final callback = () => width + i;\n    callbacks.add(callback);\n  }\n}\n\nvoid capturedSource(List<void Function()> callbacks) {\n  final list = [1, 2, 3];\n  callbacks.add(() => list.add(4));\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n  }\n}\n\nvoid unknownCollection(List<int> list) {\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n  }\n}\n\nvoid possibleThrow() {\n  final numerator = 10;\n  final denominator = 0;\n  for (var i = 0; i < 3; i++) {\n    final quotient = numerator ~/ denominator;\n    print(quotient);\n  }\n}\n\nvoid conditionalDeclaration(bool enabled) {\n  final width = 10;\n  for (var i = 0; i < 3; i++) {\n    if (enabled) {\n      final padded = width + 2;\n      print(padded);\n    }\n  }\n}\n\nclass Custom {\n  Custom operator +(Custom other) => Custom();\n  Iterable<int> get reversed => [DateTime.now().microsecond];\n}\n\nvoid customOperations() {\n  final value = Custom();\n  for (var i = 0; i < 3; i++) {\n    final sum = value + value;\n    final reversed = value.reversed;\n    print(sum);\n    print(reversed.length);\n  }\n}\n\nvoid alreadyHoisted() {\n  final list = [1, 2, 3];\n  final reversed = list.reversed;\n  for (final element in list) {\n    print(reversed.length + element);\n  }\n}\n\nvoid promotedNullable(int? input) {\n  final width = input;\n  for (var i = 0; i < 3; i++) {\n    if (width == null) continue;\n    final padded = width + 1;\n    print(padded);\n  }\n}\n\nvoid promotedCollection() {\n  final Object list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    if (list is! List<int>) continue;\n    final reversed = list.reversed;\n    print(reversed.length);\n  }\n}\n\nvoid literalArithmetic() {\n  for (var i = 0; i < 3; i++) {\n    final value = (2 + 3) * 4;\n    print(value);\n  }\n}\n\nvoid indexMutation() {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    list[0] = i;\n  }\n}\n\nvoid passingSource(void Function(List<int>) mutate) {\n  final list = [1, 2, 3];\n  for (var i = 0; i < 3; i++) {\n    final reversed = list.reversed;\n    print(reversed.length);\n    mutate(list);\n  }\n}"
+    },
+    "group": "performance",
+    "name": "move-variable-outside-iteration",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags primitive operations that return their receiver unchanged.",
     "diagnostics": [
       {
@@ -8483,6 +9707,100 @@
       "label": "Dart lints",
       "upstreamId": "use_string_buffers",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/use_string_buffers"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags references to MD5, SHA-1, DES, triple DES, and RC4 package APIs.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 9,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 10,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 12,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 20,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      }
+    ],
+    "docs": "Flags references to MD5, SHA-1, DES, triple DES, and RC4 package APIs.\n\nWeak hashes and ciphers cannot reliably protect sensitive data; use a modern\nalgorithm instead. Matches `md5` and `sha1` from `crypto`, `DES` and `DES3`\nfrom `dart_des`, and `RC4` from `simple_rc4`. Resolved declaration provenance\nis required, including prefixed imports and re-exports. Local bindings,\nlexical members, type parameters, ambiguous imports, and unrelated APIs\nwith the same spelling are not reported. Extension members shadow imports,\nbut members of an extension's on-type do not. References include hash arguments,\ncipher constructor tear-offs, and implicit or explicit construction; type\nannotations alone are not checked.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'package:crypto/crypto.dart';\nimport 'package:crypto/crypto.dart' as crypto;\nimport 'package:dart_des/dart_des.dart';\nimport 'package:dart_des/dart_des.dart' as des;\nimport 'package:simple_rc4/simple_rc4.dart';\nimport 'package:simple_rc4/simple_rc4.dart' as stream;\n\nvoid weakAlgorithms(List<int> bytes) {\n  final first = md5;\n  final second = sha1;\n  crypto.md5.convert(bytes);\n  Hmac(crypto.sha1, bytes);\n  DES(key: bytes);\n  DES3(key: bytes);\n  RC4('secret');\n  new des.DES(key: bytes);\n  new des.DES3(key: bytes);\n  new stream.RC4.fromBytes(bytes);\n  stream.RC4.fromBytes(bytes);\n  final constructor = stream.RC4.new;\n}",
+      "crossFile": null,
+      "good": "import 'package:crypto/crypto.dart';\nimport 'package:crypto/crypto.dart' as crypto;\nimport 'package:lookalike/lookalike.dart' as unrelated;\n\nvoid strongAlgorithms(List<int> bytes) {\n  final first = sha256;\n  final second = crypto.sha512;\n  Hmac(sha256, bytes);\n  crypto.sha256.convert(bytes);\n  final text = 'md5 sha1 DES DES3 RC4';\n}\n\nvoid shadowedHash(Object md5, Object sha1) {\n  final first = md5;\n  final second = sha1;\n}\n\nvoid shadowedPrefix(LocalHashes crypto) {\n  final first = crypto.md5;\n  final second = crypto.sha1;\n}\n\nclass LocalHashes {\n  final md5 = 1;\n  final sha1 = 2;\n  void useMembers() {\n    final first = md5;\n    final second = sha1;\n  }\n}\n\nvoid unrelatedPackage() {\n  final first = unrelated.md5;\n  final second = unrelated.sha1;\n  unrelated.DES();\n  unrelated.DES3();\n  unrelated.RC4();\n}"
+    },
+    "group": "security",
+    "name": "avoid-weak-cryptographic-algorithms",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -22815,6 +24133,294 @@
   },
   {
     "crossFile": false,
+    "description": "Flags assignments evaluated inside control-flow conditions.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 12,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 13,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 14,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 15,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 16,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 17,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 18,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 19,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 20,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 21,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 22,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 23,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 24,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 26,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 31,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 33,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 39,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      }
+    ],
+    "docs": "Flags assignments evaluated inside control-flow conditions.\n\nAssignments can hide a mistyped `==` or an unexpected state change. Move the\nassignment before the condition, or use a comparison. This checks all assignment\noperators in `if`, `while`, `do`/`while`, traditional `for`, ternary, and collection\nconditions, including nested expressions and `if case` or switch guards.\nLoop initializers, updates, and branches are excluded unless nested within a\nsurrounding condition. Closure bodies never inherit an outer condition, but\nconditions inside them are checked. Increment/decrement operators and assert\narguments are outside this rule's scope.",
+    "domains": [],
+    "examples": {
+      "bad": "class Box {\n  bool value = false;\n}\n\nbool identity(bool value) => value;\n\nvoid conditions(bool input, bool other, bool? nullable, Box box) {\n  var flag = false;\n  var count = 0;\n  if (flag = input) {}\n  while (flag = input) { break; }\n  do { count++; } while (flag = input);\n  for (; flag = input;) { break; }\n  final answer = (flag = input) ? 1 : 2;\n  final list = [if (flag = input) answer];\n  final set = {if (flag = input) answer};\n  final map = {if (flag = input) 'answer': answer};\n  if ((nullable ??= input) && other) {}\n  if (identity(flag = other)) {}\n  if ((count += 1) > 2) {}\n  final generated = [for (; flag = input;) answer];\n  final keyed = {for (; flag = input;) 'answer': answer};\n  if (input ? (flag = other) : false) {}\n  if ((box..value = input).value) {}\n  final values = [false];\n  if ((values..[0] = input).first) {}\n  if (() {\n    if (flag = input) {}\n    return true;\n  }()) {}\n  if (input case true when (flag = other)) {}\n  switch (input) {\n    case true when (flag = other):\n      break;\n    default:\n      break;\n  }\n  final switched = switch (input) {\n    true when (flag = other) => 1,\n    _ => 0,\n  };\n}",
+      "crossFile": null,
+      "good": "bool invoke(bool Function() callback) => callback();\n\nvoid conditions(bool input, bool other, bool? nullable) {\n  var flag = false;\n  var count = 0;\n  flag = input;\n  if (flag == other) { flag = other; }\n  while (flag) { flag = false; }\n  do { flag = input; } while (flag);\n  for (flag = input; flag; flag = false) { count++; }\n  final branch = input ? (flag = other) : false;\n  final list = [if (input) flag = other];\n  final map = {if (input) 'value': flag = other};\n  final generated = [for (flag = input; flag; flag = false) count];\n  final keyed = {for (flag = input; flag; flag = false) 'value': count};\n  if (() { flag = input; return flag; }()) {}\n  while ((() => flag = input)()) { break; }\n  if (invoke(() => flag = input)) {}\n  final ternary = (() => flag = input)() ? 1 : 2;\n  final closures = [if ((() => flag = input)()) 1];\n  if ((++count) > 2) {}\n  assert(flag = input);\n  nullable ??= other;\n  switch (input) {\n    case true when (() => flag = other)():\n      flag = false;\n      break;\n    default:\n      break;\n  }\n  final switched = switch (input) {\n    true when input => flag = other,\n    _ => false,\n  };\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-assignments-as-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags `&` and `|` applied to two non-nullable boolean operands.",
+    "diagnostics": [
+      {
+        "column": 13,
+        "file": null,
+        "line": 2,
+        "message": "Use '&&' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 3,
+        "message": "Use '||' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "Use '&&' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 6,
+        "message": "Use '||' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 7,
+        "message": "Use '&&' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 8,
+        "message": "Use '||' instead of a bitwise operator on booleans."
+      }
+    ],
+    "docs": "Flags `&` and `|` applied to two non-nullable boolean operands.\n\nPrefer `&&` and `||` to express logical intent and short-circuit evaluation.\nBoth operands must resolve to core `bool`; integer, dynamic, nullable, and\nunresolved operands are left alone. Exclusive-or and compound assignments\nare not replacements for logical conjunction or disjunction.",
+    "domains": [],
+    "examples": {
+      "bad": "void example(bool left, bool right) {\n  final a = left & right;\n  final b = left | right;\n  final c = true & false;\n  final local = true;\n  final d = local | right;\n  final e = (left == right) & (a != b);\n  final f = (!left) | (!right);\n}",
+      "crossFile": null,
+      "good": "void example(bool left, bool right, int bits, dynamic unknown) {\n  final a = left && right;\n  final b = left || right;\n  final c = bits & 3;\n  final d = bits | 4;\n  final e = left ^ right;\n  final f = unknown & right;\n  left &= right;\n  left |= right;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-bitwise-operators-with-booleans",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags ordinary comments that contain recognizable Dart statements.",
+    "diagnostics": [
+      {
+        "column": 42,
+        "file": null,
+        "line": 2,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 3,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 4,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 5,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 7,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 8,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 9,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 11,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 13,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 15,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      }
+    ],
+    "docs": "Flags ordinary comments that contain recognizable Dart statements.\n\nDelete obsolete code rather than keeping it in comments. This deliberately\nconservative heuristic recognizes declarations, calls, assignments, and\nreturn/throw statements with code punctuation. Documentation comments,\nfenced examples, prose, and TODO/FIXME notes are not reported.",
+    "domains": [],
+    "examples": {
+      "bad": "void example() {\n   // print('old');\n   // final count = 3;\n   // value = false;\n   // return null;\n  /* throw StateError('obsolete'); */\n   // service.refresh();\n   // final int count = 1;\n   // return 42;\n}\n // void obsolete(String value) {\n// }\n // class Obsolete {\n// }\n /*\n * print('old block');\n */",
+      "crossFile": null,
+      "good": "/// Example implementation:\n/// print('documented');\n/** final count = 3; */\nvoid example() {\n  // Explain why this call is required.\n  // Use service.refresh(); after reconnecting.\n  // TODO: print('enable when ready');\n  // FIXME: value = false;\n  // The value = false; means it is disabled.\n  // Max retries = 3;\n  // The value = false;\n  // ```dart\n  // print('example');\n  // ```\n  // Values include `true` and `false`.\n  print('live');\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-commented-out-code",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags explicit `dynamic` type annotations.",
     "diagnostics": [
       {
@@ -23303,6 +24909,188 @@
   },
   {
     "crossFile": false,
+    "description": "Flags extension instance methods and accessors hidden by their target's members.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 15,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 16,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 17,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 18,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 19,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 23,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 27,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 31,
+        "message": "The extension target already has this member. Rename the extension member."
+      }
+    ],
+    "docs": "Flags extension instance methods and accessors hidden by their target's members.\n\nInstance members take precedence over implicit extension invocation, so a\ncolliding extension member needs an explicit extension override to be called.\nRename it instead. The target is resolved by declaration identity, including\naliases and inherited members; getters, fields and setters can also hide a\nmethod. Static extension declarations and other extensions do not compete.\nUnresolved, dynamic and nullable targets are skipped; type parameters are\nchecked only when their resolved non-nullable bound proves the collision.\nThis checks extension declarations, not local variables inside extensions.\nSDK members absent from the precise instance-signature inventory are skipped.",
+    "domains": [],
+    "examples": {
+      "bad": "class Base {\n  void inherited() {}\n}\n\nclass Target extends Base {\n  void run() {}\n  int get size => 0;\n  int field = 0;\n  set setting(int value) {}\n}\n\ntypedef Alias = Target;\n\nextension Hidden on Target {\n  void run() {}\n  void inherited() {}\n  void size() {}\n  void field() {}\n  int get setting => 1;\n}\n\nextension Aliased on Alias {\n  void run() {}\n}\n\nextension Bounded<T extends Target> on T {\n  void inherited() {}\n}\n\nextension on Target {\n  set size(int value) {}\n}",
+      "crossFile": null,
+      "good": "class Target {\n  void run() {}\n  static void staticOnly() {}\n}\n\nclass Unrelated {\n  void differentOwner() {}\n}\n\nextension Renamed on Target {\n  void customRun() {}\n  void differentOwner() {}\n  void staticOnly() {}\n  static void run() {}\n}\n\nextension NullableTarget on Target? {\n  void run() {}\n}\n\nextension DynamicTarget on dynamic {\n  void run() {}\n}\n\nextension First on Target {\n  void extensionOnly() {}\n}\n\nextension Second on Target {\n  void extensionOnly() {}\n}\n\nextension Unbounded<T> on T {\n  void run() {}\n}\n\nclass OrdinarySubclass extends Target {\n  void run() {}\n}\n\nextension StaticIntMember on int {\n  void parse() {}\n}\n\nextension StaticBigIntMember on BigInt {\n  void two() {}\n}\n\nextension StaticDurationMember on Duration {\n  void zero() {}\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-shadowed-extension-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags local bindings and parameters that hide an enclosing type's member.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 13,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 14,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 15,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 16,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 17,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 18,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 19,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 22,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 25,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 29,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 36,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 42,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 43,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 51,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 57,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      }
+    ],
+    "docs": "Flags local bindings and parameters that hide an enclosing type's member.\n\nRenaming the local keeps unqualified member references unambiguous. Checks\nvariables, local functions, closure and executable parameters, loop bindings,\ncatch bindings and declaration patterns inside type members. Declared static\nmembers are visible in static bodies; inherited instance members are checked\nonly in instance bodies using resolved declaration identities. Initializing\nformals, type-signature parameter names and primary constructor declarations\nare excluded. This rule does not check shadowing of other locals or globals.\nUnknown inherited types are not guessed from their spelling.\nSDK members are checked only when the signature inventory proves an instance\nmember; unclassified SDK name-table entries are deliberately not used.",
+    "domains": [],
+    "examples": {
+      "bad": "class Parent {\n  int inherited = 0;\n}\n\nclass Example extends Parent {\n  int value = 0;\n  int get total => 0;\n  set status(int next) {}\n  static int counter = 0;\n  void refresh() {}\n\n  void locals() {\n    final value = 1;\n    var total = 2;\n    final inherited = 3;\n    void refresh() {}\n    final (status, other) = (1, 2);\n    for (final value in <int>[1]) {}\n    try {} catch (value) {}\n  }\n\n  void parameters(int value) {}\n\n  void closure() {\n    final callback = (int total) => total;\n  }\n\n  static void staticBody() {\n    final counter = 1;\n  }\n}\n\nextension Helpers on Example {\n  void helper() {}\n  void run() {\n    final helper = 1;\n  }\n}\n\nextension TargetMembers on Example {\n  void inspect() {\n    final value = 1;\n    final inherited = 2;\n  }\n}\n\nenum Choice {\n  first;\n\n  static void inspect() {\n    final first = 1;\n  }\n}\n\nclass LazyInitializer {\n  int value = 0;\n  late final callback = (int value) => value;\n}",
+      "crossFile": null,
+      "good": "class Unrelated {\n  int unrelated = 0;\n}\n\nclass Example {\n  int value;\n  static int count = 0;\n  Example(this.value);\n\n  void namesDiffer(int input) {\n    final localValue = input;\n    final unrelated = 2;\n    final callback = (int other) => other;\n  }\n\n  static void noInstanceScope(int value) {\n    final callback = (int value) => value;\n  }\n\n  void signatureOnly(void Function(int value) callback) {}\n\n  void assignmentIsNotDeclaration() {\n    (value, count) = (value, count);\n  }\n}\n\nvoid topLevel(int value) {\n  final count = value;\n}\n\nclass Another {\n  void namesAreLocalToTheOwner() {\n    final value = 1;\n    final count = 2;\n  }\n}\n\nextension Separate on Example {\n  void unrelated() {}\n  static void staticScope() {\n    final unrelated = 1;\n  }\n}\n\nabstract class SignatureOnly {\n  int value = 0;\n  void abstractMethod(int value);\n  external void externalMethod(int value);\n  void typedCallback(void callback(int value)) {}\n}\n\nclass EagerInitializer {\n  int value = 0;\n  final callback = (int value) => value;\n}\n\nclass ContextHolder {\n  Object get context => Object();\n}\n\nclass Screen extends ContextHolder {\n  Object build(Object context) => context;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-shadowing",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a type parameter that shadows a type parameter of an enclosing declaration.",
     "diagnostics": [
       {
@@ -23686,6 +25474,88 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-unrelated-type-assertions",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags a cascade after an unparenthesized null-coalescing expression.",
+    "diagnostics": [
+      {
+        "column": 39,
+        "file": null,
+        "line": 6,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 9,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 11,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 12,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 13,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 14,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 15,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 16,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 17,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      }
+    ],
+    "docs": "Flags a cascade after an unparenthesized null-coalescing expression.\n\nIn `a ?? b..method()`, the cascade applies to the result of `a ?? b`, not\njust `b`. Parenthesize the receiver as `(a ?? b)..method()` or the fallback\nas `a ?? (b..method())` to make that choice explicit. The receiver may also\nbe a ternary whose trailing else expression ends in `??`. Explicit receiver\nparentheses and parentheses around the fallback are respected, and `??`\nnested in other receiver subexpressions is not flagged.\nBoth ordinary and null-aware cascades are checked without type inference.",
+    "domains": [],
+    "examples": {
+      "bad": "class Box {\n  int value = 0;\n  void reset() { value = 0; }\n}\n\nBox choose(Box? first, Box second) => first ?? second..reset();\n\nvoid cascades(Box? first, Box? middle, Box second) {\n  final assigned = first ?? second..value = 1;\n  first ?? second..reset()..value = 2;\n  final nested = first ?? middle ?? second..reset();\n  final list = [first ?? second..reset()];\n  final wrapped = (first ?? second..reset());\n  final nullable = first ?? middle?..reset();\n  final operandOnly = first ?? (second)..reset();\n  final ternary = first == null ? second : middle ?? second..reset();\n  final deepTernary = first == null ? second : middle == null ? second : first ?? second..reset();\n}",
+      "crossFile": null,
+      "good": "class Box {\n  int value = 0;\n  void reset() { value = 0; }\n}\n\nBox choose(Box? first, Box second) => (first ?? second)..reset();\n\nvoid cascades(Box? first, Box? middle, Box second, bool condition) {\n  final explicitReceiver = (first ?? second)..value = 1;\n  final explicitFallback = first ?? (second..reset());\n  final multiple = (first ?? second)..reset()..value = 2;\n  final nestedReceiver = ((first ?? middle) ?? second)..reset();\n  final nestedFallback = first ?? (middle ?? (second..reset()));\n  final ordinary = second..reset();\n  final nullAware = (first ?? middle)?..reset();\n  final conditional = (condition ? first : second)?..reset();\n  final methodCall = (first ?? second).reset();\n  final ternaryReceiver = (condition ? first : middle ?? second)..reset();\n  final ternaryFallback = condition ? second : (middle ?? (second..reset()));\n  final parenthesizedElse = condition ? second : (first ?? second)..reset();\n  final coalescingThen = condition ? first ?? second : second..reset();\n}"
+    },
+    "group": "suspicious",
+    "name": "cascade-after-null-coalescing",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },

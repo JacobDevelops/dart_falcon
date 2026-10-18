@@ -1,0 +1,8 @@
+{
+  "configVersion": 2,
+  "packages": [
+    { "name": "unsafe_collection_fixture", "rootUri": "../", "packageUri": "lib/" },
+    { "name": "collection", "rootUri": "../packages/collection", "packageUri": "lib/" },
+    { "name": "flutter", "rootUri": "../packages/flutter", "packageUri": "lib/" }
+  ]
+}

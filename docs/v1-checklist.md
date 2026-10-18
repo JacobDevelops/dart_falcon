@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 66 | 132 | 24 | 222 |
+| DCM-inspired | 45 | 132 | 24 | 201 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 8 | 7 | 3 | 18 |
-| **Total** | **78** | **143** | **31** | **252** |
+| Additional rules | 7 | 7 | 3 | 17 |
+| **Total** | **56** | **143** | **31** | **230** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (222)
+## Planned DCM-inspired rules (201)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -58,17 +58,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-duplicate-map-keys` | correctness | S | paid? | Duplicate keys in a map literal silently drop entries. | must-have |
-| `avoid-duplicate-collection-elements` | correctness | LT | paid | Duplicate elements in set/list literal. | must-have |
-| `avoid-duplicate-switch-case-conditions` | correctness | S | paid | Two switch cases with equal constant conditions. | must-have |
-| `avoid-collection-equality-checks` | correctness | FT | paid | `==` between collections never compares contents. | must-have |
-| `avoid-unrelated-type-casts` | correctness | FT | paid | Cast between unrelated types always fails. | must-have |
-| `avoid-unsafe-collection-methods` | correctness | FT | paid | `.first`/`.single`/`[i]` that can throw at runtime. | must-have |
-| `avoid-missing-interpolation` | correctness | S | paid | `$name` written as literal text outside interpolation. | must-have |
-| `avoid-contradictory-expressions` | correctness | LT | paid | `a && !a` style always-false/true conditions. | must-have |
-| `avoid-unmodified-loop-condition` | correctness | LT | paid | Loop variable never changes → infinite loop. | must-have |
-| `avoid-uncaught-future-errors` | correctness | FT | paid | Future error path with no catch. | must-have |
-| `avoid-weak-cryptographic-algorithms` | security | FT | paid | MD5/SHA1/weak cipher usage. | must-have |
 | `avoid-duplicate-cascades` | correctness | S | paid? | Same cascade section invoked twice. | nice-to-have |
 | `avoid-duplicate-exports` | correctness | S | paid | Duplicate export directives are redundant only when URI and combinators make the directive genuinely redundant. | nice-to-have |
 | `avoid-duplicate-named-imports` | correctness | S | paid | Duplicate named import. | nice-to-have |
@@ -104,12 +93,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-commented-out-code` | suspicious | S | paid | Commented-out code blocks left behind. | must-have |
-| `avoid-shadowing` | suspicious | LT | paid | Local shadows an outer member. | must-have |
-| `avoid-shadowed-extension-methods` | suspicious | LT | paid | Local shadows an extension member. | must-have |
-| `avoid-assignments-as-conditions` | suspicious | S | paid | `if (x = y)` likely-bug. | must-have |
-| `avoid-bitwise-operators-with-booleans` | suspicious | S | paid | `&`/`\|` on bools instead of `&&`/`\|\|`. | must-have |
-| `cascade-after-null-coalescing` | suspicious | S | n/a | Warn when a cascade after `??` changes apparent precedence; distinct from cascade style checks. | must-have |
 | `avoid-banned-names` | suspicious | S | paid | Config-driven forbidden identifiers. | nice-to-have |
 | `avoid-banned-types` | suspicious | FT | paid | Config-driven forbidden types. | nice-to-have |
 | `avoid-banned-annotations` | suspicious | S | paid | Config-driven forbidden annotations. | nice-to-have |
@@ -167,9 +150,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-complex-conditions` | complexity | S | paid | Boolean-expression complexity limit. | must-have |
-| `avoid-complex-loop-conditions` | complexity | S | paid | Loop-condition complexity limit. | must-have |
-| `avoid-collapsible-if` | complexity | S | paid | Nested if mergeable into one condition. | must-have |
 | `avoid-long-records` | complexity | S | paid | Record size limit (falcon has param-list). | nice-to-have |
 | `avoid-complex-arithmetic-expressions` | complexity | S | paid | Arithmetic expression complexity. | nice-to-have |
 | `avoid-if-with-many-branches` | complexity | S | paid | Long if/else-if chains → switch. | nice-to-have |
@@ -186,8 +166,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-slow-collection-methods` | performance | FT | paid | Slow patterns (`.length == 0`, repeated `.where().first`). | must-have |
-| `move-variable-outside-iteration` | performance | LT | paid | Loop-invariant allocation inside a loop. | must-have |
 | `avoid-unnecessary-collections` | performance | LT | paid | Collection built only to be iterated once. | nice-to-have |
 | `move-variable-closer-to-its-usage` | performance | LT | paid | Hoisted variable used in one branch. | nice-to-have |
 | `avoid-unnecessary-futures` | performance | FT | paid | `async`/Future wrapper that adds no value. | nice-to-have |

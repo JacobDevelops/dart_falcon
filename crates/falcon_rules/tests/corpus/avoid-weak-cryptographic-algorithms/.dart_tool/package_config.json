@@ -1,0 +1,10 @@
+{
+  "configVersion": 2,
+  "packages": [
+    { "name": "weak_crypto_fixture", "rootUri": "../", "packageUri": "lib/" },
+    { "name": "crypto", "rootUri": "../packages/crypto", "packageUri": "lib/" },
+    { "name": "dart_des", "rootUri": "../packages/dart_des", "packageUri": "lib/" },
+    { "name": "simple_rc4", "rootUri": "../packages/simple_rc4", "packageUri": "lib/" },
+    { "name": "lookalike", "rootUri": "../packages/lookalike", "packageUri": "lib/" }
+  ]
+}

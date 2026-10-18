@@ -6,10 +6,10 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 298);
+    assert_eq!(RULE_METADATA.len(), 320);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
-        165
+        174
     );
 }
 
@@ -87,13 +87,6 @@ fn schema_exposes_all_groups_in_both_sections_including_empty_groups() {
                 .is_empty()
         );
     }
-    assert!(
-        schema["properties"]["linter"]["properties"]["rules"]["properties"]["security"]
-            ["properties"]
-            .as_object()
-            .unwrap()
-            .is_empty()
-    );
 
     let _: falcon_config::FalconConfig = serde_json::from_value(serde_json::json!({
         "linter": { "rules": { "a11y": {}, "security": {} } },
@@ -316,6 +309,10 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         (
             "avoid-abbreviations-in-doc-comments",
             "Raw documentation comment lines.",
+        ),
+        (
+            "avoid-commented-out-code",
+            "Raw non-documentation comment tokens.",
         ),
         ("avoid-relative-lib-imports", "Import URI path segments."),
         (

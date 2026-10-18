@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "avoid-complex-conditions": {
+          "level": "warn",
+          "options": {
+            "threshold": 3
+          }
+        }
+      }
+    }
+  }
+}

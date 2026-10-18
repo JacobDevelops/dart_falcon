@@ -1,15 +1,21 @@
 //! Suspicious lint rules.
 
+pub mod avoid_assignments_as_conditions;
+pub mod avoid_bitwise_operators_with_booleans;
+pub mod avoid_commented_out_code;
 pub mod avoid_dynamic;
 pub mod avoid_empty_else;
 pub mod avoid_ignoring_return_values;
 pub mod avoid_passing_async_when_sync_expected;
 pub mod avoid_print;
 pub mod avoid_returning_null_for_void;
+pub mod avoid_shadowed_extension_methods;
+pub mod avoid_shadowing;
 pub mod avoid_shadowing_type_parameters;
 pub mod avoid_throw_in_catch_block;
 pub mod avoid_types_as_parameter_names;
 pub mod avoid_unrelated_type_assertions;
+pub mod cascade_after_null_coalescing;
 pub mod control_flow_in_finally;
 pub mod empty_catches;
 pub mod empty_statements;
