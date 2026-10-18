@@ -154,3 +154,6 @@ avoid-misused-hooks/good.dart
 avoid-unnecessary-hook-widgets/bad.dart
 avoid-unnecessary-hook-widgets/good.dart
 avoid-unnecessary-hook-widgets/good_local.dart
+avoid-unnecessary-overrides-in-state/bad.dart
+avoid-unnecessary-overrides-in-state/good.dart
+avoid-unnecessary-overrides-in-state/good_shadowed.dart

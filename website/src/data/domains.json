@@ -13,6 +13,7 @@
       "avoid-single-child-column-or-row",
       "avoid-undisposed-instances",
       "avoid-unnecessary-containers",
+      "avoid-unnecessary-overrides-in-state",
       "avoid-unnecessary-setstate",
       "avoid-unnecessary-stateful-widgets",
       "avoid-web-libraries-in-flutter",

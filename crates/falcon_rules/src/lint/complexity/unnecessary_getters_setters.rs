@@ -105,7 +105,7 @@ fn field_name(expr: Expr<'_>) -> Option<&str> {
     }
 }
 
-fn getter_returns_field(getter: GetterDecl<'_>) -> Option<&str> {
+pub(crate) fn getter_returns_field(getter: GetterDecl<'_>) -> Option<&str> {
     match getter.body()? {
         FunctionBody::Arrow(body) => field_name(body.expr()),
         FunctionBody::Block(block) => {

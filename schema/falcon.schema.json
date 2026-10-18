@@ -736,10 +736,40 @@
                 "avoid-types-on-closure-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unnecessary-block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-call": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-continue": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-getter": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unnecessary-if": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unnecessary-length-check": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-local-variable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-negations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-overrides-in-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-reassignment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unnecessary-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-super": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-constructor-parameters": {
@@ -1127,6 +1157,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-enums": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-existing-destructuring": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-existing-variable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-full-hex-values-for-flutter-colors": {
@@ -2124,10 +2160,40 @@
                 "avoid-types-on-closure-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unnecessary-block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-call": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-continue": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-getter": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unnecessary-if": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unnecessary-length-check": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-local-variable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-negations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-overrides-in-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-reassignment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unnecessary-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-super": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-constructor-parameters": {
@@ -2515,6 +2581,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-enums": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-existing-destructuring": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-existing-variable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-full-hex-values-for-flutter-colors": {

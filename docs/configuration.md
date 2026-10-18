@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 of 376 shipped
+If no config is found, falcon enables its own recommended set: 215 of 388 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -252,6 +252,12 @@ instance fields → constructors → static methods → instance methods).
 
 `class-members-ordering` (`style`) accepts the same `order` option with the same
 category tokens; it differs from `member-ordering` only in its default sequence.
+
+### `avoid-unnecessary-getter` (`style`)
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `ignore_upcast` | `true` | Preserve getters whose return type differs from their private final backing field. Set to `false` to report these getters too. |
 
 ## Overrides
 

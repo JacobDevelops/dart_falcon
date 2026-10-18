@@ -2916,7 +2916,7 @@
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       }
     ],
-    "docs": "Flags a member that does nothing but forward to `super` with\nthe same arguments and resolved contract.\n\nSuch an override adds visual noise and a maintenance burden without changing\nbehavior — delete it and the inherited implementation stays in force.\nResolved inherited metadata and signatures preserve meaningful overrides,\nincluding documentation, body comments, narrower contracts, and visibility changes.",
+    "docs": "Flags a member that does nothing but forward to `super` with\nthe same arguments and resolved contract.\n\nSuch an override adds visual noise and a maintenance burden without changing\nbehavior — delete it and the inherited implementation stays in force.\nResolved inherited metadata and signatures preserve meaningful overrides,\nincluding documentation, body comments, narrower contracts, and visibility changes.\nOrdinary Flutter State forwarding overrides belong here; only overrides that\ndrop inherited `@protected` belong to `avoid-unnecessary-overrides-in-state`.",
     "domains": [],
     "examples": {
       "bad": "class Base {\n  void foo() {}\n  void bar(int x) {}\n  int get val => 0;\n  set name(String s) {}\n  int baz(int a, int b) => 0;\n  void qux() {}\n}\n\nclass Derived extends Base {\n  @override\n  void foo() => super.foo();\n\n  @override\n   void bar(int x) {\n    super.bar(x);\n  }\n\n  @override\n  int get val => super.val;\n\n  @override\n  set name(String s) => super.name = s;\n\n  @override\n   int baz(int a, int b) {\n    return super.baz(a, b);\n  }\n\n  @override\n   void qux() {\n    super.qux();\n  }\n}",
@@ -16637,6 +16637,238 @@
   },
   {
     "crossFile": false,
+    "description": "Flags standalone nested blocks that introduce no lexical declarations.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "Remove this unnecessary block without changing the enclosed statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Remove this unnecessary block without changing the enclosed statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Remove this unnecessary block without changing the enclosed statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Remove this unnecessary block without changing the enclosed statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Remove this unnecessary block without changing the enclosed statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Remove this unnecessary block without changing the enclosed statements."
+      }
+    ],
+    "docs": "Flags standalone nested blocks that introduce no lexical declarations.\n\nControl-flow and function bodies retain their braces. A block containing a\nvariable, pattern, or local function declaration retains its lexical scope.",
+    "domains": [],
+    "examples": {
+      "bad": "void expressions() {\n  { print('nested'); }\n}\n\nvoid empty() {\n  {}\n}\n\nint returning() {\n  { return 1; }\n}\n\nvoid multiple() {\n  { print('first'); print('second'); }\n}\n\nvoid conditional(bool ready) {\n  { if (ready) { print('ready'); } }\n}\n\nvoid scopedChild() {\n  {\n    { final value = 1; print(value); }\n  }\n}",
+      "crossFile": null,
+      "good": "void variables() {\n  final value = 1;\n  { final value = 2; print(value); }\n  print(value);\n}\n\nvoid patterns() {\n  { var (first, second) = (1, 2); print(first + second); }\n}\n\nvoid functions() {\n  { void local() {} local(); }\n}\n\nvoid controlBodies(bool ready) {\n  if (ready) { print('ready'); } else { print('waiting'); }\n  while (ready) { break; }\n  for (var i = 0; i < 2; i++) { print(i); }\n  do { print('once'); } while (false);\n}\n\nvoid exceptionBodies() {\n  try { print('try'); } catch (error) { print(error); } finally { print('finally'); }\n}\n\nvoid labels() {\n  exit: { print('labeled'); break exit; }\n}\n\nvoid laterDeclaration() {\n  { print('before'); final value = 1; print(value); }\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-block",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer direct invocation of functions and resolved callable instances.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 3,
+        "message": "Invoke this function directly instead of using '.call()'."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 4,
+        "message": "Invoke this function directly instead of using '.call()'."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Invoke this function directly instead of using '.call()'."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 6,
+        "message": "Invoke this function directly instead of using '.call()'."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 7,
+        "message": "Invoke this function directly instead of using '.call()'."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 15,
+        "message": "Invoke this function directly instead of using '.call()'."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 16,
+        "message": "Invoke this function directly instead of using '.call()'."
+      }
+    ],
+    "docs": "Prefer direct invocation of functions and resolved callable instances.\n\nNull-aware calls remain necessary for nullable receivers. Dynamic, unresolved,\nstatic and extension-only call members are deliberately not diagnosed.",
+    "domains": [],
+    "examples": {
+      "bad": "typedef Action = void Function();\nvoid inspect(void Function() action, int Function(int) convert, Action alias, Function unknownSignature) {\n  action.call();\n  convert.call(1);\n  alias.call();\n  unknownSignature.call();\n  (action).call();\n}\n\nclass Callable {\n  void call() {}\n}\nclass InheritedCallable extends Callable {}\nvoid instances(Callable callable, InheritedCallable inherited) {\n  callable.call();\n  inherited.call();\n}",
+      "crossFile": null,
+      "good": "class Callable {\n  void call() {}\n}\nvoid inspect(void Function()? nullable, void Function() action, Callable custom, dynamic unresolved) {\n  nullable?.call();\n  action();\n  unresolved.call();\n  final tearOff = action.call;\n  action..call();\n}\n\nclass StaticCallable {\n  static void call() {}\n}\nclass Plain {}\nextension CallableExtension on Plain {\n  void call() {}\n}\nvoid exclusions(Plain plain, Callable? nullableCallable) {\n  StaticCallable.call();\n  plain.call();\n  nullableCallable?.call();\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-call",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags an unlabeled continue at the end of a loop body or its final branch.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 4,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 17,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 30,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 35,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 41,
+        "message": "Remove this trailing continue; the loop already advances here."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 44,
+        "message": "Remove this trailing continue; the loop already advances here."
+      }
+    ],
+    "docs": "Flags an unlabeled continue at the end of a loop body or its final branch.\n\nAncestor inspection stops at try/finally, switch and function boundaries.",
+    "domains": [],
+    "examples": {
+      "bad": "void classic() {\n  for (var i = 0; i < 3; i++) {\n    print(i);\n    continue;\n  }\n}\n\nvoid iterable(List<int> values) {\n  for (final value in values) {\n    print(value);\n    continue;\n  }\n}\n\nvoid waiting(bool ready) {\n  while (ready) {\n    continue;\n  }\n}\n\nvoid once() {\n  do {\n    continue;\n  } while (false);\n}\n\nFuture<void> asynchronous(Stream<int> values) async {\n  await for (final value in values) {\n    print(value);\n    continue;\n  }\n}\n\nvoid unbraced(bool ready) {\n  while (ready) continue;\n}\n\nvoid conditionalTail(List<int> values) {\n  for (final value in values) {\n    if (value < 0) {\n      continue;\n    } else {\n      print(value);\n      continue;\n    }\n  }\n}",
+      "crossFile": null,
+      "good": "void guarded(List<int> values) {\n  for (final value in values) {\n    if (value < 0) continue;\n    print(value);\n  }\n}\n\nvoid labeled(List<int> values) {\n  outer: for (final first in values) {\n    for (final second in values) {\n      print(first + second);\n      continue outer;\n    }\n  }\n}\n\nvoid conditionalWork(List<int> values) {\n  for (final value in values) {\n    if (value < 0) { continue; }\n    print(value);\n  }\n}\n\nvoid finallyTail(bool ready) {\n  while (ready) {\n    try { continue; } finally { break; }\n  }\n}\n\nvoid laterWork(bool ready) {\n  while (ready) {\n    { continue; }\n    print('later');\n  }\n}\n\nvoid noContinue() {\n  for (var i = 0; i < 3; i++) { print(i); }\n  do { print('once'); } while (false);\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-continue",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags a getter that only exposes a private final field.",
+    "diagnostics": [
+      {
+        "column": 50,
+        "file": null,
+        "line": 3,
+        "message": "This getter only exposes a final field; replace both with a public final field."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 7,
+        "message": "This getter only exposes a final field; replace both with a public final field."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 12,
+        "message": "This getter only exposes a final field; replace both with a public final field."
+      }
+    ],
+    "docs": "Flags a getter that only exposes a private final field.\n\nReplace the backing field and getter with a public final field. Getter/setter\npairs are covered separately by `unnecessary-getters-setters`. By default,\ngetters that upcast the field are retained; set `ignore_upcast` to false to\ndiagnose those too.",
+    "domains": [],
+    "examples": {
+      "bad": "class Arrow {\n  final int _value = 1;\n  int get  value => _value;\n}\nclass Body {\n  final int _other = 1;\n  int get  other { return this._other; }\n}\nclass Annotated {\n  final int _hashCode = 1;\n  @override\n  int get  hashCode => _hashCode;\n}",
+      "crossFile": null,
+      "good": "class Example {\n  final int value = 1;\n  int _mutable = 1;\n  int get mutable => _mutable;\n  int get computed => value + 1;\n}\nclass Pair {\n  int _value = 1;\n  int get value => _value;\n  set value(int value) { _value = value; }\n}\nclass Annotated {\n  final int _value = 1;\n  @override\n  int get hashCode => _value + 1;\n}\nclass Upcast {\n  final int _value = 1;\n  num get value => _value;\n}\nclass Private {\n  final int _value = 1;\n  int get _alias => _value;\n}\nclass Late {\n  late final int _value;\n  int get value => _value;\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-getter",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags an if branch that only returns the same expression as the following return.",
     "diagnostics": [
       {
@@ -16679,6 +16911,286 @@
     },
     "group": "style",
     "name": "avoid-unnecessary-if",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Empty collections already skip `for-in` and `forEach` bodies.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Remove this emptiness guard: iteration already skips empty collections."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "Remove this emptiness guard: iteration already skips empty collections."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Remove this emptiness guard: iteration already skips empty collections."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "Remove this emptiness guard: iteration already skips empty collections."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 14,
+        "message": "Remove this emptiness guard: iteration already skips empty collections."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "Remove this emptiness guard: iteration already skips empty collections."
+      }
+    ],
+    "docs": "Empty collections already skip `for-in` and `forEach` bodies.\n\nOnly a sole iteration guarded by a positive emptiness test is redundant.\nRestrict receivers to local, SDK collection-typed identifiers: getters,\nlazy iterables, unknown types and custom collection APIs are not assumed pure.\nA forEach callback must be a closure, not an expression evaluated for effects.",
+    "domains": [],
+    "examples": {
+      "bad": "void inspect(List<int> values, Set<int> unique, Map<int, int> pairs) {\n  if (values.isNotEmpty) {\n    for (final value in values) { print(value); }\n  }\n  if (values.length != 0) {\n    values.forEach((value) { print(value); });\n  }\n  if (unique.length > 0) {\n    for (final value in unique) { print(value); }\n  }\n  if (1 <= values.length) {\n    values.forEach((value) { print(value); });\n  }\n  if (pairs.isNotEmpty) {\n    pairs.forEach((key, value) { print(key); print(value); });\n  }\n  if (values.length >= 1)\n    for (final value in values) { print(value); }\n}",
+      "crossFile": null,
+      "good": "class Custom {\n  int get length => 2;\n  void forEach(void Function(int) callback) { callback(1); }\n}\nvoid Function(int) makeCallback() { print('effect'); return print; }\nList<int> get changing => <int>[];\nvoid inspect(List<int> values, List<int> other, Iterable<int> lazy, Custom custom, dynamic unknown) {\n  if (values.length > 0) print(values[0]);\n  if (values.length > 1) { for (final value in values) { print(value); } }\n  if (values.isNotEmpty) { for (final value in other) { print(value); } }\n  if (values.isNotEmpty) { values.forEach((value) { print(value); }); print('extra'); }\n  if (values.isNotEmpty) { values.forEach((value) { print(value); }); } else { print('empty'); }\n  if (values.isNotEmpty) { values.forEach(makeCallback()); }\n  if (lazy.length > 0) { for (final value in lazy) { print(value); } }\n  if (custom.length > 0) { custom.forEach((value) { print(value); }); }\n  if (unknown.length > 0) { unknown.forEach((value) { print(value); }); }\n  if (changing.isNotEmpty) { for (final value in changing) { print(value); } }\n}\n\nclass Holder {\n  List<int> values = [];\n  void inspect() {\n    if (values.isNotEmpty) { values.forEach((value) { print(value); }); }\n  }\n}\nclass EffectfulHolder extends Holder {\n  @override\n  List<int> get values { print('read'); return []; }\n  @override\n  set values(List<int> value) {}\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-length-check",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports a single-use local used only to initialize the next local.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Initialize the next local directly instead of introducing this single-use alias."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Initialize the next local directly instead of introducing this single-use alias."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Initialize the next local directly instead of introducing this single-use alias."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 17,
+        "message": "Initialize the next local directly instead of introducing this single-use alias."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 22,
+        "message": "Initialize the next local directly instead of introducing this single-use alias."
+      }
+    ],
+    "docs": "Reports a single-use local used only to initialize the next local.\nBoth declarations must be eager and inferred: transferring the initializer\nthen preserves evaluation order and its type-inference context.",
+    "domains": [],
+    "examples": {
+      "bad": "void a() {\n  var first = 1;\n  var second = first;\n  print(second);\n}\nvoid b() {\n  final first = Object();\n  final second = first;\n  print(second);\n}\nvoid c() {\n  final first = [1, 2];\n  final second = first;\n  print(second);\n}\nvoid d() {\n  final first = true;\n  final second = (first);\n  print(second);\n}\nvoid e() {\n  final first = DateTime.now();\n  var second = first;\n  print(second);\n}",
+      "crossFile": null,
+      "good": "Object immediateReturn() {\n  final value = Object();\n  return value;\n}\nvoid twice() {\n  final first = Object();\n  final second = first;\n  print(first);\n  print(second);\n}\nvoid typed() {\n  final num first = 1;\n  final second = first;\n  print(second);\n}\nvoid typedAlias() {\n  final first = [1];\n  final List<num> second = first;\n  print(second);\n}\nvoid deferred() {\n  late final first = Object();\n  final second = first;\n  print(second);\n}\nvoid separated() {\n  final first = Object();\n  print('intervening');\n  final second = first;\n  print(second);\n}\nvoid captured() {\n  var first = Object();\n  final second = first;\n  void change() { first = Object(); }\n  print(second);\n}\nvoid thrown() {\n  final error = Exception();\n  throw error;\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-local-variable",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Simplifies negated bool literals and equality comparisons with a logical negation on both sides.",
+    "diagnostics": [
+      {
+        "column": 23,
+        "file": null,
+        "line": 1,
+        "message": "Simplify these unnecessary logical negations."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 2,
+        "message": "Simplify these unnecessary logical negations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 3,
+        "message": "Simplify these unnecessary logical negations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 4,
+        "message": "Simplify these unnecessary logical negations."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 5,
+        "message": "Simplify these unnecessary logical negations."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 6,
+        "message": "Simplify these unnecessary logical negations."
+      }
+    ],
+    "docs": "Simplifies negated bool literals and equality comparisons with a logical\nnegation on both sides. Stacked negations belong to\n`avoid-inverted-boolean-expressions`; arithmetic, bitwise and relational\noperators are deliberately excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "bool trueLiteral() => !true;\nbool falseLiteral() => !(false);\nbool equal(bool flag, bool another) => !flag == !another;\nbool unequal(bool flag, bool another) => (!flag) != (!another);\nbool nested(bool a) => a && !true;\nbool groupedEqual(bool a, bool b) => (!(a)) == (!(b));",
+      "crossFile": null,
+      "good": "bool single(bool flag) => !flag;\nbool equality(bool flag, bool another) => flag == another;\nbool unequal(bool flag, bool another) => flag != another;\nbool different(bool flag, bool another) => !flag == another;\nbool conjunction(bool flag, bool another) => !flag && !another;\nbool disjunction(bool flag, bool another) => !flag || !another;\nint arithmetic(int value) => -(-value);\nint bitwise(int value) => ~(~value);\nbool relational(int a, int b) => !(a < b);\nbool floating(double a, double b) => !(a >= b);\nbool doubleNegation(bool flag) => !!flag;\nbool parenthesized(bool flag) => !(!flag);\nbool triple(bool flag) => !!!flag;\nbool nested(bool a, bool b) => !!(a && !(!b));\nbool stackedLiteral() => !!true;"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-negations",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Redundant Flutter State overrides that drop inherited `@protected`.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 5,
+        "message": "Unnecessary override — this member only forwards to `super` unchanged"
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 7,
+        "message": "Unnecessary override — this member only forwards to `super` unchanged"
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 9,
+        "message": "Unnecessary override — this member only forwards to `super` unchanged"
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 11,
+        "message": "Unnecessary override — this member only forwards to `super` unchanged"
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 13,
+        "message": "Unnecessary override — this member only forwards to `super` unchanged"
+      }
+    ],
+    "docs": "Redundant Flutter State overrides that drop inherited `@protected`.\n\nShares the general override rule's forwarding, signature, documentation and\ncomment checks, but handles only the protected-annotation mismatch that rule\ndeliberately preserves. All other redundant overrides remain owned by\n`unnecessary-overrides`, so enabling both rules does not duplicate diagnostics.\nThe enclosing type must resolve to a subtype of Flutter's State declaration.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\n\nclass Redundant extends State<StatefulWidget> {\n  @override\n  void initState() => super.initState();\n  @override\n  void dispose() { super.dispose(); }\n  @override\n  void didChangeDependencies() => super.didChangeDependencies();\n  @override\n  void deactivate() => super.deactivate();\n  @override\n  void reassemble() => super.reassemble();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:meta/meta.dart';\n\nclass Meaningful extends State<StatefulWidget> {\n  @override\n  void initState() {\n    // Initialization will be added here intentionally.\n    super.initState();\n  }\n  @override\n  void dispose() { print('cleanup'); super.dispose(); }\n  /// Preserve this lifecycle documentation.\n  @override\n  void didChangeDependencies() => super.didChangeDependencies();\n  @override\n  void deactivate() {}\n  @deprecated\n  @override\n  void reassemble() => super.reassemble();\n}\nclass Parent {\n  void dispose() {}\n}\nclass NotState extends Parent {\n  @override\n  void dispose() => super.dispose();\n}\n\nclass StateBase extends State<StatefulWidget> {\n  void ordinary() {}\n}\nclass OrdinaryState extends StateBase {\n  // Owned by unnecessary-overrides, not this rule: no protected mismatch.\n  @override\n  void ordinary() => super.ordinary();\n}\n\nclass ProtectedState extends State<StatefulWidget> {\n  // Keeping protected is also owned by unnecessary-overrides.\n  @protected\n  @override\n  void initState() => super.initState();\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-overrides-in-state",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports an eager local initializer immediately overwritten without a read.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Initialize this local with the assigned value instead of overwriting an unused initial value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Initialize this local with the assigned value instead of overwriting an unused initial value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Initialize this local with the assigned value instead of overwriting an unused initial value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Initialize this local with the assigned value instead of overwriting an unused initial value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 23,
+        "message": "Initialize this local with the assigned value instead of overwriting an unused initial value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 28,
+        "message": "Initialize this local with the assigned value instead of overwriting an unused initial value."
+      }
+    ],
+    "docs": "Reports an eager local initializer immediately overwritten without a read.\nAn explicit declared type preserves inference when the assignment moves.\nOnly effect-free primitive/string initializers are discardable. Branching\nif/else overwrites are deliberately excluded without control-flow proof.",
+    "domains": [],
+    "examples": {
+      "bad": "void a(int next) {\n  int x = 1;\n  x = next;\n  print(x);\n}\nvoid b(bool next) {\n  bool x = false;\n  x = next;\n  print(x);\n}\nvoid c(double next) {\n  double x = 1.5;\n  x = next;\n  print(x);\n}\nvoid d(Object next) {\n  Object? x = null;\n  x = next;\n  print(x);\n}\nvoid e(bool flag) {\n  int x = 0;\n  x = flag ? 1 : 2;\n  print(x);\n}\nvoid stringInitializer(String next) {\n  String alpha = '';\n  alpha = next;\n  print(alpha);\n}",
+      "crossFile": null,
+      "good": "void read() { int x = 1; print(x); x = 2; }\nvoid call() { Object x = Object(); x = Object(); }\nvoid lateLocal() { late int x = 1; x = 2; }\nvoid compound() { int x = 1; x += 2; }\nvoid dependsOnOld() { int x = 1; x = x + 2; }\nvoid selfAssignment() { int x = 1; x = x; }\nvoid capture() {\n  Object? x = null;\n  x = () => x;\n  print(x);\n}\nclass C {\n  int get value => 1;\n  set value(int x) {}\n  void field() { value = 2; }\n}\nvoid shadow() {\n  var x = 1;\n  void nested(int x) { x = 2; }\n  nested(x);\n}\nvoid inferredDynamic() {\n  var x = null;\n  x = 1;\n  x = 'a';\n  print(x);\n}\nvoid inferredFromDynamic(dynamic next) {\n  var x = 0;\n  x = next;\n  print(x);\n}\nvoid interpolatedInitializer(Object next) {\n  String x = '$next';\n  x = 'replacement';\n  print(x);\n}\nvoid branchOverwrite(bool flag) {\n  int x = 0;\n  if (flag) { x = 1; } else { x = 2; }\n  print(x);\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-reassignment",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -16755,6 +17267,34 @@
     },
     "group": "style",
     "name": "avoid-unnecessary-return",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Omit implicit `super()` initializers and provably redundant member prefixes.",
+    "diagnostics": [
+      {
+        "column": 51,
+        "file": null,
+        "line": 3,
+        "message": "This empty super() call is implicit; remove the explicit initializer."
+      }
+    ],
+    "docs": "Omit implicit `super()` initializers and provably redundant member prefixes.\n\nMember checks require a final class or enum without library-local subclasses,\nmatching resolved read/write owners, and no shadowing local binding. Open\nclasses retain super dispatch because future subclasses can override members.\nConstructor checks remain available without resolution.",
+    "domains": [],
+    "examples": {
+      "bad": "class Parent { Parent(); }\nclass Child extends Parent {\n  Child() :  super();\n}",
+      "crossFile": null,
+      "good": "class Parent {\n  Parent();\n  Parent.named();\n  Parent.value(int value);\n}\nclass Implicit extends Parent { Implicit(); }\nclass Named extends Parent { Named() : super.named(); }\nclass Argument extends Parent { Argument() : super.value(1); }"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-super",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -27638,6 +28178,128 @@
       "label": "Dart lints",
       "upstreamId": "use_enums",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/use_enums"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reuse or extend an existing record destructuring instead of rereading a field.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 3,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 7,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 15,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 20,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 25,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 29,
+        "message": "Reuse or extend the existing record destructuring instead of reading this field again."
+      }
+    ],
+    "docs": "Reuse or extend an existing record destructuring instead of rereading a field.\nRecords have immutable built-in fields. Object getters and list/map indexing\ncan execute user code or change value and are intentionally not candidates.",
+    "domains": [],
+    "examples": {
+      "bad": "int a((int, int) pair) {\n  final (first, second) = pair;\n  return pair.$1;\n}\nint b((int, int) pair) {\n  final (first, second) = pair;\n  return pair.$2;\n}\nString c(({String name}) person) {\n  final (:name) = person;\n  return person.name;\n}\nint d(({int count}) record) {\n  final (count: total) = record;\n  return record.count;\n}\nint e() {\n  final pair = (1, 2);\n  var (first, second) = pair;\n  print(pair.$1);\n  return first;\n}\nint extendPositional((int, int) pair) {\n  final (first, _) = pair;\n  return pair.$2;\n}\nint extendNamed(({int first, int second}) pair) {\n  final (:first) = pair;\n  return pair.second;\n}",
+      "crossFile": null,
+      "good": "int mutation((int, int) pair) {\n  var (first, second) = pair;\n  first = 3;\n  return pair.$1;\n}\nint sourceMutation((int, int) pair) {\n  final (first, second) = pair;\n  pair = (3, 4);\n  return pair.$1;\n}\nint otherSource((int, int) pair, (int, int) other) {\n  final (first, second) = pair;\n  return other.$1;\n}\nint scoped((int, int) pair) {\n  { final (first, second) = pair; }\n  return pair.$1;\n}\nint list(List<int> values) {\n  final [first, ...rest] = values;\n  return values[0];\n}\nclass C { int get value => DateTime.now().second; }\nint getter(C object) {\n  final C(:value) = object;\n  return object.value;\n}\nint captured((int, int) pair) {\n  var (first, second) = pair;\n  void change() { first++; }\n  return pair.$1;\n}"
+    },
+    "group": "style",
+    "name": "use-existing-destructuring",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reuse a local for stable SDK arithmetic and String.length/int parity getters.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 4,
+        "message": "Reuse the existing local instead of repeating this computation."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 9,
+        "message": "Reuse the existing local instead of repeating this computation."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 14,
+        "message": "Reuse the existing local instead of repeating this computation."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 20,
+        "message": "Reuse the existing local instead of repeating this computation."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 24,
+        "message": "Reuse the existing local instead of repeating this computation."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "Reuse the existing local instead of repeating this computation."
+      }
+    ],
+    "docs": "Reuse a local for stable SDK arithmetic and String.length/int parity getters.\nCalls, user getters, allocations and overloaded operators are excluded.\nWhole-scope mutation facts deliberately reject even later/closure writes.",
+    "domains": [],
+    "examples": {
+      "bad": "int a() {\n  final x = 2;\n  final cached = x + 1;\n  return x + 1;\n}\nint b() {\n  final x = 3;\n  final cached = x * 2;\n  return (x * 2);\n}\nint c() {\n  final x = 4;\n  final cached = x - 1;\n  final next = x - 1;\n  return next;\n}\nint d() {\n  final x = 5;\n  final cached = (x + 1) * 2;\n  return (x + 1) * 2;\n}\nint e() {\n  final cached = 2 + 3;\n  return 2 + 3;\n}\nvoid sdkGetter(String value) {\n  final cached = value.length.isOdd;\n  print(value.length.isOdd);\n}",
+      "crossFile": null,
+      "good": "int mutation() {\n  var x = 1;\n  final cached = x + 2;\n  x = 2;\n  return x + 2;\n}\nint captured() {\n  var x = 1;\n  final cached = x + 2;\n  void change() { x++; }\n  return x + 2;\n}\nObject allocate() {\n  final cached = Object();\n  return Object();\n}\nint calls(int Function() next) {\n  final cached = next() + 1;\n  return next() + 1;\n}\nint shadow() {\n  final x = 1;\n  final cached = x + 1;\n  { final x = 2; return x + 1; }\n}\nint branch(bool flag) {\n  final x = 1;\n  if (flag) { final cached = x + 1; }\n  return x + 1;\n}\nint division() {\n  final x = 1;\n  final cached = x ~/ 2;\n  return x ~/ 2;\n}\nclass Counter {\n  Counter operator +(int other) => Counter();\n}\nCounter overloaded() {\n  final x = Counter();\n  final cached = x + 1;\n  return x + 1;\n}\nint mutatedCache() {\n  final x = 1;\n  var cached = x + 1;\n  cached = 3;\n  return x + 1;\n}\nint constantContext() {\n  final cached = 2 + 3;\n  const next = 2 + 3;\n  return next;\n}\nint lateDependency() {\n  late final x = 1;\n  final cached = x + 1;\n  return x + 1;\n}\nclass Unstable {\n  int get length => DateTime.now().second;\n}\nbool customGetter(Unstable value) {\n  final cached = value.length.isOdd;\n  return value.length.isOdd;\n}"
+    },
+    "group": "style",
+    "name": "use-existing-variable",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

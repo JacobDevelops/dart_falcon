@@ -5,6 +5,8 @@
 //! behavior — delete it and the inherited implementation stays in force.
 //! Resolved inherited metadata and signatures preserve meaningful overrides,
 //! including documentation, body comments, narrower contracts, and visibility changes.
+//! Ordinary Flutter State forwarding overrides belong here; only overrides that
+//! drop inherited `@protected` belong to `avoid-unnecessary-overrides-in-state`.
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ParameterContract, ResolvedType, Rule,
@@ -22,20 +24,25 @@ impl Rule for UnnecessaryOverrides {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let diags = Vec::new();
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return RulePreparation::Diagnostics(diags);
-        };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
-        let docs = ctx.tree().doc_blocks(ctx.source).collect::<Vec<_>>();
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            model,
-            signatures,
-            docs,
-            diags,
-        }))
+        prepare(ctx, false)
     }
+}
+
+pub(crate) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, state_only: bool) -> RulePreparation<'a> {
+    let diags = Vec::new();
+    let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        return RulePreparation::Diagnostics(diags);
+    };
+    let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+    let docs = ctx.tree().doc_blocks(ctx.source).collect::<Vec<_>>();
+    RulePreparation::Structural(Box::new(Collector {
+        ctx,
+        model,
+        signatures,
+        docs,
+        diags,
+        state_only,
+    }))
 }
 
 struct Collector<'a> {
@@ -44,6 +51,7 @@ struct Collector<'a> {
     signatures: &'a SignatureIndex,
     docs: Vec<DocBlock<'a>>,
     diags: Vec<Diagnostic>,
+    state_only: bool,
 }
 
 falcon_analyze::structural_visitor! {
@@ -63,10 +71,17 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(identity) = model.resolve_name(name) else {
             return StructuralTraversal::SkipChildren;
         };
+        if self.state_only
+            && self.signatures.is_subtype_of(
+                &ResolvedType::interface_identity(identity.clone()),
+                &DeclarationIdentity::flutter("State"),
+                model,
+            ) != falcon_analyze::Truth::Yes
+        {
+            return StructuralTraversal::SkipChildren;
+        }
         for member in members {
-            check_member(
-                member, &identity, model, self.signatures, &self.docs, &mut self.diags, self.ctx,
-            );
+            self.check_member(member, &identity);
         }
         StructuralTraversal::SkipChildren
     }
@@ -77,174 +92,190 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 }
 
-fn check_member(
-    member: ClassMember<'_>,
-    identity: &DeclarationIdentity,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    docs: &[DocBlock<'_>],
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    let (annotations, name, name_span, span, write, body) = match member {
-        ClassMember::Method(m) if !m.is_static() => (
-            m.annotations(),
-            m.name().name(),
-            m.name().span(),
-            m.span(),
-            false,
-            m.body(),
-        ),
-        ClassMember::Getter(g) if !g.is_static() => (
-            g.annotations(),
-            g.name().name(),
-            g.name().span(),
-            g.span(),
-            false,
-            g.body(),
-        ),
-        ClassMember::Setter(s) if !s.is_static() => (
-            s.annotations(),
-            s.name().name(),
-            s.name().span(),
-            s.span(),
-            true,
-            s.body(),
-        ),
-        ClassMember::Operator(o) => (
-            o.annotations(),
-            o.lookup_name(),
-            crate::lint::declarations::operator_token_span(o),
-            o.span(),
-            false,
-            o.body(),
-        ),
-        _ => return,
-    };
-    if !single_expr(body, ctx).is_some_and(|expr| forwards(member, expr.unparenthesized(), ctx)) {
-        return;
-    }
-    let first_doc = docs.partition_point(|doc| doc.next_token < span.start);
-    if name == "noSuchMethod"
-        || docs
-            .get(first_doc)
-            .is_some_and(|doc| doc.next_token <= name_span.start)
-    {
-        return;
-    }
-    let receiver = ResolvedType::interface_identity(identity.clone());
-    let Some(owner) = signatures.resolved_super_member_owner(&receiver, name, write, model) else {
-        return;
-    };
-    let inherited_protected = signatures
-        .declared_member_facts(&owner, name)
-        .iter()
-        .any(|fact| {
-            let matches_accessor = match member {
-                ClassMember::Method(_) => fact.kind == MemberKind::Method,
-                ClassMember::Operator(_) => fact.kind == MemberKind::Operator,
-                ClassMember::Getter(_) => fact.kind.has_getter(),
-                ClassMember::Setter(_) => fact.kind.has_setter(),
-                _ => false,
-            };
-            matches_accessor
-                && fact
-                    .annotations
-                    .iter()
-                    .any(|annotation| annotation.is_package("meta", "protected"))
-        });
-    let own_protected =
-        crate::lint::declarations::has_meta_annotation(annotations.clone(), "protected", model);
-    if (inherited_protected && !own_protected)
-        || !annotations.clone().all(|annotation| {
-            let Some(name) = falcon_analyze::QualifiedName::from_identifiers(annotation.name())
-            else {
-                return false;
-            };
-            let identity = model
-                .resolve_value(name)
-                .or_else(|| model.resolve_name(name))
-                .or_else(|| model.resolve_imported_member(name));
-            (annotation.args().is_none()
-                && (identity
-                    .as_ref()
-                    .is_some_and(|identity| identity.is_sdk("dart:core", "override"))
-                    || (identity.is_none()
-                        && model
-                            .resolve_sdk_member(name)
-                            .is_some_and(|identity| identity.is_sdk("dart:core", "override")))))
-                || (inherited_protected
-                    && identity.is_some_and(|identity| identity.is_package("meta", "protected")))
-        })
-    {
-        return;
-    }
-    let Some(supertype) = (if write {
-        signatures.super_receiver_for_write(&receiver, name, model)
-    } else {
-        signatures.super_receiver(&receiver, name, model)
-    }) else {
-        return;
-    };
-    if !matches!(member, ClassMember::Getter(_)) {
-        let own_contracts = signatures.effective_parameter_contracts(&receiver, name, write, model);
-        let inherited_contracts =
-            signatures.super_parameter_contracts(&receiver, name, write, model);
-        if !same_parameters(own_contracts.as_deref(), inherited_contracts.as_deref()) {
+impl Collector<'_> {
+    fn check_member(&mut self, member: ClassMember<'_>, identity: &DeclarationIdentity) {
+        let ctx = self.ctx;
+        let model = &self.model;
+        let signatures = self.signatures;
+        let docs = &self.docs;
+        let diags = &mut self.diags;
+        let state_only = self.state_only;
+        let (annotations, name, name_span, span, write, body) = match member {
+            ClassMember::Method(m) if !m.is_static() => (
+                m.annotations(),
+                m.name().name(),
+                m.name().span(),
+                m.span(),
+                false,
+                m.body(),
+            ),
+            ClassMember::Getter(g) if !g.is_static() => (
+                g.annotations(),
+                g.name().name(),
+                g.name().span(),
+                g.span(),
+                false,
+                g.body(),
+            ),
+            ClassMember::Setter(s) if !s.is_static() => (
+                s.annotations(),
+                s.name().name(),
+                s.name().span(),
+                s.span(),
+                true,
+                s.body(),
+            ),
+            ClassMember::Operator(o) => (
+                o.annotations(),
+                o.lookup_name(),
+                crate::lint::declarations::operator_token_span(o),
+                o.span(),
+                false,
+                o.body(),
+            ),
+            _ => return,
+        };
+        if !single_expr(body, ctx).is_some_and(|expr| forwards(member, expr.unparenthesized(), ctx))
+        {
             return;
         }
-    }
-    if matches!(member, ClassMember::Method(_) | ClassMember::Operator(_)) {
-        let (Some((declared, declared_substitutions)), Some((inherited, inherited_substitutions))) = (
-            signatures.resolved_member(&receiver, name, model),
-            signatures.resolved_member(&supertype, name, model),
-        ) else {
+        let first_doc = docs.partition_point(|doc| doc.next_token < span.start);
+        if name == "noSuchMethod"
+            || docs
+                .get(first_doc)
+                .is_some_and(|doc| doc.next_token <= name_span.start)
+        {
+            return;
+        }
+        let receiver = ResolvedType::interface_identity(identity.clone());
+        let Some(owner) = signatures.resolved_super_member_owner(&receiver, name, write, model)
+        else {
             return;
         };
-        if model.substitute(&declared.return_type, &declared_substitutions)
-            != model.substitute(&inherited.return_type, &inherited_substitutions)
-            || declared.positional.len() != inherited.positional.len()
-            || declared.named.len() != inherited.named.len()
-            || declared
-                .positional
+        let inherited_protected =
+            signatures
+                .declared_member_facts(&owner, name)
                 .iter()
-                .zip(&inherited.positional)
-                .any(|(own, parent)| {
-                    model.substitute(own, &declared_substitutions)
-                        != model.substitute(parent, &inherited_substitutions)
-                })
-            || declared.named.iter().any(|(name, own)| {
-                inherited.named.get(name).is_none_or(|parent| {
-                    model.substitute(own, &declared_substitutions)
-                        != model.substitute(parent, &inherited_substitutions)
-                })
+                .any(|fact| {
+                    let matches_accessor = match member {
+                        ClassMember::Method(_) => fact.kind == MemberKind::Method,
+                        ClassMember::Operator(_) => fact.kind == MemberKind::Operator,
+                        ClassMember::Getter(_) => fact.kind.has_getter(),
+                        ClassMember::Setter(_) => fact.kind.has_setter(),
+                        _ => false,
+                    };
+                    matches_accessor
+                        && fact
+                            .annotations
+                            .iter()
+                            .any(|annotation| annotation.is_package("meta", "protected"))
+                });
+        let own_protected =
+            crate::lint::declarations::has_meta_annotation(annotations.clone(), "protected", model);
+        if state_only && !(inherited_protected && !own_protected) {
+            return;
+        }
+        if (!state_only && inherited_protected && !own_protected)
+            || !annotations.clone().all(|annotation| {
+                let Some(name) = falcon_analyze::QualifiedName::from_identifiers(annotation.name())
+                else {
+                    return false;
+                };
+                let identity = model
+                    .resolve_value(name)
+                    .or_else(|| model.resolve_name(name))
+                    .or_else(|| model.resolve_imported_member(name));
+                (annotation.args().is_none()
+                    && (identity
+                        .as_ref()
+                        .is_some_and(|identity| identity.is_sdk("dart:core", "override"))
+                        || (identity.is_none()
+                            && model
+                                .resolve_sdk_member(name)
+                                .is_some_and(|identity| identity.is_sdk("dart:core", "override")))))
+                    || (inherited_protected
+                        && identity
+                            .is_some_and(|identity| identity.is_package("meta", "protected")))
             })
         {
             return;
         }
-    } else {
-        let (Some((declared, own)), Some((inherited, parent))) = (if write {
-            (
-                signatures.resolved_writable_field(&receiver, name, model),
-                signatures.resolved_writable_field(&supertype, name, model),
-            )
+        let Some(supertype) = (if write {
+            signatures.super_receiver_for_write(&receiver, name, model)
         } else {
-            (
-                signatures.resolved_field(&receiver, name, model),
-                signatures.resolved_field(&supertype, name, model),
-            )
+            signatures.super_receiver(&receiver, name, model)
         }) else {
             return;
         };
-        if model.substitute(&declared, &own) != model.substitute(&inherited, &parent) {
-            return;
+        if !matches!(member, ClassMember::Getter(_)) {
+            let own_contracts =
+                signatures.effective_parameter_contracts(&receiver, name, write, model);
+            let inherited_contracts =
+                signatures.super_parameter_contracts(&receiver, name, write, model);
+            if !same_parameters(own_contracts.as_deref(), inherited_contracts.as_deref()) {
+                return;
+            }
         }
+        if matches!(member, ClassMember::Method(_) | ClassMember::Operator(_)) {
+            let (
+                Some((declared, declared_substitutions)),
+                Some((inherited, inherited_substitutions)),
+            ) = (
+                signatures.resolved_member(&receiver, name, model),
+                signatures.resolved_member(&supertype, name, model),
+            )
+            else {
+                return;
+            };
+            if model.substitute(&declared.return_type, &declared_substitutions)
+                != model.substitute(&inherited.return_type, &inherited_substitutions)
+                || declared.positional.len() != inherited.positional.len()
+                || declared.named.len() != inherited.named.len()
+                || declared
+                    .positional
+                    .iter()
+                    .zip(&inherited.positional)
+                    .any(|(own, parent)| {
+                        model.substitute(own, &declared_substitutions)
+                            != model.substitute(parent, &inherited_substitutions)
+                    })
+                || declared.named.iter().any(|(name, own)| {
+                    inherited.named.get(name).is_none_or(|parent| {
+                        model.substitute(own, &declared_substitutions)
+                            != model.substitute(parent, &inherited_substitutions)
+                    })
+                })
+            {
+                return;
+            }
+        } else {
+            let (Some((declared, own)), Some((inherited, parent))) = (if write {
+                (
+                    signatures.resolved_writable_field(&receiver, name, model),
+                    signatures.resolved_writable_field(&supertype, name, model),
+                )
+            } else {
+                (
+                    signatures.resolved_field(&receiver, name, model),
+                    signatures.resolved_field(&supertype, name, model),
+                )
+            }) else {
+                return;
+            };
+            if model.substitute(&declared, &own) != model.substitute(&inherited, &parent) {
+                return;
+            }
+        }
+        diags.push(ctx.diagnostic(
+            if state_only {
+                "avoid-unnecessary-overrides-in-state"
+            } else {
+                "unnecessary-overrides"
+            },
+            "Unnecessary override — this member only forwards to `super` unchanged",
+            name_span,
+        ));
     }
-    diags.push(ctx.diagnostic(
-        "unnecessary-overrides",
-        "Unnecessary override — this member only forwards to `super` unchanged",
-        name_span,
-    ));
 }
 
 fn same_parameters(
