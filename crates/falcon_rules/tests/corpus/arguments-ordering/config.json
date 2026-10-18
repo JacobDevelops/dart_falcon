@@ -1,0 +1,37 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "arguments-ordering": {
+          "level": "warn"
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/descending.dart"],
+      "linter": { "rules": { "style": {
+        "arguments-ordering": { "level": "warn", "options": { "order": "descending", "alphabetize": true } }
+      } } }
+    },
+    {
+      "includes": ["**/ascending.dart"],
+      "linter": { "rules": { "style": {
+        "arguments-ordering": { "level": "warn", "options": { "order": "ascending" } }
+      } } }
+    },
+    {
+      "includes": ["**/alphabetize.dart"],
+      "linter": { "rules": { "style": {
+        "arguments-ordering": { "level": "warn", "options": { "alphabetize": true } }
+      } } }
+    },
+    {
+      "includes": ["**/not_alphabetized.dart"],
+      "linter": { "rules": { "style": {
+        "arguments-ordering": { "level": "warn", "options": { "alphabetize": false } }
+      } } }
+    }
+  ]
+}

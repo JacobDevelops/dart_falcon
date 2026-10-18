@@ -1,0 +1,10 @@
+final sorted = {'apple': 1, 'zebra': 2};
+final singleton = {'zebra': 1};
+final numbers = {2: 1, 1: 2};
+Map<String, int> withSpread(Map<String, int> other) => {'zebra': 1, ...other, 'apple': 2};
+Map<String, int> dynamicKey(String key) => {'zebra': 1, key: 2, 'apple': 3};
+Map<String, int> interpolation(String key) => {'zebra': 1, '$key': 2, 'apple': 3};
+final escaped = {'zebra': 1, '\u0061pple': 2};
+Map<String, int> conditional(bool flag) => {'zebra': 1, if (flag) 'middle': 2, 'apple': 3};
+final duplicates = {'apple': 1, 'apple': 2};
+final adjacent = {'zebra': 1, 'a' 'pple': 2};

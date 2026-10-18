@@ -1,0 +1,26 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "parameters-ordering": {
+          "level": "warn",
+          "options": { "order": "ascending" }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/descending.dart"],
+      "linter": { "rules": { "style": {
+        "parameters-ordering": { "level": "warn", "options": { "order": "descending" } }
+      } } }
+    },
+    {
+      "includes": ["**/clean_unconfigured.dart"],
+      "linter": { "rules": { "style": {
+        "parameters-ordering": { "level": "warn", "options": {} }
+      } } }
+    }
+  ]
+}

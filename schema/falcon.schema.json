@@ -643,6 +643,9 @@
                 "annotate-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "arguments-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -826,6 +829,9 @@
                 "empty-constructor-bodies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "enum-constants-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "eol-at-end-of-file": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -839,6 +845,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "implicit-call-tearoffs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "initializers-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "leading-newlines-in-multiline-strings": {
@@ -856,6 +865,9 @@
                 "lines-longer-than-80-chars": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "map-keys-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "matching-super-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -865,7 +877,25 @@
                 "missing-whitespace-between-adjacent-strings": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "newline-before-break": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-case": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-continue": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-method": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "newline-before-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-throw": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-default-cases": {
@@ -899,6 +929,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "parameter-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "parameters-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "pattern-fields-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-adjacent-string-concatenation": {
@@ -1058,6 +1094,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "public-member-api-docs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "record-fields-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "require-trailing-commas": {
@@ -2067,6 +2106,9 @@
                 "annotate-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "arguments-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2250,6 +2292,9 @@
                 "empty-constructor-bodies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "enum-constants-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "eol-at-end-of-file": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2263,6 +2308,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "implicit-call-tearoffs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "initializers-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "leading-newlines-in-multiline-strings": {
@@ -2280,6 +2328,9 @@
                 "lines-longer-than-80-chars": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "map-keys-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "matching-super-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2289,7 +2340,25 @@
                 "missing-whitespace-between-adjacent-strings": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "newline-before-break": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-case": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-continue": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-method": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "newline-before-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-throw": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-default-cases": {
@@ -2323,6 +2392,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "parameter-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "parameters-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "pattern-fields-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-adjacent-string-concatenation": {
@@ -2482,6 +2557,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "public-member-api-docs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "record-fields-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "require-trailing-commas": {

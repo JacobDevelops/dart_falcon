@@ -61,3 +61,9 @@ class Operand {
     return other; /* expect: newline-before-return */
   }
 }
+
+int commentedReturn() {
+  final value = 1;
+  // No separating blank line.
+  return value; /* expect: newline-before-return */
+}

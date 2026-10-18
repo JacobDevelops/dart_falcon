@@ -259,6 +259,44 @@ category tokens; it differs from `member-ordering` only in its default sequence.
 |--------|---------|---------|
 | `ignore_upcast` | `true` | Preserve getters whose return type differs from their private final backing field. Set to `false` to report these getters too. |
 
+### Name-ordering rules (`style`)
+
+`enum-constants-ordering`, `map-keys-ordering`, `parameters-ordering`,
+`pattern-fields-ordering`, and `record-fields-ordering` share the following option.
+Unlike DCM's alphabetical defaults, these config-driven falcon rules do nothing
+unless `order` is configured.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `order` | none | `"ascending"` or `"descending"` lexicographic, case-sensitive name order. |
+
+`arguments-ordering` defaults to the callee's declared parameter order and skips
+calls whose signature is unknown. `initializers-ordering` defaults to the class's
+field declaration order. Both also accept `order` to select alphabetical ordering.
+For arguments, `alphabetize: true` also selects ascending order; an explicit
+`order` takes precedence, and `alphabetize` defaults to `false`.
+Non-field initializers, including `super`, `this`, and assertions, retain their
+positions.
+For initializer ordering, only literal values and direct constructor-parameter
+reads participate; other expressions break ordering runs to preserve evaluation
+order when applying the recommendation.
+
+Parameter and argument ordering applies only to named entries, not positional
+entries whose order changes the API. Map ordering compares simple literal string
+keys, with unknown keys, spreads, and collection control flow breaking the run.
+Record ordering applies to named record-type fields, not record literals.
+Pattern ordering applies to named object and record fields. Unknown names are
+not assigned an alphabetical position.
+
+For example, `"arguments-ordering": { "level": "warn", "options": {
+"order": "ascending" } }` requires named call arguments in ascending order.
+
+The `newline-before-method`, `newline-before-constructor`, `newline-before-case`,
+`newline-before-throw`, `newline-before-continue`, and `newline-before-break`
+rules have no options. Like `newline-before-return`, they require a blank line
+only when the declaration, clause, or statement follows another entry in its
+containing list. Statement rules apply to blocks, not unbraced switch-case bodies.
+
 ## Overrides
 
 `overrides` re-configures rules per path, mirroring biome's `overrides`. The
