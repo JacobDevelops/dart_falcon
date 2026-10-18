@@ -7499,55 +7499,55 @@
         "column": 28,
         "file": "bad_conditional_export/lib/a.dart",
         "line": 2,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_export/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_export/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_export/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/b.dart -> lib/a.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 26,
         "file": "bad_conditional_import/lib/a.dart",
         "line": 2,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_import/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_import/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_import/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/b.dart -> lib/a.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_pair/lib/a.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_pair/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_pair/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_pair/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/b.dart -> lib/a.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_reachable_subcycle/lib/b.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/c.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/b.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/b.dart -> lib/c.dart -> lib/b.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_reachable_subcycle/lib/d.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/d.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/e.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/d.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/d.dart -> lib/e.dart -> lib/d.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_self/lib/a.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_self/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_self/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/a.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_shared_component/lib/a.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_shared_component/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_shared_component/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_shared_component/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/b.dart -> lib/a.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_triangle/lib/a.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/c.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/b.dart -> lib/c.dart -> lib/a.dart. Break the cycle by removing a dependency."
       },
       {
         "column": 8,
         "file": "bad_uri_aliases/lib/a.dart",
         "line": 1,
-        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_uri_aliases/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_uri_aliases/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_uri_aliases/lib/a.dart. Break the cycle by removing a dependency."
+        "message": "Import/export cycle: lib/a.dart -> lib/b.dart -> lib/a.dart. Break the cycle by removing a dependency."
       }
     ],
     "docs": "Report mutually dependent components of imported or exported library files.\n\nCycles couple libraries and make dependency boundaries harder to maintain.\nEach diagnostic includes the complete chain, ending back at its first file.\nImport and export targets include every conditional alternative; `part` and\n`part of` directives are not dependency edges. Only analyzed, resolved files\nparticipate; package URIs without a known package identity are skipped.\nCanonical path aliases and repeated directives share one edge.\nEach mutually dependent component is reported once, including self-imports.\nThe chain is a shortest cycle through its lexicographically first canonical\nfile, not an enumeration of all cycles within that component.\nConfigure this project-wide rule under the `cross-file` section.",

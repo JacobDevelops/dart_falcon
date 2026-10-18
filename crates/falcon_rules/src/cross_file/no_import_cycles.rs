@@ -18,7 +18,10 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 
-use super::{ResolvedRef, canonical_package_path, enclosing_package, resolve_directive_uri};
+use super::{
+    ResolvedRef, canonical_package_path, enclosing_package, enclosing_pubspec,
+    resolve_directive_uri,
+};
 
 #[derive(Default)]
 pub struct NoImportCycles;
@@ -144,12 +147,19 @@ impl CrossFileRule for NoImportCycles {
                 .find(|&&(target, _)| target == cycle[1])
                 .map(|&(_, span)| span)
                 .unwrap();
+            let root = enclosing_pubspec(&paths[start])
+                .and_then(|manifest| manifest.parent().map(Path::to_path_buf));
             let mut message = String::from("Import/export cycle: ");
             for (index, &node) in cycle.iter().enumerate() {
                 if index > 0 {
                     message.push_str(" -> ");
                 }
-                message.push_str(&paths[node].to_string_lossy());
+                let path = paths[node].as_path();
+                let shown = root
+                    .as_deref()
+                    .and_then(|root| path.strip_prefix(root).ok())
+                    .unwrap_or(path);
+                message.push_str(&shown.to_string_lossy());
             }
             message.push_str(". Break the cycle by removing a dependency.");
             diagnostics.push(Diagnostic::new(
