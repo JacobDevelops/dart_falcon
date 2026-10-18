@@ -95,18 +95,21 @@ Neovim 0.11+ needs no plugin. Add this to your config:
 vim.lsp.config('falcon', {
   cmd = { 'falcon', 'lsp' },
   filetypes = { 'dart' },
-  root_markers = { 'falcon.json', 'pubspec.yaml', '.git' },
+  -- only start in projects that have a falcon.json
+  root_dir = function(bufnr, on_dir)
+    local root = vim.fs.root(bufnr, 'falcon.json')
+    if root then
+      on_dir(root)
+    end
+  end,
+  -- apply falcon.json edits without restarting the server
+  capabilities = { workspace = { didChangeWatchedFiles = { dynamicRegistration = true } } },
 })
 vim.lsp.enable('falcon')
 ```
 
-On Linux and BSD, Neovim doesn't watch files by default, so `falcon.json` edits
-only apply after the server restarts. To reload them live, install
-`inotify-tools` and add this to the config above:
-
-```lua
-capabilities = { workspace = { didChangeWatchedFiles = { dynamicRegistration = true } } },
-```
+On Linux and BSD, install `inotify-tools` as well. Without `inotifywait`, Neovim
+falls back to watching every directory under the project separately.
 
 ## How releases work
 
