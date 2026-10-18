@@ -119,7 +119,13 @@
         "avoid-unnecessary-setstate": "warn",
         "use-closest-build-context": "warn",
         "avoid-late-context": "warn",
-        "avoid-inherited-widget-in-initstate": "warn"
+        "avoid-inherited-widget-in-initstate": "warn",
+        "avoid-undisposed-instances": "warn",
+        "dispose-focus-node-and-timer": "warn",
+        "dispose-fields": "warn",
+        "always-remove-listener": "warn",
+        "avoid-recursive-widget-calls": "warn",
+        "avoid-unnecessary-stateful-widgets": "warn"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",

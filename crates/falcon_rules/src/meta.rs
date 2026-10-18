@@ -1378,6 +1378,24 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::DartCodeLinter("avoid-unrelated-type-assertions"),
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_undisposed_instances::AvoidUndisposedInstances>(
+        "avoid-undisposed-instances", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::dispose_focus_node_and_timer::DisposeFocusNodeAndTimer>(
+        "dispose-focus-node-and-timer", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::dispose_fields::DisposeFields>(
+        "dispose-fields", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::always_remove_listener::AlwaysRemoveListener>(
+        "always-remove-listener", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_recursive_widget_calls::AvoidRecursiveWidgetCalls>(
+        "avoid-recursive-widget-calls", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unnecessary_stateful_widgets::AvoidUnnecessaryStatefulWidgets>(
+        "avoid-unnecessary-stateful-widgets", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
     RuleMeta::file::<lint::suspicious::no_empty_block::NoEmptyBlock>(
         "no-empty-block",
         RuleGroup::Suspicious,

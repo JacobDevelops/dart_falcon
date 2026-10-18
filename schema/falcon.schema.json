@@ -239,6 +239,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "always-remove-listener": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -278,6 +281,9 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-recursive-widget-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-relative-lib-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -290,10 +296,16 @@
                 "avoid-uncaught-future-errors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-undisposed-instances": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unmodified-loop-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-setstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-stateful-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-casts": {
@@ -333,6 +345,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "discarded-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-focus-node-and-timer": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -1507,6 +1525,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "always-remove-listener": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1546,6 +1567,9 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-recursive-widget-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-relative-lib-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1558,10 +1582,16 @@
                 "avoid-uncaught-future-errors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-undisposed-instances": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unmodified-loop-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-setstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-stateful-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-casts": {
@@ -1601,6 +1631,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "discarded-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-focus-node-and-timer": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {

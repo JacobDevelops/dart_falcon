@@ -2935,6 +2935,96 @@
   },
   {
     "crossFile": false,
+    "description": "Requires Flutter Listenable registrations in State to be removed.",
+    "diagnostics": [
+      {
+        "column": 18,
+        "file": null,
+        "line": 11,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 12,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 13,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 14,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 15,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 16,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 29,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 30,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 41,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 64,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 80,
+        "message": "Remove this listener with the same callback when the State is disposed."
+      }
+    ],
+    "docs": "Requires Flutter Listenable registrations in State to be removed.\n\nReceiver and callback must match: removing a different callback or listening\nto a different object does not clean up the registration. Disposing the same\nnotifier also removes its listeners. Anonymous callbacks cannot be paired\nwith a different closure. Unresolved APIs and non-State classes are ignored;\nlocal declaration spans distinguish shadowed receivers and callbacks.\nUnresolved expression receivers (including temporary derived animation views)\nare ignored rather than attributing their listeners to an unrelated field.\nLocal aliases stored in fields and elements of the same iterated collection\nshare receiver identity. Untraceable or ambiguous local ownership is ignored.\nUnknown assignments, compound writes, and reused loop variables invalidate\nlocal ownership. Null assertions do not change a receiver's identity.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass A extends State<StatefulWidget> {\n final a = ValueNotifier(0);\n final b = ValueNotifier(0);\n final c = ValueNotifier(0);\n final d = ValueNotifier(0);\n final e = ValueNotifier(0);\n void listener() {}\n void wrong() {}\n void initState() {\n   a.addListener(listener);\n   b.addListener(listener);\n   c.addListener(listener);\n   d.addListener(() {});\n   e.addListener(listener);\n   e..addListener(wrong);\n }\n void dispose() { b.removeListener(wrong); c.removeListener(wrong); super.dispose(); }\n}\nclass Borrowed extends StatefulWidget {\n final Animation<double> animation;\n final ValueListenable<int> value;\n Borrowed(this.animation, this.value);\n State<Borrowed> createState() => BorrowedState();\n}\nclass BorrowedState extends State<Borrowed> {\n void tick() {}\n void initState() {\n   widget.animation.addListener(tick);\n   widget.value.addListener(tick);\n }\n}\n\nclass CollectionListeners extends State<StatefulWidget> {\n final Map<String, ValueNotifier<int>> _amounts = {};\n final Map<String, ValueNotifier<int>> _other = {};\n void changed() {}\n void wrong() {}\n void initState() {\n   for (final ValueNotifier<int> c in _amounts.values) {\n     c.addListener(changed);\n   }\n }\n void dispose() {\n   for (final ValueNotifier<int> c in _other.values) {\n     c.removeListener(changed);\n     c.dispose();\n   }\n   for (final ValueNotifier<int> c in _amounts.values) {\n     c.removeListener(wrong);\n   }\n   super.dispose();\n }\n}\n\nclass StoredAliasWrongCleanup extends State<StatefulWidget> {\n ValueNotifier<int>? _authNotifier;\n final other = ValueNotifier<int>(0);\n void changed() {}\n void wrong() {}\n void initState() {\n   final notifier = ValueNotifier<int>(0);\n   _authNotifier = notifier;\n   notifier.addListener(changed);\n }\n void dispose() {\n   _authNotifier?.removeListener(wrong);\n   other.dispose();\n   super.dispose();\n }\n}\n\nclass StoredAliasDifferentDisposedField extends State<StatefulWidget> {\n ValueNotifier<int>? _authNotifier;\n final other = ValueNotifier<int>(0);\n void changed() {}\n void initState() {\n   final notifier = ValueNotifier<int>(0);\n   _authNotifier = notifier;\n   notifier.addListener(changed);\n }\n void dispose() {\n   other.dispose();\n   super.dispose();\n }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass A extends State<StatefulWidget> {\n final a = ValueNotifier(0);\n final b = ValueNotifier(0);\n final c = ValueNotifier(0);\n final d = ValueNotifier(0);\n final e = ValueNotifier(0);\n void listener() {}\n void initState() {\n   a..addListener(listener);\n   b.addListener(listener);\n   this.c.addListener(this.listener);\n   d.addListener(() {});\n   e.addListener(listener);\n }\n void dispose() {\n   a.removeListener(listener);\n   b.dispose();\n   c.removeListener(listener);\n   d.dispose();\n   e.removeListener(listener);\n   super.dispose();\n }\n}\nclass Other { final a = ValueNotifier(0); void run() { a.addListener(() {}); } }\n\nclass StoredLocalNotifier extends State<StatefulWidget> {\n ValueNotifier<int>? _authNotifier;\n void changed() {}\n void initState() {\n   final notifier = ValueNotifier<int>(0);\n   _authNotifier = notifier;\n   notifier.addListener(changed);\n }\n void dispose() {\n   _authNotifier?.dispose();\n   super.dispose();\n }\n}\n\nclass RemovedStoredAlias extends State<StatefulWidget> {\n ValueNotifier<int>? _authNotifier;\n void changed() {}\n void initState() {\n   final notifier = ValueNotifier<int>(0);\n   _authNotifier = notifier;\n   notifier.addListener(changed);\n }\n void dispose() {\n   _authNotifier?.removeListener(changed);\n   super.dispose();\n }\n}\n\nclass CollectionListeners extends State<StatefulWidget> {\n final Map<String, ValueNotifier<int>> _amounts = {};\n final Map<String, ValueNotifier<int>> _prices = {};\n void changed() {}\n void initState() {\n   for (final c in _amounts.values) {\n     c.addListener(changed);\n   }\n   for (final ValueNotifier<int> c in _amounts.values) {\n     c.addListener(changed);\n   }\n   for (final c in _prices.values) {\n     c.addListener(() {});\n   }\n   for (final ValueNotifier<int> c in _prices.values) {\n     c.addListener(() {});\n   }\n }\n void dispose() {\n   for (final ValueNotifier<int> amount in _amounts.values) {\n     amount.removeListener(changed);\n   }\n   for (final ValueNotifier<int> price in _prices.values) {\n     price.dispose();\n   }\n   super.dispose();\n }\n}\n\nclass UntraceableListenerOwner extends State<StatefulWidget> {\n void changed() {}\n void register(ValueNotifier<int> notifier) {\n   notifier.addListener(changed);\n }\n}\n\nclass AmbiguousListenerOwner extends State<StatefulWidget> {\n final first = ValueNotifier<int>(0);\n final second = ValueNotifier<int>(0);\n void changed() {}\n void register(bool condition) {\n   var notifier = first;\n   if (condition) notifier = second;\n   notifier.addListener(changed);\n }\n}\n\nclass AssertedStoredAlias extends State<StatefulWidget> {\n ValueNotifier<int>? _authNotifier;\n ValueNotifier<int>? _otherNotifier;\n void changed() {}\n void initState() {\n   final notifier = ValueNotifier<int>(0);\n   _authNotifier = notifier;\n   notifier.addListener(changed);\n   final other = ValueNotifier<int>(0);\n   _otherNotifier = other;\n   other.addListener(() {});\n }\n void dispose() {\n   _authNotifier!.removeListener(changed);\n   _otherNotifier!.dispose();\n   super.dispose();\n }\n}\n\nclass UntraceableWrites extends State<StatefulWidget> {\n final first = ValueNotifier<int>(0);\n final Map<String, ValueNotifier<int>> _amounts = {};\n void changed() {}\n void register(bool condition) {\n   var indexed = first;\n   indexed = _amounts['a']!;\n   indexed.addListener(changed);\n   var conditional = first;\n   conditional = condition ? first : _amounts['b']!;\n   conditional.addListener(changed);\n   ValueNotifier<int>? compound = first;\n   compound ??= _amounts['c']!;\n   compound?.addListener(changed);\n   var reused = first;\n   for (reused in _amounts.values) {\n     reused.addListener(changed);\n   }\n }\n}"
+    },
+    "group": "correctness",
+    "name": "always-remove-listener",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Disallow relative imports in libraries under a package's `lib/` directory.",
     "diagnostics": [],
     "docs": "Disallow relative imports in libraries under a package's `lib/` directory.\n\nThe rule runs\nonly for files inside the enclosing package's `lib/` directory (the nearest\n`pubspec.yaml` decides the package; files outside any package are skipped,\nlike the analyzer's `isInLibDir`). Every `import` whose URI parses with an\nempty scheme is reported, so `import 'src/a.dart';` must be spelled\n`import 'package:<name>/src/a.dart';`. `package:` and `dart:` imports,\nexports, and conditional alternatives are not checked; relative imports that\nreach into `lib/` from outside it belong to `avoid_relative_lib_imports`.\nIncompatible with `prefer-relative-imports`.",
@@ -3886,6 +3976,60 @@
   },
   {
     "crossFile": false,
+    "description": "Warns when a widget's build method constructs the same widget again.",
+    "diagnostics": [
+      {
+        "column": 73,
+        "file": null,
+        "line": 2,
+        "message": "This build constructs its own widget recursively; return a different widget."
+      },
+      {
+        "column": 73,
+        "file": null,
+        "line": 3,
+        "message": "This build constructs its own widget recursively; return a different widget."
+      },
+      {
+        "column": 90,
+        "file": null,
+        "line": 4,
+        "message": "This build constructs its own widget recursively; return a different widget."
+      },
+      {
+        "column": 71,
+        "file": null,
+        "line": 6,
+        "message": "This build constructs its own widget recursively; return a different widget."
+      },
+      {
+        "column": 84,
+        "file": null,
+        "line": 7,
+        "message": "This build constructs its own widget recursively; return a different widget."
+      }
+    ],
+    "docs": "Warns when a widget's build method constructs the same widget again.\n\nResolved Flutter StatelessWidget subclasses and State<T> subclasses are\nchecked in build only. Constructor identity, not spelling, is compared;\nunrelated factories, createState, and other methods are ignored.\nDeferred builders and conditional expressions are excluded because recursive\ndata-driven widget trees can terminate normally.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass A extends StatelessWidget { Widget build(BuildContext context) => A();  }\nclass B extends StatelessWidget { Widget build(BuildContext context) => new B();  }\nclass C extends StatelessWidget { Widget build(BuildContext context) => Container(child: C());  }\nclass D extends StatefulWidget { State<D> createState() => DState(); }\nclass DState extends State<D> { Widget build(BuildContext context) => D();  }\nclass E extends StatelessWidget { E.named(); Widget build(BuildContext context) => E.named();  }",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass A extends StatelessWidget {\n Widget build(BuildContext context) => Container();\n A copy() => A();\n}\nclass B extends StatelessWidget { Widget build(BuildContext context) => A(); }\nclass C extends StatefulWidget { State<C> createState() => CState(); }\nclass CState extends State<C> { Widget build(BuildContext context) => A(); }\nclass Other { Object build() => Other(); }\nObject create() => A();\nclass Tree extends StatelessWidget {\n Widget build(BuildContext context) => Builder(builder: (_) => Tree());\n}\nclass Nested extends StatelessWidget {\n final int depth = 0;\n Widget build(BuildContext context) {\n   if (depth > 0) return Nested();\n   return Container();\n }\n}\nclass Forest extends StatelessWidget {\n final List<int> children = [];\n Widget build(BuildContext context) => Column(children: [\n   for (final child in children) Forest(),\n ]);\n}\nclass Shadow extends StatelessWidget {\n Widget build(BuildContext context) {\n   final Shadow = () => Container();\n   return Shadow();\n }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-recursive-widget-calls",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Disallow relative imports that reach into a `lib/` directory.",
     "diagnostics": [
       {
@@ -4156,6 +4300,84 @@
   },
   {
     "crossFile": false,
+    "description": "Warns when a disposable constructor result is discarded.",
+    "diagnostics": [
+      {
+        "column": 2,
+        "file": null,
+        "line": 4,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 2,
+        "file": null,
+        "line": 5,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 2,
+        "file": null,
+        "line": 6,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 2,
+        "file": null,
+        "line": 7,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 2,
+        "file": null,
+        "line": 8,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 17,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 18,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 19,
+        "message": "Retain this disposable instance and dispose it when its owner is released."
+      }
+    ],
+    "docs": "Warns when a disposable constructor result is discarded.\n\nOnly resolved constructors with an instance dispose method are checked.\nPassing a value as a call or constructor argument may transfer ownership:\nwithout a callee ownership contract, reporting it would be speculative.\nReading a member or interpolating an instance does not transfer the instance.\nAssignments, variable initializers, returns, and immediately disposed\nexpressions are also ignored. This conservative rule checks temporaries only;\nit does not prove that retained locals are eventually disposed. Owned fields\nbelong to dispose-fields, dispose-focus-node-and-timer, or\nproper-controller-dispose. Subscription and sink release obligations remain\nwith cancel-subscriptions and close-sinks.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass Resource { void dispose() {} }\nvoid bad() {\n TextEditingController();\n ScrollController();\n FocusNode();\n Resource();\n new Resource();\n}\nvoid consume(Object value) {}\nvoid discardedInsideCallback() {\n consume(() {\n  Resource();\n });\n}\nvoid discardedArgumentReceivers() {\n print(ScrollController().initialScrollOffset);\n consume(FocusNode().hasFocus);\n Text('${Resource()}');\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass Resource {\n void dispose() {}\n static Resource shared() => Resource();\n}\nclass Owner { final resource = Resource(); }\nResource create() => Resource();\nResource createBlock() { return Resource(); }\nvoid consume(Object value) {}\nvoid good() {\n final a = TextEditingController();\n var b = Resource();\n b = Resource();\n Resource()..dispose();\n consume('not disposable');\n a.dispose();\n b.dispose();\n}\nclass InitializedOwner {\n final Resource resource;\n InitializedOwner() : resource = Resource();\n}\nvoid wrappers(bool flag, Resource? borrowed) {\n final either = flag ? Resource() : Resource();\n final effective = borrowed ?? Resource();\n final nodes = [FocusNode(), FocusNode()];\n Resource().dispose();\n Resource.shared();\n}\nvoid shadowedConstructor() {\n final FocusNode = () => Object();\n consume(FocusNode());\n}\n\nvoid transferredArguments(BuildContext context) {\n Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SizedBox()));\n consume(TextEditingController());\n consume(ScrollController());\n consume(FocusNode());\n consume(Resource());\n consume(new Resource());\n consume((Resource()));\n consume(Resource()..toString());\n final resource = Resource();\n consume(resource);\n final sink = HiveLogSink();\n LoggerService._(sink: sink);\n LoggerService._(sink: HiveLogSink());\n}\n\nclass HiveLogSink {\n void dispose() {}\n}\n\nclass LoggerService {\n final HiveLogSink sink;\n LoggerService._({required this.sink});\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-undisposed-instances",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags loop conditions whose local scalar inputs are never modified by the loop.",
     "diagnostics": [
       {
@@ -4276,6 +4498,60 @@
     },
     "group": "correctness",
     "name": "avoid-unnecessary-setstate",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warns when a StatefulWidget's local State contains only a pure build method.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "This widget has no state or lifecycle behavior; use StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "This widget has no state or lifecycle behavior; use StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "This widget has no state or lifecycle behavior; use StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "This widget has no state or lifecycle behavior; use StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "This widget has no state or lifecycle behavior; use StatelessWidget."
+      }
+    ],
+    "docs": "Warns when a StatefulWidget's local State contains only a pure build method.\n\nBoth declarations must resolve to Flutter types in this file. State fields,\nmixins, lifecycle methods, extra instance members, and any State member use\nother than widget conservatively retain the StatefulWidget. Inherited custom\nState bases are ignored because they may own lifecycle behavior.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass A extends StatefulWidget { State<A> createState() => AState(); }\nclass AState extends State<A> { Widget build(BuildContext context) => Container(); }\nclass B extends StatefulWidget { State<B> createState() => BState(); }\nclass BState extends State<B> { Widget build(BuildContext context) => Text('B'); }\nclass C extends StatefulWidget { State<C> createState() => CState(); }\nclass CState extends State<C> { Widget build(BuildContext context) { return Container(); } }\nclass D extends StatefulWidget { State<D> createState() => DState(); }\nclass DState extends State<D> { Widget build(BuildContext context) => Row(children: []); }\nclass E extends StatefulWidget { State<E> createState() => EState(); }\nclass EState extends State<E> { Widget build(BuildContext context) => Column(children: []); }",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass A extends StatefulWidget { State<A> createState() => AState(); }\nclass AState extends State<A> { int count = 0; Widget build(BuildContext context) => Text('$count'); }\nclass B extends StatefulWidget { State<B> createState() => BState(); }\nclass BState extends State<B> { void initState() { super.initState(); } Widget build(BuildContext context) => Container(); }\nclass C extends StatefulWidget { State<C> createState() => CState(); }\nclass CState extends State<C> { void dispose() { super.dispose(); } Widget build(BuildContext context) => Container(); }\nclass D extends StatefulWidget { State<D> createState() => DState(); }\nclass DState extends State<D> { Widget build(BuildContext context) => Text('$mounted'); }\nclass E extends StatelessWidget { Widget build(BuildContext context) => Container(); }\nclass Unknown extends StatefulWidget { State<Unknown> createState() => externalState(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-unnecessary-stateful-widgets",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -5813,6 +6089,282 @@
   },
   {
     "crossFile": false,
+    "description": "Requires other owned disposable State fields to be released in dispose().",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 7,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 8,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 9,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 10,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 11,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 21,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 22,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 23,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 41,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 42,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 43,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 44,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 45,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 46,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 47,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 48,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 49,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 50,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 51,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 52,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 53,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 54,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 55,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 56,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 57,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 58,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 59,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 94,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 104,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      }
+    ],
+    "docs": "Requires other owned disposable State fields to be released in dispose().\n\nFields initialized or assigned a resolved constructor with an instance dispose\nmethod must receive an eagerly evaluated dispose() call in the State's\ndispose() method, including calls wrapped in arguments or operands.\nBorrowed fields, static fields, unresolved types, and conditional-only releases\nare not treated as proof of ownership or cleanup. TextEditingController,\nAnimationController, ScrollController, PageController, and TabController belong\nto proper-controller-dispose, FocusNode/Timer to dispose-focus-node-and-timer,\nsubscriptions to cancel-subscriptions, and sinks\nto close-sinks. Unretained temporaries belong to avoid-undisposed-instances.\nCalls after a possible return/throw are not proof, including idempotence\nguards whose cross-invocation state is outside this rule's analysis.\nDeferred closures and short-circuit right operands do not prove cleanup.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass Resource {\n bool dispose() => true;\n void accept(dynamic value) {}\n}\nclass A extends State<StatefulWidget> {\n final a = Resource();\n final b = Resource();\n final c = Resource();\n final d = Resource();\n final e = Resource();\n void dispose() {\n   a.dispose;\n   if (false) b.dispose();\n   final callback = () => c.dispose();\n   super.dispose();\n }\n}\n\nclass DeferredCleanup extends State<StatefulWidget> {\n final deferred = Resource();\n final shortCircuit = Resource();\n final conditional = Resource();\n bool enabled = false;\n @override\n void dispose() {\n   consume(() => deferred.dispose());\n   enabled && shortCircuit.dispose();\n   enabled ? conditional.dispose() : false;\n   super.dispose();\n }\n}\n\nclass ResourceHolder {\n final resource = Resource();\n final values = <bool?>[];\n dynamic pending;\n}\n\nclass OptionalCleanup extends State<StatefulWidget> {\n final coalesced = Resource();\n final disjunction = Resource();\n final optionalArgument = Resource();\n final collectionIf = Resource();\n final collectionFor = Resource();\n final mapIf = Resource();\n final mapFor = Resource();\n final coalescingAssignment = Resource();\n final optionalAssignment = Resource();\n final chainedArgument = Resource();\n final chainedIndex = Resource();\n final optionalCascade = Resource();\n final optionalIndex = Resource();\n final optionalIndexAssignment = Resource();\n final cascadeAssignment = Resource();\n final cascadeIndexAssignment = Resource();\n final switchArm = Resource();\n final nullAwareMapKey = Resource();\n final assertedChain = Resource();\n String? maybeKey;\n Resource? services;\n ResourceHolder? holder;\n final cascadeHolder = ResourceHolder();\n List<bool?>? values;\n final cascadeValues = <bool?>[null];\n bool? pending;\n bool enabled = false;\n @override\n void dispose() {\n   services?.dispose() ?? coalesced.dispose();\n   enabled || disjunction.dispose();\n   services?.accept(optionalArgument.dispose());\n   consume([if (enabled) collectionIf.dispose()]);\n   consume([for (final value in <int>[]) collectionFor.dispose()]);\n   consume({if (enabled) 'key': mapIf.dispose()});\n   consume({for (final value in <int>[]) value: mapFor.dispose()});\n   consume({?maybeKey: nullAwareMapKey.dispose()});\n   pending ??= coalescingAssignment.dispose();\n   holder?.pending = optionalAssignment.dispose();\n   holder?.resource.accept(chainedArgument.dispose());\n   holder?.resource!.accept(assertedChain.dispose());\n   consume(holder?.values[chainedIndex.dispose() ? 0 : 1]);\n   services?..accept(optionalCascade.dispose());\n   consume(values?[optionalIndex.dispose() ? 0 : 1]);\n   values?[0] = optionalIndexAssignment.dispose();\n   cascadeHolder..pending ??= cascadeAssignment.dispose();\n   cascadeValues..[0] ??= cascadeIndexAssignment.dispose();\n   consume(switch (enabled) { _ => switchArm.dispose() });\n   super.dispose();\n }\n}\n\nclass ThrowingArgumentCleanup extends State<StatefulWidget> {\n final afterThrow = Resource();\n bool enabled = false;\n @override\n void dispose() {\n   consumePair(enabled ? throw StateError('stop') : null, afterThrow.dispose());\n   super.dispose();\n }\n}\n\nclass ThrowingCascadeCleanup extends State<StatefulWidget> {\n final resource = Resource();\n bool enabled = false;\n @override\n void dispose() {\n   resource..accept(enabled ? null : throw StateError('stop'))..dispose();\n   super.dispose();\n }\n}\n\nvoid consumePair(dynamic first, dynamic second) {}\n\nvoid consume(dynamic value) {}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nimport 'package:flutter/material.dart';\nclass Resource {\n void dispose() {}\n static Resource sharedInstance() => Resource();\n}\nclass A extends State<StatefulWidget> {\n final a = Resource();\n final b = Resource();\n final controller = TextEditingController();\n final focus = FocusNode();\n final timer = Timer(Duration.zero, () {});\n final cascadedController = TextEditingController()..text = '';\n final singleton = Resource.sharedInstance();\n static final shared = Resource();\n Resource? borrowed;\n void dispose() {\n   a.dispose();\n   this.b.dispose();\n   controller.dispose();\n   focus.dispose();\n   timer.cancel();\n   super.dispose();\n }\n}\nclass Other { final resource = Resource(); }\n\nclass Services {\n Future<void> dispose() async {}\n void accept(dynamic value) {}\n}\n\nclass EagerArgumentCleanup extends State<StatefulWidget> {\n final Services? _services = Services();\n final resource = Services();\n final cascaded = Services();\n final Services? nullableCascaded = Services();\n final eagerCollection = Services();\n final eagerAssignment = Services();\n dynamic pending;\n @override\n void dispose() {\n   unawaited(_services?.dispose() ?? Future<void>.value());\n   consume(resource.dispose());\n   cascaded..dispose();\n   nullableCascaded?..dispose();\n   consume([eagerCollection.dispose()]);\n   pending = eagerAssignment.dispose();\n   super.dispose();\n }\n}\n\nclass CleanupBeforeThrow extends State<StatefulWidget> {\n final resource = Services();\n bool enabled = false;\n @override\n void dispose() {\n   consumePair(resource.dispose(), enabled ? throw StateError('stop') : null);\n   super.dispose();\n }\n}\n\nclass CascadeCleanupBeforeThrow extends State<StatefulWidget> {\n final resource = Services();\n bool enabled = false;\n @override\n void dispose() {\n   resource..dispose()..accept(enabled ? null : throw StateError('stop'));\n   super.dispose();\n }\n}\n\nclass ParenthesizedReceiverCleanup extends State<StatefulWidget> {\n final resource = Services();\n dynamic receiver;\n @override\n void dispose() {\n   (receiver?.resource).accept(resource.dispose());\n   super.dispose();\n }\n}\n\nvoid consumePair(dynamic first, dynamic second) {}\n\nvoid consume(dynamic value) {}"
+    },
+    "group": "correctness",
+    "name": "dispose-fields",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires owned FocusNode and Timer fields to be released in State.dispose().",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 4,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 6,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 18,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 19,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 28,
+        "message": "This owned field is never released; call its dispose() or cancel() method in dispose()."
+      }
+    ],
+    "docs": "Requires owned FocusNode and Timer fields to be released in State.dispose().\n\nOnly fields constructed by a resolved Flutter FocusNode or dart:async Timer\nconstructor are checked, including assignments in lifecycle methods. A direct\ndispose()/cancel() invocation in dispose() is required; tear-offs, callbacks,\nand conditional-only invocations do not prove release. Borrowed and static\nfields are ignored. Controllers belong to proper-controller-dispose; other\ndisposable fields belong to dispose-fields, and unretained temporary objects\nbelong to avoid-undisposed-instances.\nCalls after a possible return/throw are not proof, including idempotence\nguards whose cross-invocation state is outside this rule's analysis.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'package:flutter/material.dart';\nclass A extends State<StatefulWidget> {\n  final focus = FocusNode();\n  final timer = Timer(Duration.zero, () {});\n  final periodic = Timer.periodic(Duration.zero, (_) {});\n  final tearoff = FocusNode();\n  final closure = FocusNode();\n  final conditional = FocusNode();\n  void dispose() {\n    tearoff.dispose;\n    final callback = () => closure.dispose();\n    if (false) conditional.dispose();\n    super.dispose();\n  }\n}\nclass EarlyReturn extends State<StatefulWidget> {\n final focus = FocusNode();\n final timer = Timer(Duration.zero, () {});\n void dispose() {\n   if (mounted) return;\n   focus.dispose();\n   timer.cancel();\n   super.dispose();\n }\n}\nclass ThrowExpression extends State<StatefulWidget> {\n final focus = FocusNode();\n void dispose() {\n   final check = mounted ? null : throw StateError('not mounted');\n   focus.dispose();\n   super.dispose();\n }\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nimport 'package:flutter/material.dart';\nclass A extends State<StatefulWidget> {\n  final focus = FocusNode();\n  final timer = Timer(Duration.zero, () {});\n  final periodic = Timer.periodic(Duration.zero, (_) {});\n  final controller = TextEditingController();\n  static final shared = FocusNode();\n  FocusNode? borrowed;\n  void dispose() {\n    focus.dispose();\n    timer.cancel();\n    periodic.cancel();\n    controller.dispose();\n    super.dispose();\n  }\n}\nclass Other { final focus = FocusNode(); }\nclass Arrow extends State<StatefulWidget> {\n final focus = FocusNode();\n void dispose() => focus.dispose();\n}\nclass OrderIndependent extends State<StatefulWidget> {\n Timer? timer;\n FocusNode? focus = FocusNode();\n void dispose() {\n   timer!.cancel();\n   focus!.dispose();\n   super.dispose();\n }\n void start() { timer = Timer.periodic(Duration.zero, (_) {}); }\n}\nclass NestedReturn extends State<StatefulWidget> {\n final focus = FocusNode();\n void dispose() {\n   void nested() { return; }\n   focus.dispose();\n   super.dispose();\n }\n}"
+    },
+    "group": "correctness",
+    "name": "dispose-focus-node-and-timer",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Require switch statements over enum-like classes to cover every constant value.",
     "diagnostics": [
       {
@@ -7037,100 +7589,100 @@
         "column": 9,
         "file": null,
         "line": 5,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 14,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 25,
         "file": null,
         "line": 18,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 33,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 14,
         "file": null,
         "line": 44,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 53,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 64,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 68,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 30,
         "file": null,
         "line": 72,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 85,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 86,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 87,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 88,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 89,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 90,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       },
       {
         "column": 9,
         "file": null,
         "line": 91,
-        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+        "message": "This controller is never disposed; call its dispose() method in dispose()."
       }
     ],
-    "docs": "Requires Flutter controllers owned by a `State` field to be disposed.",
+    "docs": "Requires Flutter controllers owned by a `State` field to be disposed.\nShared field checks recognize eagerly evaluated releases, including arguments\nand operands, but not deferred closures or conditional expression branches.",
     "domains": [
       "flutter"
     ],

@@ -1,5 +1,6 @@
 //! Correctness lint rules.
 
+pub mod always_remove_listener;
 pub mod always_use_package_imports;
 pub mod avoid_collection_equality_checks;
 pub mod avoid_contradictory_expressions;
@@ -13,12 +14,15 @@ pub mod avoid_inherited_widget_in_initstate;
 pub mod avoid_late_context;
 pub mod avoid_missing_interpolation;
 pub mod avoid_mutable_global_variables;
+pub mod avoid_recursive_widget_calls;
 pub mod avoid_relative_lib_imports;
 pub mod avoid_returning_widgets;
 pub mod avoid_type_to_string;
 pub mod avoid_uncaught_future_errors;
+pub mod avoid_undisposed_instances;
 pub mod avoid_unmodified_loop_condition;
 pub mod avoid_unnecessary_setstate;
+pub mod avoid_unnecessary_stateful_widgets;
 pub mod avoid_unrelated_type_casts;
 pub mod avoid_unsafe_collection_methods;
 pub mod avoid_unused_parameters;
@@ -32,6 +36,8 @@ pub mod correct_order_for_super_dispose;
 pub mod deprecated_member_use_from_same_package;
 pub mod diagnostic_describe_all_properties;
 pub mod discarded_futures;
+pub mod dispose_fields;
+pub mod dispose_focus_node_and_timer;
 pub mod exhaustive_cases;
 mod flutter_state_rules;
 pub mod hash_and_equals;
