@@ -299,6 +299,9 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-assigning-to-static-field": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-calling-notifier-members-inside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -356,6 +359,9 @@
                 "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-missing-completer-stack-trace": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-missing-controller": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -374,7 +380,16 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-nested-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-nested-streams-and-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-recursive-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-recursive-widget-calls": {
@@ -398,6 +413,9 @@
                 "avoid-uncaught-future-errors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unconditional-break": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-undisposed-instances": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -410,10 +428,16 @@
                 "avoid-unnecessary-stateful-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unreachable-for-loop": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unrelated-type-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unsafe-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unused-after-null-check": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
@@ -500,6 +524,9 @@
                 "literal-only-boolean-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "match-getter-setter-field-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "missing-test-assertion": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -516,6 +543,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-closures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-json-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-define-hero-tag": {
@@ -693,7 +723,13 @@
                 "avoid-hardcoded-credentials": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-sensitive-query-params": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-weak-cryptographic-algorithms": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-random-secure": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -1858,6 +1894,9 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-assigning-to-static-field": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-calling-notifier-members-inside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1915,6 +1954,9 @@
                 "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-missing-completer-stack-trace": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-missing-controller": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1933,7 +1975,16 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-nested-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-nested-streams-and-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-recursive-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-recursive-widget-calls": {
@@ -1957,6 +2008,9 @@
                 "avoid-uncaught-future-errors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unconditional-break": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-undisposed-instances": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1969,10 +2023,16 @@
                 "avoid-unnecessary-stateful-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unreachable-for-loop": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unrelated-type-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unsafe-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unused-after-null-check": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
@@ -2059,6 +2119,9 @@
                 "literal-only-boolean-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "match-getter-setter-field-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "missing-test-assertion": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2075,6 +2138,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-closures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-json-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-define-hero-tag": {
@@ -2252,7 +2318,13 @@
                 "avoid-hardcoded-credentials": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-sensitive-query-params": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-weak-cryptographic-algorithms": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-random-secure": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },

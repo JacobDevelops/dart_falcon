@@ -4440,6 +4440,76 @@
   },
   {
     "crossFile": false,
+    "description": "Flags instance methods writing resolved static fields, including compound assignments and increments.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 5,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 12,
+        "message": "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static."
+      }
+    ],
+    "docs": "Flags instance methods writing resolved static fields, including compound\nassignments and increments. Static methods, top-level functions, declarations,\ninstance fields, setters, and shadowed names are excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "class Counter {\n  static int count = 0;\n  static int? cached;\n  void update() {\n    count = 1;\n    count += 2;\n    count++;\n    --count;\n    cached ??= 1;\n    Counter.count = 2;\n    Counter.count *= 2;\n    Counter.count--;\n  }\n}",
+      "crossFile": null,
+      "good": "class Counter {\n  static int count = 0;\n  int value = 0;\n  static set setting(int value) {}\n  void change(int count) {\n    count = 1;\n    value = 2;\n    value++;\n    this.value += 2;\n  }\n  void local() {\n    int count = 0;\n    count++;\n  }\n  static void reset() {\n    count = 0;\n    Counter.count += 1;\n    count++;\n  }\n}\nvoid change(Counter counter) {\n  counter.value = 3;\n  Counter.setting = 1;\n  final read = Counter.count;\n  Counter.count = 2;\n  Counter.count--;\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-assigning-to-static-field",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags calls to Riverpod notifier methods during widget build.",
     "diagnostics": [
       {
@@ -5854,6 +5924,58 @@
   },
   {
     "crossFile": false,
+    "description": "Preserve error origins when calling SDK `Completer.completeError`.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Pass a stack trace as the second argument to Completer.completeError."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Pass a stack trace as the second argument to Completer.completeError."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Pass a stack trace as the second argument to Completer.completeError."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Pass a stack trace as the second argument to Completer.completeError."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 9,
+        "message": "Pass a stack trace as the second argument to Completer.completeError."
+      }
+    ],
+    "docs": "Preserve error origins when calling SDK `Completer.completeError`.\nPass the caught stack trace, or `StackTrace.current`, as the second argument.\n\nChecks ordinary, null-aware, and cascade calls using resolved receiver types.\nExplicit null is missing too. Custom same-named methods and dynamic receivers\nare ignored; inherited methods are checked only when their SDK owner resolves\nand library/import lookup does not select a different completeError function.\n\nReference: https://dcm.dev/docs/rules/common/avoid-missing-completer-stack-trace/",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nvoid errors(Completer<int> completer, Completer<void>? nullable, async.Completer<String> prefixed) {\n  completer.completeError('first');\n  completer.completeError('second', null);\n  nullable?.completeError('third');\n  prefixed.completeError('fourth');\n  completer..completeError('fifth');\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nclass Custom {\n  void completeError(Object error) {}\n}\n\nvoid errors(Completer<int> completer, Completer<void>? nullable, dynamic unknown, StackTrace trace) {\n  completer.completeError('first', trace);\n  completer.completeError('second', StackTrace.current);\n  nullable?.completeError('third', trace);\n  completer..completeError('fourth', trace);\n  Custom().completeError('custom');\n  unknown.completeError('unknown');\n  completer.complete(1);\n}\n\nabstract class Overriding<T> implements Completer<T> {\n  void completeError(Object error, [StackTrace? stackTrace]) {}\n  void fail(Object error) {\n    completeError(error);\n  }\n}\n\nextension CustomCompleterErrors<T> on Completer<T> {\n  void completeError(Object error) {}\n  void failWithCustomHandler(Object error) {\n    completeError(error);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-missing-completer-stack-trace",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Require Flutter text fields to expose their updated value.",
     "diagnostics": [
       {
@@ -6258,6 +6380,122 @@
   },
   {
     "crossFile": false,
+    "description": "Avoid `Future<Future<T>>`, `FutureOr<Future<T>>`, and other directly nested future wrappers.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "Remove the nested future wrapper; return a single Future or FutureOr instead."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Remove the nested future wrapper; return a single Future or FutureOr instead."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "Remove the nested future wrapper; return a single Future or FutureOr instead."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 7,
+        "message": "Remove the nested future wrapper; return a single Future or FutureOr instead."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 8,
+        "message": "Remove the nested future wrapper; return a single Future or FutureOr instead."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 9,
+        "message": "Remove the nested future wrapper; return a single Future or FutureOr instead."
+      }
+    ],
+    "docs": "Avoid `Future<Future<T>>`, `FutureOr<Future<T>>`, and other directly\nnested future wrappers. Return `Future<T>` (or `FutureOr<T>`) instead.\n\nChecks explicit type occurrences, including expanded typedefs, using SDK\ndeclaration identities and lexical type parameters. Collections of futures\nare not nested wrappers; inferred-only types are deliberately not reported.\n\nReference: https://dcm.dev/docs/rules/common/avoid-nested-futures/",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nFuture<Future<int>>? first;\nFutureOr<Future<int>>? second;\nFutureOr<FutureOr<int>>? third;\nFuture<FutureOr<String>>? fourth;\nasync.Future<async.Future<int>>? prefixed;\nvoid consume(Future<Future<void>> value) {}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nFuture<int>? one;\nFutureOr<int>? maybe;\nList<Future<int>>? many;\nFuture<List<int>>? collection;\nFuture<Stream<int>>? stream;\nFuture<int> Function()? callback;\nFuture? raw;"
+    },
+    "group": "correctness",
+    "name": "avoid-nested-futures",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Avoid directly nesting SDK streams and futures: `Stream<Future<T>>` and `Future<Stream<T>>` complicate consumption.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 7,
+        "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 8,
+        "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 9,
+        "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence."
+      }
+    ],
+    "docs": "Avoid directly nesting SDK streams and futures: `Stream<Future<T>>` and\n`Future<Stream<T>>` complicate consumption. Use `asyncMap`/`asyncExpand`, or\nexpose a single `Stream<T>` instead of a future that produces a stream.\n\nFutureOr is also future-like. Explicit type occurrences and typedef\nexpansions are checked with lexical type-parameter scopes; stream-of-stream\nand future-of-future types are outside this rule. Inferred-only types are\nnot reported.\n\nReference: https://dcm.dev/docs/rules/common/avoid-nested-streams-and-futures/",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nStream<Future<int>>? first;\nFuture<Stream<int>>? second;\nStream<FutureOr<int>>? third;\nFutureOr<Stream<String>>? fourth;\nasync.Stream<async.Future<int>>? prefixed;\nvoid consume(Future<Stream<void>> value) {}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nStream<int>? sequence;\nFuture<int>? result;\nFutureOr<int>? maybe;\nStream<Stream<int>>? sequences;\nFuture<Future<int>>? nestedFuture;\nFuture<List<Stream<int>>>? batches;\nStream<List<Future<int>>>? jobs;\nFuture<Stream<int> Function()>? callback;"
+    },
+    "group": "correctness",
+    "name": "avoid-nested-streams-and-futures",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags non-listening Provider reads directly inside Flutter widget builds.",
     "diagnostics": [
       {
@@ -6333,6 +6571,88 @@
     "group": "correctness",
     "name": "avoid-read-inside-build",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports direct self-calls in functions and methods, including guarded recursion.",
+    "diagnostics": [
+      {
+        "column": 18,
+        "file": null,
+        "line": 1,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 2,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 3,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 6,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 9,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 12,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 51,
+        "file": null,
+        "line": 13,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 14,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 15,
+        "message": "Avoid calling the same function recursively; consider an iterative implementation."
+      }
+    ],
+    "docs": "Reports direct self-calls in functions and methods, including guarded recursion.\n\nLocal declaration identities exclude shadowed call targets. Calls on another\nreceiver, getters, extension dispatch, and calls inside anonymous closures\nare deliberately excluded rather than guessed to be recursive.",
+    "domains": [],
+    "examples": {
+      "bad": "int forever() => forever();\nint recursive(int n) { return recursive(n - 1); }\nvoid again() { again(); }\nclass Broken {\n  int run() => this.run();\n  static int staticRun() => staticRun();\n}\nvoid outer() {\n  int local() => local();\n  print(local);\n}\nint bounded(int n) => n <= 0 ? 0 : bounded(n - 1);\nint guarded(int n) { if (n <= 0) return 0; return guarded(n - 1); }\nIterable<int> sequence() sync* { yield* sequence(); }\nFuture<void> asyncAgain() async => asyncAgain();",
+      "crossFile": null,
+      "good": "int delegates(int Function() delegates) => delegates();\nint other() => 1;\nint wrapper() => other();\nclass Valid {\n  Valid? next;\n  int run() => next!.run();\n  int shadow(int Function() shadow) => shadow();\n  int get recursiveGetter => recursiveGetter; // Covered by recursive-getters.\n}\nvoid nested() { void closure() { print('not recursive'); } closure(); }\nint iterative(int n) { var result = 0; while (n > 0) { result += n; n--; } return result; }\nvoid shadowed() {\n  final shadowed = () => 1;\n  print(shadowed());\n}\nvoid captured() { final callback = () => captured(); print(callback); }"
+    },
+    "group": "correctness",
+    "name": "avoid-recursive-calls",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -6804,6 +7124,64 @@
   },
   {
     "crossFile": false,
+    "description": "Reports unconditional break, continue, return or throw in a for-loop body.",
+    "diagnostics": [
+      {
+        "column": 47,
+        "file": null,
+        "line": 2,
+        "message": "This statement unconditionally interrupts every loop iteration; make the exit conditional."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 3,
+        "message": "This statement unconditionally interrupts every loop iteration; make the exit conditional."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 4,
+        "message": "This statement unconditionally interrupts every loop iteration; make the exit conditional."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 5,
+        "message": "This statement unconditionally interrupts every loop iteration; make the exit conditional."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 6,
+        "message": "This statement unconditionally interrupts every loop iteration; make the exit conditional."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 9,
+        "message": "This statement unconditionally interrupts every loop iteration; make the exit conditional."
+      }
+    ],
+    "docs": "Reports unconditional break, continue, return or throw in a for-loop body.\n\nBranches, nested loops, try/finally, and labeled jumps are not flattened:\nthey may change which iteration or construct an exit interrupts.",
+    "domains": [],
+    "examples": {
+      "bad": "void exits(Iterable<int> values) {\n  for (final value in values) { print(value); break; }\n  for (final value in values) { print(value); continue; }\n  for (final value in values) { print(value); return; }\n  for (final value in values) { throw value; }\n  for (var i = 0; i < 10; i++) { final value = i; print(value); break; }\n}\nvoid bare(Iterable<int> values) {\n  for (final value in values) continue;\n}",
+      "crossFile": null,
+      "good": "void repeat(bool stop) {\n  for (var i = 0; i < 10; i++) { if (stop) break; }\n  while (stop) { if (stop) continue; break; }\n  for (var i = 0; i < 3; i++) { print(i); }\n  do { if (stop) break; } while (stop);\n  outer: for (;;) { break outer; }\n  for (var i = 0; i < 3; i++) {\n    switch (i) { case 0: break; default: print(i); }\n  }\n  while (stop) {\n    try { break; } finally { if (stop) continue; }\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unconditional-break",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Warns when a disposable constructor result is discarded.",
     "diagnostics": [
       {
@@ -7066,6 +7444,64 @@
   },
   {
     "crossFile": false,
+    "description": "Reports iteration of a collection in a branch that requires it to be empty.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "This condition requires the collection to be empty, so the iteration body cannot run."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "This condition requires the collection to be empty, so the iteration body cannot run."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "This condition requires the collection to be empty, so the iteration body cannot run."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This condition requires the collection to be empty, so the iteration body cannot run."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 14,
+        "message": "This condition requires the collection to be empty, so the iteration body cannot run."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "This condition requires the collection to be empty, so the iteration body cannot run."
+      }
+    ],
+    "docs": "Reports iteration of a collection in a branch that requires it to be empty.\n\nOnly resolved local SDK collections and immediate iteration are inspected.\nFields/getters, intervening statements and unknown collection types may change\nbetween the guard and iteration, so they are deliberately left alone.",
+    "domains": [],
+    "examples": {
+      "bad": "void listLoop(List<int> items) {\n  if (items.isEmpty) { for (final item in items) { print(item); } }\n}\nvoid listCallback(List<int> items) {\n  if (items.length == 0) { items.forEach(print); }\n}\nvoid reversedLength(List<int> items) {\n  if (0 == items.length) { for (final item in items) { print(item); } }\n}\nvoid negated(List<int> items) {\n  if (!items.isNotEmpty) { items.forEach(print); }\n}\nvoid setLoop(Set<String> items) {\n  if (items.isEmpty) { for (final item in items) { print(item); } }\n}\nvoid mapCallback(Map<String, int> items) {\n  if (items.isEmpty) { items.forEach((key, value) { print(value); }); }\n}",
+      "crossFile": null,
+      "good": "void valid(List<int> items, List<int> others) {\n  for (final item in items) { print(item); }\n  if (items.isNotEmpty) { items.forEach(print); }\n  if (items.length != 0) { for (final item in items) { print(item); } }\n  if (items.isEmpty) { for (final item in others) { print(item); } }\n  // Mutation between guard and loop invalidates the empty fact.\n  if (items.isEmpty) { items.add(1); for (final item in items) { print(item); } }\n  if (items.isEmpty) { final items = others; items.forEach(print); }\n  if (items.isEmpty) { print('empty'); } else { items.forEach(print); }\n}\nclass Custom {\n  bool get isEmpty => true;\n  void forEach(void Function(int) action) { action(1); }\n}\nvoid custom(Custom items) {\n  if (items.isEmpty) { items.forEach(print); }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unreachable-for-loop",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags casts between types proven unrelated by canonical type resolution.",
     "diagnostics": [
       {
@@ -7310,6 +7746,88 @@
     },
     "group": "correctness",
     "name": "avoid-unsafe-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports a null-checked local ignored by a branch that passes another local of the same resolved type to a call.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 8,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 15,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 18,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 22,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 26,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 29,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 32,
+        "message": "This null-checked variable is unused; check whether the branch uses the wrong variable."
+      }
+    ],
+    "docs": "Reports a null-checked local ignored by a branch that passes another local\nof the same resolved type to a call. Declaration identities keep shadowed\nnames distinct. Branch-local replacements and unknown types are excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "void text(String? checked, String replacement) {\n  if (checked != null) { print(replacement); }\n}\nvoid integer(int? checked, int replacement) {\n  if (null != checked) { print(replacement); }\n}\nvoid decimal(double? checked, double replacement) {\n  if ((checked) != null) { print(replacement); }\n}\nvoid boolean(bool? checked, bool replacement) {\n  if (checked != null) { print(replacement); }\n}\nvoid consume({required String value}) {}\nvoid named(String? checked, String replacement) {\n  if (checked != null) { consume(value: replacement); }\n}\nvoid shadowed(String? checked, String replacement) {\n  if (checked != null) { { final checked = 'other'; print(checked); } print(replacement); }\n}\nvoid headline(String value) {\n  final String? myNullableValue = 'hello';\n  if (myNullableValue != null) { print(value); }\n}\nclass Item {}\nvoid userType(Item? checked, Item replacement) {\n  if (checked != null) { print(replacement); }\n}\nvoid numeric(num? checked, num replacement) {\n  if (checked != null) { print(replacement); }\n}\nvoid matchingGeneric(List<int>? checked, List<int> replacement) {\n  if (checked != null) { print(replacement); }\n}",
+      "crossFile": null,
+      "good": "void usesChecked(String? checked, String replacement) {\n  if (checked != null) { print(checked); print(replacement); }\n}\nvoid unrelated(String? checked, int count) {\n  if (checked != null) { print(count); }\n}\nvoid literal(String? checked) {\n  if (checked != null) { print('ready'); }\n}\nvoid nullBranch(String? checked, String replacement) {\n  if (checked == null) { print(replacement); }\n}\nvoid empty(String? checked) { if (checked != null) {} }\nvoid compound(String? checked, String replacement) {\n  if (checked != null && checked.isNotEmpty) { print(replacement); }\n}\nvoid captured(String? checked, String replacement) {\n  if (checked != null) {\n    void use() { print(checked); }\n    print(replacement);\n    use();\n  }\n}\nvoid elseOnly(String? checked, String replacement) {\n  if (checked != null) {} else { print(replacement); }\n}\nvoid alreadyNonNull(String checked, String replacement) {\n  if (checked != null) { print(replacement); }\n}\nvoid branchLocal(String? token, List<String> lines) {\n  if (token != null) { for (final line in lines) print(line); }\n}\nvoid onlyShadowed(String? checked) {\n  if (checked != null) { final checked = 'other'; print(checked); }\n}\nvoid callbackParameter(String? checked, List<String> lines) {\n  if (checked != null) { lines.forEach((String line) { print(line); }); }\n}\nvoid genericMismatch(List<int>? checked, List<String> replacement) {\n  if (checked != null) { print(replacement); }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unused-after-null-check",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -10131,6 +10649,64 @@
   },
   {
     "crossFile": false,
+    "description": "Detect likely copy-paste errors in trivial accessors when a different field matching the accessor name is declared.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 10,
+        "message": "Accessor 'total' uses '_count' instead of the field matching its name."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 11,
+        "message": "Accessor 'size' uses '_count' instead of the field matching its name."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 12,
+        "message": "Accessor 'amount' uses '_count' instead of the field matching its name."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "Accessor 'quantity' uses '_count' instead of the field matching its name."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 14,
+        "message": "Accessor 'title' uses '_name' instead of the field matching its name."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 15,
+        "message": "Accessor 'label' uses '_name' instead of the field matching its name."
+      }
+    ],
+    "docs": "Detect likely copy-paste errors in trivial accessors when a different field\nmatching the accessor name is declared. Inherited contracts and computed\naccessors are conservatively excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "class State {\n  int _count = 0;\n  String _name = '';\n  int _total = 0;\n  int _size = 0;\n  int _amount = 0;\n  int _quantity = 0;\n  String _title = '';\n  String _label = '';\n  int get total => _count;\n  int get size { return this._count; }\n  set amount(int value) => _count = value;\n  set quantity(int value) { this._count = value; }\n  String get title => _name;\n  set label(String value) { _name = value; }\n}",
+      "crossFile": null,
+      "good": "class State {\n  int _count = 0;\n  int get count => _count;\n  set count(int value) => _count = value;\n  int get doubled => _count * 2;\n  set positive(int value) { if (value > 0) _count = value; }\n  int get constant => 42;\n  int get externalValue => unknown;\n  set checked(int value) { print(value); _count = value; }\n  set parameter(int _count) => _count = _count;\n}\nclass Other {\n  int _size = 0;\n  int get size { return this._size; }\n}\nint unknown = 0;\nclass Aliases {\n  bool _enabled = false;\n  bool get isEnabled => _enabled;\n  int _count = 0;\n  int get size => _count;\n  int get length => _count;\n  int __value = 0;\n  int get value => __value;\n}\nabstract class Contract {\n  int get value;\n}\nclass Inherited implements Contract {\n  int _count = 0;\n  int _value = 1;\n  int get value => _count;\n}"
+    },
+    "group": "correctness",
+    "name": "match-getter-setter-field-names",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Reports inline test callbacks that contain no recognized assertion calls.",
     "diagnostics": [
       {
@@ -11010,6 +11586,64 @@
       "label": "Dart lints",
       "upstreamId": "null_closures",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/null_closures"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Decode JSON containers using their actual runtime generic types.",
+    "diagnostics": [
+      {
+        "column": 39,
+        "file": null,
+        "line": 5,
+        "message": "Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 6,
+        "message": "Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 8,
+        "message": "Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 10,
+        "message": "Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 11,
+        "message": "Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 12,
+        "message": "Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents."
+      }
+    ],
+    "docs": "Decode JSON containers using their actual runtime generic types.\n\nInstead of `jsonDecode(text) as List<int>`, use\n`(jsonDecode(text) as List<Object?>).cast<int>()`. For maps, first use\n`Map<String, Object?>`, then `.cast<String, Value>()`.\n\nTracks canonical SDK jsonDecode/json.decode calls without a reviver, direct\nno-reviver JsonDecoder().convert calls, immutable local aliases, casts, and\nindexing into those decoded values. Cast patterns in\nconditionals, switch cases/expressions, and pattern declarations are checked.\nArbitrary dynamic values, unresolved generic arguments, parameters merely\nnamed json, mutable aliases, custom decoders, and values returned from\ncollection conversions are not assumed to be decoded JSON.\n\nReference: https://dcm.dev/docs/rules/common/prefer-correct-json-casts/",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:convert';\nimport 'dart:convert' as convert;\n\nvoid decode(String text) {\n  final numbers = jsonDecode(text) as List<int>;\n  final mapping = convert.jsonDecode(text) as Map<String, int>;\n  final json = jsonDecode(text) as Map<String, Object?>;\n  final items = json['items'] as List<String>;\n  final alias = json;\n  final nested = alias['nested'] as Map<String, List<int>>;\n  final wrongKeys = jsonDecode(text) as Map<int, dynamic>;\n  if (json['items'] case Object() as List<int>) {}\n}",
+      "crossFile": null,
+      "good": "import 'dart:convert';\n\nvoid decode(String text, dynamic unrelated) {\n  final json = jsonDecode(text) as Map<String, Object?>;\n  final items = (json['items'] as List<Object?>).cast<int>().toList();\n  final map = (json['map'] as Map<String, dynamic>).cast<String, int>();\n  final list = jsonDecode(text) as List<dynamic>;\n  final raw = jsonDecode(text) as Map;\n  final scalar = json['count'] as int;\n  final nonJson = unrelated as List<int>;\n  final converted = items as List<int>;\n  {\n    final json = <String, dynamic>{'items': <int>[1]};\n    final typed = json['items'] as List<int>;\n  }\n  final revived = jsonDecode(text, reviver: (key, value) => value) as List<int>;\n}"
+    },
+    "group": "correctness",
+    "name": "prefer-correct-json-casts",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -15707,6 +16341,70 @@
   },
   {
     "crossFile": false,
+    "description": "Detect explicit secret-bearing URL query keys, not arbitrary occurrences of words such as `token` in paths, fragments, map values, or prose.",
+    "diagnostics": [
+      {
+        "column": 15,
+        "file": null,
+        "line": 1,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 2,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 3,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      },
+      {
+        "column": 51,
+        "file": null,
+        "line": 4,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 5,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 6,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 7,
+        "message": "Do not put secrets in URL query parameters; use an authorization header or request body."
+      }
+    ],
+    "docs": "Detect explicit secret-bearing URL query keys, not arbitrary occurrences of\nwords such as `token` in paths, fragments, map values, or prose.",
+    "domains": [],
+    "examples": {
+      "bad": "final first = 'https://example.com/?password=secret';\nfinal second = 'http://example.com/path?page=1&access_token=value';\nfinal third = Uri(queryParameters: {'api_key': 'secret'});\nfinal fourth = Uri.https('example.com', '/path', {'client_secret': 'secret'});\nfinal fifth = new Uri(queryParameters: {'refresh_token': 'secret'});\nfinal sixth = Uri.http('example.com', '/', {'PASSWORD': 'secret'});\nfinal seventh = 'https://example.com/?token=$token';\nString token = 'secret';",
+      "crossFile": null,
+      "good": "final first = 'https://example.com/password';\nfinal second = 'https://example.com/?page=1#token=secret';\nfinal third = Uri(queryParameters: {'page': 'token'});\nfinal fourth = Uri.https('example.com', '/', {'search': 'password'});\nfinal fifth = {'password': 'not a query'};\nfinal sixth = 'The password=secret example is not a URL';\nfinal seventh = 'https://example.com/?token_count=10';\nfinal eighth = Uri.http('example.com', '/token', {'page': '1'});\nfinal fragmentQuery = 'https://app.example.com/#/reset?token=abc';\nvoid shadowed(dynamic Uri) {\n  Uri(queryParameters: {'token': 'not a URL'});\n  Uri.https('example.com', '/', {'password': 'not a URL'});\n}"
+    },
+    "group": "security",
+    "name": "avoid-sensitive-query-params",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags references to MD5, SHA-1, DES, triple DES, and RC4 package APIs.",
     "diagnostics": [
       {
@@ -15792,6 +16490,64 @@
     "group": "security",
     "name": "avoid-weak-cryptographic-algorithms",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer the cryptographically secure `dart:math` random generator.",
+    "diagnostics": [
+      {
+        "column": 15,
+        "file": null,
+        "line": 3,
+        "message": "Use Random.secure() when reproducible randomness is not required."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Use Random.secure() when reproducible randomness is not required."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "Use Random.secure() when reproducible randomness is not required."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 6,
+        "message": "Use Random.secure() when reproducible randomness is not required."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 7,
+        "message": "Use Random.secure() when reproducible randomness is not required."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 8,
+        "message": "Use Random.secure() when reproducible randomness is not required."
+      }
+    ],
+    "docs": "Prefer the cryptographically secure `dart:math` random generator.\n\nOnly resolved unnamed Random constructors are checked; explicit seeds are\nexempt because they express a requirement for reproducible randomness.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:math';\nimport 'dart:math' as math;\nfinal first = Random();\nfinal second = new Random();\nfinal third = math.Random();\nfinal fourth = new math.Random();\nRandom create() => Random();\nfinal explicitNew = Random.new();",
+      "crossFile": null,
+      "good": "import 'dart:math';\nimport 'dart:math' as math;\nfinal secure = Random.secure();\nfinal prefixedSecure = math.Random.secure();\nfinal seeded = Random(42);\nfinal explicitSeeded = new Random(7);\nfinal prefixedSeeded = math.Random(1);\nvoid shadow(dynamic Random) { Random(); }\nclass Other { Other(); }\nfinal other = Other();"
+    },
+    "group": "security",
+    "name": "prefer-random-secure",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",

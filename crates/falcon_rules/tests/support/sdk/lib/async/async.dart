@@ -23,3 +23,11 @@ abstract class Timer {
   external factory Timer(Duration duration, void Function() callback);
   void cancel();
 }
+abstract class Completer<T> {
+  external factory Completer();
+  external factory Completer.sync();
+  void complete([FutureOr<T>? value]);
+  void completeError(Object error, [StackTrace? stackTrace]);
+  Future<T> get future;
+  bool get isCompleted;
+}

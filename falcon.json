@@ -71,6 +71,16 @@
         "always-pass-global-key": "warn",
         "avoid-incorrect-image-opacity": "warn",
         "prefer-define-hero-tag": "warn",
+        "avoid-unused-after-null-check": "warn",
+        "avoid-unreachable-for-loop": "warn",
+        "avoid-unconditional-break": "warn",
+        "avoid-nested-futures": "warn",
+        "avoid-nested-streams-and-futures": "warn",
+        "avoid-missing-completer-stack-trace": "warn",
+        "avoid-assigning-to-static-field": "warn",
+        "match-getter-setter-field-names": "warn",
+        "prefer-correct-json-casts": "warn",
+        "avoid-recursive-calls": "warn",
         "avoid-web-libraries-in-flutter": "warn",
         "no-logic-in-create-state": "warn",
         "avoid-relative-lib-imports": "warn",
@@ -441,6 +451,8 @@
       },
       "security": {
         "avoid-hardcoded-credentials": "warn",
+        "prefer-random-secure": "warn",
+        "avoid-sensitive-query-params": "warn",
         "avoid-weak-cryptographic-algorithms": "warn"
       },
       "a11y": {
