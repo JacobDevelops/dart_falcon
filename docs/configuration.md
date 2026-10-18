@@ -438,7 +438,7 @@ Notes:
   }
   ```
 
-  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`). `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not. Both lists must be non-empty and `message` non-blank, otherwise the entry is ignored. Each matching entry reports once per import, and per-path overrides replace the base options.
+  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`). `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not. Both lists must be non-empty and `message` non-blank, otherwise the entry is ignored. Each matching entry reports once per import URI, so a matching conditional alternative gets its own report. Per-path overrides replace the base options.
 
 ## Migrating from dart_code_linter / pyramid_lint
 
