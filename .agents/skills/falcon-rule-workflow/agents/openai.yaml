@@ -1,0 +1,4 @@
+interface:
+  display_name: "Falcon Rule Workflow"
+  short_description: "Change rules across metadata, corpus, and generated docs"
+  default_prompt: "Use $falcon-rule-workflow to change a falcon rule and reconcile its corpus, metadata, and generated documentation contracts."

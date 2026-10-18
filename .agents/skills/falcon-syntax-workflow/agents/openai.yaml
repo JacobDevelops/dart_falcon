@@ -1,0 +1,4 @@
+interface:
+  display_name: "Falcon Syntax Workflow"
+  short_description: "Extend Dart parsing and arena CST contracts together"
+  default_prompt: "Use $falcon-syntax-workflow to change Dart parsing or CST traversal while preserving lossless syntax, recovery, and visitor contracts."
