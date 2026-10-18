@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 18 | 132 | 24 | 174 |
+| DCM-inspired | 14 | 132 | 24 | 170 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
 | Additional rules | 3 | 7 | 3 | 13 |
-| **Total** | **21** | **143** | **31** | **195** |
+| **Total** | **17** | **143** | **31** | **191** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (174)
+## Planned DCM-inspired rules (170)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -298,10 +298,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-conditional-hooks` | correctness | S | paid | Hooks called conditionally break rules-of-hooks. | must-have |
-| `avoid-hooks-outside-build` | correctness | FT | paid | Hook used outside a build method. | must-have |
-| `avoid-misused-hooks` | correctness | FT | paid | Hook misuse. | must-have |
-| `avoid-unnecessary-hook-widgets` | performance | LT | paid | HookWidget with no hooks. | must-have |
 | `prefer-use-callback` | performance | FT | paid | Wrap callbacks in `useCallback`. | nice-to-have |
 | `prefer-use-memo` | performance | FT | paid | Wrap values in `useMemo`. | nice-to-have |
 

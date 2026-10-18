@@ -2438,6 +2438,34 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("use_if_null_to_convert_nulls_to_bools"),
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_conditional_hooks::AvoidConditionalHooks>(
+        "avoid-conditional-hooks",
+        RuleGroup::Correctness,
+        Some(Domain::FlutterHooks),
+        true,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_hooks_outside_build::AvoidHooksOutsideBuild>(
+        "avoid-hooks-outside-build",
+        RuleGroup::Correctness,
+        Some(Domain::FlutterHooks),
+        true,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_misused_hooks::AvoidMisusedHooks>(
+        "avoid-misused-hooks",
+        RuleGroup::Correctness,
+        Some(Domain::FlutterHooks),
+        true,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::avoid_unnecessary_hook_widgets::AvoidUnnecessaryHookWidgets>(
+        "avoid-unnecessary-hook-widgets",
+        RuleGroup::Performance,
+        Some(Domain::FlutterHooks),
+        false,
+        RuleSource::Falcon,
+    ),
     RuleMeta::resolved::<
         lint::performance::use_is_even_rather_than_modulo::UseIsEvenRatherThanModulo,
     >(

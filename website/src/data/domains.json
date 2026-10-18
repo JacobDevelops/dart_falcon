@@ -82,7 +82,12 @@
   },
   {
     "name": "flutter_hooks",
-    "rules": []
+    "rules": [
+      "avoid-conditional-hooks",
+      "avoid-hooks-outside-build",
+      "avoid-misused-hooks",
+      "avoid-unnecessary-hook-widgets"
+    ]
   },
   {
     "name": "equatable",

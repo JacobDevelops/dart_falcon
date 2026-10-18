@@ -132,6 +132,9 @@
         "avoid-watch-outside-build": "warn",
         "dispose-providers": "warn",
         "prefer-read-for-methods": "warn",
+        "avoid-conditional-hooks": "warn",
+        "avoid-hooks-outside-build": "warn",
+        "avoid-misused-hooks": "warn",
         "list-all-equatable-fields": "warn",
         "add-equatable-props": "warn",
         "avoid-mutable-equatable-subclass-fields": "warn"
@@ -150,7 +153,8 @@
         "use-string-buffers": "off",
         "avoid-slow-collection-methods": "warn",
         "move-variable-outside-iteration": "warn",
-        "avoid-shrink-wrap-in-lists": "warn"
+        "avoid-shrink-wrap-in-lists": "warn",
+        "avoid-unnecessary-hook-widgets": "warn"
       },
       "style": {
         "sort-child-properties-last": "warn",

@@ -3164,6 +3164,138 @@
   },
   {
     "crossFile": false,
+    "description": "Flags hook calls in conditional branches, short-circuit operands, and loops.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 13,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 14,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 15,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 17,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 18,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 27,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 30,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 32,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 33,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 34,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 59,
+        "file": null,
+        "line": 35,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 38,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 42,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      }
+    ],
+    "docs": "Flags hook calls in conditional branches, short-circuit operands, and loops.\n\nHooks depend on a stable invocation order across builds. Move the hook call\noutside the condition and put conditional work inside its callback instead.\nOnly hook-widget builds, custom useX functions, and HookBuilder builders\nare checked; invalid hook contexts belong to the other hook rules.\nPackage hooks and custom hooks proven to compose them are recognized by\nsemantic identity. If/ternary conditions, switch subjects, left operands,\nand for-loop initializers/iterables are unconditional. Nested functions\nstart separate execution contexts. This rule checks enclosing syntax, not\nconditional early exits, exception paths, lazy variables, or null-aware calls.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_hooks/flutter_hooks.dart';\n\nint useCounter() => useState(0);\n\nvoid useConditional(bool enabled, List<int> values) {\n  if (enabled) {\n    useState(0);\n  } else {\n    useMemoized(() => 1);\n  }\n  final first = enabled\n      ? useState(1)\n      : useState(2);\n  final and = enabled && useState(true);\n  final or = enabled || useState(false);\n  int? optional;\n  final fallback = optional ?? useState(1);\n  optional ??= useState(2);\n  for (final value in values) {\n    useState(value);\n  }\n  while (enabled) {\n    useMemoized(() => 1);\n    break;\n  }\n  do {\n    useState(0);\n  } while (enabled);\n  for (var index = 0; index < values.length; index++) {\n    useCounter();\n  }\n  final list = [if (enabled) useState(3)];\n  final mapped = [for (final value in values) useState(value)];\n  final map = {if (enabled) 'value': useState(1)};\n  final repeatedMap = {for (final value in values) value: useState(value)};\n  switch (first) {\n    case 1:\n      useState(0);\n      break;\n  }\n  final selected = switch (first) {\n    1 => useState(1),\n    _ => 0,\n  };\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nint useCounter() => hooks.useState(0);\n\nvoid useStable(bool enabled, List<int> values) {\n  final state = hooks.useState(0);\n  hooks.useMemoized(() {\n    if (enabled) return 1;\n    return 0;\n  });\n  hooks.useEffect(() {\n    for (final value in values) {\n      if (value > 0) print(value);\n    }\n  });\n  final condition = hooks.useState(true) && enabled;\n  final otherCondition = hooks.useState(false) || enabled;\n  final int? optional = hooks.useState<int?>(null);\n  final fallback = optional ?? 1;\n  final ternary = hooks.useState(true) ? 1 : 0;\n  if (hooks.useState(true)) print(state);\n  for (var index = hooks.useState(0); index < 2; index++) {\n    print(index);\n  }\n  final custom = useCounter();\n  final collection = [if (hooks.useState(true)) custom];\n  if (enabled) {\n    void callback() {\n      hooks.useState(0);\n    }\n    final callbackExpression = () => hooks.useState(0);\n  }\n}\n\nclass Unrelated {\n  int useState(int initial) => initial;\n\n  void useUnrelated(bool enabled) {\n    if (enabled) useState(0);\n  }\n}\n\nvoid unrelated(bool enabled, Unrelated service) {\n  if (enabled) service.useState(0);\n}\n\nvoid useShadowed(bool enabled, int Function(int) useState) {\n  if (enabled) useState(0);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-conditional-hooks",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags pairs of conditions that are always false with `&&` or true with `||`.",
     "diagnostics": [
       {
@@ -3830,6 +3962,78 @@
   },
   {
     "crossFile": false,
+    "description": "Flags confirmed Flutter hooks outside hook builds, custom hooks, and HookBuilder/HookConsumer builders.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 5,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 19,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 23,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 31,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 36,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      }
+    ],
+    "docs": "Flags confirmed Flutter hooks outside hook builds, custom hooks, and HookBuilder/HookConsumer builders.\n\nOnly resolved flutter_hooks functions and useX/_useX functions that actually\ncompose them count as hooks. Nested callbacks do not inherit the enclosing\nbuild or custom-hook permission. Confirmed non-hook widget builds are left\nto avoid-misused-hooks; unresolved calls, unresolved build ancestry, and shadowed names are ignored.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nfinal initial = useState<int>(0).toString();\nvoid start() {\n  hooks.useEffect(() {});\n}\nint useComposed() => useState(0);\nvoid callCustom() {\n  useComposed();\n}\nclass Screen extends HookWidget {\n  void onPressed() {\n    useMemoized(() => 1);\n  }\n  Widget build(BuildContext context) {\n    final callback = () {\n      useState(1);\n    };\n    return HookBuilder(builder: (context) {\n      final nested = () {\n        useState(2);\n      };\n      return const SizedBox();\n    });\n  }\n}\nvoid _useFeature() {\n  final callback = () {\n    useState(3);\n  };\n}\nclass Service {\n  void build() {\n    useState(4);\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nint useFeature() => useState(1);\nint _usePrivate() => hooks.useMemoized(() => 2);\nint useBusiness() => 3;\nvoid ordinary() { useBusiness(); }\nvoid shadowed(int Function(int) useState) { useState(0); }\nvoid shadowedPrefix(dynamic hooks) { hooks.useState(0); }\nclass Screen extends HookWidget {\n  Widget build(BuildContext context) {\n    useState<int>(0);\n    useFeature();\n    _usePrivate();\n    int _useLocal() => hooks.useState<int>(1);\n    _useLocal();\n    return HookBuilder(builder: (context) {\n      hooks.useEffect(() {});\n      return const SizedBox();\n    });\n  }\n  int _useMethod() => useState(2);\n}\nclass RiverScreen extends HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass NonHookScreen extends StatelessWidget {\n  Widget build(BuildContext context) {\n    useState(0); // Owned by avoid-misused-hooks, not this rule.\n    return const SizedBox();\n  }\n}\n\nclass StatefulHooks extends StatefulHookWidget {}\nclass HooksState extends State<StatefulHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulRiverHooks extends StatefulHookConsumerWidget {}\nclass RiverHooksState extends ConsumerState<StatefulRiverHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return HookConsumer(builder: (context, ref, child) {\n      useState(1);\n      return const SizedBox();\n    });\n  }\n}\nclass UnknownScreen extends MissingHookBase {\n  Widget build(BuildContext context) {\n    useState(0); // Unresolved ancestry is not proof of an invalid context.\n    return const SizedBox();\n  }\n}\nmixin CounterHooks {\n  int useCounter() => useState(0);\n}\nextension ContextHooks on BuildContext {\n  int useCounter() => useState(0);\n}\n\nmixin HookScreenBuild on HookWidget {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nmixin UnconstrainedBuild {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-hooks-outside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid inherited-widget subscriptions during initState.",
     "diagnostics": [
       {
@@ -4046,6 +4250,66 @@
     },
     "group": "correctness",
     "name": "avoid-missing-interpolation",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags confirmed Flutter hooks called directly in non-hook Flutter widget builds.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 8,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 12,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 27,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      }
+    ],
+    "docs": "Flags confirmed Flutter hooks called directly in non-hook Flutter widget builds.\n\nWidget ancestry must resolve. HookWidget/HookConsumerWidget builds and State\nbuilds for StatefulHookWidget/StatefulHookConsumerWidget are excluded, as is\nunknown ancestry. Custom useX functions must compose resolved flutter_hooks\ncalls; spelling alone is insufficient. Nested callbacks belong to\navoid-hooks-outside-build instead.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nint useFeature() => useState(1);\nclass Screen extends StatelessWidget {\n  Widget build(BuildContext context) {\n    useState<int>(0).toString();\n    useMemoized(() => 1);\n    useFeature();\n    for (var i = 0; i < 2; i++) {\n      useState(i);\n    }\n    return const SizedBox();\n  }\n}\nabstract class BaseScreen extends StatelessWidget {}\nclass DerivedScreen extends BaseScreen {\n  Widget build(BuildContext context) {\n    hooks.useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulScreen extends StatefulWidget {}\nclass ScreenState extends State<StatefulScreen> {\n  Widget build(BuildContext context) {\n    hooks.useEffect(() {});\n    return const SizedBox();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nint useBusiness() => 2;\nvoid ordinary() { useState(0); } // Outside-build rule owns this.\nclass Screen extends HookWidget {\n  Widget build(BuildContext context) {\n    useState<int>(0);\n    return const SizedBox();\n  }\n}\nclass RiverScreen extends HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    useMemoized(() => 1);\n    return const SizedBox();\n  }\n}\nclass NonHookScreen extends StatelessWidget {\n  Widget build(BuildContext context) {\n    useBusiness(); // A custom useX name alone is not a hook.\n    final callback = () { useState(0); }; // Outside-build owns callbacks.\n    return HookBuilder(builder: (context) {\n      useState(1);\n      return const SizedBox();\n    });\n  }\n}\nclass Service {\n  int build() => useState(0); // Not a Flutter widget.\n}\nclass ShadowedScreen extends StatelessWidget {\n  final int Function(int) useState;\n  ShadowedScreen(this.useState);\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulScreen extends StatefulWidget {}\nclass ScreenState extends State<StatefulScreen> {\n  void event() { useState(0); } // Not a build method.\n}\n\nclass StatefulHooks extends StatefulHookWidget {}\nclass HooksState extends State<StatefulHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulRiverHooks extends StatefulHookConsumerWidget {}\nclass RiverHooksState extends ConsumerState<StatefulRiverHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return HookConsumer(builder: (context, ref, child) {\n      useState(1);\n      return const SizedBox();\n    });\n  }\n}\nclass UnknownScreen extends MissingHookBase {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass UnknownState extends State<dynamic> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-misused-hooks",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -11031,6 +11295,102 @@
     },
     "group": "performance",
     "name": "avoid-slow-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags confirmed hook widgets and `HookBuilder` callbacks that do not use hooks.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 21,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 22,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 23,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 25,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 33,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 38,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 42,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 43,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 52,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      }
+    ],
+    "docs": "Flags confirmed hook widgets and `HookBuilder` callbacks that do not use hooks.\n\nReplace an unused hook widget with a regular widget to simplify its lifecycle.\nOnly concrete, directly package-derived `HookWidget` and `HookConsumerWidget`\nclasses with their own build body, and inline `HookBuilder` callbacks, are\nchecked. Every call except a generative constructor of a confirmed Flutter\n`Widget` subtype retains its immediate hook owner. Getter reads and cascades\nalso retain that owner; nested callbacks do not retain an outer owner.\nAbstract classes, inherited builds, and unresolved hook widget identities are\nskipped. Classes extended elsewhere in the same library are skipped; subclasses\nin other libraries are not visible and must be checked before conversion.\nIndirect hooks through overloaded operators or setters are not tracked.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nclass EmptyBlock extends HookWidget {\n  @override\n  Widget build(BuildContext context) { return const SizedBox(); }\n}\n\nclass EmptyArrow extends hooks.HookWidget {\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass EmptyConsumer extends HookConsumerWidget {\n  @override\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nfinal emptyArrow = HookBuilder(builder: (context) => const SizedBox());\nfinal emptyBlock = hooks.HookBuilder(builder: (context) { return const SizedBox(); });\nfinal explicitNew = new HookBuilder(builder: (context) => const SizedBox());\n\nclass OuterWithoutHooks extends HookWidget {\n  @override\n  Widget build(BuildContext context) => HookBuilder(builder: (context) {\n    useState(0);\n    return const SizedBox();\n  });\n}\n\nclass CallbackOnly extends HookWidget {\n  @override\n  Widget build(BuildContext context) => Clickable(onPressed: () { useState(0); });\n}\n\nfinal nestedCallback = hooks.HookBuilder(builder: (context) {\n  return Clickable(onPressed: () { hooks.useState(0); });\n});\n\nfinal prefixedNew = new hooks.HookBuilder(builder: (context) => const SizedBox());\nfinal parenthesized = (hooks.HookBuilder(builder: (context) => const SizedBox()));\n\nclass Clickable extends StatelessWidget {\n  const Clickable({required this.onPressed});\n  final void Function() onPressed;\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass PlainFieldRead extends HookWidget {\n  const PlainFieldRead(this.child);\n  final Widget child;\n  @override\n  Widget build(BuildContext context) => child;\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nclass StateUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass ConsumerUser extends HookConsumerWidget {\n  @override\n  Widget build(BuildContext context, WidgetRef ref) {\n    hooks.useEffect(() {});\n    return const SizedBox();\n  }\n}\nWidget useContent() { useState(0); return const SizedBox(); }\nWidget _useContent() => useContent();\nclass CustomHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => useContent();\n}\nclass PrivateHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => _useContent();\n}\nWidget indirectlyUsesHooks() { useState(0); return const SizedBox(); }\nclass IndirectUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => indirectlyUsesHooks();\n}\nabstract class AbstractWidget extends HookWidget {\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass InheritedBuild extends StateUser {}\nfinal withHook = HookBuilder(builder: (context) {\n  useState(0);\n  return const SizedBox();\n});\nfinal withCustomHook = hooks.HookBuilder(builder: (context) => useContent());\nfinal withIndirectHook = HookBuilder(builder: indirectlyUsesHooksWithContext);\nWidget indirectlyUsesHooksWithContext(BuildContext context) => indirectlyUsesHooks();\n\nclass MethodHookUser extends HookWidget {\n  Widget content() { useState(0); return const SizedBox(); }\n  @override\n  Widget build(BuildContext context) => content();\n}\n\nfinal prefixedHook = hooks.HookBuilder(builder: (context) {\n  hooks.useState(0);\n  return const SizedBox();\n});\nfinal prefixedNewHook = new hooks.HookBuilder(builder: (context) {\n  hooks.useEffect(() {});\n  return const SizedBox();\n});\n\nclass GeneratedHooks extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    final states = List.generate(3, (_) => useState(0));\n    return const SizedBox();\n  }\n}\n\nclass HookBundle {\n  final state = useState(0);\n  HookBundle();\n  factory HookBundle.create() {\n    useState(0);\n    return HookBundle();\n  }\n}\nclass FactoryHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    new HookBundle.create();\n    return const SizedBox();\n  }\n}\nclass FieldInitializerHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    HookBundle();\n    return const SizedBox();\n  }\n}\n\nWidget get hookContent { useState(0); return const SizedBox(); }\nclass TopLevelGetterUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => hookContent;\n}\nclass MemberGetterUser extends HookWidget {\n  Widget get content { useState(0); return const SizedBox(); }\n  @override\n  Widget build(BuildContext context) => content;\n}\nclass ExplicitGetterUser extends HookWidget {\n  Widget get content { useState(0); return const SizedBox(); }\n  @override\n  Widget build(BuildContext context) => this.content;\n}\n\nclass HookActions extends StatelessWidget {\n  void init() { useState(0); }\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass CascadeHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => HookActions()..init();\n}\n\nclass UnknownCallUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    Unknown();\n    return const SizedBox();\n  }\n}\nclass ExplicitUnknownCallUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    new Unknown();\n    return const SizedBox();\n  }\n}\n\nclass HookBase extends HookWidget {\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass HookChild extends HookBase {\n  @override\n  Widget build(BuildContext context) {\n    useState(0);\n    return super.build(context);\n  }\n}\n\nclass StaticHooks {\n  static Widget content() { useState(0); return const SizedBox(); }\n}\nclass StaticHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => StaticHooks.content();\n}\nextension ContextHooks on BuildContext {\n  Widget hookContent() { useState(0); return const SizedBox(); }\n}\nclass ExtensionHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => context.hookContent();\n}\n\nclass Panel extends StatelessWidget {\n  const Panel();\n  static Widget withCounter() {\n    useState(0);\n    return const Panel();\n  }\n  factory Panel.counted() {\n    useState(0);\n    return const Panel();\n  }\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass StaticWidgetMethodUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => Panel.withCounter();\n}\nclass WidgetFactoryUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => Panel.counted();\n}\nclass ExplicitWidgetFactoryUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => new Panel.counted();\n}\n\nclass ShadowedWidgetConstructor extends HookWidget {\n  Widget SizedBox() {\n    useState(0);\n    return const Panel();\n  }\n  @override\n  Widget build(BuildContext context) => SizedBox();\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-hook-widgets",
     "recommended": false,
     "source": {
       "kind": "Falcon",

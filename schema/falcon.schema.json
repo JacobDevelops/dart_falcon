@@ -263,6 +263,9 @@
                 "avoid-collection-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-conditional-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-contradictory-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -287,6 +290,9 @@
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-hooks-outside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-inherited-widget-in-initstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -294,6 +300,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-misused-hooks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-equatable-subclass-fields": {
@@ -508,6 +517,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-hook-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "move-variable-outside-iteration": {
@@ -1588,6 +1600,9 @@
                 "avoid-collection-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-conditional-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-contradictory-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1612,6 +1627,9 @@
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-hooks-outside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-inherited-widget-in-initstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1619,6 +1637,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-misused-hooks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-equatable-subclass-fields": {
@@ -1833,6 +1854,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-hook-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "move-variable-outside-iteration": {
