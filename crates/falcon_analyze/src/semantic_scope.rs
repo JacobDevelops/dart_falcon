@@ -726,6 +726,7 @@ impl<'a> SemanticState<'a> {
                     return_type,
                     defaults: signature.defaults.clone(),
                     positional_parameter_names: signature.positional_parameter_names.clone(),
+                    named_parameter_names: Arc::clone(&signature.named_parameter_names),
                     non_optional_defaults: signature.non_optional_defaults.clone(),
                 }
             }

@@ -1056,6 +1056,45 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::DartCodeLinter("newline-before-return"),
     ),
+    RuleMeta::file::<lint::style::newline_before_method::NewlineBeforeMethod>(
+        "newline-before-method", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::newline_before_case::NewlineBeforeCase>(
+        "newline-before-case", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::newline_before_throw::NewlineBeforeThrow>(
+        "newline-before-throw", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::newline_before_continue::NewlineBeforeContinue>(
+        "newline-before-continue", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::newline_before_break::NewlineBeforeBreak>(
+        "newline-before-break", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::newline_before_constructor::NewlineBeforeConstructor>(
+        "newline-before-constructor", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::enum_constants_ordering::EnumConstantsOrdering>(
+        "enum-constants-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::map_keys_ordering::MapKeysOrdering>(
+        "map-keys-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::parameters_ordering::ParametersOrdering>(
+        "parameters-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::arguments_ordering::ArgumentsOrdering>(
+        "arguments-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::initializers_ordering::InitializersOrdering>(
+        "initializers-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::pattern_fields_ordering::PatternFieldsOrdering>(
+        "pattern-fields-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::record_fields_ordering::RecordFieldsOrdering>(
+        "record-fields-ordering", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
     RuleMeta::file::<lint::style::no_magic_number::NoMagicNumber>(
         "no-magic-number",
         RuleGroup::Style,

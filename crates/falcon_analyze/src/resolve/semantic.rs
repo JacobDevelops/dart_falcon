@@ -3527,6 +3527,11 @@ fn setter_parameter_contracts(name: &str, is_covariant: bool) -> Arc<[ParameterC
     }])
 }
 
+fn empty_parameter_names() -> Arc<[String]> {
+    static EMPTY: std::sync::LazyLock<Arc<[String]>> = std::sync::LazyLock::new(|| Arc::from([]));
+    Arc::clone(&EMPTY)
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedSignature {
     pub owner_parameters: Vec<TypeParameterId>,
@@ -3541,6 +3546,8 @@ pub struct ResolvedSignature {
     /// Default-bearing positional names in binding order, with empty slots for
     /// parameters without defaults. Empty when no positional defaults exist.
     pub positional_parameter_names: Vec<String>,
+    /// Named parameters in declaration order; empty when that order is unavailable.
+    pub named_parameter_names: Arc<[String]>,
     /// Default-bearing parameters that are required or annotated `@required`.
     pub non_optional_defaults: HashSet<String>,
     pub named: HashMap<String, ResolvedType>,
@@ -3556,6 +3563,7 @@ impl ResolvedSignature {
             optional_positional: 0,
             defaults: HashMap::new(),
             positional_parameter_names: Vec::new(),
+            named_parameter_names: empty_parameter_names(),
             non_optional_defaults: HashSet::new(),
             positional: Vec::new(),
             named: HashMap::new(),
@@ -7234,6 +7242,13 @@ impl SignatureIndex {
                 if let Some(ty) = primary_signature.named.remove(name) {
                     primary_signature.named.insert(label.to_string(), ty);
                 }
+                if let Some(ordered_name) =
+                    Arc::make_mut(&mut primary_signature.named_parameter_names)
+                        .iter_mut()
+                        .find(|ordered_name| ordered_name.as_str() == name)
+                {
+                    label.clone_into(ordered_name);
+                }
                 if let Some(default) = primary_signature.defaults.remove(name) {
                     primary_signature
                         .defaults
@@ -10043,6 +10058,7 @@ fn signature<'a>(
     result.owner_parameters = owner_parameters.to_vec();
     result.call_parameters = parameter_ids(scope, call_parameters.clone());
     let mut required_named = Vec::new();
+    let mut named_parameter_names = Vec::new();
     let mut contracts = Vec::new();
     for param in params.into_iter().flat_map(|params| params.params()) {
         let name = param.name().name();
@@ -10071,6 +10087,7 @@ fn signature<'a>(
                 required_named.push(name.to_string());
             }
             result.named.insert(name.to_string(), ty);
+            named_parameter_names.push(name.to_string());
         } else {
             result.optional_positional += usize::from(kind == ParamKind::OptionalPositional);
             result.positional.push(ty);
@@ -10106,6 +10123,9 @@ fn signature<'a>(
         if let Some(default) = default {
             result.defaults.insert(name.to_string(), default);
         }
+    }
+    if !named_parameter_names.is_empty() {
+        result.named_parameter_names = named_parameter_names.into();
     }
     if let Some(facts) = facts {
         facts.parameter_contracts = Some(if contracts.is_empty() {

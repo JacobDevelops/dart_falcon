@@ -14136,6 +14136,166 @@
   },
   {
     "crossFile": false,
+    "description": "Named arguments follow their resolved parameter declaration order by default.",
+    "diagnostics": [
+      {
+        "column": 71,
+        "file": null,
+        "line": 4,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 62,
+        "file": null,
+        "line": 7,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 10,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 54,
+        "file": null,
+        "line": 11,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 12,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 13,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 16,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 52,
+        "file": null,
+        "line": 20,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 28,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 36,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 40,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 64,
+        "file": null,
+        "line": 41,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 62,
+        "file": null,
+        "line": 42,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 66,
+        "file": null,
+        "line": 43,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 44,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 64,
+        "file": null,
+        "line": 45,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 61,
+        "file": null,
+        "line": 48,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 66,
+        "file": null,
+        "line": 52,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 64,
+        "file": null,
+        "line": 54,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 57,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 67,
+        "file": null,
+        "line": 60,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 64,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 72,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      }
+    ],
+    "docs": "Named arguments follow their resolved parameter declaration order by default.\nUnknown signatures are skipped. `order: ascending` or `order: descending`\nexplicitly selects alphabetical ordering; `alphabetize: true` selects ascending.",
+    "domains": [],
+    "examples": {
+      "bad": "void target({int alpha = 0, int zebra = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n  Example.forward() : this(zebra: 2,  alpha: 1);\n}\nclass Child extends Example {\n  Child() : super(zebra: 2,  alpha: 1);\n}\nvoid calls() {\n  target(zebra: 2,  alpha: 1);\n  Example(zebra: 2,  alpha: 1);\n  new Example(zebra: 2,  alpha: 1);\n  const Example(zebra: 2,  alpha: 1);\n}\n\n@Example(zebra: 2,  alpha: 1)\nclass Annotated {}\n\nenum Choice {\n  value(zebra: 2,  alpha: 1);\n  const Choice({int alpha = 0, int zebra = 0});\n}\n\nclass Builder {\n  void configure({int alpha = 0, int zebra = 0}) {}\n}\nvoid cascades(Builder builder) {\n  builder..configure(zebra: 2,  alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward()\n      : this.named(alpha: 1,  zebra: 2);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object) {\n  declarationOrder(alpha: 1,  zebra: 2);\n  declarationOrder(middle: 3,  alpha: 1);\n  NonAlphabetical(alpha: 1,  zebra: 2);\n  new NonAlphabetical(alpha: 1,  zebra: 2);\n  object.configure(alpha: 1,  zebra: 2);\n  object..configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical(alpha: 1,  zebra: 2)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(alpha: 1,  zebra: 2);\n  Inherited.named()\n      : super.named(alpha: 1,  zebra: 2);\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical.named(alpha: 1,  zebra: 2)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(alpha: 1,  zebra: 2);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(alpha: 1,  zebra: 2);\n}",
+      "crossFile": null,
+      "good": "void target(int zebra, int alpha, {int beta = 0, int gamma = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n}\nvoid calls() {\n  target(2, 1, beta: 3, gamma: 4);\n  Example(alpha: 1, zebra: 2);\n  const Example(alpha: 1, zebra: 2);\n  final items = [2, 1];\n  final record = (zebra: 2, alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward() : this.named(zebra: 2, alpha: 1);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object, dynamic unknown) {\n  declarationOrder(zebra: 2, alpha: 1, middle: 3);\n  declarationOrder(zebra: 2, middle: 3);\n  NonAlphabetical(zebra: 2, alpha: 1);\n  new NonAlphabetical(zebra: 2, alpha: 1);\n  object.configure(zebra: 2, alpha: 1);\n  object..configure(zebra: 2, alpha: 1);\n  unknown.configure(zebra: 2, alpha: 1);\n  unknown.configure(alpha: 1, zebra: 2);\n  unresolved(zebra: 2, alpha: 1);\n  unresolved(alpha: 1, zebra: 2);\n}\n\n@NonAlphabetical(zebra: 2, alpha: 1)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(zebra: 2, alpha: 1);\n  Inherited.named() : super.named(zebra: 2, alpha: 1);\n  Inherited.forward() : this();\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(zebra: 2, alpha: 1);\n}\nvoid functionTypeUnknown(void Function({int alpha, int zebra}) callback) {\n  callback(zebra: 2, alpha: 1);\n}\n\n@NonAlphabetical.named(zebra: 2, alpha: 1)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(zebra: 2, alpha: 1);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(zebra: 2, alpha: 1);\n}"
+    },
+    "group": "style",
+    "name": "arguments-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags Latin abbreviations in doc comments.",
     "diagnostics": [
       {
@@ -18853,6 +19013,58 @@
   },
   {
     "crossFile": false,
+    "description": "Flags enum constants whose declared names violate the configured order.",
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": null,
+        "line": 1,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 2,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 3,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 4,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 5,
+        "message": "Reorder named entries to follow the configured order."
+      }
+    ],
+    "docs": "Flags enum constants whose declared names violate the configured order.\n\nSet `order` to `\"ascending\"` or `\"descending\"` to compare names\nlexicographically and case-sensitively. Without a valid explicit order,\nthis rule is inactive. Constructor arguments and enum members do not affect\nthe comparison.",
+    "domains": [],
+    "examples": {
+      "bad": "enum Fruit { zebra, apple }\nenum Color { red, blue }\nenum Enhanced { zebra(1), apple(2); const Enhanced(this.value); final int value; }\nenum Named { zebra.x(), apple.x(); const Named.x(); }\nenum Middle { apple, zebra, berry }",
+      "crossFile": null,
+      "good": "enum Fruit { apple, zebra }\nenum Color { blue, red }\nenum Enhanced { apple(1), zebra(2); const Enhanced(this.value); final int value; }\nenum Single { apple }\nenum Named { apple.x(), zebra.x(); const Named.x(); }"
+    },
+    "group": "style",
+    "name": "enum-constants-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a non-empty file that does not end with exactly one line break.",
     "diagnostics": [
       {
@@ -19418,6 +19630,58 @@
   },
   {
     "crossFile": false,
+    "description": "Requires field initializers to follow their containing type's field declaration order by default.",
+    "diagnostics": [
+      {
+        "column": 62,
+        "file": null,
+        "line": 4,
+        "message": "Reorder field initializers to follow field declaration order."
+      },
+      {
+        "column": 56,
+        "file": null,
+        "line": 6,
+        "message": "Reorder field initializers to follow field declaration order."
+      },
+      {
+        "column": 62,
+        "file": null,
+        "line": 11,
+        "message": "Reorder field initializers to follow field declaration order."
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 20,
+        "message": "Reorder field initializers to follow field declaration order."
+      },
+      {
+        "column": 56,
+        "file": null,
+        "line": 29,
+        "message": "Reorder field initializers to follow field declaration order."
+      }
+    ],
+    "docs": "Requires field initializers to follow their containing type's field declaration\norder by default. Explicit `order: ascending` or `descending` selects\nalphabetical ordering. Only literal values and constructor-parameter reads\ncan be reordered because initializer expressions evaluate in written order.\nOther expressions, assertions, and `super`/`this` constructor calls keep their\npositions and break ordering runs; unknown fields also break declaration-order\nruns rather than guessing their order.",
+    "domains": [],
+    "examples": {
+      "bad": "class Example {\n  final int zebra;\n  final int alpha;\n  Example() : alpha = 1,  zebra = 2;\n  Example.values(int a, int z)\n      : alpha = a,  zebra = z;\n}\n\nclass Words {\n  final String zebra, alpha;\n  Words() : alpha = 'a',  zebra = 'z';\n}\n\nclass WithBoundary {\n  final int zebra;\n  final int alpha;\n  WithBoundary()\n      : assert(true),\n        alpha = 1,\n         zebra = 2;\n}\n\nenum EnumFields {\n  value;\n\n  final int zebra;\n  final int alpha;\n  const EnumFields()\n      : alpha = 1,  zebra = 2;\n}",
+      "crossFile": null,
+      "good": "int next() => 1;\n\nclass Example {\n  final int zebra;\n  final int alpha;\n  Example() : zebra = 2, alpha = 1;\n  Example.values(int a, int z) : zebra = z, alpha = a;\n  Example.withAssert() : alpha = 1, assert(true), zebra = 2;\n  Example.withEffects() : zebra = next(), alpha = next();\n  Example.withUnknownValue() : zebra = next(), alpha = 1;\n  Example.reversedEffects() : alpha = next(), zebra = next();\n  Example.reversedUnknownValue() : alpha = next(), zebra = 1;\n  Example.redirect() : this();\n}\n\nclass Parent {\n  Parent();\n}\n\nclass Child extends Parent {\n  final int zebra;\n  final int alpha;\n  Child() : zebra = 2, alpha = 1, super();\n  Child.withAssert() : alpha = 1, assert(true), zebra = 2, super();\n}\n\nclass Words {\n  final String zebra, alpha;\n  Words() : zebra = 'z', alpha = 'a';\n  Words.withInterpolation() : zebra = '${next()}', alpha = 'a';\n  Words.reversedInterpolation() : alpha = '${next()}', zebra = 'z';\n}\n\n// Each containing class has its own declaration order.\nclass Opposite {\n  final int alpha;\n  final int zebra;\n  Opposite() : alpha = 1, zebra = 2;\n}\n\nenum EnumFields {\n  value;\n\n  final int zebra;\n  final int alpha;\n  const EnumFields() : zebra = 2, alpha = 1;\n}"
+    },
+    "group": "style",
+    "name": "initializers-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a multiline string spanning several lines whose text does not start with a line break right after the opening quotes.",
     "diagnostics": [
       {
@@ -19666,6 +19930,58 @@
   },
   {
     "crossFile": false,
+    "description": "Flags literal string map keys that violate the configured order.",
+    "diagnostics": [
+      {
+        "column": 28,
+        "file": null,
+        "line": 1,
+        "message": "Reorder literal string map keys to follow the configured order."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 2,
+        "message": "Reorder literal string map keys to follow the configured order."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 3,
+        "message": "Reorder literal string map keys to follow the configured order."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 4,
+        "message": "Reorder literal string map keys to follow the configured order."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 5,
+        "message": "Reorder literal string map keys to follow the configured order."
+      }
+    ],
+    "docs": "Flags literal string map keys that violate the configured order.\n\nSet `order` to `\"ascending\"` or `\"descending\"` for case-sensitive\nlexicographic ordering. Without a valid explicit order, this rule is inactive.\nDynamic keys, spreads, collection control-flow, interpolations, adjacent\nstrings, and escaped non-raw strings break the comparison sequence.",
+    "domains": [],
+    "examples": {
+      "bad": "final first = {'zebra': 1, 'apple': 2};\nfinal second = {\"red\": 1, \"blue\": 2};\nfinal raw = {r'zebra': 1, r'apple': 2};\nfinal mixedQuotes = {'zebra': 1, \"apple\": 2};\nfinal nested = {'outer': {'zebra': 1, 'apple': 2}};",
+      "crossFile": null,
+      "good": "final sorted = {'apple': 1, 'zebra': 2};\nfinal singleton = {'zebra': 1};\nfinal numbers = {2: 1, 1: 2};\nMap<String, int> withSpread(Map<String, int> other) => {'zebra': 1, ...other, 'apple': 2};\nMap<String, int> dynamicKey(String key) => {'zebra': 1, key: 2, 'apple': 3};\nMap<String, int> interpolation(String key) => {'zebra': 1, '$key': 2, 'apple': 3};\nfinal escaped = {'zebra': 1, '\\u0061pple': 2};\nMap<String, int> conditional(bool flag) => {'zebra': 1, if (flag) 'middle': 2, 'apple': 3};\nfinal duplicates = {'apple': 1, 'apple': 2};\nfinal adjacent = {'zebra': 1, 'a' 'pple': 2};"
+    },
+    "group": "style",
+    "name": "map-keys-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags positional super parameters named differently from the super constructor's corresponding parameter.",
     "diagnostics": [
       {
@@ -19882,6 +20198,248 @@
   },
   {
     "crossFile": false,
+    "description": "Requires a blank line before a break that follows another statement.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 4,
+        "message": "Add a blank line before break statement"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Add a blank line before break statement"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 18,
+        "message": "Add a blank line before break statement"
+      }
+    ],
+    "docs": "Requires a blank line before a break that follows another statement.\n\nChecks labeled and unlabeled breaks in blocks. First statements, unbraced\nbreaks, and switch-case lists are exempt. Blank lines above comments count.",
+    "domains": [],
+    "examples": {
+      "bad": "void loops(bool condition) {\n  while (condition) {\n    print('before');\n    break;\n  }\n  outer: for (var i = 0; i < 3; i++) {\n    while (condition) {\n      print('nested');\n      break outer;\n    }\n  }\n}\n\nvoid commented(bool condition) {\n  while (condition) {\n    print('before');\n    // No separating blank line.\n    break;\n  }\n}",
+      "crossFile": null,
+      "good": "void loops(bool condition) {\n  while (condition) {\n    break;\n  }\n  while (condition) {\n    print('before');\n\n    break;\n  }\n  outer: for (var i = 0; i < 3; i++) {\n    while (condition) {\n      break outer;\n    }\n  }\n  while (condition) {\n    if (condition) break;\n  }\n}\n\nvoid cases(int value) {\n  switch (value) {\n    default:\n      print(value);\n      break;\n  }\n}\n\nvoid commented(bool condition) {\n  while (condition) {\n    print('before');\n\n    // Stop this loop.\n    break;\n  }\n}"
+    },
+    "group": "style",
+    "name": "newline-before-break",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a blank line between successive switch statement case clauses.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Add a blank line before case clause"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 10,
+        "message": "Add a blank line before case clause"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 14,
+        "message": "Add a blank line before case clause"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "Add a blank line before case clause"
+      }
+    ],
+    "docs": "Requires a blank line between successive switch statement case clauses.\n\nThe first clause is exempt, and grouped labels need no blank line between\nthem. Nested switches are checked independently, including default clauses.\nBlank lines above attached comments count.",
+    "domains": [],
+    "examples": {
+      "bad": "void select(int value) {\n  switch (value) {\n    case 0:\n      print(0);\n      break;\n    case 1:\n      switch (value) {\n        case 1:\n          break;\n        default:\n          break;\n      }\n      break;\n    default:\n      break;\n  }\n}\n\nvoid commented(int value) {\n  switch (value) {\n    case 0:\n      break;\n    // No separating blank line.\n    default:\n      break;\n  }\n}",
+      "crossFile": null,
+      "good": "void select(int value) {\n  switch (value) {\n    case 0:\n      print(0);\n      break;\n\n    case 1:\n      switch (value) {\n        case 1:\n          break;\n\n        default:\n          break;\n      }\n      break;\n\n    default:\n      break;\n  }\n}\n\nvoid single(int value) {\n  switch (value) {\n    default:\n      break;\n  }\n}\n\nvoid grouped(int value) {\n  switch (value) {\n    case 0:\n    case 1:\n      print(value);\n      break;\n\n    // These labels share a body.\n    case 2:\n    case 3:\n      break;\n\n    /* The blank line precedes this comment. */\n    default:\n      break;\n  }\n}"
+    },
+    "group": "style",
+    "name": "newline-before-case",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a blank line before constructors following another member.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Add a blank line before constructor declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 4,
+        "message": "Add a blank line before constructor declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Add a blank line before constructor declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Add a blank line before constructor declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 24,
+        "message": "Add a blank line before constructor declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 30,
+        "message": "Add a blank line before constructor declaration"
+      }
+    ],
+    "docs": "Requires a blank line before constructors following another member.\n\nIncludes named, redirecting, and factory constructor declarations.\nThe first member is exempt unless enum constants precede it; constructor\ninvocations are not checked. Blank lines above attached comments count.",
+    "domains": [],
+    "examples": {
+      "bad": "class Example {\n  final int value;\n  Example(this.value);\n  Example.zero() : value = 0;\n\n  Example.one() : value = 1;\n}\n\nclass FactoryExample {\n  FactoryExample();\n  factory FactoryExample.create() => FactoryExample();\n}\n\nclass Nested {\n  void method() {\n    final value = Example(1);\n    print(value);\n  }\n  Nested();\n}\n\nenum Action {\n  run;\n  const Action();\n}\n\nclass Documented {\n  final int value;\n  /// No blank line above this documentation.\n  Documented(this.value);\n}",
+      "crossFile": null,
+      "good": "class Example {\n  Example();\n\n  Example.named();\n\n  factory Example.create() => Example();\n}\n\nclass FirstConstructor {\n  FirstConstructor() {\n    final make = () { return Example(); };\n    make();\n  }\n}\n\nclass Fields {\n  final int value;\n\n  const Fields(this.value);\n}\n\nclass Documented {\n  final int value;\n\n  /// Creates a documented instance.\n  Documented(this.value);\n}\n\nenum Action {\n  run;\n\n  /// Creates an action.\n  const Action();\n}"
+    },
+    "group": "style",
+    "name": "newline-before-constructor",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a blank line before a continue that follows another statement.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 4,
+        "message": "Add a blank line before continue statement"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Add a blank line before continue statement"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 18,
+        "message": "Add a blank line before continue statement"
+      }
+    ],
+    "docs": "Requires a blank line before a continue that follows another statement.\n\nChecks labeled and unlabeled continues in blocks. First statements, unbraced\ncontinues, and switch-case lists are exempt. Blank lines above comments count.",
+    "domains": [],
+    "examples": {
+      "bad": "void loops(bool condition) {\n  while (condition) {\n    print('before');\n    continue;\n  }\n  outer: for (var i = 0; i < 3; i++) {\n    while (condition) {\n      print('nested');\n      continue outer;\n    }\n  }\n}\n\nvoid commented(bool condition) {\n  while (condition) {\n    print('before');\n    // No separating blank line.\n    continue;\n  }\n}",
+      "crossFile": null,
+      "good": "void loops(bool condition) {\n  while (condition) {\n    continue;\n  }\n  while (condition) {\n    print('before');\n\n    continue;\n  }\n  outer: for (var i = 0; i < 3; i++) {\n    while (condition) {\n      continue outer;\n    }\n  }\n  while (condition) {\n    if (condition) continue;\n  }\n}\n\nvoid cases(int value) {\n  while (true) {\n    switch (value) {\n      case 0:\n        print(value);\n        continue next;\n      next:\n      default:\n        return;\n    }\n  }\n}\n\nvoid commented(bool condition) {\n  while (condition) {\n    print('before');\n\n    // Start another iteration.\n    continue;\n  }\n}"
+    },
+    "group": "style",
+    "name": "newline-before-continue",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a blank line before method declarations following another member.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Add a blank line before method declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Add a blank line before method declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Add a blank line before method declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Add a blank line before method declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 27,
+        "message": "Add a blank line before method declaration"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 33,
+        "message": "Add a blank line before method declaration"
+      }
+    ],
+    "docs": "Requires a blank line before method declarations following another member.\n\nThe first member is exempt unless enum constants precede it. Checks methods\nin classes, mixins, enums, and extensions; top-level and local functions are\nnot method declarations. Blank lines above attached comments count.",
+    "domains": [],
+    "examples": {
+      "bad": "class Example {\n  void first() {}\n  void second() {}\n\n  void spaced() {\n    void local() {}\n    local();\n  }\n  void nested() {\n    final callback = () { print('not a declaration'); };\n    callback();\n  }\n}\n\nmixin Actions {\n  int value = 0;\n  void run() {}\n}\n\nextension ActionsOnInt on int {\n  int get doubled => this * 2;\n  void run() {}\n}\n\nenum Action {\n  run;\n  void execute() {}\n}\n\nclass Documented {\n  void first() {}\n  /// No blank line above this documentation.\n  void second() {}\n}",
+      "crossFile": null,
+      "good": "class Example {\n  void first() {}\n\n  void second() {}\n\n  @override\n  String toString() => 'Example';\n}\n\nmixin Actions {\n  void first() {}\n\n  void second() {}\n}\n\nextension ActionsOnInt on int {\n  void first() {}\n\n  void second() {}\n}\n\nvoid topLevel() {}\nvoid anotherTopLevel() {}\n\nclass Documented {\n  void first() {}\n\n  /// Runs the second action.\n  /// The blank line belongs above these comments.\n  void second() {}\n\n  /* A block comment can also introduce a method. */\n  void third() {}\n}\n\nenum Action {\n  run;\n\n  /// Executes the action.\n  void execute() {}\n}"
+    },
+    "group": "style",
+    "name": "newline-before-method",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags `return` statements that are not preceded by a blank line.",
     "diagnostics": [
       {
@@ -19937,14 +20495,20 @@
         "file": null,
         "line": 61,
         "message": "Add a blank line before return statement"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 68,
+        "message": "Add a blank line before return statement"
       }
     ],
-    "docs": "Flags `return` statements that are not preceded by a blank line.\n\nSeparating a `return` from the statements above it with a blank line makes\nthe exit point of a block visually distinct, so readers can spot where\ncontrol leaves the function without parsing the surrounding code. The rule\nonly checks returns that follow another statement in the same block.\nSwitch-case statement lists are not blocks. A blank line is any run of\nwhitespace containing two or more newlines; spaces and tabs do not matter.",
+    "docs": "Flags `return` statements that are not preceded by a blank line.\n\nSeparating a `return` from the statements above it with a blank line makes\nthe exit point of a block visually distinct, so readers can spot where\ncontrol leaves the function without parsing the surrounding code. The rule\nonly checks returns that follow another statement in the same block.\nSwitch-case statement lists are not blocks. A blank line contains two or more\nnewlines and may appear above attached comments; spaces and tabs do not matter.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for newline-before-return rule\n// violations: return statement not preceded by a blank line\n\nint badFunction(int x) {\n  final result = x * 2;\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n  return upper;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n    return product;\n  }\n}\n\nvoid nestedReturns() {\n  if (true) {\n    final value = 42;\n    return value;\n  }\n  print('done');\n  return;\n}\n\nfinal callback = () {\n  print('callback');\n  return 1;\n};\n\nint switchReturns(int value) {\n  switch (value) {\n    case 0:\n      print(value);\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid labeledReturn() {\n  label: {\n    print('label');\n    return;\n  }\n}\n\nclass Operand {\n  Operand operator +(Operand other) {\n    print(other);\n    return other;\n  }\n}",
+      "bad": "// Test cases for newline-before-return rule\n// violations: return statement not preceded by a blank line\n\nint badFunction(int x) {\n  final result = x * 2;\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n  return upper;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n    return product;\n  }\n}\n\nvoid nestedReturns() {\n  if (true) {\n    final value = 42;\n    return value;\n  }\n  print('done');\n  return;\n}\n\nfinal callback = () {\n  print('callback');\n  return 1;\n};\n\nint switchReturns(int value) {\n  switch (value) {\n    case 0:\n      print(value);\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid labeledReturn() {\n  label: {\n    print('label');\n    return;\n  }\n}\n\nclass Operand {\n  Operand operator +(Operand other) {\n    print(other);\n    return other;\n  }\n}\n\nint commentedReturn() {\n  final value = 1;\n  // No separating blank line.\n  return value;\n}",
       "crossFile": null,
-      "good": "// Test cases for newline-before-return rule\n// No violations: return preceded by blank line or is the only statement\n\nint goodFunction(int x) {\n  final result = x * 2;\n\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n\n  return upper;\n}\n\n// Single-statement body: no preceding statement so no blank line needed\nint identity(int x) {\n  return x;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n\n    return product;\n  }\n}\n\n// With blank line in nested blocks\nvoid nestedCorrect() {\n  if (true) {\n    final value = 42;\n\n    return value;\n  }\n\n  print('done');\n\n  return;\n}\n\n// Arrow function: no block, no check needed\nint arrow(int x) => x * 2;\n\n// Conditional with proper spacing\nbool check(int x) {\n  if (x > 0) {\n\n    return true;\n  }\n\n  return false;\n}\n\nfinal callbacks = [\n  () {\n    return 1;\n  },\n];\n\nint firstInEachList(int value) {\n  switch (value) {\n    case 0:\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid firstInNestedLists() {\n  try {\n    return;\n  } catch (error) {\n    return;\n  } finally {\n    return;\n  }\n}\n\nvoid singleStatementBranches(bool flag) {\n  if (flag) return;\n  while (flag) return;\n  label: {\n    return;\n  }\n}"
+      "good": "// Test cases for newline-before-return rule\n// No violations: return preceded by blank line or is the only statement\n\nint goodFunction(int x) {\n  final result = x * 2;\n\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n\n  return upper;\n}\n\n// Single-statement body: no preceding statement so no blank line needed\nint identity(int x) {\n  return x;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n\n    return product;\n  }\n}\n\n// With blank line in nested blocks\nvoid nestedCorrect() {\n  if (true) {\n    final value = 42;\n\n    return value;\n  }\n\n  print('done');\n\n  return;\n}\n\n// Arrow function: no block, no check needed\nint arrow(int x) => x * 2;\n\n// Conditional with proper spacing\nbool check(int x) {\n  if (x > 0) {\n\n    return true;\n  }\n\n  return false;\n}\n\nfinal callbacks = [\n  () {\n    return 1;\n  },\n];\n\nint firstInEachList(int value) {\n  switch (value) {\n    case 0:\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid firstInNestedLists() {\n  try {\n    return;\n  } catch (error) {\n    return;\n  } finally {\n    return;\n  }\n}\n\nvoid singleStatementBranches(bool flag) {\n  if (flag) return;\n  while (flag) return;\n  label: {\n    return;\n  }\n}\n\nint commentedReturn() {\n  final value = 1;\n\n  // Explain the return.\n  return value;\n}"
     },
     "group": "style",
     "name": "newline-before-return",
@@ -19953,6 +20517,58 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "newline-before-return",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a blank line before a throw that follows another statement.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Add a blank line before throw statement"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "Add a blank line before throw statement"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 13,
+        "message": "Add a blank line before throw statement"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 22,
+        "message": "Add a blank line before throw statement"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 32,
+        "message": "Add a blank line before throw statement"
+      }
+    ],
+    "docs": "Requires a blank line before a throw that follows another statement.\n\nChecks blocks, including nested bodies and closures. First statements,\nunbraced throws, and switch-case lists are exempt. Blank lines above attached\ncomments count.",
+    "domains": [],
+    "examples": {
+      "bad": "void fail(bool condition) {\n  print('start');\n  throw StateError('failure');\n}\n\nvoid nested(bool condition) {\n  if (condition) {\n    print('nested');\n    throw StateError('nested');\n  }\n  final callback = () {\n    print('closure');\n    throw StateError('closure');\n  };\n  callback();\n}\n\nvoid cases(int value) {\n  switch (value) {\n    case 0: {\n      print(value);\n      throw StateError('case block');\n    }\n    default:\n      throw StateError('first');\n  }\n}\n\nvoid commented() {\n  print('before');\n  // No separating blank line.\n  throw StateError('failure');\n}",
+      "crossFile": null,
+      "good": "void first() {\n  throw StateError('first');\n}\n\nvoid separated() {\n  print('before');\n\n  throw StateError('after blank line');\n}\n\nvoid nested(bool condition) {\n  if (condition) {\n    throw StateError('first in nested block');\n  }\n  final callback = () {\n    throw StateError('first in closure');\n  };\n  callback();\n}\n\nvoid guarded(bool condition) {\n  if (condition) throw StateError('unbraced');\n}\n\nvoid cases(int value) {\n  switch (value) {\n    default:\n      throw StateError('first');\n  }\n}\n\nvoid followingCaseStatement(int value) {\n  switch (value) {\n    default:\n      print(value);\n      throw StateError('case');\n  }\n}\n\nvoid commented() {\n  print('before');\n\n  // Explain the failure.\n  throw StateError('failure');\n}"
+    },
+    "group": "style",
+    "name": "newline-before-throw",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -20953,6 +21569,116 @@
       "label": "Dart lints",
       "upstreamId": "parameter_assignments",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/parameter_assignments"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires named parameters to follow the explicitly configured alphabetical order.",
+    "diagnostics": [
+      {
+        "column": 64,
+        "file": null,
+        "line": 1,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 4,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 69,
+        "file": null,
+        "line": 5,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 75,
+        "file": null,
+        "line": 9,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 68,
+        "file": null,
+        "line": 10,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 84,
+        "file": null,
+        "line": 13,
+        "message": "Reorder named entries to follow the configured order."
+      }
+    ],
+    "docs": "Requires named parameters to follow the explicitly configured alphabetical order.\nPositional parameters are excluded. Set `order` to `ascending` or `descending`;\nwithout a valid order this rule does nothing.",
+    "domains": [],
+    "examples": {
+      "bad": "void top({int zebra = 0, int  alpha = 0}) {}\n\nclass Example {\n  Example({int zebra = 0, int  alpha = 0});\n  void method({int zebra = 0, int  alpha = 0}) {}\n}\n\nvoid closures() {\n  final callback = ({int zebra = 0, int  alpha = 0}) {};\n  void local({int zebra = 0, int  alpha = 0}) {}\n}\n\ntypedef Callback = void Function({int zebra, int  alpha});",
+      "crossFile": null,
+      "good": "void named({int alpha = 0, int zebra = 0}) {}\nvoid positional(int zebra, int alpha) {}\nvoid optional([int zebra = 0, int alpha = 0]) {}\nvoid mixed(int zebra, int alpha, {int beta = 0, int gamma = 0}) {}\nvoid single({int zebra = 0}) {}\n\nclass Example {\n  final int alpha;\n  final int zebra;\n  Example({this.alpha = 0, this.zebra = 0});\n}\n\ntypedef Callback = void Function({int alpha, int zebra});"
+    },
+    "group": "style",
+    "name": "parameters-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags named object and record pattern fields that violate the configured order.",
+    "diagnostics": [
+      {
+        "column": 38,
+        "file": null,
+        "line": 2,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 3,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 4,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 5,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 6,
+        "message": "Reorder named entries to follow the configured order."
+      }
+    ],
+    "docs": "Flags named object and record pattern fields that violate the configured order.\n\nSet `order` to `\"ascending\"` or `\"descending\"` for case-sensitive\nlexicographic ordering. Without a valid explicit order, this rule is inactive.\nExplicit labels and inferred shorthand names are compared; positional record\nfields and unresolved shorthand names break the comparison sequence.",
+    "domains": [],
+    "examples": {
+      "bad": "void objects(Object value) {\n  if (value case Point(zebra: var z, apple: var a)) {}\n  if (value case Point(:var zebra, :var apple)) {}\n  if (value case (zebra: var z, apple: var a)) {}\n  if (value case (:var zebra, :var apple)) {}\n  if (value case (0, zebra: var z, apple: var a)) {}\n}\nclass Point { final int apple = 1; final int zebra = 2; }",
+      "crossFile": null,
+      "good": "void objects(Object value) {\n  if (value case Point(apple: var a, zebra: var z)) {}\n  if (value case Point(:var apple, :var zebra)) {}\n  if (value case (apple: var a, zebra: var z)) {}\n  if (value case (:var apple, :var zebra)) {}\n  if (value case (var zebra, var apple)) {}\n  if (value case (0, apple: var a, zebra: var z)) {}\n  if (value case Point(apple: var zebra, zebra: var apple)) {}\n}\nclass Point { final int apple = 1; final int zebra = 2; }"
+    },
+    "group": "style",
+    "name": "pattern-fields-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -25450,6 +26176,58 @@
       "label": "Dart lints",
       "upstreamId": "public_member_api_docs",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/public_member_api_docs"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags named record type fields that violate the configured order.",
+    "diagnostics": [
+      {
+        "column": 34,
+        "file": null,
+        "line": 1,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 2,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 3,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 4,
+        "message": "Reorder named entries to follow the configured order."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 5,
+        "message": "Reorder named entries to follow the configured order."
+      }
+    ],
+    "docs": "Flags named record type fields that violate the configured order.\n\nSet `order` to `\"ascending\"` or `\"descending\"` for case-sensitive\nlexicographic ordering. Without a valid explicit order, this rule is inactive.\nNamed fields are checked independently for each record type. Positional fields\nand record literals are ignored; reordering literal expressions can change effects.",
+    "domains": [],
+    "examples": {
+      "bad": "typedef First = ({int zebra, int apple});\ntypedef Mixed = (int, {int zebra, int apple});\ntypedef Nested = ({({int zebra, int apple}) outer});\n({int zebra, int apple}) typed = (apple: 1, zebra: 2);\ntypedef Named = ({int zebra, int apple});",
+      "crossFile": null,
+      "good": "typedef Sorted = ({int apple, int zebra});\ntypedef Positional = (String, String);\ntypedef Mixed = (int, {int apple, int zebra});\ntypedef Singleton = ({int zebra});\n({int apple, int zebra}) typed = (apple: 1, zebra: 2);\ntypedef Named = ({int apple, int zebra});\nfinal unsortedLiteral = (zebra: 1, apple: 2);"
+    },
+    "group": "style",
+    "name": "record-fields-ordering",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

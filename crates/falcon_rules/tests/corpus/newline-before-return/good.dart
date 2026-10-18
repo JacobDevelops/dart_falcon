@@ -91,3 +91,10 @@ void singleStatementBranches(bool flag) {
     return;
   }
 }
+
+int commentedReturn() {
+  final value = 1;
+
+  // Explain the return.
+  return value;
+}

@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 388);
+    assert_eq!(RULE_METADATA.len(), 401);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         215
@@ -405,6 +405,11 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         "linter": {
             "rules": {
                 "style": {
+                    "enum-constants-ordering": { "level": "warn", "options": { "order": "ascending" } },
+                    "map-keys-ordering": { "level": "warn", "options": { "order": "ascending" } },
+                    "parameters-ordering": { "level": "warn", "options": { "order": "ascending" } },
+                    "pattern-fields-ordering": { "level": "warn", "options": { "order": "ascending" } },
+                    "record-fields-ordering": { "level": "warn", "options": { "order": "ascending" } },
                     "use-design-system-item": {
                         "level": "warn",
                         "options": { "items": [{ "class_name": "Container" }] }

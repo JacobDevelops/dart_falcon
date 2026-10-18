@@ -1,0 +1,1 @@
+enum Unconfigured { zebra, apple }

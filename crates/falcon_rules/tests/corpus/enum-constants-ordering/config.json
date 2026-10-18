@@ -1,0 +1,66 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "enum-constants-ordering": {
+          "level": "warn",
+          "options": {
+            "order": "ascending"
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/bad_2.dart",
+        "**/good_2.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "enum-constants-ordering": {
+              "level": "warn",
+              "options": {
+                "order": "descending"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/good_3.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "enum-constants-ordering": {
+              "level": "warn",
+              "options": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/good_4.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "enum-constants-ordering": {
+              "level": "warn",
+              "options": {
+                "order": "invalid"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

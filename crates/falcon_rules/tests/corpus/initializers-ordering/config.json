@@ -1,0 +1,26 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "initializers-ordering": {
+          "level": "warn",
+          "options": {}
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/descending.dart"],
+      "linter": { "rules": { "style": {
+        "initializers-ordering": { "level": "warn", "options": { "order": "descending" } }
+      } } }
+    },
+    {
+      "includes": ["**/alphabetical.dart"],
+      "linter": { "rules": { "style": {
+        "initializers-ordering": { "level": "warn", "options": { "order": "ascending" } }
+      } } }
+    }
+  ]
+}
