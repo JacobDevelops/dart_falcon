@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 14 | 132 | 24 | 170 |
+| DCM-inspired | 10 | 132 | 24 | 166 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 3 | 7 | 3 | 13 |
-| **Total** | **17** | **143** | **31** | **191** |
+| Additional rules | 2 | 7 | 3 | 12 |
+| **Total** | **12** | **143** | **31** | **186** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (170)
+## Planned DCM-inspired rules (166)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -266,16 +266,11 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-ref-watch-outside-build` | correctness | FT | paid | `ref.watch` outside build. | must-have |
-| `avoid-ref-read-inside-build` | correctness | FT | paid | `ref.read` inside build. | must-have |
 | `use-ref-read-synchronously` | correctness | FT | paid | Ref used after await without mounted. | must-have |
-| `prefer-ref-read-for-methods` | correctness | FT | n/a | Prefer ref.read for method actions rather than watching state. | must-have |
 | `use-ref-and-state-synchronously` | correctness | FT | paid | Ref/state used after await without mounted. | must-have |
-| `avoid-calling-notifier-members-inside-build` | correctness | FT | paid | Mutating a notifier during build. | must-have |
 | `dispose-provided-instances` | correctness | FT | paid | Provided disposables not disposed. | must-have |
 | `dispose-provider-resources` | correctness | FT | n/a | Provider-created resources must use autoDispose or ref.onDispose for cleanup; avoid misleading scope-leak terminology. | must-have |
 | `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
-| `avoid-unnecessary-consumer-widgets` | performance | LT | paid | ConsumerWidget without ref use. | must-have |
 | `avoid-ref-inside-state-dispose` | correctness | FT | paid | ref used in dispose. | nice-to-have |
 | `avoid-public-notifier-properties` | style | LT | paid | Notifier exposing mutable state. | nice-to-have |
 | `prefer-immutable-provider-arguments` | correctness | FT | paid | Provider family args must be immutable. | nice-to-have |

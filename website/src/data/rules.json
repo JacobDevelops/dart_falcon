@@ -3106,6 +3106,72 @@
   },
   {
     "crossFile": false,
+    "description": "Flags calls to Riverpod notifier methods during widget build.",
+    "diagnostics": [
+      {
+        "column": 31,
+        "file": null,
+        "line": 10,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 13,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 14,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 20,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 25,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 30,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      }
+    ],
+    "docs": "Flags calls to Riverpod notifier methods during widget build.\n\nBuild must not trigger notifier side effects. Method tear-offs and nested\ncallbacks are not calls during build; unrelated same-named types and Object\nmethods (`toString` and `noSuchMethod`) are ignored.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    ref.read(counterProvider).increment();\n    final counter = ref.watch(counterProvider);\n    counter.increment();\n    counter.reset();\n    ref.watch(asyncProvider).refresh();\n    return 0;\n  }\n}\nclass Arrow extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    ref.read(counterProvider).increment();\n    return 0;\n  }\n}\nObject consumer() => Consumer(builder: (context, ref, child) {\n  ref.read(counterProvider).increment();\n  return 0;\n});\nclass HookScreen extends hooks.HookConsumerWidget {\n  Object build(Object context, hooks.WidgetRef ref) {\n    ref.read(counterProvider).increment();\n    return 0;\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nclass Service { void increment() {} }\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final counter = ref.watch(counterProvider);\n    final callback = () => counter.increment();\n    void local() { counter.reset(); }\n    final tearoff = counter.increment;\n    final service = Service();\n    service.increment();\n    counter.toString();\n    return callback;\n  }\n  void action(WidgetRef ref) { ref.read(counterProvider).increment(); }\n}\nvoid outside(Counter counter) { counter.increment(); }\nclass Unrelated {\n  Object build(Object context, Counter counter) { counter.increment(); return 0; }\n}\nclass DeferredMenu extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      PopupMenuButton(itemBuilder: (context) {\n        ref.read(counterProvider).increment();\n        return 0;\n      });\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-calling-notifier-members-inside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags equality comparisons between non-constant SDK collections.",
     "diagnostics": [
       {
@@ -4554,6 +4620,144 @@
     },
     "group": "correctness",
     "name": "avoid-recursive-widget-calls",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags one-time Riverpod reads of provider state during widget build.",
+    "diagnostics": [
+      {
+        "column": 23,
+        "file": null,
+        "line": 6,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 7,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 8,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 12,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 15,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 69,
+        "file": null,
+        "line": 17,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 19,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      }
+    ],
+    "docs": "Flags one-time Riverpod reads of provider state during widget build.\n\nUse watch to rebuild when state changes. Nested callbacks and notifier action reads are excluded.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final value = ref.read(countProvider);\n    if (value > 0) { return ref.read(countProvider); }\n    return ref.read<int>(countProvider);\n  }\n}\nclass Arrow extends ConsumerWidget {\n  Object build(Object context, WidgetRef reader) => reader.read(countProvider);\n}\nclass ScreenState extends ConsumerState<Object> {\n  Object build(Object context) => ref.read(countProvider);\n}\nObject consumer() => Consumer(builder: (context, ref, child) => ref.read(countProvider));\nclass HookScreen extends hooks.HookConsumerWidget {\n  Object build(Object context, hooks.WidgetRef ref) => ref.read(countProvider);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final callback = () => ref.read(countProvider);\n    void local() { ref.read(countProvider); }\n    return ref.watch(countProvider);\n  }\n  int action(WidgetRef ref) => ref.read(countProvider);\n}\nint outside(WidgetRef ref) => ref.read(countProvider);\nfinal plain = Provider<int>((ref) => ref.read(countProvider));\nclass Unrelated {\n  int read(Object value) => 0;\n  Object build(Object context, Unrelated ref) => ref.read(countProvider);\n}\nObject consumer() => Consumer(builder: (context, ref, child) => () => ref.read(countProvider));\nclass DeferredMenu extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      PopupMenuButton(itemBuilder: (context) => ref.read(countProvider));\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-ref-read-inside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Riverpod WidgetRef.watch subscriptions outside synchronous widget build bodies.",
+    "diagnostics": [
+      {
+        "column": 36,
+        "file": null,
+        "line": 6,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 7,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 9,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 10,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 15,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 18,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 21,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 25,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      }
+    ],
+    "docs": "Flags Riverpod WidgetRef.watch subscriptions outside synchronous widget build bodies.\n\nSubscriptions belong in build; event callbacks and other widget methods\nshould read once. Consumer builders and package-confirmed Flutter builder,\nitemBuilder and separatorBuilder callbacks inside build are build contexts.\nProvider Ref callbacks are left unchanged, including those inside widgets.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  void action(WidgetRef ref) { ref.watch(countProvider);  }\n  int getCount(WidgetRef reader) => reader.watch(countProvider);\n  Object build(Object context, WidgetRef ref) {\n    final callback = () => ref.watch(countProvider);\n    void local() { ref.watch(countProvider); }\n    return callback;\n  }\n}\nclass ScreenState extends ConsumerState<Object> {\n  void initState() { ref.watch(countProvider); }\n  Object build(Object context) => 0;\n}\nvoid action(WidgetRef reader) { reader.watch(countProvider); }\nclass HookScreen extends hooks.HookConsumerWidget {\n  Object build(Object context, WidgetRef ref) => 0;\n  void action(hooks.WidgetRef ref) { ref.watch(countProvider); }\n}\nclass MenuScreen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      PopupMenuButton(itemBuilder: (context) => ref.watch(countProvider));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_hooks/flutter_hooks.dart' as flutter_hooks;\nimport 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final value = ref.watch(countProvider);\n    return value;\n  }\n  int action(WidgetRef ref) => ref.read(countProvider);\n}\nclass ScreenState extends ConsumerState<Object> {\n  Object build(Object context) => ref.watch(countProvider);\n}\nfinal dependent = Provider<int>((ref) => ref.watch(countProvider));\nObject consumer() => Consumer(builder: (context, ref, child) => ref.watch(countProvider));\nclass Unrelated { int watch(Object value) => 0; }\nint unrelated(Unrelated ref) => ref.watch(countProvider);\nint unknown(dynamic ref) => ref.watch(countProvider);\nclass BuilderScreen extends ConsumerWidget {\n  static final dependent = Provider<int>((Ref ref) => ref.watch(countProvider));\n  Object build(Object context, WidgetRef ref) =>\n      Builder(builder: (context) => ref.watch(countProvider));\n}\nclass SliverBuilderScreen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      SliverChildBuilderDelegate((context, index) => ref.watch(countProvider));\n}\nclass OtherBuilders extends hooks.HookConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    SliverList.builder(itemBuilder: (context, index) => ref.watch(countProvider));\n    SliverGrid.builder(itemBuilder: (context, index) => ref.watch(countProvider));\n    ReorderableListView.builder(itemBuilder: (context, index) => ref.watch(countProvider));\n    AnimatedList(itemBuilder: (context, index, animation) => ref.watch(countProvider));\n    return flutter_hooks.HookBuilder(builder: (context) => ref.watch(countProvider));\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-ref-watch-outside-build",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -8810,6 +9014,66 @@
   },
   {
     "crossFile": false,
+    "description": "Flags watching a Riverpod notifier solely to invoke one of its methods.",
+    "diagnostics": [
+      {
+        "column": 30,
+        "file": null,
+        "line": 9,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 10,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 48,
+        "file": null,
+        "line": 11,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 12,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 13,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 14,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      }
+    ],
+    "docs": "Flags watching a Riverpod notifier solely to invoke one of its methods.\n\nActions should read the notifier rather than establish a rebuild subscription. Only package-confirmed Ref receivers and notifier types are matched.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nvoid actions(WidgetRef ref) {\n  ref.watch(counterProvider).increment();\n  ref.watch(counterProvider).reset();\n  final increment = ref.watch(counterProvider).increment;\n  ref.watch<Counter>(counterProvider).increment();\n  (ref.watch(counterProvider)).reset();\n  ref.watch(asyncProvider).refresh();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nvoid actions(WidgetRef ref) {\n  ref.read(counterProvider).increment();\n  final increment = ref.read(counterProvider).increment;\n  final state = ref.watch(counterProvider).value;\n  final notifier = ref.watch(counterProvider);\n  notifier.increment();\n  ref.watch(counterProvider).toString();\n}\nclass Service { void invoke() {} }\nfinal serviceProvider = Provider<Service>((ref) => Service());\nvoid service(WidgetRef ref) { ref.watch(serviceProvider).invoke(); }\nvoid unknown(dynamic ref) { ref.watch(counterProvider).increment(); }"
+    },
+    "group": "correctness",
+    "name": "prefer-ref-read-for-methods",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Prefer relative imports for libraries of the same package under `lib/`.",
     "diagnostics": [],
     "docs": "Prefer relative imports for libraries of the same package under `lib/`.\n\nThe rule runs only\nfor files inside the enclosing package's `lib/` directory (the nearest\n`pubspec.yaml` names the package; files outside any package, or in a package\nwithout a `name`, are skipped). An `import` whose URI is a `package:` URI\nnaming the file's own package, such as `import 'package:my_pkg/src/a.dart';`\ninside `my_pkg/lib/`, is reported and should be written relative\n(`import 'src/a.dart';`). Imports of other packages, `dart:` libraries,\nexports, and conditional alternatives are not checked. Incompatible with\n`always-use-package-imports`.",
@@ -11295,6 +11559,72 @@
     },
     "group": "performance",
     "name": "avoid-slow-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Riverpod consumer widgets whose build reference is unused.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This widget does not use its ref; convert it to a HookWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 26,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 36,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 40,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 48,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      }
+    ],
+    "docs": "Flags Riverpod consumer widgets whose build reference is unused.\nA direct ConsumerWidget or HookConsumerWidget subclass can use a regular\nwidget when it does not need its WidgetRef. References are matched to the\nparameter declaration, so nested consumers with their own ref do not count.\nAbstract/generic classes, mixins, interfaces, missing bodies and uncertain\nreference types are excluded, as are locally subclassed widgets and helpers\nthat use a WidgetRef parameter.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\n\nfinal provider = Object();\n\nclass PlainConsumer extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nclass HookConsumer extends hooks.HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    return const SizedBox();\n  }\n}\n\nclass NestedConsumer extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    return Consumer(builder: (context, ref, child) {\n      ref.watch(provider);\n      return const SizedBox();\n    });\n  }\n}\n\nclass LocalShadow extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    {\n      final ref = 'a local string';\n      print(ref);\n    }\n    return const SizedBox();\n  }\n}\n\nclass RenamedReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef unused) => const SizedBox();\n}\n\nclass ClosureShadow extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    void visit(String ref) { print(ref); }\n    visit('shadow');\n    return const SizedBox();\n  }\n}\n\nclass PrefixedConsumer extends hooks.ConsumerWidget {\n  Widget build(BuildContext context, hooks.WidgetRef reference) => const SizedBox();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\n\nfinal provider = Object();\n\nclass WatchesProvider extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    ref.watch(provider);\n    return const SizedBox();\n  }\n}\n\nclass CapturesReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    void callback() { ref.read(provider); }\n    callback();\n    return const SizedBox();\n  }\n}\n\nclass PassesReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => render(ref);\n  Widget render(WidgetRef reference) {\n    reference.watch(provider);\n    return const SizedBox();\n  }\n}\n\nclass HelperConsumesReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n  Widget render(WidgetRef reference) {\n    reference.watch(provider);\n    return const SizedBox();\n  }\n}\n\nclass HookReadsProvider extends hooks.HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef reference) {\n    reference.read(provider);\n    return const SizedBox();\n  }\n}\n\nmixin Behavior {}\nclass MixedConsumer extends ConsumerWidget with Behavior {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nabstract class AbstractConsumer extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nclass InferredReference extends ConsumerWidget {\n  Widget build(BuildContext context, ref) => const SizedBox();\n}\n\nclass UncertainHelper extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n  void helper(ref) { print(ref); }\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-consumer-widgets",
     "recommended": false,
     "source": {
       "kind": "Falcon",

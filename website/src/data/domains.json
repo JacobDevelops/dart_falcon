@@ -69,7 +69,13 @@
   },
   {
     "name": "riverpod",
-    "rules": []
+    "rules": [
+      "avoid-calling-notifier-members-inside-build",
+      "avoid-ref-read-inside-build",
+      "avoid-ref-watch-outside-build",
+      "avoid-unnecessary-consumer-widgets",
+      "prefer-ref-read-for-methods"
+    ]
   },
   {
     "name": "provider",

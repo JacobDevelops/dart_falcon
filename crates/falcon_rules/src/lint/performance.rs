@@ -3,6 +3,7 @@
 pub mod avoid_shrink_wrap_in_lists;
 pub mod avoid_slow_async_io;
 pub mod avoid_slow_collection_methods;
+pub mod avoid_unnecessary_consumer_widgets;
 pub mod avoid_unnecessary_hook_widgets;
 pub mod move_variable_outside_iteration;
 pub mod noop_primitive_operations;

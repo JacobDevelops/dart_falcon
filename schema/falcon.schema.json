@@ -260,6 +260,9 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-calling-notifier-members-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-collection-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -315,6 +318,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-recursive-widget-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-watch-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-relative-lib-imports": {
@@ -440,6 +449,9 @@
                 "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-ref-read-for-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-relative-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -517,6 +529,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-consumer-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-hook-widgets": {
@@ -1597,6 +1612,9 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-calling-notifier-members-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-collection-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1652,6 +1670,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-recursive-widget-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-watch-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-relative-lib-imports": {
@@ -1777,6 +1801,9 @@
                 "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-ref-read-for-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-relative-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1854,6 +1881,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-consumer-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-hook-widgets": {

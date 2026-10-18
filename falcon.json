@@ -128,6 +128,10 @@
         "avoid-unnecessary-stateful-widgets": "warn",
         "avoid-duplicate-test-assertions": "warn",
         "missing-test-assertion": "warn",
+        "avoid-ref-watch-outside-build": "warn",
+        "avoid-ref-read-inside-build": "warn",
+        "prefer-ref-read-for-methods": "warn",
+        "avoid-calling-notifier-members-inside-build": "warn",
         "avoid-read-inside-build": "warn",
         "avoid-watch-outside-build": "warn",
         "dispose-providers": "warn",
@@ -154,6 +158,7 @@
         "avoid-slow-collection-methods": "warn",
         "move-variable-outside-iteration": "warn",
         "avoid-shrink-wrap-in-lists": "warn",
+        "avoid-unnecessary-consumer-widgets": "warn",
         "avoid-unnecessary-hook-widgets": "warn"
       },
       "style": {
