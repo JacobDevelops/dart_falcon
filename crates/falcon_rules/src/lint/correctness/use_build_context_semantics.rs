@@ -27,6 +27,8 @@ pub(super) struct Semantics {
     pub protected_callbacks: HashSet<NodeId>,
     pub constants: HashMap<NodeId, bool>,
     pub never: HashSet<NodeId>,
+    pub rule: &'static str,
+    pub message: &'static str,
 }
 
 pub(super) fn prepare<'a>(
@@ -47,9 +49,13 @@ pub(super) fn prepare<'a>(
     let mut collector = Collector {
         program,
         ctx,
+        setstate: false,
         semantics: Semantics::default(),
         globals: HashMap::with_capacity(global_count),
     };
+    collector.semantics.rule = "use-build-context-synchronously";
+    collector.semantics.message =
+        "Do not use a BuildContext across an async gap without a matching mounted check.";
     for declaration in program.declarations() {
         match declaration {
             TopLevelDecl::Variable(variable) => {
@@ -77,11 +83,24 @@ pub(super) fn prepare<'a>(
     Some(collector)
 }
 
+pub(super) fn prepare_setstate<'a>(
+    program: Program<'a>,
+    ctx: &'a AnalyzeContext<'a>,
+) -> Option<Collector<'a>> {
+    let mut collector = prepare(program, ctx)?;
+    collector.setstate = true;
+    collector.semantics.rule = "use-setstate-synchronously";
+    collector.semantics.message =
+        "Do not call setState across an async gap without checking mounted.";
+    Some(collector)
+}
+
 pub(super) struct Collector<'a> {
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     semantics: Semantics,
     globals: HashMap<&'a str, ResolvedType>,
+    setstate: bool,
 }
 
 #[cfg(test)]
@@ -352,7 +371,9 @@ fn receiver_type<'a>(
 
 impl<'a> Collector<'a> {
     fn use_context(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
-        if let Some(kind) = context_kind(expression, state, &self.globals) {
+        if !self.setstate
+            && let Some(kind) = context_kind(expression, state, &self.globals)
+        {
             self.semantics.uses.insert(key(expression), kind);
         }
     }
@@ -394,6 +415,9 @@ impl<'a> Collector<'a> {
         if !identity.is_sdk("dart:async", identity.name()) {
             return;
         }
+        if self.setstate && identity.name() != "Future" {
+            return;
+        }
         match (identity.name(), constructor) {
             ("Future", "new" | "" | "microtask") => self.callbacks(args, &[0], &[]),
             ("Future", "delayed") => self.callbacks(args, &[1], &[]),
@@ -422,6 +446,9 @@ impl<'a> Collector<'a> {
                 .flatten()
         });
         if let Some(identity) = static_class {
+            if self.setstate && !identity.is_sdk("dart:async", "Future") {
+                return;
+            }
             match (identity.name(), field.field().name()) {
                 ("Future", "doWhile") => self.callbacks(args, &[0], &[]),
                 ("Future", "forEach") => self.callbacks(args, &[1], &[]),
@@ -438,6 +465,9 @@ impl<'a> Collector<'a> {
         let ResolvedType::Interface { identity, .. } = receiver else {
             return;
         };
+        if self.setstate && !identity.is_sdk("dart:async", "Future") {
+            return;
+        }
         match (identity.name(), method) {
             ("Future", "catchError" | "onError") => self.callbacks(args, &[0], &["test"]),
             ("Future", "then") => self.callbacks(args, &[0], &["onError"]),
@@ -503,6 +533,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     if let Some(kind) =
                         mounted_kind(&receiver_type(object, state, &self.globals), state)
                     {
+                        let kind = kind
+                            || (self.setstate
+                                && context_kind(object, state, &self.globals) == Some(true));
                         self.semantics.mounted.insert(key(expression), kind);
                     }
                 } else if !field.is_null_safe()
@@ -514,6 +547,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             Expr::Call(call) => {
                 let callee = call.callee();
                 let args = call.args();
+                if self.setstate && super::super::flutter_state_rules::is_setstate(call, state) {
+                    self.semantics.uses.insert(key(expression), true);
+                }
                 self.arguments(args, state);
                 if let Expr::Field(field) = callee.unparenthesized()
                     && (is_context(&receiver_type(field.object(), state, &self.globals), true)

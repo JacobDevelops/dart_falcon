@@ -112,7 +112,14 @@
         "avoid-missing-interpolation": "warn",
         "avoid-contradictory-expressions": "warn",
         "avoid-unmodified-loop-condition": "warn",
-        "avoid-uncaught-future-errors": "warn"
+        "avoid-uncaught-future-errors": "warn",
+        "use-setstate-synchronously": "warn",
+        "require-super-dispose": "warn",
+        "avoid-empty-setstate": "warn",
+        "avoid-unnecessary-setstate": "warn",
+        "use-closest-build-context": "warn",
+        "avoid-late-context": "warn",
+        "avoid-inherited-widget-in-initstate": "warn"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",

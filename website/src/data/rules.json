@@ -3376,6 +3376,60 @@
   },
   {
     "crossFile": false,
+    "description": "Avoid setState callbacks with empty block bodies.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 3,
+        "message": "Avoid an empty setState callback; update state inside the callback."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "Avoid an empty setState callback; update state inside the callback."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Avoid an empty setState callback; update state inside the callback."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "Avoid an empty setState callback; update state inside the callback."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 7,
+        "message": "Avoid an empty setState callback; update state inside the callback."
+      }
+    ],
+    "docs": "Avoid setState callbacks with empty block bodies. Comments and empty statements do not update state; unrelated methods are ignored.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { void update() {\nsetState(() { ; });\nsetState(() { /* comment */ });\nthis.setState(() {});\nsetState((() {}));\nsetState(() { ; ; });\n}}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { int x = 0; void update() {\nsetState(() { x++; });\nsetState(() => x++);\nthis.setState(() { x = 2; });\nsetState(() { update(); });\nsetState(() { if (x == 0) x = 1; });\n}}"
+    },
+    "group": "correctness",
+    "name": "avoid-empty-setstate",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Disallow mutable global and static state.",
     "diagnostics": [
       {
@@ -3441,6 +3495,114 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-global-state",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Avoid inherited-widget subscriptions during initState.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 3,
+        "message": "Move inherited-widget subscriptions from initState to didChangeDependencies."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "Move inherited-widget subscriptions from initState to didChangeDependencies."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Move inherited-widget subscriptions from initState to didChangeDependencies."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "Move inherited-widget subscriptions from initState to didChangeDependencies."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 7,
+        "message": "Move inherited-widget subscriptions from initState to didChangeDependencies."
+      }
+    ],
+    "docs": "Avoid inherited-widget subscriptions during initState. Checks direct BuildContext dependency calls and known subscribing Flutter of methods, including synchronous local helper calls.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { void initState() {\nTheme.of(context);\nMediaQuery.of(context);\nDirectionality.of(context);\nDefaultTextStyle.of(context);\nIconTheme.of(context);\n}}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { void didChangeDependencies() {\nTheme.of(context);\nMediaQuery.of(context);\nDirectionality.of(context);\nDefaultTextStyle.of(context);\nIconTheme.of(context);\n}}"
+    },
+    "group": "correctness",
+    "name": "avoid-inherited-widget-in-initstate",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Avoid storing BuildContext in late fields or reading it in late initializers.",
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": null,
+        "line": 3,
+        "message": "Avoid storing or accessing BuildContext in a late field initializer."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "Avoid storing or accessing BuildContext in a late field initializer."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 5,
+        "message": "Avoid storing or accessing BuildContext in a late field initializer."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 6,
+        "message": "Avoid storing or accessing BuildContext in a late field initializer."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 7,
+        "message": "Avoid storing or accessing BuildContext in a late field initializer."
+      }
+    ],
+    "docs": "Avoid storing BuildContext in late fields or reading it in late initializers. Resolved Flutter context values are checked rather than identifier spelling.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> {\nlate final value0 = context;\nlate BuildContext value1;\nlate final value2 = this.context;\nlate final value3 = Theme.of(context);\nlate final BuildContext value4 = context;\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> {\nlate final value0 = 0;\nlate final value1 = 'text';\nlate final value2 = <String>[];\nBuildContext? value3;\nBuildContext get value4 => context;\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-late-context",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -3952,6 +4114,60 @@
     },
     "group": "correctness",
     "name": "avoid-unmodified-loop-condition",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Avoid setState during build, initState, or didUpdateWidget.",
+    "diagnostics": [
+      {
+        "column": 20,
+        "file": null,
+        "line": 3,
+        "message": "Update state directly instead of calling setState during this lifecycle method."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 4,
+        "message": "Update state directly instead of calling setState during this lifecycle method."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 5,
+        "message": "Update state directly instead of calling setState during this lifecycle method."
+      },
+      {
+        "column": 67,
+        "file": null,
+        "line": 7,
+        "message": "Update state directly instead of calling setState during this lifecycle method."
+      },
+      {
+        "column": 101,
+        "file": null,
+        "line": 8,
+        "message": "Update state directly instead of calling setState during this lifecycle method."
+      }
+    ],
+    "docs": "Avoid setState during build, initState, or didUpdateWidget. Synchronous local method calls are followed transitively; deferred closures and async methods are excluded.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { int x=0;\nvoid initState() { setState(() { x++; }); }\nWidget build(BuildContext context) { setState(() { x++; }); return Text(''); }\nvoid didUpdateWidget(StatefulWidget old) { setState(() { x++; }); }\n}\nclass Explicit extends State<StatefulWidget> { void initState() { this.setState(() {}); } }\nclass Helpers extends State<StatefulWidget> { void update() { setState(() {}); } void initState() { update(); } }",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { int x=0;\nvoid update() { setState(() { x++; }); }\nvoid didChangeDependencies() { setState(() { x++; }); }\nWidget build(BuildContext context) { return ElevatedButton(onPressed: () { setState(() { x++; }); }, child: Text('')); }\nvoid initState() { Future.delayed(Duration.zero, () { setState(() { x++; }); }); }\n}\nclass Other { void setState(Function fn) {} void initState() { setState(() {}); } }"
+    },
+    "group": "correctness",
+    "name": "avoid-unnecessary-setstate",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -6980,6 +7196,60 @@
     }
   },
   {
+    "crossFile": false,
+    "description": "Require super.dispose() in Flutter State dispose overrides.",
+    "diagnostics": [
+      {
+        "column": 47,
+        "file": null,
+        "line": 2,
+        "message": "Call super.dispose() in this State dispose override."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 3,
+        "message": "Call super.dispose() in this State dispose override."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 4,
+        "message": "Call super.dispose() in this State dispose override."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 5,
+        "message": "Call super.dispose() in this State dispose override."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 6,
+        "message": "Call super.dispose() in this State dispose override."
+      }
+    ],
+    "docs": "Require super.dispose() in Flutter State dispose overrides. Presence is checked separately from the ordering rule; nested callbacks do not count.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass S0 extends State<StatefulWidget> { void dispose() {}  }\nclass S1 extends State<StatefulWidget> { void dispose() => cleanup();  }\nclass S2 extends State<StatefulWidget> { void dispose() { cleanup(); }  }\nclass S3 extends State<StatefulWidget> { void dispose() { return; }  }\nclass S4 extends State<StatefulWidget> { void dispose() { try { cleanup(); } finally { cleanup(); } }  }",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S0 extends State<StatefulWidget> { void dispose() { super.dispose(); } }\nclass S1 extends State<StatefulWidget> { void dispose() => super.dispose(); }\nclass S2 extends State<StatefulWidget> { void dispose() { cleanup(); super.dispose(); } }\nclass S3 extends State<StatefulWidget> { void dispose() { try { cleanup(); } finally { super.dispose(); } } }\nclass Other { void dispose() {} }"
+    },
+    "group": "correctness",
+    "name": "require-super-dispose",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
     "crossFile": true,
     "description": "Require `pubspec.yaml` dependency sections to be sorted alphabetically.",
     "diagnostics": [
@@ -8167,6 +8437,60 @@
   },
   {
     "crossFile": false,
+    "description": "Use the nearest BuildContext parameter inside nested callbacks.",
+    "diagnostics": [
+      {
+        "column": 46,
+        "file": null,
+        "line": 3,
+        "message": "Use the closest BuildContext parameter instead of an outer context."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 4,
+        "message": "Use the closest BuildContext parameter instead of an outer context."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 5,
+        "message": "Use the closest BuildContext parameter instead of an outer context."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 6,
+        "message": "Use the closest BuildContext parameter instead of an outer context."
+      },
+      {
+        "column": 86,
+        "file": null,
+        "line": 7,
+        "message": "Use the closest BuildContext parameter instead of an outer context."
+      }
+    ],
+    "docs": "Use the nearest BuildContext parameter inside nested callbacks. Only resolved Flutter contexts are checked, avoiding unrelated variables named context.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nvoid example(BuildContext outer) {\nfinal callback0 = (BuildContext inner) { use(outer); };\nfinal callback1 = (BuildContext inner) => use(outer);\nfinal callback2 = (BuildContext inner) { return Theme.of(outer); };\nvoid callback3(BuildContext inner) { use(outer); }\nfinal callback4 = (BuildContext inner) { final nested = (BuildContext closest) { use(inner); }; };\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nvoid example(BuildContext outer) {\nfinal callback0 = (BuildContext inner) { use(inner); };\nfinal callback1 = (BuildContext inner) => use(inner);\nfinal callback2 = (BuildContext inner) { return Theme.of(inner); };\nvoid callback3(BuildContext inner) { use(inner); }\nfinal callback4 = (int value) { use(outer); };\n}"
+    },
+    "group": "correctness",
+    "name": "use-closest-build-context",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Require public widget constructors to accept or initialize a Flutter `Key`.",
     "diagnostics": [
       {
@@ -8265,6 +8589,60 @@
       "label": "Pyramid Lint",
       "upstreamId": "use_once_constructors_once_provider",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require a mounted check before calling setState after an async gap.",
+    "diagnostics": [
+      {
+        "column": 46,
+        "file": null,
+        "line": 3,
+        "message": "Do not call setState across an async gap without checking mounted."
+      },
+      {
+        "column": 46,
+        "file": null,
+        "line": 4,
+        "message": "Do not call setState across an async gap without checking mounted."
+      },
+      {
+        "column": 61,
+        "file": null,
+        "line": 5,
+        "message": "Do not call setState across an async gap without checking mounted."
+      },
+      {
+        "column": 82,
+        "file": null,
+        "line": 6,
+        "message": "Do not call setState across an async gap without checking mounted."
+      },
+      {
+        "column": 64,
+        "file": null,
+        "line": 7,
+        "message": "Do not call setState across an async gap without checking mounted."
+      }
+    ],
+    "docs": "Require a mounted check before calling setState after an async gap. Reuses the BuildContext async-state analysis and its control-flow guards.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { int x=0;\nFuture<void> update0() async { await work(); setState(() { x++; }); }\nFuture<void> update1() async { await work(); this.setState(() { x++; }); }\nFuture<void> update2() async { if (mounted) { await work(); setState(() { x++; }); } }\nFuture<void> update3() async { await work(); if (!mounted) return; await work(); setState(() { x++; }); }\nFuture<void> update4() async { try { await work(); } finally { setState(() { x++; }); } }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> { int x=0;\nFuture<void> update0() async { await work(); if (!mounted) return; setState(() { x++; }); }\nFuture<void> update1() async { await work(); if (mounted) { this.setState(() { x++; }); } }\nvoid update2() { setState(() { x++; }); }\nFuture<void> update3() async { await work(); if (!this.mounted) return; setState(() { x++; }); }\nFuture<void> update4() async { await work(); if (!context.mounted) return; setState(() { x++; }); }\n}"
+    },
+    "group": "correctness",
+    "name": "use-setstate-synchronously",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

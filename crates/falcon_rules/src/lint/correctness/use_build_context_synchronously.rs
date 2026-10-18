@@ -12,6 +12,8 @@ use falcon_syntax::cst::visit::{
 };
 use falcon_syntax::cst::*;
 
+use crate::lint::declarations::in_test_directory as is_test_file;
+
 #[path = "use_build_context_semantics.rs"]
 mod semantics;
 
@@ -34,11 +36,30 @@ impl Rule for UseBuildContextSynchronously {
     }
 }
 
+pub(super) fn prepare_setstate<'a>(
+    program: Program<'a>,
+    ctx: &'a AnalyzeContext<'a>,
+) -> RulePreparation<'a> {
+    semantics::prepare_setstate(program, ctx).map_or_else(
+        || RulePreparation::Diagnostics(Vec::new()),
+        |collector| RulePreparation::Semantic(Box::new(collector)),
+    )
+}
+
 fn analyze_semantics(
     program: Program<'_>,
     ctx: &AnalyzeContext,
-    mut semantics: semantics::Semantics,
+    semantics: semantics::Semantics,
 ) -> Vec<Diagnostic> {
+    let rule = semantics.rule;
+    let message = semantics.message;
+    async_gap_spans(program, semantics)
+        .into_iter()
+        .map(|span| ctx.diagnostic(rule, message, span))
+        .collect()
+}
+
+fn async_gap_spans(program: Program<'_>, mut semantics: semantics::Semantics) -> Vec<Span> {
     if semantics.uses.is_empty() {
         return Vec::new();
     }
@@ -85,14 +106,10 @@ fn analyze_semantics(
             }
         }
         if report {
-            diagnostics.push(ctx.diagnostic(
-                "use-build-context-synchronously",
-                "Do not use a BuildContext across an async gap without a matching mounted check.",
-                node.span,
-            ));
+            diagnostics.push(node.span);
         }
     }
-    diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
+    diagnostics.sort_by_key(|span| span.start);
     diagnostics
 }
 
@@ -922,10 +939,6 @@ impl AsyncStateVisitor<'_> {
         }
         (fallthrough && all_mounted).then_some(AsyncState::Mounted)
     }
-}
-
-fn is_test_file(path: &std::path::Path) -> bool {
-    crate::lint::declarations::in_test_directory(path)
 }
 
 #[cfg(test)]

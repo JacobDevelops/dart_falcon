@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 45 | 132 | 24 | 201 |
+| DCM-inspired | 39 | 132 | 24 | 195 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 7 | 7 | 3 | 17 |
-| **Total** | **56** | **143** | **31** | **230** |
+| Additional rules | 6 | 7 | 3 | 16 |
+| **Total** | **49** | **143** | **31** | **223** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (201)
+## Planned DCM-inspired rules (195)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -197,13 +197,6 @@ not re-added.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `use-setstate-synchronously` | correctness | FT | paid | `setState` after await without mounted check. | must-have |
-| `require-super-dispose` | correctness | FT | n/a | Require super.dispose() in overrides; distinct from the shipped ordering check. | must-have |
-| `avoid-empty-setstate` | correctness | S | paid | `setState(() {})` with an empty body. | must-have |
-| `avoid-unnecessary-setstate` | correctness | FT | paid | setState in build/init where needless. | must-have |
-| `use-closest-build-context` | correctness | FT | paid | Wrong BuildContext across an async gap. | must-have |
-| `avoid-late-context` | correctness | FT | paid | Storing BuildContext in a late field. | must-have |
-| `avoid-inherited-widget-in-initstate` | correctness | FT | paid | `.of(context)` in initState. | must-have |
 | `avoid-undisposed-instances` | correctness | FT | paid | Controllers/notifiers never disposed. | must-have |
 | `dispose-focus-node-and-timer` | correctness | FT | n/a | Extend disposal checks to FocusNode and Timer fields, proving FocusNode.dispose() or Timer.cancel() actually runs. | must-have |
 | `avoid-hardcoded-credentials` | security | S | n/a | Warn when credential-like names are assigned literal values; heuristic, not a full secrets scanner. | nice-to-have |

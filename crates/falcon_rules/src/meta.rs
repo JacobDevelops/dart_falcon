@@ -1231,6 +1231,27 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::PyramidLint("proper_super_init_state"),
     ),
+    RuleMeta::resolved::<lint::correctness::use_setstate_synchronously::UseSetstateSynchronously>(
+        "use-setstate-synchronously", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::require_super_dispose::RequireSuperDispose>(
+        "require-super-dispose", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_empty_setstate::AvoidEmptySetstate>(
+        "avoid-empty-setstate", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unnecessary_setstate::AvoidUnnecessarySetstate>(
+        "avoid-unnecessary-setstate", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::use_closest_build_context::UseClosestBuildContext>(
+        "use-closest-build-context", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_late_context::AvoidLateContext>(
+        "avoid-late-context", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_inherited_widget_in_initstate::AvoidInheritedWidgetInInitstate>(
+        "avoid-inherited-widget-in-initstate", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
     RuleMeta::resolved::<lint::suspicious::no_self_comparisons::NoSelfComparisons>(
         "no-self-comparisons",
         RuleGroup::Suspicious,

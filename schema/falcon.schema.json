@@ -256,7 +256,16 @@
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-empty-setstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-inherited-widget-in-initstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
@@ -278,6 +287,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unmodified-loop-condition": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-casts": {
@@ -376,6 +388,9 @@
                 "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "require-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "test-types-in-equals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -400,10 +415,16 @@
                 "use-build-context-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "use-closest-build-context": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-key-in-widget-constructors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-once-constructors-once-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-setstate-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "valid-regexps": {
@@ -1475,7 +1496,16 @@
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-empty-setstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-inherited-widget-in-initstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
@@ -1497,6 +1527,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unmodified-loop-condition": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-casts": {
@@ -1595,6 +1628,9 @@
                 "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "require-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "test-types-in-equals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1619,10 +1655,16 @@
                 "use-build-context-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "use-closest-build-context": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-key-in-widget-constructors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-once-constructors-once-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-setstate-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "valid-regexps": {
