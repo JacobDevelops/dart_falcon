@@ -35,55 +35,26 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 0 | 118 | 24 | 142 |
+| DCM-inspired | 0 | 0 | 24 | 24 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 0 | 4 | 3 | 7 |
-| **Total** | **0** | **126** | **31** | **157** |
+| Additional rules | 0 | 0 | 3 | 3 |
+| **Total** | **0** | **4** | **31** | **35** |
 
-Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
-[Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
+Counts reflect remaining checklist rows. DCM nice-to-have rows shipped and were removed.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (142)
+## Remaining DCM-inspired rules (24)
 
-These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
+These post-1.0 candidates are from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
 Analysis legend: **S** syntax-only, **LT** needs-local-type-inference, **FT**
-needs-full-type-resolution, **X** needs-cross-file/project. Falcon group assignments
-for domain rules (flutter/test/bloc/riverpod/provider/flutter_hooks/equatable) are
-provisional and should be confirmed at implementation time.
+needs-full-type-resolution, **X** needs-cross-file/project.
 
 ### 2a. core: correctness
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-duplicate-cascades` | correctness | S | paid? | Same cascade section invoked twice. | nice-to-have |
-| `avoid-duplicate-exports` | correctness | S | paid | Duplicate export directives are redundant only when URI and combinators make the directive genuinely redundant. | nice-to-have |
-| `avoid-duplicate-named-imports` | correctness | S | paid | Duplicate named import. | nice-to-have |
-| `avoid-duplicate-mixins` | correctness | S | paid | Same mixin applied twice. | nice-to-have |
-| `avoid-duplicate-factories` | correctness | S | paid | Duplicate factory declaration. | nice-to-have |
-| `avoid-duplicate-initializers` | correctness | S | paid | Duplicate initializer entry. | nice-to-have |
-| `avoid-unsafe-reduce` | correctness | FT | paid | `reduce` on possibly-empty iterable throws. | nice-to-have |
-| `function-always-returns-null` | correctness | LT | paid | Function whose every return yields null. | nice-to-have |
-| `function-always-returns-same-value` | correctness | LT | paid | Function returns one constant on all paths. | nice-to-have |
-| `avoid-missing-enum-constant-in-map` | correctness | FT | paid | Map keyed by enum missing a constant. | nice-to-have |
-| `avoid-constant-conditions` | correctness | LT | paid | Condition statically known constant. | nice-to-have |
-| `avoid-constant-assert-conditions` | correctness | LT | paid | Assert condition statically known constant. | nice-to-have |
-| `avoid-constant-switches` | correctness | LT | paid | Switch on a statically constant value. | nice-to-have |
-| `avoid-self-compare` | correctness | S | paid | `x == x` (verify vs existing no-self-comparisons). | nice-to-have |
-| `avoid-unused-after-null-check` | correctness | LT | paid | Value discarded after a null check. | nice-to-have |
-| `avoid-unreachable-for-loop` | correctness | LT | paid | Loop body provably never runs. | nice-to-have |
-| `avoid-unconditional-break` | correctness | S | paid | `break` that always fires on first iteration. | nice-to-have |
-| `avoid-nested-futures` | correctness | FT | paid | `Future<Future<T>>` nesting mistake. | nice-to-have |
-| `avoid-nested-streams-and-futures` | correctness | FT | paid | Nested stream/future type mistake. | nice-to-have |
-| `avoid-missing-completer-stack-trace` | correctness | FT | paid | `Completer.completeError` without stack trace. | nice-to-have |
-| `prefer-random-secure` | security | FT | paid | `Random()` where `Random.secure()` intended. | nice-to-have |
-| `avoid-sensitive-query-params` | security | S | paid | Secrets/tokens in URL query params. | nice-to-have |
-| `avoid-assigning-to-static-field` | correctness | LT | paid | Mutating static state. | nice-to-have |
-| `match-getter-setter-field-names` | correctness | LT | paid | Getter/setter names disagree with backing field. | nice-to-have |
-| `prefer-correct-json-casts` | correctness | FT | paid | Unsafe casts decoding JSON maps. | nice-to-have |
-| `avoid-recursive-calls` | correctness | LT | paid | Unbounded self-recursion (falcon has recursive-getters only). | nice-to-have |
 | `avoid-not-encodable-in-to-json` | correctness | FT | paid | `toJson` returns a non-encodable value. | post-1.0 |
 | `require-atomic-async-updates` | correctness | FT | paid | Read-modify-write across an await race. | post-1.0 |
 | `pass-correct-accepted-type` | correctness | FT | paid | Argument type mismatch (DCM-style). | post-1.0 |
@@ -93,24 +64,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-banned-names` | suspicious | S | paid | Config-driven forbidden identifiers. | nice-to-have |
-| `avoid-banned-types` | suspicious | FT | paid | Config-driven forbidden types. | nice-to-have |
-| `avoid-banned-annotations` | suspicious | S | paid | Config-driven forbidden annotations. | nice-to-have |
-| `avoid-banned-exports` | suspicious | S | paid | Config-driven forbidden exports. | nice-to-have |
-| `banned-usage` | suspicious | FT | paid | Config-driven banned API usage. | nice-to-have |
-| `avoid-barrel-files` | suspicious | X | paid | Discourage barrel/index re-export files. | nice-to-have |
-| `avoid-double-slash-imports` | suspicious | S | paid | `//` in import path. | nice-to-have |
-| `avoid-incorrect-uri` | suspicious | S | paid | Malformed URI in import/annotation. | nice-to-have |
-| `avoid-accessing-other-classes-private-members` | suspicious | FT | paid | Reaching into another class's privates. | nice-to-have |
-| `avoid-referencing-subclasses` | suspicious | FT | paid | Base class referencing its subclasses. | nice-to-have |
-| `avoid-suspicious-super-overrides` | suspicious | FT | paid | Override that discards super behavior. | nice-to-have |
-| `no-magic-string` | suspicious | S | paid | String-literal analog of no-magic-number. | nice-to-have |
-| `avoid-non-final-exception-class-fields` | suspicious | LT | paid | Mutable fields on exception classes. | nice-to-have |
-| `avoid-mutating-parameters` | suspicious | LT | paid | Reassigning/mutating a parameter. | nice-to-have |
-| `avoid-nested-assignments` | suspicious | S | paid | Assignment buried in an expression. | nice-to-have |
-| `avoid-multi-assignment` | suspicious | S | paid | Chained multi-assignment. | nice-to-have |
-| `avoid-negated-conditions` | suspicious | S | paid | Prefer positive conditions for readability. | nice-to-have |
-| `avoid-inverted-boolean-checks` | suspicious | S | paid | Prefer non-inverted boolean checks. | nice-to-have |
 | `avoid-importing-entrypoint-exports` | suspicious | X | paid | Importing from an app entrypoint. | post-1.0 |
 | `avoid-similar-names` | suspicious | S | paid | Confusingly similar identifiers in scope. | post-1.0 |
 
@@ -118,29 +71,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `prefer-any-or-every` | style | FT | paid | Manual loop replaceable by any/every. | nice-to-have |
-| `prefer-getter-over-method` | style | LT | paid | Zero-arg method that should be a getter. | nice-to-have |
-| `prefer-named-parameters` | style | S | paid | Too many positional params → named. | nice-to-have |
-| `prefer-boolean-prefixes` | style | S | paid | Bool getters/fields lacking is/has/should prefix (verify vs boolean-prefixes). | nice-to-have |
-| `prefer-match-file-name` | style | X | paid | Sole class or enum in a file should match the filename; naming conventions are checked separately. | nice-to-have |
-| `prefer-type-over-var` | style | LT | paid | Explicit type instead of `var` where unclear. | nice-to-have |
-| `prefer-correct-error-name` | style | S | paid | Naming convention for error types. | nice-to-have |
-| `prefer-correct-handler-name` | style | S | paid | Naming convention for handlers. | nice-to-have |
-| `prefer-correct-callback-field-name` | style | S | paid | Naming convention for callback fields. | nice-to-have |
-| `prefer-commenting-analyzer-ignores` | style | S | paid | `// ignore:` must carry an explanation. | nice-to-have |
-| `newline-before-method` | style | S | paid | Blank line before method declarations. | nice-to-have |
-| `newline-before-case` | style | S | paid | Blank line before case clauses. | nice-to-have |
-| `newline-before-throw` | style | S | paid | Blank line before throw. | nice-to-have |
-| `newline-before-continue` | style | S | paid | Blank line before continue. | nice-to-have |
-| `newline-before-break` | style | S | paid | Blank line before break. | nice-to-have |
-| `newline-before-constructor` | style | S | paid | Blank line before constructor. | nice-to-have |
-| `enum-constants-ordering` | style | S | paid | Config-driven enum constant ordering. | nice-to-have |
-| `map-keys-ordering` | style | S | paid | Config-driven map key ordering. | nice-to-have |
-| `parameters-ordering` | style | S | paid | Config-driven parameter ordering. | nice-to-have |
-| `arguments-ordering` | style | S | paid | Config-driven argument ordering. | nice-to-have |
-| `initializers-ordering` | style | S | paid | Config-driven initializer ordering. | nice-to-have |
-| `pattern-fields-ordering` | style | S | paid | Config-driven pattern-field ordering. | nice-to-have |
-| `record-fields-ordering` | style | S | paid | Config-driven record-field ordering. | nice-to-have |
 | `prefer-single-declaration-per-file` | style | S | paid | One public type per file. | post-1.0 |
 | `prefer-single-widget-per-file` | style | S | paid | One widget per file. | post-1.0 |
 | `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. | post-1.0 |
@@ -150,15 +80,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-long-records` | complexity | S | paid | Record size limit (falcon has param-list). | nice-to-have |
-| `avoid-complex-arithmetic-expressions` | complexity | S | paid | Arithmetic expression complexity. | nice-to-have |
-| `avoid-if-with-many-branches` | complexity | S | paid | Long if/else-if chains → switch. | nice-to-have |
-| `avoid-nested-switches` | complexity | S | paid | Deeply nested switch statements. | nice-to-have |
-| `avoid-nested-switch-expressions` | complexity | S | paid | Deeply nested switch expressions. | nice-to-have |
-| `avoid-nested-try-statements` | complexity | S | paid | Deeply nested try statements. | nice-to-have |
-| `max-statements` | complexity | S | paid | Statement-count-per-function metric. | nice-to-have |
-| `cognitive-complexity` | complexity | S | n/a | Nesting-weighted complexity metric, distinct from cyclomatic complexity and maximum nesting level. | nice-to-have |
-| `widget-tree-depth` | complexity | FT | n/a | Widget-tree nesting depth from real widget structure, not parenthesis counting. | nice-to-have |
 | `avoid-local-functions` | complexity | S | paid | Overuse of local functions. | post-1.0 |
 | `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. | post-1.0 |
 
@@ -166,34 +87,9 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-unnecessary-collections` | performance | LT | paid | Collection built only to be iterated once. | nice-to-have |
-| `move-variable-closer-to-its-usage` | performance | LT | paid | Hoisted variable used in one branch. | nice-to-have |
-| `avoid-unnecessary-futures` | performance | FT | paid | `async`/Future wrapper that adds no value. | nice-to-have |
-| `prefer-return-await` | performance | FT | paid | `return await` needed for correct stack traces. | nice-to-have |
 | `prefer-bytes-builder` | performance | FT | paid | Building byte lists without BytesBuilder. | post-1.0 |
 
-### 2f. core: unnecessary/redundant cleanups (style)
-
-Not covered by falcon's existing `unnecessary-*` family; verify each against the
-shipped set before implementing. Several are near-twins that should be aliased,
-not re-added.
-
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-unnecessary-block` | style | S | paid | Redundant block statement. | nice-to-have |
-| `avoid-unnecessary-call` | style | FT | paid | Redundant `.call()`. | nice-to-have |
-| `avoid-unnecessary-continue` | style | S | paid | Redundant trailing continue. | nice-to-have |
-| `avoid-unnecessary-negations` | style | S | paid | Double/redundant negation. | nice-to-have |
-| `avoid-unnecessary-length-check` | style | LT | paid | Redundant `.length` check before access. | nice-to-have |
-| `avoid-unnecessary-local-variable` | style | LT | paid | Local variable used once immediately. | nice-to-have |
-| `avoid-unnecessary-super` | style | LT | paid | Redundant super call. | nice-to-have |
-| `avoid-unnecessary-overrides-in-state` | style | LT | paid | State override that only calls super. | nice-to-have |
-| `avoid-unnecessary-getter` | style | LT | paid | Getter that only returns a field. | nice-to-have |
-| `avoid-unnecessary-reassignment` | style | LT | paid | Variable reassigned to the same value. | nice-to-have |
-| `use-existing-variable` | style | LT | paid | Reuse an existing binding instead of recomputing. | nice-to-have |
-| `use-existing-destructuring` | style | LT | paid | Reuse an existing destructuring binding. | nice-to-have |
-
-### 2g. flutter domain
+### 2f. flutter domain
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -201,106 +97,48 @@ not re-added.
 | `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). | post-1.0 |
 | `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. | post-1.0 |
 
-### 2h. test domain (new)
+### 2g. test domain
 
 Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-empty-test-groups` | correctness | S | paid | `group()` with no tests. | nice-to-have |
-| `prefer-unique-test-names` | suspicious | S | paid | Duplicate test descriptions. | nice-to-have |
-| `prefer-correct-test-file-name` | style | X | paid | Test file naming convention. | nice-to-have |
-| `prefer-expect-later` | correctness | FT | paid | Async matcher needs `expectLater`. | nice-to-have |
-| `prefer-test-matchers` | style | FT | paid | Use dedicated matchers over manual expect. | nice-to-have |
-| `avoid-top-level-members-in-tests` | suspicious | S | paid | Top-level state leaking across tests. | nice-to-have |
 | `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. | post-1.0 |
 | `avoid-missing-test-files` | correctness | X | paid | Source file without a matching test. | post-1.0 |
 | `avoid-misused-test-matchers` | correctness | FT | paid | Matcher applied to the wrong type. | post-1.0 |
 | `format-test-name` | style | S | paid | Test description formatting. | post-1.0 |
 | `prefer-test-structure` | style | S | paid | Arrange/act/assert structure. | post-1.0 |
 
-### 2i. bloc domain (new)
+### 2h. bloc domain
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `handle-bloc-event-subclasses` | correctness | FT | paid | `on<Event>` missing subclass handling. | nice-to-have |
-| `avoid-passing-bloc-to-bloc` | suspicious | FT | paid | Bloc dependency anti-pattern. | nice-to-have |
-| `avoid-passing-build-context-to-blocs` | suspicious | FT | paid | BuildContext leaking into a bloc. | nice-to-have |
-| `avoid-bloc-public-fields` | style | LT | paid | Bloc encapsulation (fields). | nice-to-have |
-| `avoid-bloc-public-methods` | style | LT | paid | Bloc encapsulation (methods). | nice-to-have |
-| `avoid-passing-bloc-to-widget` | suspicious | FT | n/a | Avoid passing a Bloc directly to a widget. | nice-to-have |
-| `prefer-bloc-extensions` | style | LT | n/a | Prefer Bloc extensions for supported APIs. | nice-to-have |
-| `prefer-bloc-event-suffix` | style | S | paid | Event naming convention. | nice-to-have |
-| `prefer-bloc-state-suffix` | style | S | paid | State naming convention. | nice-to-have |
-| `prefer-multi-bloc-provider` | style | LT | paid | Nested providers → MultiBlocProvider. | nice-to-have |
 | `avoid-empty-build-when` | correctness | S | paid | Empty `buildWhen` callback. | post-1.0 |
 | `avoid-cubits` | style | LT | paid | Opinionated: prefer Bloc over Cubit. | post-1.0 |
 | `avoid-returning-value-from-cubit-methods` | style | LT | paid | Cubit methods should be void. | post-1.0 |
 
-### 2j. riverpod domain (new)
+### 2i. riverpod domain
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
 | `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
-| `avoid-ref-inside-state-dispose` | correctness | FT | paid | ref used in dispose. | nice-to-have |
-| `avoid-public-notifier-properties` | style | LT | paid | Notifier exposing mutable state. | nice-to-have |
-| `prefer-immutable-provider-arguments` | correctness | FT | paid | Provider family args must be immutable. | nice-to-have |
-| `prefer-riverpod-notifier-suffix` | style | S | paid | Notifier naming convention. | nice-to-have |
-| `prefer-riverpod-provider-suffix` | style | S | paid | Provider naming convention. | nice-to-have |
-| `prefer-correct-notifier-file-name` | style | X | paid | Notifier file naming convention. | nice-to-have |
-| `prefer-correct-provider-file-name` | style | X | paid | Provider file naming convention. | nice-to-have |
 | `avoid-notifier-constructors` | style | LT | paid | Notifiers shouldn't declare constructors. | post-1.0 |
 | `prefer-single-notifier-per-file` | style | S | paid | One notifier per file. | post-1.0 |
 
-### 2k. provider domain (new)
-
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-instantiating-in-value-provider` | correctness | FT | paid | `.value` provider creating a new instance. | nice-to-have |
-| `prefer-multi-provider` | style | LT | paid | Nested providers → MultiProvider. | nice-to-have |
-| `prefer-provider-extensions` | style | LT | paid | Use context extensions over `Provider.of`. | nice-to-have |
-
-### 2l. flutter_hooks domain (new)
-
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `prefer-use-callback` | performance | FT | paid | Wrap callbacks in `useCallback`. | nice-to-have |
-| `prefer-use-memo` | performance | FT | paid | Wrap values in `useMemo`. | nice-to-have |
-
-### 2m. equatable domain (new)
-
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `extend-equatable` | style | LT | paid | Value class should extend Equatable; a library preference, not a correctness improvement. | nice-to-have |
-| `prefer-equatable-mixin` | style | LT | paid | Use EquatableMixin where appropriate. | nice-to-have |
-
 ### Deduplication notes
 
-These DCM rows are covered elsewhere and are **not** counted in the DCM totals:
+These eight DCM names are covered by shipped rules and are not counted in the DCM totals:
 
-| DCM rule | listed instead as | reason |
-|---|---|---|
-| `avoid-collection-methods-with-unrelated-types` | official `collection_methods_unrelated_type` | same check; prefer official naming |
-| `prefer-contains` | official `prefer_contains` | same check; prefer official naming |
-| `avoid-self-assignment` | official `no_self_assignments` | same check; prefer official naming |
-| `avoid-unnecessary-parentheses` | official `unnecessary_parenthesis` | same check; prefer official naming |
-| `avoid-unnecessary-statements` | official `unnecessary_statements` | same check; prefer official naming |
-| `avoid-banned-imports` | cross-file `banned-imports` | same architecture-boundary check; lives in the cross-file pass |
-
-Related-but-distinct pairs kept separately (noted for implementers):
-`avoid-collection-equality-checks` (collections) vs official
-`unrelated_type_equality_checks` (unrelated types); DCM's granular BuildContext
-checks (`use-setstate-synchronously`, `use-closest-build-context`) vs official
-`use_build_context_synchronously`; `avoid-duplicate-switch-case-conditions` vs
-falcon's shipped `no-duplicate-case-values`; `avoid-self-compare` vs falcon's
-shipped `no-self-comparisons`.
-Deduplicated or partially covered requirements: `avoid-bloc-public-methods` and `prefer-multi-bloc-provider` are existing rows; `prefer-ref-read-for-methods` is covered by neither existing provider nor riverpod rows and is listed separately. setState after an async gap is `use-setstate-synchronously` and setState in lifecycle methods is `avoid-unnecessary-setstate`, so neither gets its own row; the Equatable preference is `extend-equatable`. Image labels are covered by `avoid-missing-image-alt`; disposal work is limited to `super.dispose()`, FocusNode.dispose(), and Timer.cancel() coverage absent from existing disposal checks. The cascade-precedence, cognitive-complexity, widget-tree-depth, and filename-correspondence checks are distinct from shipped style or complexity checks; duplicate exports must account for combinators.
-
-The survey excludes rules already ported by falcon and niche-package rules for flame, patrol, mocktail, get_it, and fake_async.
-
-Additional planned rows cover uncovered disposal cases, accessibility labels and touch targets, provider cleanup, mutable Equatable subclasses, cognitive complexity, widget-tree depth, redundant exports, and optional conventions.
-
----
+| DCM rule | listed instead as |
+|---|---|
+| `avoid-collection-methods-with-unrelated-types` | `collection_methods_unrelated_type` |
+| `prefer-contains` | `prefer_contains` |
+| `avoid-self-assignment` | `no_self_assignments` |
+| `avoid-unnecessary-parentheses` | `unnecessary_parenthesis` |
+| `avoid-unnecessary-statements` | `unnecessary_statements` |
+| `avoid-banned-imports` | `banned-imports` |
+| `avoid-self-compare` | `no-self-comparisons` |
+| `prefer-boolean-prefixes` | `boolean-prefixes` |
 
 ## Planned cross-file rules (8)
 
