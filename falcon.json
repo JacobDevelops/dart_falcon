@@ -112,7 +112,20 @@
         "avoid-missing-interpolation": "warn",
         "avoid-contradictory-expressions": "warn",
         "avoid-unmodified-loop-condition": "warn",
-        "avoid-uncaught-future-errors": "warn"
+        "avoid-uncaught-future-errors": "warn",
+        "use-setstate-synchronously": "warn",
+        "require-super-dispose": "warn",
+        "avoid-empty-setstate": "warn",
+        "avoid-unnecessary-setstate": "warn",
+        "use-closest-build-context": "warn",
+        "avoid-late-context": "warn",
+        "avoid-inherited-widget-in-initstate": "warn",
+        "avoid-undisposed-instances": "warn",
+        "dispose-focus-node-and-timer": "warn",
+        "dispose-fields": "warn",
+        "always-remove-listener": "warn",
+        "avoid-recursive-widget-calls": "warn",
+        "avoid-unnecessary-stateful-widgets": "warn"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",
@@ -127,7 +140,8 @@
         "use-is-even-rather-than-modulo": "off",
         "use-string-buffers": "off",
         "avoid-slow-collection-methods": "warn",
-        "move-variable-outside-iteration": "warn"
+        "move-variable-outside-iteration": "warn",
+        "avoid-shrink-wrap-in-lists": "warn"
       },
       "style": {
         "sort-child-properties-last": "warn",
@@ -301,7 +315,14 @@
         "prefer-named-boolean-parameters": "warn",
         "avoid-unnecessary-if": "warn",
         "avoid-unnecessary-return": "warn",
-        "avoid-redundant-else": "warn"
+        "avoid-redundant-else": "warn",
+        "prefer-align-over-container": "warn",
+        "prefer-center-over-align": "warn",
+        "prefer-padding-over-container": "warn",
+        "prefer-constrained-box-over-container": "warn",
+        "prefer-transform-over-container": "warn",
+        "prefer-container": "warn",
+        "prefer-for-loop-in-children": "warn"
       },
       "suspicious": {
         "avoid-print": "warn",
@@ -337,6 +358,9 @@
       },
       "security": {
         "avoid-weak-cryptographic-algorithms": "warn"
+      },
+      "a11y": {
+        "prefer-action-button-tooltip": "warn"
       }
     }
   },

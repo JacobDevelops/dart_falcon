@@ -1231,6 +1231,27 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::PyramidLint("proper_super_init_state"),
     ),
+    RuleMeta::resolved::<lint::correctness::use_setstate_synchronously::UseSetstateSynchronously>(
+        "use-setstate-synchronously", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::require_super_dispose::RequireSuperDispose>(
+        "require-super-dispose", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_empty_setstate::AvoidEmptySetstate>(
+        "avoid-empty-setstate", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unnecessary_setstate::AvoidUnnecessarySetstate>(
+        "avoid-unnecessary-setstate", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::use_closest_build_context::UseClosestBuildContext>(
+        "use-closest-build-context", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_late_context::AvoidLateContext>(
+        "avoid-late-context", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_inherited_widget_in_initstate::AvoidInheritedWidgetInInitstate>(
+        "avoid-inherited-widget-in-initstate", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
     RuleMeta::resolved::<lint::suspicious::no_self_comparisons::NoSelfComparisons>(
         "no-self-comparisons",
         RuleGroup::Suspicious,
@@ -1357,6 +1378,24 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::DartCodeLinter("avoid-unrelated-type-assertions"),
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_undisposed_instances::AvoidUndisposedInstances>(
+        "avoid-undisposed-instances", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::dispose_focus_node_and_timer::DisposeFocusNodeAndTimer>(
+        "dispose-focus-node-and-timer", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::dispose_fields::DisposeFields>(
+        "dispose-fields", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::always_remove_listener::AlwaysRemoveListener>(
+        "always-remove-listener", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_recursive_widget_calls::AvoidRecursiveWidgetCalls>(
+        "avoid-recursive-widget-calls", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unnecessary_stateful_widgets::AvoidUnnecessaryStatefulWidgets>(
+        "avoid-unnecessary-stateful-widgets", RuleGroup::Correctness, FLUTTER, true, RuleSource::Falcon,
+    ),
     RuleMeta::file::<lint::suspicious::no_empty_block::NoEmptyBlock>(
         "no-empty-block",
         RuleGroup::Suspicious,
@@ -1482,6 +1521,69 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         NONE,
         true,
         RuleSource::Lints("prefer_interpolation_to_compose_strings"),
+    ),
+    RuleMeta::resolved::<lint::performance::avoid_shrink_wrap_in_lists::AvoidShrinkWrapInLists>(
+        "avoid-shrink-wrap-in-lists",
+        RuleGroup::Performance,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_align_over_container::PreferAlignOverContainer>(
+        "prefer-align-over-container",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_center_over_align::PreferCenterOverAlign>(
+        "prefer-center-over-align",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_padding_over_container::PreferPaddingOverContainer>(
+        "prefer-padding-over-container",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_constrained_box_over_container::PreferConstrainedBoxOverContainer>(
+        "prefer-constrained-box-over-container",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_transform_over_container::PreferTransformOverContainer>(
+        "prefer-transform-over-container",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_container::PreferContainer>(
+        "prefer-container",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_for_loop_in_children::PreferForLoopInChildren>(
+        "prefer-for-loop-in-children",
+        RuleGroup::Style,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::a11y::prefer_action_button_tooltip::PreferActionButtonTooltip>(
+        "prefer-action-button-tooltip",
+        RuleGroup::A11y,
+        FLUTTER,
+        false,
+        RuleSource::Falcon,
     ),
     RuleMeta::resolved::<lint::correctness::type_literal_in_constant_pattern::TypeLiteralInConstantPattern>(
         "type-literal-in-constant-pattern",

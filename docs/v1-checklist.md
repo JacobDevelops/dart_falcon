@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 45 | 132 | 24 | 201 |
+| DCM-inspired | 25 | 132 | 24 | 181 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 7 | 7 | 3 | 17 |
-| **Total** | **56** | **143** | **31** | **230** |
+| Additional rules | 5 | 7 | 3 | 15 |
+| **Total** | **34** | **143** | **31** | **208** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (201)
+## Planned DCM-inspired rules (181)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -197,31 +197,9 @@ not re-added.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `use-setstate-synchronously` | correctness | FT | paid | `setState` after await without mounted check. | must-have |
-| `require-super-dispose` | correctness | FT | n/a | Require super.dispose() in overrides; distinct from the shipped ordering check. | must-have |
-| `avoid-empty-setstate` | correctness | S | paid | `setState(() {})` with an empty body. | must-have |
-| `avoid-unnecessary-setstate` | correctness | FT | paid | setState in build/init where needless. | must-have |
-| `use-closest-build-context` | correctness | FT | paid | Wrong BuildContext across an async gap. | must-have |
-| `avoid-late-context` | correctness | FT | paid | Storing BuildContext in a late field. | must-have |
-| `avoid-inherited-widget-in-initstate` | correctness | FT | paid | `.of(context)` in initState. | must-have |
-| `avoid-undisposed-instances` | correctness | FT | paid | Controllers/notifiers never disposed. | must-have |
-| `dispose-focus-node-and-timer` | correctness | FT | n/a | Extend disposal checks to FocusNode and Timer fields, proving FocusNode.dispose() or Timer.cancel() actually runs. | must-have |
 | `avoid-hardcoded-credentials` | security | S | n/a | Warn when credential-like names are assigned literal values; heuristic, not a full secrets scanner. | nice-to-have |
 | `accessible-widget-labels` | a11y | LT | n/a | Warn on interactive widgets missing labels; heuristic, not compliance validation. Image labels are covered by `avoid-missing-image-alt`. | nice-to-have |
 | `minimum-touch-target` | a11y | LT | n/a | Warn on explicitly undersized interactive touch targets; heuristic, not compliance validation. | nice-to-have |
-| `dispose-fields` | correctness | FT | paid | Disposable fields not disposed in `dispose()`. | must-have |
-| `always-remove-listener` | correctness | FT | paid | `addListener` without `removeListener`. | must-have |
-| `avoid-recursive-widget-calls` | correctness | LT | paid | Widget builds itself → stack overflow. | must-have |
-| `avoid-shrink-wrap-in-lists` | performance | LT | paid | `shrinkWrap: true` perf trap in scrollables. | must-have |
-| `prefer-align-over-container` | style | LT | paid | Container used only for alignment → Align. | must-have |
-| `prefer-center-over-align` | style | LT | paid | Align used for centering → Center. | must-have |
-| `prefer-padding-over-container` | style | LT | paid | Container used only for padding → Padding. | must-have |
-| `prefer-constrained-box-over-container` | style | LT | paid | Container used only for constraints → ConstrainedBox. | must-have |
-| `prefer-transform-over-container` | style | LT | paid | Container used only for transform → Transform. | must-have |
-| `prefer-container` | style | LT | paid | Collapse stacked layout widgets into one Container. | must-have |
-| `prefer-for-loop-in-children` | style | S | paid | `.map().toList()` in children → collection-for. | must-have |
-| `prefer-action-button-tooltip` | a11y | LT | paid | IconButton/action lacking a tooltip (a11y). | must-have |
-| `avoid-unnecessary-stateful-widgets` | correctness | FT | paid | StatefulWidget with no state → Stateless. | must-have |
 | `avoid-mounted-in-setstate` | correctness | FT | paid | `mounted` check misuse around setState. | nice-to-have |
 | `prefer-single-setstate` | performance | FT | paid | Multiple setState calls collapsible. | nice-to-have |
 | `avoid-disposing-late-fields` | correctness | LT | paid | Disposing a late field that may be unset. | nice-to-have |

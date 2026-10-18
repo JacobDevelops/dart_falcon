@@ -9827,12 +9827,36 @@ pub fn resolve_call_constructor<'a>(
     model: &SemanticModel<'_>,
     allow_generic_instantiation: bool,
 ) -> Option<(DeclarationIdentity, &'a str)> {
-    let mut segments = expression_segments(callee, allow_generic_instantiation)?;
-    if let Some(identity) = model.resolve_dotted(&segments) {
+    // A type has at most a prefix and name, followed by an optional constructor.
+    let mut segments = [""; 3];
+    let mut count = 0;
+    let mut current = callee;
+    loop {
+        match current.unparenthesized() {
+            Expr::Ident(identifier) => {
+                *segments.get_mut(count)? = identifier.name();
+                count += 1;
+                break;
+            }
+            Expr::Field(field) => {
+                *segments.get_mut(count)? = field.field().name();
+                count += 1;
+                current = field.object();
+            }
+            Expr::GenericInstantiation(instantiation) if allow_generic_instantiation => {
+                current = instantiation.target();
+            }
+            _ => return None,
+        }
+    }
+    segments[..count].reverse();
+    if let Some(identity) = model.resolve_dotted(&segments[..count]) {
         return Some((identity, "new"));
     }
-    let constructor = segments.pop()?;
-    Some((model.resolve_dotted(&segments)?, constructor))
+    Some((
+        model.resolve_dotted(&segments[..count - 1])?,
+        segments[count - 1],
+    ))
 }
 
 /// Resolve an explicit `new`/`const` constructor without assuming a dotted
@@ -17411,6 +17435,49 @@ final integer = integers.first;
                 );
             },
         );
+    }
+
+    #[test]
+    fn call_constructor_resolution_bounds_qualified_names_without_losing_wrappers() {
+        for (expression, allow_generics, expected) in [
+            ("Local()", false, Some(("Local", "new"))),
+            ("Local.named()", false, Some(("Local", "named"))),
+            ("core.List()", false, Some(("List", "new"))),
+            ("core.List.filled(0, 0)", false, Some(("List", "filled"))),
+            ("(core.List).filled(0, 0)", false, Some(("List", "filled"))),
+            ("core.List.filled.extra()", false, None),
+            ("unknown()", false, None),
+            ("Local<int>", false, None),
+            ("Local<int>", true, Some(("Local", "new"))),
+        ] {
+            let source = format!(
+                "import 'dart:core' as core; class Local<T> {{}} final value = {expression};"
+            );
+            with_model(&source, |program, model| {
+                let TopLevelDecl::Variable(variable) = program.declarations().last().unwrap()
+                else {
+                    panic!("expected variable");
+                };
+                let expression = variable
+                    .declarators()
+                    .next()
+                    .unwrap()
+                    .initializer()
+                    .unwrap();
+                let callee = match expression.unparenthesized() {
+                    Expr::Call(call) => call.callee(),
+                    expression => expression,
+                };
+                let resolved = resolve_call_constructor(callee, model, allow_generics);
+                assert_eq!(
+                    resolved
+                        .as_ref()
+                        .map(|(identity, name)| (identity.name(), *name)),
+                    expected,
+                    "{source}"
+                );
+            });
+        }
     }
 
     #[test]
