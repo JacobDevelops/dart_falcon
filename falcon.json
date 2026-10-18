@@ -106,9 +106,13 @@
         "avoid-duplicate-map-keys": "warn",
         "avoid-duplicate-collection-elements": "warn",
         "avoid-duplicate-switch-case-conditions": "warn",
+        "avoid-collection-equality-checks": "warn",
+        "avoid-unrelated-type-casts": "warn",
+        "avoid-unsafe-collection-methods": "warn",
         "avoid-missing-interpolation": "warn",
         "avoid-contradictory-expressions": "warn",
-        "avoid-unmodified-loop-condition": "warn"
+        "avoid-unmodified-loop-condition": "warn",
+        "avoid-uncaught-future-errors": "warn"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",
@@ -330,6 +334,9 @@
         "avoid-assignments-as-conditions": "warn",
         "avoid-bitwise-operators-with-booleans": "warn",
         "cascade-after-null-coalescing": "warn"
+      },
+      "security": {
+        "avoid-weak-cryptographic-algorithms": "warn"
       }
     }
   },

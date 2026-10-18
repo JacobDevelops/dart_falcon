@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 50 | 132 | 24 | 206 |
+| DCM-inspired | 45 | 132 | 24 | 201 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
 | Additional rules | 7 | 7 | 3 | 17 |
-| **Total** | **61** | **143** | **31** | **235** |
+| **Total** | **56** | **143** | **31** | **230** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (206)
+## Planned DCM-inspired rules (201)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -58,11 +58,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-collection-equality-checks` | correctness | FT | paid | `==` between collections never compares contents. | must-have |
-| `avoid-unrelated-type-casts` | correctness | FT | paid | Cast between unrelated types always fails. | must-have |
-| `avoid-unsafe-collection-methods` | correctness | FT | paid | `.first`/`.single`/`[i]` that can throw at runtime. | must-have |
-| `avoid-uncaught-future-errors` | correctness | FT | paid | Future error path with no catch. | must-have |
-| `avoid-weak-cryptographic-algorithms` | security | FT | paid | MD5/SHA1/weak cipher usage. | must-have |
 | `avoid-duplicate-cascades` | correctness | S | paid? | Same cascade section invoked twice. | nice-to-have |
 | `avoid-duplicate-exports` | correctness | S | paid | Duplicate export directives are redundant only when URI and combinators make the directive genuinely redundant. | nice-to-have |
 | `avoid-duplicate-named-imports` | correctness | S | paid | Duplicate named import. | nice-to-have |

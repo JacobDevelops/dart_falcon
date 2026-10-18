@@ -6,10 +6,10 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 315);
+    assert_eq!(RULE_METADATA.len(), 320);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
-        170
+        174
     );
 }
 
@@ -87,13 +87,6 @@ fn schema_exposes_all_groups_in_both_sections_including_empty_groups() {
                 .is_empty()
         );
     }
-    assert!(
-        schema["properties"]["linter"]["properties"]["rules"]["properties"]["security"]
-            ["properties"]
-            .as_object()
-            .unwrap()
-            .is_empty()
-    );
 
     let _: falcon_config::FalconConfig = serde_json::from_value(serde_json::json!({
         "linter": { "rules": { "a11y": {}, "security": {} } },

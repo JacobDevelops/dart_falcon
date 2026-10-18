@@ -72,6 +72,7 @@ abstract final class Function {}
 abstract class String {
   String operator [](int index);
   String operator *(int times);
+  List<String> split(Pattern pattern);
 }
 abstract class Iterable<E> {
   bool contains(Object? element);

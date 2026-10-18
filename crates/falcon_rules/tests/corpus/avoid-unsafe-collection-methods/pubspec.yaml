@@ -1,0 +1,6 @@
+name: unsafe_collection_fixture
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    path: packages/flutter

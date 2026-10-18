@@ -18,6 +18,7 @@ pub(crate) mod options;
 pub(crate) mod package_layout;
 pub mod performance;
 pub(crate) mod resource_leaks;
+pub mod security;
 #[cfg(test)]
 mod semantic_scope_tests;
 pub(crate) mod semantic_type_operations;

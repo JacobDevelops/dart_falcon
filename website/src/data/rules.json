@@ -2848,6 +2848,64 @@
   },
   {
     "crossFile": false,
+    "description": "Flags equality comparisons between non-constant SDK collections.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 2,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 3,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 4,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 5,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 6,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 7,
+        "message": "Collection equality compares identity — use a content equality helper instead"
+      }
+    ],
+    "docs": "Flags equality comparisons between non-constant SDK collections.\n\nList, Set, and Map equality compares identity rather than contents. Use a\ncollection equality helper instead. Comparisons between two constants are\nexempt, as are unrelated types (covered by unrelated-type-equality-checks),\nnull comparisons, and custom collection classes that may override equality.",
+    "domains": [],
+    "examples": {
+      "bad": "void compare(List<int> a, List<int> b, Set<int> c, Set<int> d, Map<String, int> e, Map<String, int> f) {\n  print(a == b);\n  print(a != b);\n  print(c == d);\n  print(e != f);\n  print(a == const [1]);\n  print(<int>[1] == <int>[2]);\n}",
+      "crossFile": null,
+      "good": "void compare(List<int> values, dynamic unknown) {\n  const a = [1];\n  const b = [1];\n  print(a == b);\n  print(const <int>{1} == const <int>{1});\n  print(const <String, int>{'x': 1} == const <String, int>{'x': 1});\n  print(values == null);\n  print(values == unknown);\n  print(values == 1);\n  print(1 == 2);\n  print(identical(values, values));\n}\n\nclass ValueList implements List<int> {\n  @override\n  bool operator ==(Object other) => other is ValueList;\n  @override\n  int get hashCode => 0;\n  @override\n  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);\n}\nvoid custom(ValueList first, ValueList second) { print(first == second); }\nvoid unrelated(List<int> integers, List<String> strings, Set<int> unique) {\n  print(integers == strings);\n  print(integers == unique);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-collection-equality-checks",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags pairs of conditions that are always false with `&&` or true with `||`.",
     "diagnostics": [
       {
@@ -3746,6 +3804,88 @@
   },
   {
     "crossFile": false,
+    "description": "Flags local futures first awaited after another await inside a try/catch.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 10,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 18,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 26,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 34,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 42,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 53,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 54,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 63,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 71,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 82,
+        "message": "This future is awaited after an async gap; await it immediately or attach an error handler first."
+      }
+    ],
+    "docs": "Flags local futures first awaited after another await inside a try/catch.\n\nA future can complete with an unhandled error while execution is suspended,\nbefore the later await attaches the surrounding catch's error handler. Await\nit immediately or attach an error handler before the first async gap.\n\nThis conservative analysis follows straight-line statements directly in a\ntry body with at least one catch. It tracks resolved Future-returning calls\nand constructors assigned to locals, and reports the later awaited local,\nnot discarded futures. Unknown base types and FutureOr are excluded. Early\ncatchError, onError, and then(onError:) calls are exempt, including handlers\nattached in a separate statement or initializer. Parentheses are transparent.\nBranches, loops, nested blocks, local declarations of functions, and other\nexpression statements end tracking: no control-flow or alias assumptions are\nmade across them. Late and multi-variable declarations are excluded. Nested\nfunctions and shadowed locals cannot consume an outer candidate. Only root\nawait expressions in expression, return, and local-variable statements count\nas gaps; awaits nested in other expressions are outside the matching limits.\nA reference inside a composite await operand conservatively consumes that\ncandidate, covering combinators and forwarding methods without alias guesses.\nA handler protects only the call it terminates, not subsequent chained calls.\nWhen intermediate types are unavailable, only SDK Future method chains\n(then/catchError/onError/timeout/whenComplete) on a proven Future base qualify.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\n\nFuture<int> start() async => 1;\nFuture<void> gap() async {}\n\nFuture<void> inferredLocal() async {\n  try {\n    final pending = start();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> explicitLocal() async {\n  try {\n    Future<int> pending = start();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> parenthesized() async {\n  try {\n    final pending = (start());\n    await (gap());\n    await (pending);\n  } catch (_) {}\n}\n\nFuture<void> initializerGap() async {\n  try {\n    final pending = start();\n    final result = await start();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<int> returnAwait() async {\n  try {\n    final pending = start();\n    await gap();\n    return await pending;\n  } catch (_) {\n    return 0;\n  }\n}\n\nFuture<void> multiplePending() async {\n  try {\n    final first = start();\n    final second = start();\n    await gap();\n    await first;\n    await second;\n  } catch (_) {}\n}\n\nFuture<void> lateHandler() async {\n  try {\n    final pending = start();\n    await gap();\n    pending.catchError((Object error) => 0);\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> laterChainCanFail() async {\n  try {\n    final pending = start().catchError((Object error) => 0).timeout(const Duration(seconds: 1));\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<int> withRetry(Future<int> pending) => pending;\n\nFuture<void> uncalledClosureCannotConsume() async {\n  try {\n    final pending = start();\n    final retry = () async => await withRetry(pending);\n    await gap();\n    await pending;\n  } catch (_) {}\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nFuture<int> start() async => 1;\nFuture<void> gap() async {}\n\nFuture<void> immediatelyAwaited() async {\n  try {\n    final pending = start();\n    await pending;\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> initializerHandler() async {\n  try {\n    final pending = start().catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> typedHandler() async {\n  try {\n    final pending = start().onError<Exception>((error, stack) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> thenHandler() async {\n  try {\n    final pending = start().then((value) => value, onError: (Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> separateHandler() async {\n  try {\n    final pending = start();\n    pending.catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> handlerInitializer() async {\n  try {\n    final pending = start();\n    final handled = pending.catchError((Object error) => 0);\n    await gap();\n    await pending;\n    await handled;\n  } catch (_) {}\n}\n\nFuture<void> dynamicType(dynamic Function() create) async {\n  try {\n    final pending = create();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> noCatch() async {\n  final pending = start();\n  await gap();\n  await pending;\n}\n\nFuture<void> finallyOnly() async {\n  try {\n    final pending = start();\n    await gap();\n    await pending;\n  } finally {}\n}\n\nFuture<void> discarded() async {\n  try {\n    final pending = start();\n    await gap();\n  } catch (_) {}\n}\n\nFuture<void> nestedFunction() async {\n  try {\n    final pending = start();\n    Future<void> later() async {\n      await gap();\n      await pending;\n    }\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> shadowed() async {\n  try {\n    final pending = start();\n    {\n      final pending = start();\n      await pending;\n    }\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> reassigned() async {\n  try {\n    var pending = start();\n    await gap();\n    pending = start();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> aliased() async {\n  try {\n    final pending = start();\n    final alias = pending;\n    alias.catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> lazyInitialization() async {\n  try {\n    late final pending = start();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> multipleDeclarators() async {\n  try {\n    Future<int> first = start(), second = start();\n    await gap();\n    await first;\n    await second;\n  } catch (_) {}\n}\n\nFuture<void> aggregateAwait() async {\n  try {\n    final first = start();\n    final second = start();\n    await Future.wait([first, second]);\n    await first;\n    await second;\n  } catch (_) {}\n}\n\nFuture<void> forwardingAwait() async {\n  try {\n    final pending = start();\n    await pending.timeout(const Duration(seconds: 1));\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> compositeHandlerStatement() async {\n  try {\n    final pending = start();\n    pending.then((value) => value).catchError((Object error) => 0);\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> compositeHandlerInitializer() async {\n  try {\n    final pending = start();\n    final handled = pending.then((value) => value).catchError((Object error) => 0);\n    await gap();\n    await pending;\n    await handled;\n  } catch (_) {}\n}\n\nFutureOr<int> maybeStart() => 1;\nFuture<void> futureOrIsNotProof() async {\n  try {\n    final pending = maybeStart();\n    await gap();\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> conditionalGap(bool condition) async {\n  try {\n    final pending = start();\n    if (condition) {\n      await gap();\n    }\n    await pending;\n  } catch (_) {}\n}\n\nFuture<void> loopBoundary(List<int> values) async {\n  try {\n    final pending = start();\n    for (final value in values) {\n      await gap();\n    }\n    await pending;\n  } catch (_) {}\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-uncaught-future-errors",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags loop conditions whose local scalar inputs are never modified by the loop.",
     "diagnostics": [
       {
@@ -3813,6 +3953,260 @@
     "group": "correctness",
     "name": "avoid-unmodified-loop-condition",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags casts between types proven unrelated by canonical type resolution.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 2,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 3,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 4,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 6,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 14,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 17,
+        "message": "Cast types are unrelated — use a compatible type instead"
+      }
+    ],
+    "docs": "Flags casts between types proven unrelated by canonical type resolution.\n\nChecks `as` expressions, cast patterns, and SDK collection `cast<T>()`\nelement/key/value conversions. Dynamic, unresolved, and potentially related\ntypes are not reported. Collection casts are lazy but fail when an element\nof the incompatible type is read.",
+    "domains": [],
+    "examples": {
+      "bad": "void casts(String text, int number, List<int> numbers, Set<int> unique, Map<String, int> map) {\n  print(text as int);\n  print(number as String);\n  print(numbers as List<String>);\n  print(numbers.cast<String>());\n  print(unique.cast<String>());\n  print(map.cast<int, int>());\n  print(map.cast<String, String>());\n}\n\nclass Animal {}\nclass NotAnimal {}\nvoid unrelatedClasses(Animal animal) {\n  print(animal as NotAnimal);\n}\nvoid castPattern(String text) {\n  if (text case final number as int) print(number);\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\n\nvoid casts(Object value, dynamic unknown, List<num> numbers, Map<Object, Object> map) {\n  print(value as String);\n  print(unknown as int);\n  print(numbers as List<int>);\n  print(numbers.cast<int>());\n  print(numbers.cast<Object>());\n  print(map.cast<String, int>());\n}\nclass Custom {\n  Custom cast<T>() => this;\n}\nvoid custom(Custom item) { item.cast<String>(); }\n\nextension type Id(int value) {}\nvoid erasedAndStructural<T>(int number, Object value, Object recordValue, Function callback, T generic, FutureOr<int> futureOr) {\n  print(number as Id);\n  print(value as void Function());\n  print(callback as void Function(int));\n  print(recordValue as (int, String));\n  print((1, 2) as Object);\n  print(generic as void Function());\n  print(futureOr as int);\n  if (value case final callback as void Function()) print(callback);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unrelated-type-casts",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags potentially throwing element access on SDK collections.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 6,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 8,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 9,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 10,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 11,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 12,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 13,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 17,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 20,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 23,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 29,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 30,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 31,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 32,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 42,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 43,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 47,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 51,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 52,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 53,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 53,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 54,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 55,
+        "message": "Collection access may throw — use a nullable lookup or an explicit fallback"
+      }
+    ],
+    "docs": "Flags potentially throwing element access on SDK collections.\n\nIterable first/last/single (including object-pattern getters), predicate\nsearches without an `orElse` fallback, elementAt, and List indexing can\nthrow when an element does not exist. The max/min extension getters are\nincluded only when their resolved extension comes from package:collection.\nPrefer nullable alternatives. Map indexing, unknown receivers, and custom\ncollection implementations are excluded. List indexing is safe in a resolved\nFlutter ListView.builder/GridView.builder's direct, synchronous itemBuilder\nbody when itemCount is the same local list's length (including\n`list?.length ?? 0`) and the index is its second parameter. Both bindings\nmust be unreassigned. The list must otherwise appear only as an index or\nlength receiver: aliases, helper arguments, method calls, setters and cascades\nconservatively disable the exemption. Shadowed bindings and nested callbacks\ndo not inherit it. Other bounds/cardinality proofs are not attempted.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'package:collection/collection.dart';\n\nvoid access(List<int> values, Set<String> names, Iterable<int> items, int index) {\n  print(values.first);\n  print(names.last);\n  print(items.single);\n  print(values[index]);\n  print(items.elementAt(index));\n  print(values.firstWhere((value) => value > 0));\n  print(values.lastWhere((value) => value > 0));\n  print(values.singleWhere((value) => value > 0));\n  values..first;\n  values..firstWhere((value) => value > 0);\n}\n\nvoid objectPatterns(Object value) {\n  if (value case List<int>(first: final first)) {\n    print(first);\n  }\n  if (value case Iterable<int>(last: final last)) {\n    print(last);\n  }\n  if (value case Set<int>(single: final single)) {\n    print(single);\n  }\n}\n\nvoid packageExtrema(Iterable<int> values) {\n  print(values.max);\n  print(values.min);\n  values..max;\n  if (values case Iterable<int>(min: final smallest)) {\n    print(smallest);\n  }\n}\n\nclass NotString {\n  List<int> split(String separator) => [];\n}\n\nvoid customSplit(NotString value) {\n  print(value.split(',').first);\n  print(value.split(',').last);\n}\n\nvoid mutatedSplit(String text) {\n  text.split(',')..clear()..first;\n}\n\nvoid splitResults(String text, Pattern separator) {\n  print(text.split(separator).first);\n  print(text.split(separator).last);\n  text.split(separator)..first..last;\n  print(''.split('').first);\n  print(''.split(RegExp('')).last);\n}",
+      "crossFile": null,
+      "good": "void access(List<int> values, Map<int, String> names, dynamic unknown) {\n  print(names[0]);\n  print(values.firstOrNull);\n  print(values.lastOrNull);\n  print(values.singleOrNull);\n  print(values.firstWhere((value) => value > 0, orElse: () => 0));\n  print(values.lastWhere((value) => value > 0, orElse: () => 0));\n  print(values.singleWhere((value) => value > 0, orElse: () => 0));\n  print(unknown.first);\n}\nclass Custom {\n  int get first => 0;\n  int operator [](int index) => 0;\n}\nvoid custom(Custom value) { print(value.first); print(value[0]); }\n\n\nclass Splittable {\n  Custom split(String separator) => Custom();\n}\n\nvoid customSplit(Splittable value) {\n  print(value.split(',').first);\n}\n\nvoid customPatterns(Object value) {\n  if (value case Custom(first: final first)) {\n    print(first);\n  }\n}\n\nextension LocalExtrema on Iterable<int> {\n  int get max => 0;\n  int get min => 0;\n}\n\nvoid localExtrema(Iterable<int> values) {\n  print(values.max);\n  print(values.min);\n  if (values case Iterable<int>(max: final maximum)) {\n    print(maximum);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unsafe-collection-methods",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -9313,6 +9707,100 @@
       "label": "Dart lints",
       "upstreamId": "use_string_buffers",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/use_string_buffers"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags references to MD5, SHA-1, DES, triple DES, and RC4 package APIs.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 9,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 10,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 12,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 20,
+        "message": "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead."
+      }
+    ],
+    "docs": "Flags references to MD5, SHA-1, DES, triple DES, and RC4 package APIs.\n\nWeak hashes and ciphers cannot reliably protect sensitive data; use a modern\nalgorithm instead. Matches `md5` and `sha1` from `crypto`, `DES` and `DES3`\nfrom `dart_des`, and `RC4` from `simple_rc4`. Resolved declaration provenance\nis required, including prefixed imports and re-exports. Local bindings,\nlexical members, type parameters, ambiguous imports, and unrelated APIs\nwith the same spelling are not reported. Extension members shadow imports,\nbut members of an extension's on-type do not. References include hash arguments,\ncipher constructor tear-offs, and implicit or explicit construction; type\nannotations alone are not checked.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'package:crypto/crypto.dart';\nimport 'package:crypto/crypto.dart' as crypto;\nimport 'package:dart_des/dart_des.dart';\nimport 'package:dart_des/dart_des.dart' as des;\nimport 'package:simple_rc4/simple_rc4.dart';\nimport 'package:simple_rc4/simple_rc4.dart' as stream;\n\nvoid weakAlgorithms(List<int> bytes) {\n  final first = md5;\n  final second = sha1;\n  crypto.md5.convert(bytes);\n  Hmac(crypto.sha1, bytes);\n  DES(key: bytes);\n  DES3(key: bytes);\n  RC4('secret');\n  new des.DES(key: bytes);\n  new des.DES3(key: bytes);\n  new stream.RC4.fromBytes(bytes);\n  stream.RC4.fromBytes(bytes);\n  final constructor = stream.RC4.new;\n}",
+      "crossFile": null,
+      "good": "import 'package:crypto/crypto.dart';\nimport 'package:crypto/crypto.dart' as crypto;\nimport 'package:lookalike/lookalike.dart' as unrelated;\n\nvoid strongAlgorithms(List<int> bytes) {\n  final first = sha256;\n  final second = crypto.sha512;\n  Hmac(sha256, bytes);\n  crypto.sha256.convert(bytes);\n  final text = 'md5 sha1 DES DES3 RC4';\n}\n\nvoid shadowedHash(Object md5, Object sha1) {\n  final first = md5;\n  final second = sha1;\n}\n\nvoid shadowedPrefix(LocalHashes crypto) {\n  final first = crypto.md5;\n  final second = crypto.sha1;\n}\n\nclass LocalHashes {\n  final md5 = 1;\n  final sha1 = 2;\n  void useMembers() {\n    final first = md5;\n    final second = sha1;\n  }\n}\n\nvoid unrelatedPackage() {\n  final first = unrelated.md5;\n  final second = unrelated.sha1;\n  unrelated.DES();\n  unrelated.DES3();\n  unrelated.RC4();\n}"
+    },
+    "group": "security",
+    "name": "avoid-weak-cryptographic-algorithms",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

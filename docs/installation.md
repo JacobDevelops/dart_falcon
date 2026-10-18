@@ -124,5 +124,5 @@ falls back to watching every directory under the project separately.
 ## Next steps
 
 See [configuration.md](./configuration.md) for configuring rules and options,
-or run `falcon check .`. With no `falcon.json` present, falcon's 170 recommended
-rules out of 315 shipped rules run at their default severity.
+or run `falcon check .`. With no `falcon.json` present, falcon's 174 recommended
+rules out of 320 shipped rules run at their default severity.
