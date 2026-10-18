@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 463);
+    assert_eq!(RULE_METADATA.len(), 476);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         215

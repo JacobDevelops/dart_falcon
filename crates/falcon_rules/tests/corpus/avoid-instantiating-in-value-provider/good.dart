@@ -1,0 +1,23 @@
+import 'package:provider/provider.dart' as p;
+class Model {
+  Model();
+  static final Model instance = Model();
+  static Model cached() => instance;
+}
+class Provider {
+  Provider.value({Object? value});
+}
+Model makeModel() => Model();
+void examples(Model existing, dynamic factory) {
+  p.Provider.value(value: existing);
+  p.ChangeNotifierProvider.value(value: existing);
+  p.ListenableProvider.value(value: existing);
+  p.Provider(create: (_) => Model());
+  Provider.value(value: Model());
+  p.Provider.value(value: makeModel());
+  p.Provider.value(value: factory());
+  p.Provider.value(value: Model.cached());
+}
+void shadowed(dynamic Model) {
+  p.Provider.value(value: Model());
+}

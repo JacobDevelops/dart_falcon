@@ -5870,6 +5870,60 @@
   },
   {
     "crossFile": false,
+    "description": "Value providers borrow existing instances; newly constructed values need create.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      }
+    ],
+    "docs": "Value providers borrow existing instances; newly constructed values need create.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:provider/provider.dart' as p;\nclass Model {\n  Model();\n  Model.named();\n  factory Model.make() => Model();\n}\nvoid examples() {\n  p.Provider.value(value: Model());\n  p.ChangeNotifierProvider.value(value: new Model());\n  p.ListenableProvider.value(value: Model.named());\n  new p.Provider.value(value: (Model()));\n  p.Provider<Model>.value(value: Model.make());\n}",
+      "crossFile": null,
+      "good": "import 'package:provider/provider.dart' as p;\nclass Model {\n  Model();\n  static final Model instance = Model();\n  static Model cached() => instance;\n}\nclass Provider {\n  Provider.value({Object? value});\n}\nModel makeModel() => Model();\nvoid examples(Model existing, dynamic factory) {\n  p.Provider.value(value: existing);\n  p.ChangeNotifierProvider.value(value: existing);\n  p.ListenableProvider.value(value: existing);\n  p.Provider(create: (_) => Model());\n  Provider.value(value: Model());\n  p.Provider.value(value: makeModel());\n  p.Provider.value(value: factory());\n  p.Provider.value(value: Model.cached());\n}\nvoid shadowed(dynamic Model) {\n  p.Provider.value(value: Model());\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-instantiating-in-value-provider",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid storing BuildContext in late fields or reading it in late initializers.",
     "diagnostics": [
       {
@@ -10012,6 +10066,60 @@
       "label": "Dart lints",
       "upstreamId": "exhaustive_cases",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/exhaustive_cases"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warns when a Bloc constructor leaves a concrete event subclass without a handler.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      }
+    ],
+    "docs": "Warns when a Bloc constructor leaves a concrete event subclass without a handler.\n\nRegister a handler for every event subclass, or register a handler for their\nparent event. This rule checks event classes declared in the same file and\n`on<Event>` registrations in each generative constructor, including cascades.\nInferred registrations conservatively count as coverage. Factories, redirects,\nabstract event classes, generic event roots and overridden `on` APIs are ignored.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.empty() : super(0) {}\n  CounterBloc.partialCascade() : super(0) {\n    this..on<Start>((event, emit) {});\n  }\n  CounterBloc.otherReceiver(Bloc<Event, int> other) : super(0) {\n    other\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CounterBloc.localOn() : super(0) {\n    void on(Object handler) {}\n    on((Event event, Emitter<int> emit) {});\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CompleteBloc extends Bloc<Event, int> {\n  CompleteBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CompleteBloc.parent() : super(0) {\n    on<Event>((event, emit) {});\n  }\n  CompleteBloc.redirect() : this();\n  CompleteBloc.inferred() : super(0) {\n    on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascade() : super(0) {\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CompleteBloc.inferredCascade() : super(0) {\n    this..on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascadeWithLocalOn() : super(0) {\n    void on<T>(Object handler) {}\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n}\nclass NotABloc {\n  NotABloc();\n}\n\nclass GenericBloc<Event extends Object> extends Bloc<Event, int> {\n  GenericBloc() : super(0) {\n    on<Event>((event, emit) {});\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "handle-bloc-event-subclasses",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -17456,6 +17564,114 @@
       "label": "Dart lints",
       "upstreamId": "avoid_annotating_with_dynamic",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_annotating_with_dynamic"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Keep package-confirmed Bloc instance fields private; inherited API overrides are allowed.",
+    "diagnostics": [
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "Keep Bloc instance fields private; expose state instead."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 5,
+        "message": "Keep Bloc instance fields private; expose state instead."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 6,
+        "message": "Keep Bloc instance fields private; expose state instead."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 7,
+        "message": "Keep Bloc instance fields private; expose state instead."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 8,
+        "message": "Keep Bloc instance fields private; expose state instead."
+      }
+    ],
+    "docs": "Keep package-confirmed Bloc instance fields private; inherited API overrides are allowed.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nclass Example extends Bloc<int, int> {\n  Example() : super(0);\n  final int value0 = 0;\n  final int value1 = 1;\n  final int value2 = 2;\n  final int value3 = 3;\n  final int value4 = 4;\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nclass Example extends Bloc<int, int> {\n  Example() : super(0);\n  final int _value = 0;\n  static final int shared = 1;\n  int get value => _value;\n  @override final int state = 0;\n  void _command() {}\n}\nclass Ordinary { int value = 0; }"
+    },
+    "group": "style",
+    "name": "avoid-bloc-public-fields",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Enforce the package-confirmed Bloc convention.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "Keep Bloc command methods private; expose events instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 5,
+        "message": "Keep Bloc command methods private; expose events instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 6,
+        "message": "Keep Bloc command methods private; expose events instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 7,
+        "message": "Keep Bloc command methods private; expose events instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 8,
+        "message": "Keep Bloc command methods private; expose events instead."
+      }
+    ],
+    "docs": "Enforce the package-confirmed Bloc convention.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nclass Example extends Bloc<int, int> {\n  Example() : super(0);\n  void command0() {}\n  void command1() {}\n  void command2() {}\n  void command3() {}\n  void command4() {}\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nclass Example extends Bloc<int, int> {\n  Example() : super(0);\n  void _command() {}\n  static void shared() {}\n  int get value => 1;\n  @override Future<void> close() async {}\n  @override void add(int event) {}\n}\nclass Counter extends Cubit<int> { Counter() : super(0); void increment() {} }\nclass Ordinary { void command() {} }"
+    },
+    "group": "style",
+    "name": "avoid-bloc-public-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -25161,6 +25377,168 @@
   },
   {
     "crossFile": false,
+    "description": "Enforce the package-confirmed Bloc convention.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "End Bloc event class names with 'Event'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "End Bloc event class names with 'Event'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "End Bloc event class names with 'Event'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "End Bloc event class names with 'Event'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "End Bloc event class names with 'Event'."
+      }
+    ],
+    "docs": "Enforce the package-confirmed Bloc convention.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nclass Action {}\nclass Variant0 extends Action {}\nclass Variant1 extends Action {}\nclass Variant2 extends Action {}\nclass Variant3 extends Action {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nclass ActionEvent {}\nclass Variant0Event extends ActionEvent {}\nclass Variant1Event extends ActionEvent {}\nclass Variant2Event extends ActionEvent {}\nclass Variant3Event extends ActionEvent {}\nclass Example extends Bloc<ActionEvent, int> { Example() : super(0); }\nclass Unrelated {}"
+    },
+    "group": "style",
+    "name": "prefer-bloc-event-suffix",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer context.read/watch over package:flutter_bloc's provider lookups.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Use context.read or context.watch instead of a provider's of method."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Use context.read or context.watch instead of a provider's of method."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 6,
+        "message": "Use context.read or context.watch instead of a provider's of method."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 7,
+        "message": "Use context.read or context.watch instead of a provider's of method."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 8,
+        "message": "Use context.read or context.watch instead of a provider's of method."
+      }
+    ],
+    "docs": "Prefer context.read/watch over package:flutter_bloc's provider lookups.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_bloc/flutter_bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nvoid example(Object context) {\n  BlocProvider.of<int>(context);\n  BlocProvider.of<int>(context, listen: false);\n  BlocProvider.of<int>(context, listen: true);\n  fb.BlocProvider.of<int>(context);\n  RepositoryProvider.of<int>(context);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_bloc/flutter_bloc.dart' as fb;\nclass BlocProvider { static int of(Object context) => 0; }\nclass Custom { int of(Object context) => 0; }\nvoid example(Object context, Custom service, Custom BlocProvider, bool listen) {\n  BlocProvider.of(context);\n  service.of(context);\n  context.read<int>();\n  context.watch<int>();\n  fb.BlocProvider.of<int>(context, listen: listen);\n}\nextension LocalContext on Object {\n  T read<T>() => throw StateError('fixture');\n  T watch<T>() => throw StateError('fixture');\n}"
+    },
+    "group": "style",
+    "name": "prefer-bloc-extensions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Enforce the package-confirmed Bloc convention.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "End Bloc state class names with 'State'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "End Bloc state class names with 'State'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "End Bloc state class names with 'State'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "End Bloc state class names with 'State'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "End Bloc state class names with 'State'."
+      }
+    ],
+    "docs": "Enforce the package-confirmed Bloc convention.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nclass Action {}\nclass Variant0 extends Action {}\nclass Variant1 extends Action {}\nclass Variant2 extends Action {}\nclass Variant3 extends Action {}\nclass Example extends Bloc<int, Action> { Example() : super(Action()); }",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nclass ActionState {}\nclass Variant0State extends ActionState {}\nclass Variant1State extends ActionState {}\nclass Variant2State extends ActionState {}\nclass Variant3State extends ActionState {}\nclass Example extends Bloc<int, ActionState> { Example() : super(ActionState()); }\nclass Unrelated {}"
+    },
+    "group": "style",
+    "name": "prefer-bloc-state-suffix",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Prefers `Center` over an `Align` whose alignment is known to be centered.",
     "diagnostics": [
       {
@@ -28493,6 +28871,120 @@
   },
   {
     "crossFile": false,
+    "description": "Flatten directly nested package:flutter_bloc BlocProviders with MultiBlocProvider.",
+    "diagnostics": [
+      {
+        "column": 14,
+        "file": null,
+        "line": 4,
+        "message": "Combine nested BlocProviders with MultiBlocProvider."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 5,
+        "message": "Combine nested BlocProviders with MultiBlocProvider."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 6,
+        "message": "Combine nested BlocProviders with MultiBlocProvider."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 7,
+        "message": "Combine nested BlocProviders with MultiBlocProvider."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 8,
+        "message": "Combine nested BlocProviders with MultiBlocProvider."
+      }
+    ],
+    "docs": "Flatten directly nested package:flutter_bloc BlocProviders with MultiBlocProvider.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_bloc/flutter_bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nObject example() {\n  final p0 = BlocProvider<int>(create: (_) => 0, child: BlocProvider<int>.value(value: 1, child: 0));\n  final p1 = new BlocProvider<int>(create: (_) => 0, child: BlocProvider<int>.value(value: 1, child: 0));\n  final p2 = fb.BlocProvider<int>(create: (_) => 0, child: BlocProvider<int>.value(value: 1, child: 0));\n  final p3 = BlocProvider<int>(create: (_) => 0, child: BlocProvider<int>.value(value: 1, child: 0));\n  final p4 = BlocProvider<int>(create: (_) => 0, child: BlocProvider<int>.value(value: 1, child: 0));\n  return p0;\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_bloc/flutter_bloc.dart' as fb;\nclass BlocProvider { BlocProvider({required Object child}); }\nObject example() {\n  final single = fb.BlocProvider<int>(create: (_) => 0, child: 0);\n  final unrelated = BlocProvider(child: BlocProvider(child: 0));\n  final mixed = fb.BlocProvider<int>(create: (_) => 0, child: BlocProvider(child: 0));\n  final repositories = fb.RepositoryProvider<int>(create: (_) => 0, child: fb.RepositoryProvider<int>(create: (_) => 0, child: 0));\n  final multi = fb.MultiBlocProvider(providers: [fb.BlocProvider<int>(create: (_) => 0, child: 0)], child: single);\n  return multi;\n}"
+    },
+    "group": "style",
+    "name": "prefer-multi-bloc-provider",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer a flat MultiProvider to directly nested provider widgets.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 4,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Replace directly nested providers with MultiProvider."
+      }
+    ],
+    "docs": "Prefer a flat MultiProvider to directly nested provider widgets.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:provider/provider.dart' as p;\nvoid examples(Object existing) {\n  p.Provider(create: (_) => 1, child: p.Provider(create: (_) => 2));\n  p.Provider.value(value: existing, child: p.ChangeNotifierProvider.value(value: existing));\n  p.ChangeNotifierProvider(create: (_) => existing, child: p.ListenableProvider.value(value: existing));\n  new p.ListenableProvider(create: (_) => existing, child: new p.Provider(create: (_) => 1));\n  p.Provider<int>(create: (_) => 1, child: (p.Provider<String>(create: (_) => 'a')));\n  p.Provider<Object>.value(value: existing, child: p.ChangeNotifierProvider<Object>.value(value: existing));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart' as p;\nclass Provider { Provider({Object? child}); }\nclass Wrapper { Wrapper({Object? child}); }\nvoid examples(Object existing, Object child) {\n  p.Provider(create: (_) => 1);\n  p.Provider.value(value: existing, child: child);\n  p.MultiProvider(providers: [p.Provider(create: (_) => 1), p.Provider(create: (_) => 2)], child: child);\n  p.Provider(create: (_) => 1, child: Wrapper(child: p.Provider(create: (_) => 2)));\n  Provider(child: p.Provider(create: (_) => 1));\n  p.Provider(create: (_) => 1, child: Provider(child: child));\n  p.Provider(create: (_) => 1, child: p.MultiProvider(providers: [], child: child));\n}\nvoid shadowed(dynamic p) {\n  p.Provider(child: p.Provider());\n}\nvoid lookupChild(BuildContext context) {\n  p.Provider(create: (_) => 1, child: p.Provider.of<Object>(context));\n}"
+    },
+    "group": "style",
+    "name": "prefer-multi-provider",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags explicit positional `bool` parameters in private declarations and unconstrained closures.",
     "diagnostics": [
       {
@@ -28761,6 +29253,60 @@
     },
     "group": "style",
     "name": "prefer-padding-over-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer context.read/watch when provider extensions are in scope.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Use context.watch instead of Provider.of."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use context.watch instead of Provider.of."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Use context.read instead of Provider.of."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Use context.watch instead of Provider.of."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Use context.read instead of Provider.of."
+      }
+    ],
+    "docs": "Prefer context.read/watch when provider extensions are in scope.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\nimport 'package:provider/provider.dart' as p;\nvoid examples(BuildContext context) {\n  Provider.of<int>(context);\n  Provider.of<String>(context, listen: true);\n  Provider.of<Object>(context, listen: false);\n  p.Provider.of<int>(context);\n  p.Provider.of<String>(context, listen: (false));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\nimport 'package:provider/provider.dart' as p;\nvoid examples(BuildContext context, bool listen) {\n  context.read<int>();\n  context.watch<int>();\n  Provider.of<int>(context, listen: listen);\n  p.Provider<int>(create: (_) => 1);\n  p.Provider.value(value: 1);\n}\nvoid shadowed(BuildContext context, dynamic Provider) {\n  Provider.of<int>(context);\n}\nvoid shadowedPrefix(BuildContext context, dynamic p) {\n  p.Provider.of<int>(context);\n}"
+    },
+    "group": "style",
+    "name": "prefer-provider-extensions",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -34832,6 +35378,264 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-passing-async-when-sync-expected",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Rejects direct Bloc and Cubit arguments to other blocs.",
+    "diagnostics": [
+      {
+        "column": 53,
+        "file": null,
+        "line": 11,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 57,
+        "file": null,
+        "line": 12,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 71,
+        "file": null,
+        "line": 13,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 14,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 15,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 16,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 17,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 18,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 61,
+        "file": null,
+        "line": 19,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      }
+    ],
+    "docs": "Rejects direct Bloc and Cubit arguments to other blocs.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ConsumerAlias = Consumer;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nvoid dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {\n  Consumer( counter);\n  new Consumer( counter);\n  Consumer.named(dependency:  cubit);\n  ChildConsumer( counter);\n  ConsumerAlias( counter);\n  consumer.accept( counter);\n  Consumer( Counter());\n  ConsumerCubit( counter);\n  consumer..accept( counter);\n}",
+      "crossFile": null,
+      "good": "import 'support.dart' as real;\n\nclass Bloc<E, S> {}\nclass Cubit<S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(real.Counter counter) => LookupConsumer();\n}\n\nvoid boundaries(real.Counter counter, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(real.Repository(0));\n  real.Repository(counter);\n  real.View(counter);\n  real.Consumer(Cubit<int>());\n  real.Consumer(Bloc<Object, int>());\n  real.Consumer(unknown);\n  LocalBloc(counter);\n  consumer.accept(1);\n  consumer..accept(1);\n  LookupConsumer.of(counter);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(counter);\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-passing-bloc-to-bloc",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Rejects direct Bloc and Cubit arguments to Flutter widget constructors.",
+    "diagnostics": [
+      {
+        "column": 55,
+        "file": null,
+        "line": 25,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 59,
+        "file": null,
+        "line": 26,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 73,
+        "file": null,
+        "line": 27,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 56,
+        "file": null,
+        "line": 28,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 56,
+        "file": null,
+        "line": 29,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 55,
+        "file": null,
+        "line": 30,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 72,
+        "file": null,
+        "line": 31,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 64,
+        "file": null,
+        "line": 32,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 33,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 34,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 35,
+        "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+      }
+    ],
+    "docs": "Rejects direct Bloc and Cubit arguments to Flutter widget constructors.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'support.dart' as app;\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ViewAlias = app.View;\nclass ChildView extends app.View {\n  ChildView(Object dependency) : super(dependency);\n}\nclass BlocProvider extends app.View {\n  BlocProvider.value({required Object value}) : super(value);\n}\nclass BlocBuilder extends app.View {\n  BlocBuilder({required Object bloc}) : super(bloc);\n}\nclass BlocListener extends app.View {\n  BlocListener({required Object bloc}) : super(bloc);\n}\nclass BlocConsumer extends app.View {\n  BlocConsumer({required Object bloc}) : super(bloc);\n}\nclass BlocSelector extends app.View {\n  BlocSelector({required Object bloc}) : super(bloc);\n}\n\nvoid dependencies(app.Counter counter, b.Bloc<Object, int> bloc) {\n  app.View( counter);\n  new app.View( counter);\n  app.View.named(dependency:  bloc);\n  ChildView( counter);\n  ViewAlias( counter);\n  app.View( app.Counter());\n  BlocProvider.value(value:  counter);\n  BlocBuilder(bloc:  counter);\n  BlocListener(bloc:  counter);\n  BlocConsumer(bloc:  counter);\n  BlocSelector(bloc:  counter);\n}",
+      "crossFile": null,
+      "good": "import 'support.dart' as real;\nimport 'package:flutter_bloc/flutter_bloc.dart' as framework;\nimport 'package:flutter/widgets.dart' as flutter;\n\nclass Widget {\n  Widget(Object dependency);\n}\nclass LocalView extends Widget {\n  LocalView(Object dependency) : super(dependency);\n}\nclass Bloc<E, S> {}\nclass Cubit<S> {}\n\nclass LookupView extends real.View {\n  LookupView() : super(0);\n  static LookupView of(real.Counter counter) => LookupView();\n}\n\nvoid boundaries(real.Counter counter, dynamic unknown) {\n  Widget(counter);\n  LocalView(counter);\n  real.Repository(counter);\n  real.View(Bloc<Object, int>());\n  real.View(Cubit<int>());\n  real.View(real.Repository(0));\n  real.View(unknown);\n  LookupView.of(counter);\n  framework.BlocProvider.value(value: counter, child: flutter.SizedBox());\n  framework.RepositoryProvider.value(value: counter, child: flutter.SizedBox());\n  framework.BlocBuilder<real.Counter, int>(\n    bloc: counter,\n    builder: (context, state) => flutter.SizedBox(),\n  );\n  framework.BlocListener<real.Counter, int>(\n    bloc: counter,\n    listener: (context, state) {},\n    child: flutter.SizedBox(),\n  );\n  framework.BlocConsumer<real.Counter, int>(\n    bloc: counter,\n    builder: (context, state) => flutter.SizedBox(),\n    listener: (context, state) {},\n  );\n  framework.BlocSelector<real.Counter, int, bool>(\n    bloc: counter,\n    selector: (state) => state > 0,\n    builder: (context, selected) => flutter.SizedBox(),\n  );\n  final View = (Object dependency) => real.Repository(dependency);\n  View(counter);\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-passing-bloc-to-widget",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.",
+    "diagnostics": [
+      {
+        "column": 63,
+        "file": null,
+        "line": 27,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 67,
+        "file": null,
+        "line": 28,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 81,
+        "file": null,
+        "line": 29,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 68,
+        "file": null,
+        "line": 30,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 68,
+        "file": null,
+        "line": 31,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 70,
+        "file": null,
+        "line": 32,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 68,
+        "file": null,
+        "line": 33,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 34,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 71,
+        "file": null,
+        "line": 35,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 69,
+        "file": null,
+        "line": 39,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 79,
+        "file": null,
+        "line": 40,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      }
+    ],
+    "docs": "Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart' as f;\nimport 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nclass CustomContext implements f.BuildContext {\n  bool get mounted => true;\n}\n\ntypedef ConsumerAlias = Consumer;\n\nclass Event {\n  Event(Object payload);\n}\nclass ChildEvent extends Event {\n  ChildEvent(Object payload) : super(payload);\n}\nclass EventBloc extends b.Bloc<Event, int> {\n  EventBloc() : super(0);\n  void add(Event event) {}\n}\n\nvoid dependencies(f.BuildContext context, Consumer consumer, CustomContext custom) {\n  Consumer( context);\n  new Consumer( context);\n  Consumer.named(dependency:  context);\n  ChildConsumer( context);\n  ConsumerAlias( context);\n  consumer.accept( context);\n  ConsumerCubit( context);\n  Consumer( custom);\n  consumer..accept( context);\n}\n\nvoid eventPayload(f.BuildContext context, EventBloc bloc) {\n  bloc.add(Event( context));\n  final event = ChildEvent( context);\n  bloc.add(event);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart' as flutter;\nimport 'support.dart' as real;\n\nclass BuildContext {}\nclass Bloc<E, S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(flutter.BuildContext context) => LookupConsumer();\n}\nclass UnrelatedEvent {\n  UnrelatedEvent(Object payload);\n}\n\nvoid boundaries(flutter.BuildContext context, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(BuildContext());\n  real.Consumer(real.Repository(0));\n  real.Consumer(unknown);\n  real.Repository(context);\n  real.View(context);\n  LocalBloc(context);\n  consumer.accept(context.mounted);\n  consumer..accept(context.mounted);\n  LookupConsumer.of(context);\n  UnrelatedEvent(context);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(context);\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-passing-build-context-to-blocs",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
