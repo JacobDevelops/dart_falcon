@@ -16871,6 +16871,88 @@
   },
   {
     "crossFile": false,
+    "description": "Flags a trailing `if` that wraps multiple statements in a void function.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 22,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 28,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 36,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 49,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 54,
+        "message": "Invert this condition and return early to reduce nesting."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 60,
+        "message": "Invert this condition and return early to reduce nesting."
+      }
+    ],
+    "docs": "Flags a trailing `if` that wraps multiple statements in a void function.\n\nInvert the condition and return early to remove a level of indentation.\nOnly a function body's final statement is considered, with no `else`, a\nplain expression condition, and a block with multiple statements or a nested\n`if`. Explicitly void functions, methods, operators and local functions,\nsetters, and constructors are checked. Non-void and inferred-return functions,\nclosures, generators, pattern conditions, and single-statement guard clauses\nare left alone: a bare return must not change a value-returning contract.",
+    "domains": [],
+    "examples": {
+      "bad": "void top(bool ready) {\n  if (ready) {\n    print('ready');\n    print('work');\n  }\n}\nvoid afterWork(bool ready) {\n  print('start');\n  if (ready) {\n    print('ready');\n    print('work');\n  }\n}\nclass Worker {\n  Worker(bool ready) {\n    if (ready) {\n      print('ready');\n      print('work');\n    }\n  }\n  void run(bool ready) {\n    if (ready) {\n      print('ready');\n      print('work');\n    }\n  }\n  set ready(bool value) {\n    if (value) {\n      print('ready');\n      print('work');\n    }\n  }\n}\nvoid outer() {\n  void local(bool ready) {\n    if (ready) {\n      print('ready');\n      print('work');\n    }\n  }\n  local(true);\n}\nvoid nested(bool first, bool second) {\n  if (first) {\n    if (second) { print('one'); print('two'); }\n  }\n}\nset ready(bool value) {\n  if (value) {\n    print('one'); print('two');\n  }\n}\nvoid asynchronous(bool value) async {\n  if (value) {\n    print('one'); print('two');\n  }\n}\nclass Indexed {\n  void operator []=(int index, bool value) {\n    if (value) {\n      print(index); print(value);\n    }\n  }\n}",
+      "crossFile": null,
+      "good": "void guard(bool ready) {\n  if (!ready) return;\n  print('ready');\n  print('work');\n}\nvoid single(bool ready) {\n  if (ready) { print('one'); }\n}\nvoid withElse(bool ready) {\n  if (ready) { print('one'); print('two'); }\n  else { print('other'); }\n}\nvoid notLast(bool ready) {\n  if (ready) { print('one'); print('two'); }\n  print('end');\n}\nint value(bool ready) {\n  if (ready) { print('one'); return 1; }\n  return 0;\n}\nvoid pattern(Object value) {\n  if (value case int number) { print(number); print('int'); }\n}\nvoid empty(bool ready) { if (ready) {} }\nvoid expression(bool ready) { if (ready) print('one'); }\nvoid inferred(bool value) {\n  final callback = () {\n    if (value) { print('one'); print('two'); }\n  };\n  callback();\n}\ndynamic inferredReturn(bool value) {\n  if (value) { print('one'); return 1; }\n}\nFuture<void> future(bool value) async {\n  if (value) { print('one'); print('two'); }\n}\nIterable<int> generator(bool value) sync* {\n  if (value) { yield 1; yield 2; }\n}\nclass Value {\n  int method(bool value) {\n    if (value) { print('one'); return 1; }\n    return 0;\n  }\n}"
+    },
+    "group": "style",
+    "name": "prefer-early-return",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a private field that is initialized but never reassigned, so it could be `final` (`prefer-final-fields`, adopted from package:lints).",
     "diagnostics": [
       {
@@ -17318,6 +17400,70 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "prefer-first",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags zero-based, unit-step index loops over a syntactically known list.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 26,
+        "message": "Use a 'for-in' loop; use '.indexed' when the index is needed."
+      }
+    ],
+    "docs": "Flags zero-based, unit-step index loops over a syntactically known list.\n\nA `for-in` loop expresses element traversal directly; use `.indexed` when the\nindex is also needed. Matches a single local initialized to `0`, a strict\n`index < items.length` bound, and `index++`, `++index`, or `index += 1`.\nThe collection must be a local or parameter explicitly typed `List`, or a\nlocal with an inferred type initialized with a list literal. Other types,\nfields, and computed receivers are skipped because syntax alone cannot\nestablish iterability.\nFiles with unprefixed imports, library parts, or a possible local declaration\nshadowing `List` are skipped rather than guessing the collection's identity.\n\nBody writes to the index, collection rebinding, element writes, collection\nescapes or method calls, closures, cascades, and suspension are excluded.\nCollection references in the body must be direct `items[index]` reads.\nCollection and index references must resolve to the original declarations;\nshadowed bindings cannot stand in for either loop variable.\nThis is a syntactic recommendation, not an automatic rewrite: indirect\nmutation through aliases or opaque function calls is not analyzed.",
+    "domains": [],
+    "examples": {
+      "bad": "void canonical(List<int> items) {\n  for (var i = 0; i < items.length; i++) {\n    print(items[i]);\n  }\n  for (int index = 0; index < items.length; ++index) {\n    print(items[index]);\n  }\n  for (var i = 0; i < items.length; i += 1) {\n    print('$i: ${items[i]}');\n  }\n  for (var i = (0); (i) < (items.length); i++)\n    print(items[i]);\n  for (var i = 0; i < items.length; i++) {\n    if (items[i] < 0) continue;\n    if (items[i] == 10) break;\n    print(i);\n  }\n}\n\nvoid literals() {\n  final values = [1, 2, 3];\n  for (var j = 0; j < values.length; j++) {\n    print(values[j]);\n  }\n  List<String> names = ['Ada', 'Grace'];\n  for (var n = 0; n < names.length; n += 1) {\n    print(names[n]);\n  }\n}",
+      "crossFile": null,
+      "good": "void boundaries(List<int> items, List<int> other) {\n  for (final item in items) {\n    print(item);\n  }\n  for (var i = 1; i < items.length; i++) {\n    print(items[i]);\n  }\n  for (var i = 0; items.length > i; i++) {\n    print(items[i]);\n  }\n  for (var i = 0; i <= items.length; i++) {\n    print(i);\n  }\n  for (var i = 0; i < items.length; i += 2) {\n    print(items[i]);\n  }\n  for (var i = 0; i < items.length; i--) {\n    print(items[i]);\n    break;\n  }\n  for (var i = 0; i < items.length; i++) {\n    i += 1;\n    print(items[i]);\n  }\n  for (var i = 0; i < items.length; i++) {\n    items.add(i);\n  }\n  for (var i = 0; i < items.length; i++) {\n    items[i] = 0;\n  }\n  for (var i = 0; i < items.length; i++) {\n    items = other;\n  }\n  for (var i = 0; i < items.length; i++) {\n    print(items[i + 1]);\n  }\n  for (var i = 0; i < items.length; i++) {\n    print(items);\n  }\n  for (var i = 0, j = 0; i < items.length; i++, j++) {\n    print(items[i]);\n  }\n  var index = 0;\n  for (index = 0; index < items.length; index++) {\n    print(items[index]);\n  }\n  for (var i = 0; i < items.length; i++) {\n    final callback = () => items[i];\n    print(callback);\n  }\n  for (var i = 0; i < items.length; i++) {\n    final alias = items;\n    alias.clear();\n  }\n  for (var i = 0; i < items.length; i++) {\n    final i = 1;\n    print(items[i]);\n  }\n  for (var i = 0; i < items.length; i++) {\n    (i, index) = (1, 2);\n  }\n}\n\nvoid nonLists(String text, Map<int, int> entries, dynamic unknown) {\n  for (var i = 0; i < text.length; i++) {\n    print(text[i]);\n  }\n  for (var i = 0; i < entries.length; i++) {\n    print(entries[i]);\n  }\n  for (var i = 0; i < unknown.length; i++) {\n    print(unknown[i]);\n  }\n}\n\nclass Owner {\n  List<int> items = [1, 2];\n  void fields() {\n    for (var i = 0; i < items.length; i++) {\n      print(items[i]);\n    }\n    for (var i = 0; i < this.items.length; i++) {\n      print(this.items[i]);\n    }\n  }\n}\n\nFuture<void> suspension(List<int> items) async {\n  for (var i = 0; i < items.length; i++) {\n    await Future<void>.value();\n    print(items[i]);\n  }\n}"
+    },
+    "group": "style",
+    "name": "prefer-for-in",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -18437,6 +18583,154 @@
   },
   {
     "crossFile": false,
+    "description": "Flags explicit positional `bool` parameters in private declarations and unconstrained closures.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 1,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 2,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 3,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 4,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 7,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 8,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 9,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 10,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 11,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 12,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 15,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 17,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 18,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 19,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 22,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 23,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 25,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 27,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 31,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 39,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 45,
+        "message": "Prefer a named boolean parameter instead of a positional parameter."
+      }
+    ],
+    "docs": "Flags explicit positional `bool` parameters in private declarations and unconstrained closures.\n\nThis complements `avoid-positional-boolean-parameters`, covering declarations\nthat shipped rule skips. Enabling both gives full coverage of the explicit\n`bool`/`bool?` forms described here without duplicate diagnostics.\nNamed arguments make boolean values understandable at call sites.\n\nPrivate named functions (including local functions), constructors whose own\nname starts with `_`, and private methods without inherited contracts are\nchecked. Closures are checked only as direct initializers of untyped variables\nor fields, not in arguments, returns, assignments, or typed declarations.\nThe first required or optional positional `bool`/`bool?` is reported.\nNamed parameters, public signatures, setters, operators, extension-type\nrepresentation parameters, and `Function(...)` types are excluded, as are\naliases and inferred field/super parameters. Explicit types must resolve to\n`dart:core`'s `bool`, not a shadowing declaration or type parameter. Methods\nwith override annotations or unresolved inheritance are left alone.\n\n```dart\nvoid _configure(bool verbose) {} // Prefer `{required bool verbose}`.\nfinal configure = (bool verbose) {}; // Prefer `({required bool verbose})`.\n```",
+    "domains": [],
+    "examples": {
+      "bad": "void _configure(bool verbose) {}\nvoid _optional([bool verbose = false]) {}\nvoid _nullable(bool? enabled) {}\nvoid _multiple(int count, bool verbose, bool dryRun) {}\n\nclass Settings {\n  Settings._internal(bool enabled);\n  Settings._optional([bool enabled = false]);\n  factory Settings._factory(bool enabled) => Settings._internal(enabled);\n  void _method(bool enabled) {}\n  static void _staticMethod(bool? enabled) {}\n  final callback = (bool enabled) {};\n}\n\nclass Primary._hidden(bool enabled);\n\nfinal callback = (bool enabled) {};\nfinal nullableCallback = (bool? enabled) => enabled;\nfinal optionalCallback = ([bool enabled = false]) {};\n\nvoid outer() {\n  void _local(bool enabled) {}\n  final nested = (int count, bool enabled) {};\n  void _generic<bool>(bool enabled) {}\n  void _sibling(bool enabled) {}\n  final generic = <bool>(bool enabled) {};\n  final sibling = (bool enabled) {};\n}\n\nabstract class Contract {\n  void _fixed(bool enabled);\n}\nclass Annotated extends Contract {\n  @override\n  void _fixed(bool enabled) {}\n}\nclass Unannotated extends Contract {\n  void _fixed(bool enabled) {}\n  void _independent(bool enabled) {}\n}\nclass Generic<bool> {\n  void _shadowed(bool enabled) {}\n}\nclass AfterGeneric {\n  void _unshadowed(bool enabled) {}\n}",
+      "crossFile": null,
+      "good": "// Public signatures and Function types belong to the shipped rule.\nvoid configure(bool verbose) {}\ntypedef Callback = void Function(bool enabled);\ntypedef void Legacy(bool enabled);\nvoid _takesCallback(void callback(bool enabled)) {}\nvoid _takesFunction(void Function(bool enabled) callback) {}\n\nvoid _named({required bool verbose}) {}\nvoid _optionalNamed({bool? enabled}) {}\nvoid _nonBoolean(int count, String label) {}\nvoid _inferred(enabled) {}\n\nclass Settings {\n  final bool enabled;\n  Settings(bool enabled) : enabled = enabled;\n  Settings._inferred(this.enabled);\n  Settings._named({required this.enabled});\n  void _method({required bool enabled}) {}\n  void method(bool enabled) {}\n  set flag(bool value) {}\n}\n\nclass Child extends Settings {\n  Child._inferred(super.enabled);\n}\n\nclass _PrivateClass {\n  // Constructor privacy is determined by its own name, not its class name.\n  _PrivateClass(bool enabled);\n}\n\nclass NamedPrimary._hidden({required bool enabled});\nclass PublicPrimary(bool enabled);\n\nset _flag(bool value) {}\nfinal namedCallback = ({required bool enabled}) {};\nfinal nonBooleanCallback = (int value) => value;\nfinal inferredCallback = (value) => value;\n\nvoid outer() {\n  void local(bool enabled) {}\n  void _localNamed({required bool enabled}) {}\n}\n\n// An alias is deliberately not an explicit bool spelling.\ntypedef Flag = bool;\nvoid _alias(Flag enabled) {}\n\n// Lexically shadowing type parameters are not dart:core bool.\nvoid _generic<bool>(bool enabled) {}\nfinal genericCallback = <bool>(bool enabled) {};\nclass Generic<bool> {\n  Generic._hidden(bool enabled);\n  void method() {\n    void _local(bool enabled) {}\n    final callback = (bool enabled) {};\n  }\n}\nvoid enclosing<bool>() {\n  void _local(bool enabled) {}\n  final callback = (bool enabled) {};\n}\n\n// These positional signatures are fixed by their contexts.\nvoid consume(void Function(bool) callback) {}\nvoid contextualCallbacks() {\n  consume((bool enabled) {});\n  void Function(bool) callback = (bool enabled) {};\n  callback = (bool enabled) {};\n}\nvoid Function(bool) returnedCallback() => (bool enabled) {};\nfinal void Function(bool) typedCallback = (bool enabled) {};\nclass ContextualFields {\n  final void Function(bool) callback = (bool enabled) {};\n}\n\n// A representation parameter must stay positional.\nextension type Representation._hidden(bool enabled) {}"
+    },
+    "group": "style",
+    "name": "prefer-named-boolean-parameters",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Prefers `f?.call()` to calling a null-checked function after a `!= null` test.",
     "diagnostics": [
       {
@@ -18491,6 +18785,70 @@
       "label": "Dart lints",
       "upstreamId": "prefer_null_aware_method_calls",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_null_aware_method_calls"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags an `if` returning a boolean literal followed by the opposite literal.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Return the condition or its negation instead of boolean literals."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Return the condition or its negation instead of boolean literals."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Return the condition or its negation instead of boolean literals."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Return the condition or its negation instead of boolean literals."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 22,
+        "message": "Return the condition or its negation instead of boolean literals."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 29,
+        "message": "Return the condition or its negation instead of boolean literals."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 35,
+        "message": "Return the condition or its negation instead of boolean literals."
+      }
+    ],
+    "docs": "Flags an `if` returning a boolean literal followed by the opposite literal.\n\nReturn the condition (or its negation) instead of spelling out both boolean\noutcomes. Only adjacent statements with a plain condition, no `else`, and\none return in the then-branch are checked. Pattern conditions, extra branch\nwork, non-literal results, and equal results are left alone. Explicit `else`\nbranches are left to `prefer-conditional-expressions`. The fallback return\nis highlighted; evaluation order and short-circuit behavior are unchanged.",
+    "domains": [],
+    "examples": {
+      "bad": "bool direct(bool value) {\n  if (value) return true;\n  return false;\n}\nbool inverted(bool value) {\n  if (value) { return false; }\n  return true;\n}\nbool parenthesized(bool value) {\n  if ((value)) { return (true); }\n  return (false);\n}\nclass Worker {\n  bool check(int value) {\n    if (value > 0) { return true; }\n    return false;\n  }\n}\nvoid closure() {\n  final check = (bool value) {\n    if (value) return true;\n    return false;\n  };\n  print(check(true));\n}\nbool nested(bool value, bool other) {\n  if (other) {\n    if (value) return false;\n    return true;\n  }\n  return false;\n}\nbool nestedBlocks(bool value) {\n  if (value) {{ return true; }}\n  return false;\n}",
+      "crossFile": null,
+      "good": "bool direct(bool value) { return value; }\nbool inverted(bool value) { return !value; }\nbool extraWork(bool value) {\n  if (value) { print('work'); return true; }\n  return false;\n}\nbool same(bool value) {\n  if (value) return true;\n  return true;\n}\nbool intervening(bool value) {\n  if (value) return true;\n  print('other');\n  return false;\n}\nbool withElse(bool value) {\n  if (value) return true;\n  else return false;\n}\nbool pattern(Object value) {\n  if (value case int number when number > 0) return true;\n  return false;\n}\nint nonBoolean(bool value) {\n  if (value) return 1;\n  return 0;\n}\nbool arbitrary(bool value, bool result) {\n  if (value) return result;\n  return false;\n}\nbool separateBlock(bool value) {\n  if (value) return true;\n  { return false; }\n}"
+    },
+    "group": "style",
+    "name": "prefer-returning-condition",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -18607,6 +18965,88 @@
       "label": "Dart lints",
       "upstreamId": "prefer_spread_collections",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_spread_collections"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer switch expressions for exhaustive switches that only return or assign a value.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 30,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 43,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 55,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 65,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 76,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 87,
+        "message": "Use a switch expression to select this value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 97,
+        "message": "Use a switch expression to select this value."
+      }
+    ],
+    "docs": "Prefer switch expressions for exhaustive switches that only return or assign a value.\n\nA switch expression makes value selection explicit without repeating `return`\nor the assignment target. This rule flags Dart 3 switches whose branches are\nall a single value-returning `return`, or all a plain `=` assignment to the\nsame simple identifier, optionally followed by an unlabeled `break`. Single\n`throw` branches may accompany either form.\n\nA `default` or unguarded, untyped wildcard case is required: exhaustiveness\nis not inferred from types. Grouped/fallthrough cases, labeled cases, empty\nbodies, blocks, extra statements, mixed return/assignment branches, compound\nassignments, property/index targets, and labeled breaks are excluded.\nAssignment patterns binding the target name are excluded, since equal target\nspellings need not refer to the same variable across branches.\nNo automatic fix is offered.",
+    "domains": [],
+    "examples": {
+      "bad": "String describe(int value) {\n  switch (value) {\n    case 1:\n      return 'one';\n    default:\n      return 'other';\n  }\n}\n\nint absolute(int value) {\n  switch (value) {\n    case < 0:\n      return -value;\n    case _:\n      return value;\n  }\n}\n\nint guarded(Object value) {\n  switch (value) {\n    case int number when number > 0:\n      return number;\n    default:\n      return 0;\n  }\n}\n\nint select(int value) {\n  var result = 0;\n  switch (value) {\n    case 1:\n      result = 10;\n      break;\n    default:\n      result = 20;\n      break;\n  }\n  return result;\n}\n\nString choose(bool value) {\n  var result = '';\n  switch (value) {\n    case true:\n      result = 'yes';\n      break;\n    case _:\n      result = 'no';\n      break;\n  }\n  return result;\n}\n\nFuture<int> asynchronous(int value) async {\n  switch (value) {\n    case 1:\n      return await Future.value(1);\n    default:\n      return await Future.value(0);\n  }\n}\n\nint implicitBreak(int value) {\n  var result = 0;\n  switch (value) {\n    case 1:\n      result = 1;\n    default:\n      result = 2;\n  }\n  return result;\n}\n\nint independentBinding(Object value) {\n  var result = 0;\n  switch (value) {\n    case int number:\n      result = number;\n    default:\n      result = -1;\n      break;\n  }\n  return result;\n}\n\nint returningWithThrow(int value) {\n  switch (value) {\n    case 1:\n      return 1;\n    default:\n      throw StateError('Unsupported value');\n  }\n}\n\nint assigningWithThrow(int value) {\n  var result = 0;\n  switch (value) {\n    case 0:\n      throw StateError('Zero');\n    case 1:\n      result = 1;\n      break;\n    default:\n      result = 2;\n  }\n  return result;\n}",
+      "crossFile": null,
+      "good": "String expression(int value) => switch (value) {\n  1 => 'one',\n  _ => 'other',\n};\n\n// Even if a type could prove exhaustiveness, this rule requires a fallback.\nint noFallback(bool value) {\n  switch (value) {\n    case true:\n      return 1;\n    case false:\n      return 0;\n  }\n}\n\nint grouped(int value) {\n  switch (value) {\n    case 1:\n    case 2:\n      return 1;\n    default:\n      return 0;\n  }\n}\n\nvoid empty(int value) {\n  switch (value) {\n    case 1:\n      break;\n    default:\n  }\n}\n\nint extraWork(int value) {\n  switch (value) {\n    case 1:\n      print(value);\n      return 1;\n    default:\n      return 0;\n  }\n}\n\nvoid noValues(int value) {\n  switch (value) {\n    case 1:\n      return;\n    default:\n      return;\n  }\n}\n\nint differentTargets(int value) {\n  var first = 0;\n  var second = 0;\n  switch (value) {\n    case 1:\n      first = 1;\n      break;\n    default:\n      second = 2;\n      break;\n  }\n  return first + second;\n}\n\nint compound(int value) {\n  var result = 0;\n  switch (value) {\n    case 1:\n      result += 1;\n      break;\n    default:\n      result += 2;\n      break;\n  }\n  return result;\n}\n\nclass Box {\n  int value = 0;\n}\n\nvoid properties(int value, Box box) {\n  switch (value) {\n    case 1:\n      box.value = 1;\n      break;\n    default:\n      box.value = 2;\n      break;\n  }\n}\n\nvoid indexed(int value, List<int> values) {\n  switch (value) {\n    case 1:\n      values[0] = 1;\n      break;\n    default:\n      values[0] = 2;\n      break;\n  }\n}\n\nint mixed(int value) {\n  var result = 0;\n  switch (value) {\n    case 1:\n      return 1;\n    default:\n      result = 2;\n      break;\n  }\n  return result;\n}\n\nint blocks(int value) {\n  switch (value) {\n    case 1:\n      { return 1; }\n    default:\n      { return 0; }\n  }\n}\n\nint labeledBreak(int value) {\n  var result = 0;\n  outer: while (true) {\n    switch (value) {\n      case 1:\n        result = 1;\n        break outer;\n      default:\n        result = 2;\n        break outer;\n    }\n  }\n  return result;\n}\n\nint labeledCase(int value) {\n  switch (value) {\n    target: case 1:\n      return 1;\n    default:\n      return 0;\n  }\n}\n\nint guardedWildcard(int value) {\n  switch (value) {\n    case _ when value > 0:\n      return 1;\n    case 0:\n      return 0;\n  }\n  return -1;\n}\n\nint typedWildcard(Object value) {\n  switch (value) {\n    case int _:\n      return 1;\n    case String _:\n      return 2;\n  }\n  return 0;\n}\n\n// Same spelling does not imply the same variable in different patterns.\nint patternBinding(Object value) {\n  var result = 0;\n  switch (value) {\n    case int result:\n      result = 1;\n      break;\n    default:\n      result = 2;\n      break;\n  }\n  return result;\n}\n\nNever onlyThrows(int value) {\n  switch (value) {\n    case 1:\n      throw StateError('One');\n    default:\n      throw StateError('Other');\n  }\n}\n\nint throwWithExtraStatement(int value) {\n  switch (value) {\n    case 1:\n      print(value);\n      throw StateError('One');\n    default:\n      return 0;\n  }\n}\n\nint implicitAssignmentWithExtraStatement(int value) {\n  var result = 0;\n  switch (value) {\n    case 1:\n      result = 1;\n      print(result);\n    default:\n      result = 2;\n  }\n  return result;\n}"
+    },
+    "group": "style",
+    "name": "prefer-switch-expression",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 71 | 132 | 24 | 227 |
+| DCM-inspired | 66 | 132 | 24 | 222 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
 | Additional rules | 8 | 7 | 3 | 18 |
-| **Total** | **83** | **143** | **31** | **257** |
+| **Total** | **78** | **143** | **31** | **252** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (227)
+## Planned DCM-inspired rules (222)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -135,11 +135,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `prefer-early-return` | style | S | paid | Flatten nested if via early return. | must-have |
-| `prefer-returning-condition` | style | S | paid | `if (x) return true; return false;` → `return x;`. | must-have |
-| `prefer-switch-expression` | style | S | paid | Convert switch statement to Dart 3 switch expression. | must-have |
-| `prefer-for-in` | style | S | paid | Index loop convertible to for-in. | must-have |
-| `prefer-named-boolean-parameters` | style | S | paid | Bare bool positional params hurt call sites. | must-have |
 | `prefer-any-or-every` | style | FT | paid | Manual loop replaceable by any/every. | nice-to-have |
 | `prefer-getter-over-method` | style | LT | paid | Zero-arg method that should be a getter. | nice-to-have |
 | `prefer-named-parameters` | style | S | paid | Too many positional params → named. | nice-to-have |
