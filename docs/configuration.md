@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 192 of 347 shipped
+If no config is found, falcon enables its own recommended set: 192 of 351 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -398,6 +398,10 @@ effect.
 | `package-names`          | style        | yes         |                              |
 | `secure-pubspec-urls`    | security     | yes         |                              |
 | `sort-pub-dependencies`  | correctness  | no          |                              |
+| `unused-dependencies`    | correctness  | no          |                              |
+| `undeclared-dependencies` | correctness | no          |                              |
+| `no-import-cycles`       | correctness  | no          |                              |
+| `banned-imports`         | correctness  | no          |                              |
 
 Notes:
 
@@ -409,6 +413,32 @@ Notes:
   way you would for any rule.
 - **Package boundaries.** Each `pubspec.yaml` starts a package boundary. An unreadable or invalid manifest doesn't inherit the enclosing package's name.
 - **`unnecessary-nullable`** checks private (`_`-prefixed) declarations whose call sites are visible in the project. It is opt-in; enable it under `cross-file.rules.correctness`. Use `overrides` to disable it for particular files.
+- **`undeclared-dependencies`** overlaps `depend-on-referenced-packages`. When both are enabled for a file, `undeclared-dependencies` reports the shared cases and `depend-on-referenced-packages` keeps only its stricter `bin/` and build-hook checks.
+- **`no-import-cycles`** reports one shortest concrete cycle per group of mutually importing libraries (plus self-imports), so a large tangle produces one diagnostic, not one per cycle.
+- **`banned-imports`** does nothing until configured. Each entry in `options.rules` lists `files` globs, `deny` globs and a `message`:
+
+  ```json
+  "cross-file": {
+    "rules": {
+      "correctness": {
+        "banned-imports": {
+          "level": "error",
+          "options": {
+            "rules": [
+              {
+                "files": ["lib/domain/**"],
+                "deny": ["package:flutter/**", "lib/data/**"],
+                "message": "Keep domain code independent of Flutter and the data layer."
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+  ```
+
+  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`). `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not. Both lists must be non-empty and `message` non-blank, otherwise the entry is ignored. Each matching entry reports once per import, and per-path overrides replace the base options.
 
 ## Migrating from dart_code_linter / pyramid_lint
 

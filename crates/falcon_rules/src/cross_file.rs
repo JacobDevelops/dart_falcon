@@ -6,12 +6,18 @@
 //! This module root holds the shared cross-file plumbing every rule needs:
 //! package/pubspec discovery, directive-URI resolution, and path normalization.
 
+pub mod banned_imports;
 pub mod depend_on_referenced_packages;
+#[cfg(test)]
+mod dependency_tests;
+pub mod no_import_cycles;
 pub mod package_names;
 pub mod secure_pubspec_urls;
 pub mod sort_pub_dependencies;
+pub mod undeclared_dependencies;
 pub mod unnecessary_nullable;
 pub mod unused_code;
+pub mod unused_dependencies;
 pub mod unused_files;
 
 use std::collections::{HashMap, HashSet};

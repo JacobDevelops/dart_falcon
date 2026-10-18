@@ -1,0 +1,7 @@
+name: app
+dependencies:
+  unused_0: any # /* expect: unused-dependencies */
+  unused_1: any # /* expect: unused-dependencies */
+  unused_2: any # /* expect: unused-dependencies */
+  unused_3: any # /* expect: unused-dependencies */
+  unused_4: any # /* expect: unused-dependencies */

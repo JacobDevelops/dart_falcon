@@ -377,7 +377,11 @@
         "unused-code": "warn",
         "unused-files": "warn",
         "depend-on-referenced-packages": "off",
-        "sort-pub-dependencies": "off"
+        "sort-pub-dependencies": "off",
+        "unused-dependencies": "warn",
+        "undeclared-dependencies": "warn",
+        "no-import-cycles": "warn",
+        "banned-imports": "warn"
       },
       "security": {
         "secure-pubspec-urls": "off"

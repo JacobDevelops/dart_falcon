@@ -13,6 +13,36 @@ fn for_meta<'a>(ctx: &'a AnalyzeContext, meta: &RuleMeta) -> Option<&'a Value> {
     ctx.rule_options(meta.group.as_str(), meta.name)
 }
 
+pub(crate) fn cross_file_for_rule<'a>(
+    config: &'a falcon_config::FalconConfig,
+    path: &str,
+    name: &str,
+) -> Option<&'a Value> {
+    let group = meta_for(name)?.group.as_str();
+    let mut result = config
+        .cross_file
+        .rules
+        .groups
+        .get(group)
+        .and_then(|rules| rules.get(name))
+        .and_then(falcon_config::RuleConfiguration::options);
+    for entry in &config.overrides {
+        if !entry.matches(path) {
+            continue;
+        }
+        if let Some(options) = entry
+            .cross_file
+            .as_ref()
+            .and_then(|section| section.rules.groups.get(group))
+            .and_then(|rules| rules.get(name))
+            .and_then(falcon_config::RuleConfiguration::options)
+        {
+            result = Some(options);
+        }
+    }
+    result
+}
+
 pub(crate) fn usize(options: Option<&Value>, key: &str) -> Option<usize> {
     options?.get(key)?.as_u64().map(|value| value as usize)
 }
@@ -34,6 +64,36 @@ pub(crate) fn strings<'a>(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn cross_file_options_use_the_cross_file_section_and_path_overrides() {
+        let config = serde_json::from_value(json!({
+            "linter": {"rules": {"correctness": {
+                "unused-files": {"level": "warn", "options": {"origin": "linter"}}
+            }}},
+            "cross-file": {"rules": {"correctness": {
+                "unused-files": {"level": "warn", "options": {"origin": "base"}}
+            }}},
+            "overrides": [
+                {"includes": ["lib/**"], "cross-file": {"rules": {"correctness": {
+                    "unused-files": {"level": "warn", "options": {"origin": "override"}}
+                }}}},
+                {"includes": ["lib/**"], "cross-file": {"rules": {"correctness": {
+                    "unused-files": "error"
+                }}}}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            cross_file_for_rule(&config, "test/test.dart", "unused-files"),
+            Some(&json!({"origin": "base"}))
+        );
+        assert_eq!(
+            cross_file_for_rule(&config, "lib/main.dart", "unused-files"),
+            Some(&json!({"origin": "override"}))
+        );
+        assert!(cross_file_for_rule(&config, "lib/main.dart", "unknown-rule").is_none());
+    }
 
     #[test]
     fn usize_preserves_lenient_defaults() {

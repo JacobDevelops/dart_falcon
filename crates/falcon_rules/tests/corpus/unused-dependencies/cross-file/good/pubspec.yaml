@@ -1,0 +1,12 @@
+name: app
+dependencies:
+  from_lib: any
+  from_bin: any
+  from_test: any
+  from_export: any
+  from_conditional: any
+  flutter:
+    sdk: flutter
+  native_plugin: any
+dev_dependencies:
+  not_used: any

@@ -36,9 +36,9 @@ style | suspicious`.
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
 | DCM-inspired | 21 | 132 | 24 | 177 |
-| Cross-file additions | 4 | 4 | 4 | 12 |
+| Cross-file additions | 0 | 4 | 4 | 8 |
 | Additional rules | 4 | 7 | 3 | 14 |
-| **Total** | **29** | **143** | **31** | **203** |
+| **Total** | **25** | **143** | **31** | **199** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
@@ -344,7 +344,7 @@ Additional planned rows cover uncovered disposal cases, accessibility labels and
 
 ---
 
-## Planned cross-file rules (12)
+## Planned cross-file rules (8)
 
 Whole-project / app-wide rules live in the `cross-file` config section.
 The current shipped set is defined by the cross-file entries in `RULE_METADATA`;
@@ -354,16 +354,7 @@ infrastructure: **A** reuses the resolved directive graph / lexical name index;
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four shipped official lints are not counted in the 12 planned additions below.
-
-### 3a. Tier 1: must-have (4)
-
-| rule | falcon group | analysis | difficulty | description |
-|---|---|---|---|---|
-| `unused-dependencies` | correctness | needs-cross-file/project | B | A package in pubspec `dependencies:` that no source file imports via `package:<dep>/…`. |
-| `undeclared-dependencies` | correctness | needs-cross-file/project | B | A `package:<x>/…` import whose `<x>` is neither a declared (dev)dependency nor the package itself. |
-| `no-import-cycles` | correctness | needs-cross-file/project | A | Import/export cycle between library files; report the full cycle chain. |
-| `banned-imports` | correctness | needs-cross-file/project | A | User-configured architecture boundaries: files matching glob X may not import glob Y. |
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `sort-pub-dependencies`, `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, and `banned-imports`. The four shipped official lints are not counted in the 8 planned additions below.
 
 ### 3b. Tier 2: nice-to-have (4)
 

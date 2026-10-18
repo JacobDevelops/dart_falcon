@@ -1,0 +1,5 @@
+name: app
+dependencies:
+  regular: any
+dev_dependencies:
+  dev: any

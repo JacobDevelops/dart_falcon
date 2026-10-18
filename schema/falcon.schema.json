@@ -31,16 +31,28 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "banned-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "depend-on-referenced-packages": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "no-import-cycles": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "sort-pub-dependencies": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "undeclared-dependencies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unused-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-dependencies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unused-files": {
@@ -1254,16 +1266,28 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "banned-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "depend-on-referenced-packages": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "no-import-cycles": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "sort-pub-dependencies": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "undeclared-dependencies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unused-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-dependencies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unused-files": {

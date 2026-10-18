@@ -5182,6 +5182,109 @@
     }
   },
   {
+    "crossFile": true,
+    "description": "Report imports forbidden by package-relative architectural boundaries.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 1,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 2,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 3,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 4,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 41,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 5,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 6,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 7,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 8,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 36,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 10,
+        "message": "Keep domain code independent of platform and data libraries."
+      },
+      {
+        "column": 28,
+        "file": "bad/lib/domain/bad.dart",
+        "line": 11,
+        "message": "Keep domain code independent of platform and data libraries."
+      }
+    ],
+    "docs": "Report imports forbidden by package-relative architectural boundaries.\n\nConfigure `rules: [{files: [\"lib/domain/**\"], deny: [\"package:flutter/**\"],\nmessage: \"Keep domain code independent of Flutter.\"}]` in this rule's options.\nBoth lists are required, nonempty lists of nonempty glob strings; `message`\nis required and nonblank. An invalid entry (including any invalid glob or\nnon-string list member) is ignored, and no configuration means no reports.\nGlobs are case-sensitive, match the entire string, and use `/` separators:\n`*` does not cross directories, while `**` does. Source `files` paths are\nrelative to their nearest enclosing pubspec directory (including `lib/`).\nFiles without an enclosing pubspec are skipped.\n\nEach `deny` pattern matches the decoded import URI, without quotes, and the\nnormalized package-relative target of relative or same-package imports.\nLocal target matching does not require the target to exist. External package\nand SDK imports match only their URI. Primary and all conditional URIs are\nchecked, including inactive alternatives; prefixes, deferred loading and\ncombinators do not exempt an import. Each matching entry reports its custom\nmessage once per URI, even if several of its patterns match. Overlapping\nentries can therefore produce multiple reports. Exports and parts are not\nimports and are deliberately outside this rule's boundary policy.",
+    "domains": [],
+    "examples": {
+      "bad": null,
+      "crossFile": [
+        {
+          "content": "import 'dart:io';\nimport 'package:flutter/material.dart' show Widget;\nimport '../data/repository.dart';\nimport 'package:boundary_app/data/cache.dart';\nimport 'stub.dart' if (dart.library.io) 'dart:io';\nimport 'package:legacy/client.dart' deferred as legacy;\nimport 'package:flutter/src/widgets/framework.dart' as widgets;\nimport '../domain/../data/missing.dart';\nimport 'stub.dart'\n    if (dart.library.io == 'true') 'package:flutter/io.dart'\n    if (dart.library.html) 'package:flutter/web.dart';\n\nvoid main() {}",
+          "path": "bad/lib/domain/bad.dart"
+        },
+        {
+          "content": "name: boundary_app",
+          "path": "bad/pubspec.yaml"
+        },
+        {
+          "content": "import 'dart:async';\nimport 'dart:collection';\nimport 'package:flutterish/material.dart';\nimport '../shared/repository.dart';\nimport 'package:boundary_app/shared/cache.dart';\nimport 'package:legacy/nested/client.dart';\nimport 'stub.dart' if (dart.library.io) 'safe.dart';\nexport 'package:flutter/material.dart';\nexport '../data/repository.dart';\n\nvoid main() {}",
+          "path": "good/lib/domain/good.dart"
+        },
+        {
+          "content": "import 'dart:io';\nimport 'package:flutter/material.dart';\nimport '../data/repository.dart';\nimport 'package:boundary_app/data/cache.dart';\nimport 'package:legacy/client.dart';\n\nvoid main() {}",
+          "path": "good/lib/presentation/good.dart"
+        },
+        {
+          "content": "name: boundary_app",
+          "path": "good/pubspec.yaml"
+        }
+      ],
+      "good": null
+    },
+    "group": "correctness",
+    "name": "banned-imports",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
     "crossFile": false,
     "description": "Cancel instances of `dart:async` `StreamSubscription`.",
     "diagnostics": [
@@ -5880,7 +5983,7 @@
         "message": "The imported package 'not_declared' isn't a dependency of the importing package."
       }
     ],
-    "docs": "Require imported packages to be declared in `pubspec.yaml`.\n\nImports from `lib/` and `bin/` must name a regular dependency. Imports from\ndevelopment-only locations such as `test/` and `tool/` may also name a\ndev-dependency. SDK imports and imports of the package itself are ignored.\nLike the analyzer, only the primary URI is checked, not conditional alternatives.",
+    "docs": "Require imported packages to be declared in `pubspec.yaml`.\n\nImports from `lib/` and `bin/` must name a regular dependency. Imports from\ndevelopment-only locations such as `test/` and `tool/` may also name a\ndev-dependency. SDK imports and imports of the package itself are ignored.\nLike the analyzer, only the primary URI is checked, not conditional alternatives.\nWhen `undeclared-dependencies` is enabled for a file, that rule owns missing\ndeclarations and dev-dependencies imported from `lib/`; this rule only adds\nits stricter executable/build-hook dependency check, avoiding duplicate reports.",
     "domains": [],
     "examples": {
       "bad": null,
@@ -7291,6 +7394,315 @@
     }
   },
   {
+    "crossFile": true,
+    "description": "Report mutually dependent components of imported or exported library files.",
+    "diagnostics": [
+      {
+        "column": 28,
+        "file": "bad_conditional_export/lib/a.dart",
+        "line": 2,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_export/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_export/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_export/lib/a.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 26,
+        "file": "bad_conditional_import/lib/a.dart",
+        "line": 2,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_import/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_import/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_conditional_import/lib/a.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_pair/lib/a.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_pair/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_pair/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_pair/lib/a.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_reachable_subcycle/lib/b.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/c.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/b.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_reachable_subcycle/lib/d.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/d.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/e.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_reachable_subcycle/lib/d.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_self/lib/a.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_self/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_self/lib/a.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_shared_component/lib/a.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_shared_component/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_shared_component/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_shared_component/lib/a.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_triangle/lib/a.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/c.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_triangle/lib/a.dart. Break the cycle by removing a dependency."
+      },
+      {
+        "column": 8,
+        "file": "bad_uri_aliases/lib/a.dart",
+        "line": 1,
+        "message": "Import/export cycle: /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_uri_aliases/lib/a.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_uri_aliases/lib/b.dart -> /Users/jacob/Documents/Developer/dart_falcon/crates/falcon_rules/tests/corpus/no-import-cycles/cross-file/bad_uri_aliases/lib/a.dart. Break the cycle by removing a dependency."
+      }
+    ],
+    "docs": "Report mutually dependent components of imported or exported library files.\n\nCycles couple libraries and make dependency boundaries harder to maintain.\nEach diagnostic includes the complete chain, ending back at its first file.\nImport and export targets include every conditional alternative; `part` and\n`part of` directives are not dependency edges. Only analyzed, resolved files\nparticipate; package URIs without a known package identity are skipped.\nCanonical path aliases and repeated directives share one edge.\nEach mutually dependent component is reported once, including self-imports.\nThe chain is a shortest cycle through its lexicographically first canonical\nfile, not an enumeration of all cycles within that component.\nConfigure this project-wide rule under the `cross-file` section.",
+    "domains": [],
+    "examples": {
+      "bad": null,
+      "crossFile": [
+        {
+          "content": "export 'stub.dart'\n    if (dart.library.html) 'b.dart';",
+          "path": "bad_conditional_export/lib/a.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass BrowserStorage {}",
+          "path": "bad_conditional_export/lib/b.dart"
+        },
+        {
+          "content": "class MemoryStorage {}",
+          "path": "bad_conditional_export/lib/stub.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_conditional_export/pubspec.yaml"
+        },
+        {
+          "content": "import 'stub.dart'\n    if (dart.library.io) 'b.dart';\nclass Storage {}",
+          "path": "bad_conditional_import/lib/a.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass NativeStorage {}",
+          "path": "bad_conditional_import/lib/b.dart"
+        },
+        {
+          "content": "class MemoryStorage {}",
+          "path": "bad_conditional_import/lib/stub.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_conditional_import/pubspec.yaml"
+        },
+        {
+          "content": "import 'b.dart';\nclass AccountRepository {}",
+          "path": "bad_pair/lib/a.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass AccountCache {}",
+          "path": "bad_pair/lib/b.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_pair/pubspec.yaml"
+        },
+        {
+          "content": "import 'b.dart';\nclass Entry {}",
+          "path": "bad_reachable_subcycle/lib/a.dart"
+        },
+        {
+          "content": "import 'c.dart';\nclass Controller {}",
+          "path": "bad_reachable_subcycle/lib/b.dart"
+        },
+        {
+          "content": "import 'b.dart';\nclass State {}",
+          "path": "bad_reachable_subcycle/lib/c.dart"
+        },
+        {
+          "content": "export 'e.dart';",
+          "path": "bad_reachable_subcycle/lib/d.dart"
+        },
+        {
+          "content": "import 'd.dart';\nclass OtherFeature {}",
+          "path": "bad_reachable_subcycle/lib/e.dart"
+        },
+        {
+          "content": "name: cycle_fixture",
+          "path": "bad_reachable_subcycle/pubspec.yaml"
+        },
+        {
+          "content": "import 'a.dart';\nclass Model {}",
+          "path": "bad_self/lib/a.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_self/pubspec.yaml"
+        },
+        {
+          "content": "import 'b.dart';\nimport 'c.dart';\nclass Feature {}",
+          "path": "bad_shared_component/lib/a.dart"
+        },
+        {
+          "content": "import 'a.dart';\nimport 'c.dart';\nclass Controller {}",
+          "path": "bad_shared_component/lib/b.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass State {}",
+          "path": "bad_shared_component/lib/c.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_shared_component/pubspec.yaml"
+        },
+        {
+          "content": "export 'b.dart';",
+          "path": "bad_triangle/lib/a.dart"
+        },
+        {
+          "content": "import 'c.dart';\nclass Repository {}",
+          "path": "bad_triangle/lib/b.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass Service {}",
+          "path": "bad_triangle/lib/c.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_triangle/pubspec.yaml"
+        },
+        {
+          "content": "import 'b.dart';\nexport './b.dart';\nimport 'package:cycle_fixture/b.dart' as models;\nclass Repository {}",
+          "path": "bad_uri_aliases/lib/a.dart"
+        },
+        {
+          "content": "import './a.dart';\nclass Model {}",
+          "path": "bad_uri_aliases/lib/b.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "bad_uri_aliases/pubspec.yaml"
+        },
+        {
+          "content": "export 'src/model.dart';\nexport 'src/repository.dart';",
+          "path": "good_barrel/lib/a.dart"
+        },
+        {
+          "content": "class Model {}",
+          "path": "good_barrel/lib/src/model.dart"
+        },
+        {
+          "content": "import 'model.dart';\nclass Repository {}",
+          "path": "good_barrel/lib/src/repository.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "good_barrel/pubspec.yaml"
+        },
+        {
+          "content": "import 'b.dart';\nclass Screen {}",
+          "path": "good_chain/lib/a.dart"
+        },
+        {
+          "content": "import 'c.dart';\nclass Controller {}",
+          "path": "good_chain/lib/b.dart"
+        },
+        {
+          "content": "class State {}",
+          "path": "good_chain/lib/c.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "good_chain/pubspec.yaml"
+        },
+        {
+          "content": "export 'stub.dart' if (dart.library.io) 'native.dart';",
+          "path": "good_conditional/lib/a.dart"
+        },
+        {
+          "content": "class Model {}",
+          "path": "good_conditional/lib/model.dart"
+        },
+        {
+          "content": "import 'model.dart';\nclass Storage {}",
+          "path": "good_conditional/lib/native.dart"
+        },
+        {
+          "content": "class Storage {}",
+          "path": "good_conditional/lib/stub.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "good_conditional/pubspec.yaml"
+        },
+        {
+          "content": "export 'b.dart';\nexport 'c.dart';",
+          "path": "good_diamond/lib/a.dart"
+        },
+        {
+          "content": "import 'd.dart';\nclass Repository {}",
+          "path": "good_diamond/lib/b.dart"
+        },
+        {
+          "content": "import 'd.dart';\nclass Cache {}",
+          "path": "good_diamond/lib/c.dart"
+        },
+        {
+          "content": "class Model {}",
+          "path": "good_diamond/lib/d.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "good_diamond/pubspec.yaml"
+        },
+        {
+          "content": "import 'package:another_package/a.dart';\nimport 'dart:async';\nclass Adapter {}",
+          "path": "good_external_package/lib/a.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "good_external_package/pubspec.yaml"
+        },
+        {
+          "content": "part 'b.dart';\nclass Feature {}",
+          "path": "good_part_reverse_import/lib/a.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass GeneratedAdapter {}",
+          "path": "good_part_reverse_import/lib/b.dart"
+        },
+        {
+          "content": "name: cycle_fixture",
+          "path": "good_part_reverse_import/pubspec.yaml"
+        },
+        {
+          "content": "library feature;\npart 'b.dart';\nclass Feature {}",
+          "path": "good_parts/lib/a.dart"
+        },
+        {
+          "content": "part of 'a.dart';\nclass FeatureState {}",
+          "path": "good_parts/lib/b.dart"
+        },
+        {
+          "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\"",
+          "path": "good_parts/pubspec.yaml"
+        },
+        {
+          "content": "import 'package:http/http.dart';\nclass HttpAdapter {}",
+          "path": "good_unknown_package_suffix/lib/a.dart"
+        },
+        {
+          "content": "import 'a.dart';\nclass LocalTransport {}",
+          "path": "good_unknown_package_suffix/lib/http.dart"
+        }
+      ],
+      "good": null
+    },
+    "group": "correctness",
+    "name": "no-import-cycles",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
     "crossFile": false,
     "description": "Require `StatefulWidget.createState` to return only a fresh zero-argument Flutter `State` construction.",
     "diagnostics": [
@@ -8431,6 +8843,95 @@
     }
   },
   {
+    "crossFile": true,
+    "description": "Report package imports and exports missing from the enclosing pubspec.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": "bad/lib/app.dart",
+        "line": 1,
+        "message": "Declare 'missing_0' in pubspec dependencies before importing it."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/app.dart",
+        "line": 2,
+        "message": "Declare 'missing_1' in pubspec dependencies before importing it."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/app.dart",
+        "line": 3,
+        "message": "Declare 'missing_2' in pubspec dependencies before importing it."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/app.dart",
+        "line": 4,
+        "message": "Declare 'missing_3' in pubspec dependencies before importing it."
+      },
+      {
+        "column": 8,
+        "file": "bad/lib/app.dart",
+        "line": 5,
+        "message": "Declare 'test_helpers' in pubspec dependencies before importing it."
+      },
+      {
+        "column": 42,
+        "file": "bad/lib/app.dart",
+        "line": 6,
+        "message": "Declare 'conditional' in pubspec dependencies before importing it."
+      },
+      {
+        "column": 44,
+        "file": "bad/lib/app.dart",
+        "line": 7,
+        "message": "Declare 'conditional_export' in pubspec dependencies before importing it."
+      }
+    ],
+    "docs": "Report package imports and exports missing from the enclosing pubspec.\n\nRegular dependencies and self-imports are allowed everywhere; dev-dependencies\nare allowed only outside `lib/`. Generated `flutter_gen` imports are exempt.\nMalformed manifests are skipped; conditional alternatives are checked too.\n`depend-on-referenced-packages` defers overlapping reports when this rule is\nenabled, but retains its stricter bin/build-hook checks.",
+    "domains": [],
+    "examples": {
+      "bad": null,
+      "crossFile": [
+        {
+          "content": "import 'package:missing_0/api.dart';\nimport 'package:missing_1/api.dart';\nimport 'package:missing_2/api.dart';\nimport 'package:missing_3/api.dart';\nexport 'package:test_helpers/api.dart';\nimport 'local.dart' if (dart.library.io) 'package:conditional/api.dart';\nexport 'local.dart' if (dart.library.html) 'package:conditional_export/api.dart';",
+          "path": "bad/lib/app.dart"
+        },
+        {
+          "content": "name: app\ndev_dependencies:\n  test_helpers: any",
+          "path": "bad/pubspec.yaml"
+        },
+        {
+          "content": "import 'package:dev/api.dart';\nvoid main() {}",
+          "path": "good/bin/main.dart"
+        },
+        {
+          "content": "import 'package:app/self.dart';\nimport 'package:regular/api.dart';\nimport 'dart:io';\nimport 'local.dart';\nimport 'package:flutter_gen/generated.dart';",
+          "path": "good/lib/app.dart"
+        },
+        {
+          "content": "name: app\ndependencies:\n  regular: any\ndev_dependencies:\n  dev: any",
+          "path": "good/pubspec.yaml"
+        },
+        {
+          "content": "import 'package:dev/api.dart';",
+          "path": "good/test/app_test.dart"
+        }
+      ],
+      "good": null
+    },
+    "group": "correctness",
+    "name": "undeclared-dependencies",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
     "crossFile": false,
     "description": "Disallow unused Flutter framework and `dart:async` imports.",
     "diagnostics": [
@@ -9023,6 +9524,83 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "check-unused-code",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": true,
+    "description": "Report regular pubspec dependencies with no Dart import or export in the analyzed package.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": "bad/pubspec.yaml",
+        "line": 3,
+        "message": "No analyzed Dart source uses 'unused_0'; remove the dependency if it is not used natively or by build tools."
+      },
+      {
+        "column": 3,
+        "file": "bad/pubspec.yaml",
+        "line": 4,
+        "message": "No analyzed Dart source uses 'unused_1'; remove the dependency if it is not used natively or by build tools."
+      },
+      {
+        "column": 3,
+        "file": "bad/pubspec.yaml",
+        "line": 5,
+        "message": "No analyzed Dart source uses 'unused_2'; remove the dependency if it is not used natively or by build tools."
+      },
+      {
+        "column": 3,
+        "file": "bad/pubspec.yaml",
+        "line": 6,
+        "message": "No analyzed Dart source uses 'unused_3'; remove the dependency if it is not used natively or by build tools."
+      },
+      {
+        "column": 3,
+        "file": "bad/pubspec.yaml",
+        "line": 7,
+        "message": "No analyzed Dart source uses 'unused_4'; remove the dependency if it is not used natively or by build tools."
+      }
+    ],
+    "docs": "Report regular pubspec dependencies with no Dart import or export in the analyzed package.\n\nAll analyzed Dart locations count, including bin, test, tool and examples, as\ndo conditional import/export alternatives. Dev-dependencies, SDK dependencies\nand plugins registered in `.flutter-plugins-dependencies` are exempt: native\nregistration can use a plugin without a Dart import. Declared dependencies\nwhose resolved pubspec declares Flutter fonts, assets or plugin metadata are\nalso exempt, since Flutter can consume them without a Dart import. Resolution\nuses the nearest `.dart_tool/package_config.json`; missing or unreadable\ndependency metadata cannot establish this exemption. Nested packages are\nindependent. This is a source-set check, not a pub solver: excluded/unscanned\nfiles, build-time tools and native-only packages without Flutter metadata\ncannot establish usage. Suppress intentional non-Dart dependencies in pubspec.",
+    "domains": [],
+    "examples": {
+      "bad": null,
+      "crossFile": [
+        {
+          "content": "void main() {}",
+          "path": "bad/lib/app.dart"
+        },
+        {
+          "content": "name: app\ndependencies:\n  unused_0: any #\n  unused_1: any #\n  unused_2: any #\n  unused_3: any #\n  unused_4: any #",
+          "path": "bad/pubspec.yaml"
+        },
+        {
+          "content": "import 'package:from_bin/api.dart';\nvoid main() {}",
+          "path": "good/bin/main.dart"
+        },
+        {
+          "content": "import 'package:from_lib/api.dart';\nexport 'package:from_export/api.dart';\nimport 'fallback.dart' if (dart.library.io) 'package:from_conditional/api.dart';",
+          "path": "good/lib/app.dart"
+        },
+        {
+          "content": "name: app\ndependencies:\n  from_lib: any\n  from_bin: any\n  from_test: any\n  from_export: any\n  from_conditional: any\n  flutter:\n    sdk: flutter\n  native_plugin: any\ndev_dependencies:\n  not_used: any",
+          "path": "good/pubspec.yaml"
+        },
+        {
+          "content": "import 'package:from_test/api.dart';",
+          "path": "good/test/app_test.dart"
+        }
+      ],
+      "good": null
+    },
+    "group": "correctness",
+    "name": "unused-dependencies",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
