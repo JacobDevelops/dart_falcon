@@ -239,6 +239,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "add-equatable-props": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "always-remove-listener": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -260,6 +263,9 @@
                 "avoid-duplicate-switch-case-conditions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-test-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -276,6 +282,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-mutable-equatable-subclass-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-global-variables": {
@@ -374,7 +383,13 @@
                 "library-private-types-in-public-api": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "list-all-equatable-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "literal-only-boolean-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "missing-test-assertion": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-adjacent-strings-in-list": {
@@ -1525,6 +1540,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "add-equatable-props": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "always-remove-listener": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1546,6 +1564,9 @@
                 "avoid-duplicate-switch-case-conditions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-test-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1562,6 +1583,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-mutable-equatable-subclass-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-global-variables": {
@@ -1660,7 +1684,13 @@
                 "library-private-types-in-public-api": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "list-all-equatable-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "literal-only-boolean-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "missing-test-assertion": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-adjacent-strings-in-list": {

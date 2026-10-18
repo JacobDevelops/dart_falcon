@@ -1,0 +1,20 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "equatable_fixture",
+      "rootUri": "../",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "equatable",
+      "rootUri": "../packages/equatable",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "entity_base",
+      "rootUri": "../packages/entity_base",
+      "packageUri": "lib/"
+    }
+  ]
+}

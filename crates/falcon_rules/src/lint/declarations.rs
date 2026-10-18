@@ -79,6 +79,13 @@ pub(crate) fn has_meta_annotation<'a>(
     })
 }
 
+/// Whether the filename follows the Dart test runner's discovery convention.
+pub(crate) fn has_test_file_suffix(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("_test.dart"))
+}
+
 /// Whether a file is in one of the analyzer's package-root test directories.
 pub(crate) fn in_test_directory(path: &std::path::Path) -> bool {
     let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {

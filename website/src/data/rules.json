@@ -2935,6 +2935,66 @@
   },
   {
     "crossFile": false,
+    "description": "Flags concrete Equatable subclasses that do not declare an instance props property.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "This Equatable subclass is missing a 'props' getter. Override it to define equality."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "This Equatable subclass is missing a 'props' getter. Override it to define equality."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "This Equatable subclass is missing a 'props' getter. Override it to define equality."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "This Equatable subclass is missing a 'props' getter. Override it to define equality."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "This Equatable subclass is missing a 'props' getter. Override it to define equality."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "This Equatable subclass is missing a 'props' getter. Override it to define equality."
+      }
+    ],
+    "docs": "Flags concrete Equatable subclasses that do not declare an instance props property.\n\nA concrete subclass must explicitly define which values participate in equality, even\nwhen a parent already supplies props. An instance getter, field or declaring constructor\nparameter named props satisfies the rule. Abstract/sealed bases are exempt. Only resolved\ntransitive package:equatable subtypes inheriting Equatable's concrete equality are checked;\ninterface-only implementations, classes replacing equality, unrelated same-named types\nand unknown types are ignored.",
+    "domains": [
+      "equatable"
+    ],
+    "examples": {
+      "bad": "import 'support.dart' as fixtures;\nimport 'support.dart';\nclass Direct extends Parent {}\nclass MixedValue extends Mixed {}\nclass Indirect extends Parent { final int child = 1; }\nclass Transitive extends Middle { final int child = 1; }\nclass PrefixedChild extends fixtures.Parent { final int value = 1; }\nclass MixedChild extends Mixed { final int first = 1; final int second = 2; }",
+      "crossFile": null,
+      "good": "import 'package:equatable/equatable.dart';\nimport 'package:equatable/equatable.dart' as eq;\nimport 'support.dart';\nclass Direct extends Equatable { List<Object?> get props => []; }\nclass MixedValue with EquatableMixin { List<Object?> get props => []; }\nclass Indirect extends Parent { List<Object?> get props => super.props; }\nclass Transitive extends Middle { List<Object?> get props => []; }\nclass Prefixed extends eq.Equatable { List<Object?> get props => []; }\nclass MixedChild extends Mixed { List<Object?> get props { return []; } }\nclass Unrelated { final int value = 1; }"
+    },
+    "group": "correctness",
+    "name": "add-equatable-props",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires Flutter Listenable registrations in State to be removed.",
     "diagnostics": [
       {
@@ -3410,6 +3470,29 @@
     },
     "group": "correctness",
     "name": "avoid-duplicate-switch-case-conditions",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports repeated identical, side-effect-free assertions in a straight-line block.",
+    "diagnostics": [],
+    "docs": "Reports repeated identical, side-effect-free assertions in a straight-line block.\n\nOnly `_test.dart` files importing `test` or `flutter_test` are inspected.\nCalls must resolve to the test framework or matcher package. Comparisons use\nthe actual and matcher source spelling. Literal/local actual values, standard\nmatcher constants and simple framework matcher factories are eligible.\nUnknown local matcher objects and asynchronous local actuals are excluded.\nIntervening non-assertion statements, branches, effectful arguments, awaited\ncalls, and chained calls end the comparison run.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvoid example() { expect(1, 1); expect(1, 1); }",
+      "crossFile": null,
+      "good": "void expect(Object? a, Object? b) {}\nvoid example() { expect(1, 1); expect(1, 1); }"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-test-assertions",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -3914,6 +3997,60 @@
     },
     "group": "correctness",
     "name": "avoid-missing-interpolation",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags mutable instance fields on subclasses inheriting Equatable equality.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 16,
+        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 20,
+        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final."
+      }
+    ],
+    "docs": "Flags mutable instance fields on subclasses inheriting Equatable equality.\n\nChanging value-object state can invalidate hash-based collection membership. This checks\ndeclared fields, including private, late and primary-constructor fields, only when the\nresolved inherited equality implementation belongs to package:equatable Equatable or\nEquatableMixin. Static, final, abstract and external fields, interface-only implementations,\nunresolved inheritance and classes replacing equality themselves are excluded.",
+    "domains": [
+      "equatable"
+    ],
+    "examples": {
+      "bad": "import 'package:equatable/equatable.dart';\nimport 'package:equatable/equatable.dart' as eq;\nimport 'support.dart';\nclass Direct extends Equatable {\n  int value = 1;\n  List<Object?> get props => [value];\n}\nclass MixedValue with EquatableMixin {\n  int value = 1;\n  List<Object?> get props => [value];\n}\nclass Indirect extends Middle {\n  int child = 1;\n}\nclass Prefixed extends eq.Equatable {\n  late int value;\n  List<Object?> get props => [value];\n}\nclass Private extends Mixed {\n  int _value = 1;\n}",
+      "crossFile": null,
+      "good": "import 'package:equatable/equatable.dart';\nimport 'support.dart';\nclass Immutable extends Equatable {\n  final int value = 1;\n  List<Object?> get props => [value];\n}\nclass Static extends Parent { static int value = 1; }\nclass LateFinal extends Middle { late final int value; }\nclass Constants extends Mixed { static const int value = 1; }\nclass GetterOnly extends Parent { int get value => 1; }\nclass OwnEquality extends Parent {\n  int value = 1;\n  bool operator ==(Object other) => identical(this, other);\n  int get hashCode => 0;\n}\nclass Unrelated { int value = 1; }\nclass InterfaceOnly implements Equatable {\n  int value = 1;\n  List<Object?> get props => [value];\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-mutable-equatable-subclass-fields",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -6866,6 +7003,66 @@
   },
   {
     "crossFile": false,
+    "description": "Flags declared instance fields omitted from a statically understood Equatable props list.",
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": null,
+        "line": 6,
+        "message": "The 'props' list omits declared instance fields. Add every field to the list."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 10,
+        "message": "The 'props' list omits declared instance fields. Add every field to the list."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 14,
+        "message": "The 'props' list omits declared instance fields. Add every field to the list."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 18,
+        "message": "The 'props' list omits declared instance fields. Add every field to the list."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 22,
+        "message": "The 'props' list omits declared instance fields. Add every field to the list."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 26,
+        "message": "The 'props' list omits declared instance fields. Add every field to the list."
+      }
+    ],
+    "docs": "Flags declared instance fields omitted from a statically understood Equatable props list.\n\nOnly resolved transitive package:equatable Equatable/EquatableMixin subtypes inheriting\nEquatable's concrete equality are checked; classes replacing equality are excluded.\nInstance storage includes private and\nprimary-constructor fields, but not static, abstract or external fields or computed\ngetters. Arrow getters and single-return blocks with literal lists are supported,\nincluding this.field, super.props spreads and cascaded addAll calls with known lists.\nUnknown expressions, collection control flow, and unknown spreads are left silent.",
+    "domains": [
+      "equatable"
+    ],
+    "examples": {
+      "bad": "import 'package:equatable/equatable.dart';\nimport 'package:equatable/equatable.dart' as eq;\nimport 'support.dart';\nclass Direct extends Equatable {\n  final int value = 1;\n  List<Object?> get props => [];\n}\nclass MixedValue with EquatableMixin {\n  final int value = 1;\n  List<Object?> get props => [];\n}\nclass Indirect extends Middle {\n  final int child = 1;\n  List<Object?> get props => [...super.props];\n}\nclass Prefixed extends eq.Equatable {\n  final int x = 1, y = 2;\n  List<Object?> get props => [x];\n}\nclass Private extends Mixed {\n  final int _value = 1;\n  List<Object?> get props { return []; }\n}\nclass Cascaded extends Parent {\n  final int value = 1;\n  List<Object?> get props => super.props..addAll([]);\n}",
+      "crossFile": null,
+      "good": "import 'package:equatable/equatable.dart';\nimport 'support.dart';\nclass Complete extends Equatable {\n  final int value = 1;\n  List<Object?> get props => [value];\n}\nclass ExplicitThis with EquatableMixin {\n  final int value = 1;\n  List<Object?> get props { return [this.value]; }\n}\nclass StaticOnly extends Parent {\n  static int ignored = 1;\n  int get computed => 2;\n  List<Object?> get props => [...super.props];\n}\nclass UnknownCall extends Parent {\n  final int value = 1;\n  List<Object?> values() => [value];\n  List<Object?> get props => values();\n}\nclass UnknownSpread extends Parent {\n  final int value = 1;\n  List<Object?> values() => [value];\n  List<Object?> get props => [...values()];\n}\nclass Conditional extends Parent {\n  final int value = 1;\n  List<Object?> get props => [if (true) value];\n}\nclass CompleteChild extends Middle {\n  final int child = 1;\n  List<Object?> get props => [...super.props, child];\n}\nclass Unrelated {\n  final int value = 1;\n  List<Object?> get props => [];\n}\nclass Cascaded extends Parent {\n  final int value = 1;\n  List<Object?> get props => super.props..addAll([value]);\n}\nclass UnknownCascade extends Parent {\n  final int value = 1;\n  List<Object?> values() => [value];\n  List<Object?> get props => super.props..addAll(values());\n}"
+    },
+    "group": "correctness",
+    "name": "list-all-equatable-fields",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags conditions built only from literals, whose value never changes.",
     "diagnostics": [
       {
@@ -6968,6 +7165,29 @@
       "label": "Dart lints",
       "upstreamId": "literal_only_boolean_expressions",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/literal_only_boolean_expressions"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports inline test callbacks that contain no recognized assertion calls.",
+    "diagnostics": [],
+    "docs": "Reports inline test callbacks that contain no recognized assertion calls.\n\nOnly `_test.dart` files importing `test` or `flutter_test` are inspected,\nand `test`/`testWidgets` must resolve to a framework package. Assertions\ninclude framework expectations, asynchronous expectation wrappers, `fail`,\nand mockito/mocktail verification calls. Assertions in unused local closures\nor functions and nested tests do not satisfy the enclosing test.\n\n## Options\n\n`include-assertions` is a list of additional assertion function names. These\nnames explicitly trust project helpers, including local functions; prefixed\nnames can be supplied as written at their call sites.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvoid main() { test('not a test filename', () {}); }",
+      "crossFile": null,
+      "good": "void test(String name, Function body) {}\nvoid main() { test('not a package test', () {}); }"
+    },
+    "group": "correctness",
+    "name": "missing-test-assertion",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

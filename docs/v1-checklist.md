@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 25 | 132 | 24 | 181 |
+| DCM-inspired | 21 | 132 | 24 | 177 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 5 | 7 | 3 | 15 |
-| **Total** | **34** | **143** | **31** | **208** |
+| Additional rules | 4 | 7 | 3 | 14 |
+| **Total** | **29** | **143** | **31** | **203** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (181)
+## Planned DCM-inspired rules (177)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -220,12 +220,10 @@ not re-added.
 
 ### 2h. test domain (new)
 
-Activated for `*_test.dart`. Falcon ships none of these today.
+Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-duplicate-test-assertions` | correctness | S | paid | Same assertion repeated in a test. | must-have |
-| `missing-test-assertion` | correctness | LT | paid | Test body with no expect/verify. | must-have |
 | `avoid-empty-test-groups` | correctness | S | paid | `group()` with no tests. | nice-to-have |
 | `prefer-unique-test-names` | suspicious | S | paid | Duplicate test descriptions. | nice-to-have |
 | `prefer-correct-test-file-name` | style | X | paid | Test file naming convention. | nice-to-have |
@@ -315,10 +313,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `list-all-equatable-fields` | correctness | FT | paid | Field missing from Equatable props. | must-have |
-| `add-equatable-props` | correctness | FT | paid | Equatable subclass missing a props override. | must-have |
 | `extend-equatable` | style | LT | paid | Value class should extend Equatable; a library preference, not a correctness improvement. | nice-to-have |
-| `avoid-mutable-equatable-subclass-fields` | correctness | FT | n/a | Mutable fields on subclasses inheriting Equatable equality can invalidate equality/hash behavior. | must-have |
 | `prefer-equatable-mixin` | style | LT | paid | Use EquatableMixin where appropriate. | nice-to-have |
 
 ### Deduplication notes

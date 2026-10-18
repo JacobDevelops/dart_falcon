@@ -1,0 +1,4 @@
+name: entity_base
+dependencies:
+  equatable:
+    path: ../equatable

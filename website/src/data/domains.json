@@ -58,7 +58,10 @@
   },
   {
     "name": "test",
-    "rules": []
+    "rules": [
+      "avoid-duplicate-test-assertions",
+      "missing-test-assertion"
+    ]
   },
   {
     "name": "bloc",
@@ -78,6 +81,10 @@
   },
   {
     "name": "equatable",
-    "rules": []
+    "rules": [
+      "add-equatable-props",
+      "avoid-mutable-equatable-subclass-fields",
+      "list-all-equatable-fields"
+    ]
   }
 ]

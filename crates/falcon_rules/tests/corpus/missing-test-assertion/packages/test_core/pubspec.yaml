@@ -1,0 +1,3 @@
+name: test_core
+environment:
+  sdk: ^3.9.0

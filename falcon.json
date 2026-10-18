@@ -125,7 +125,12 @@
         "dispose-fields": "warn",
         "always-remove-listener": "warn",
         "avoid-recursive-widget-calls": "warn",
-        "avoid-unnecessary-stateful-widgets": "warn"
+        "avoid-unnecessary-stateful-widgets": "warn",
+        "avoid-duplicate-test-assertions": "warn",
+        "missing-test-assertion": "warn",
+        "list-all-equatable-fields": "warn",
+        "add-equatable-props": "warn",
+        "avoid-mutable-equatable-subclass-fields": "warn"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",
