@@ -1501,6 +1501,8 @@ fn switch_guard_arrow_lookahead_respects_nested_delimiters() {
         "items?[0] == (() => true)()",
         "flag ? true : (other)",
         "switch (x) { _ when (flag) => true, _ => false }",
+        "x is Map<String, int> && (flag)",
+        "f<int, String>(x) && (flag)",
     ] {
         let source = format!("main() {{ x switch {{ _ when {guard} => 1, _ => 0 }}; }}");
         let parsed = parse(&source);

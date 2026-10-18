@@ -112,12 +112,19 @@ impl<'src> Parser<'src> {
 
     fn switch_guard_arrow(&self) -> Option<usize> {
         let mut depth = 0usize;
-        for (offset, token) in self.tokens.iter_from(self.pos)?.enumerate() {
-            match token.kind {
-                TokenKind::Arrow if depth == 0 => return Some(self.pos + offset),
+        let mut i = self.pos;
+        loop {
+            match self.tokens.get(i)?.kind {
+                TokenKind::Arrow if depth == 0 => return Some(i),
                 TokenKind::Eof => return None,
                 TokenKind::Comma | TokenKind::RBrace | TokenKind::Semicolon if depth == 0 => {
                     return None;
+                }
+                TokenKind::Lt => {
+                    if let Some(end) = self.after_generic_type_args(i) {
+                        i = end;
+                        continue;
+                    }
                 }
                 TokenKind::LParen
                 | TokenKind::LBracket
@@ -128,8 +135,8 @@ impl<'src> Parser<'src> {
                 }
                 _ => {}
             }
+            i += 1;
         }
-        None
     }
 
     fn parse_typed_collection(&mut self, marker: Marker) -> CompletedMarker {
@@ -300,14 +307,14 @@ impl<'src> Parser<'src> {
         marker.complete(self, NodeKind::BinaryExpr)
     }
 
-    /// Scan a balanced `<...>` starting at the cursor (which must be `<`),
+    /// Scan a balanced `<...>` starting at `start` (which must be `<`),
     /// returning the token index immediately *after* the closing `>` when the
     /// span contains only type-ish tokens, or `None` when some token means the
     /// `<` is really a comparison operator. Shared by generic-invocation and
     /// generic-instantiation detection.
-    fn after_generic_type_args(&self) -> Option<usize> {
+    fn after_generic_type_args(&self, start: usize) -> Option<usize> {
         use TokenKind::*;
-        debug_assert_eq!(self.cur().kind, Lt);
+        debug_assert_eq!(self.kind_at(start), Lt);
         let mut depth = 0i32;
         // Angle depth captured at each open `(`/`[`/`{`. Records and function types
         // nest inside type arguments (`Foo<(int, Bar<T>)>`, `Foo<int Function()>`),
@@ -315,7 +322,7 @@ impl<'src> Parser<'src> {
         // angle opened *outside* the current bracket group. That would be an
         // expression `>`/shift (`a < b ? (d >> e) : 0`), not a type-arg close.
         let mut bracket_stack: Vec<i32> = Vec::new();
-        let mut i = self.pos;
+        let mut i = start;
         while let Some(tok) = self.tokens.get(i) {
             match &tok.kind {
                 Lt => depth += 1,
@@ -354,7 +361,7 @@ impl<'src> Parser<'src> {
                 _ => return None,
             }
             i += 1;
-            if i - self.pos > 512 {
+            if i - start > 512 {
                 return None;
             }
         }
@@ -365,7 +372,7 @@ impl<'src> Parser<'src> {
     /// list — a balanced `<...>` closed immediately before `(`, `.`, or `?.`.
     /// Distinguishes `f<T>()` from the comparison in `a < b ? () => c() : null`.
     fn is_generic_invocation(&self) -> bool {
-        self.after_generic_type_args()
+        self.after_generic_type_args(self.pos)
             .is_some_and(|idx| self.after_type_args_is_call(idx))
     }
 
@@ -374,7 +381,7 @@ impl<'src> Parser<'src> {
     /// token, whose following token cannot continue a `<` comparison (Dart's own
     /// disambiguation rule, per the constructor-tearoffs spec).
     fn is_generic_instantiation(&self) -> bool {
-        match self.after_generic_type_args() {
+        match self.after_generic_type_args(self.pos) {
             Some(idx) if !self.after_type_args_is_call(idx) => {
                 self.token_ends_generic_instantiation(idx)
             }
