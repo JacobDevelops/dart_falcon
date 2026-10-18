@@ -1,0 +1,19 @@
+{
+  "linter": {
+    "rules": {
+      "performance": {
+        "move-variable-closer-to-its-usage": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/bad_after_if.dart", "**/good_after_if.dart"],
+      "linter": {"rules": {"performance": {"move-variable-closer-to-its-usage": {"level": "warn", "options": {"ignore_after_if": false}}}}}
+    },
+    {
+      "includes": ["**/good_ignore_const.dart"],
+      "linter": {"rules": {"performance": {"move-variable-closer-to-its-usage": {"level": "warn", "options": {"ignore_const": true}}}}}
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-named-parameters": {
+          "level": "warn",
+          "options": { "max_number": 2 }
+        }
+      }
+    }
+  }
+}

@@ -3269,6 +3269,97 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Falcon,
     ),
+    RuleMeta::resolved::<lint::performance::avoid_unnecessary_collections::AvoidUnnecessaryCollections>(
+        "avoid-unnecessary-collections",
+        RuleGroup::Performance,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::move_variable_closer_to_its_usage::MoveVariableCloserToItsUsage>(
+        "move-variable-closer-to-its-usage",
+        RuleGroup::Performance,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::avoid_unnecessary_futures::AvoidUnnecessaryFutures>(
+        "avoid-unnecessary-futures",
+        RuleGroup::Performance,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::prefer_return_await::PreferReturnAwait>(
+        "prefer-return-await",
+        RuleGroup::Performance,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_any_or_every::PreferAnyOrEvery>(
+        "prefer-any-or-every",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_match_file_name::PreferMatchFileName>(
+        "prefer-match-file-name",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_commenting_analyzer_ignores::PreferCommentingAnalyzerIgnores>(
+        "prefer-commenting-analyzer-ignores",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_named_parameters::PreferNamedParameters>(
+        "prefer-named-parameters",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_getter_over_method::PreferGetterOverMethod>(
+        "prefer-getter-over-method",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_type_over_var::PreferTypeOverVar>(
+        "prefer-type-over-var",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_correct_error_name::PreferCorrectErrorName>(
+        "prefer-correct-error-name",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_correct_handler_name::PreferCorrectHandlerName>(
+        "prefer-correct-handler-name",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_correct_callback_field_name::PreferCorrectCallbackFieldName>(
+        "prefer-correct-callback-field-name",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
 ];
 
 /// Legacy rule ids mapped to their canonical id. Covers the pre-1.0
@@ -3277,6 +3368,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
 /// rule). Keeps old `falcon.json` rule keys and old `// falcon-ignore
 /// lint/<group>/<id>` suppression paths resolving after the id normalization.
 pub const RULE_ALIASES: &[(&str, &str)] = &[
+    ("prefer-boolean-prefixes", "boolean-prefixes"),
     // ── snake_case → kebab-case renames ──
     (
         "avoid_inverted_boolean_expressions",

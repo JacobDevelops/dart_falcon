@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 of 500 shipped
+If no config is found, falcon enables its own recommended set: 215 of 513 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -266,6 +266,32 @@ patterns select nothing. For example:
 | | `max_length` | `300` | Flag identifiers longer than this. |
 | | `exceptions` | `[]` | Names always allowed regardless of length (there is no built-in list). |
 | `boolean-prefixes` (`style`) | `valid_prefixes` | `["is","are","was","were","has","have","had","can","should","will","do","does","did"]` | Accepted boolean-name prefixes (dart-pyramid-lint defaults). User entries **extend** the defaults. Only variable/field declarations with a boolean-*literal* initializer, and bool-returning methods/getters/functions, are checked; parameters and uninitialized fields are not. Names are matched with a single leading underscore stripped, and `@override` methods are exempt. |
+| `prefer-correct-error-name` (`style`) | `allowed_names` | unset | Accepted exception parameter names in catch clauses and resolved SDK Future/Stream error callbacks. Inactive until a nonempty list is configured. |
+| | `ignored_names` | `[]` | Additional error parameter names to ignore. |
+| `prefer-correct-handler-name` (`style`) | `name_pattern` | unset | Regular expression required for callback handler method names, ignoring a privacy underscore. Inactive until a valid nonempty pattern is configured; inherited contracts and annotated methods are excluded. |
+| | `ignore_public` | `false` | Exclude public handler methods. |
+| `prefer-correct-callback-field-name` (`style`) | `name_pattern` | unset | Regular expression identifying callback fields. Function fields must match and non-function fields must not match. Inactive until a valid nonempty pattern is configured; `_` is ignored. |
+
+### `prefer-named-parameters` (`style`)
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `max_number` | `1` | Maximum positional parameters before named parameters are preferred. Inherited method contracts, extension types, closures, setters and operators are excluded. |
+
+The `prefer-boolean-prefixes` rule id is an alias for `boolean-prefixes` and uses the same options and declaration scope.
+
+### `prefer-commenting-analyzer-ignores` (`style`)
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `ignore_global` | `true` | Exclude `ignore_for_file:` directives. Set to `false` to require explanations for both file-wide and line-specific analyzer ignores. |
+
+### `move-variable-closer-to-its-usage` (`performance`)
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `ignore_const` | `false` | Exclude const declarations. Only immutable scalar-literal declarations are considered. |
+| `ignore_after_if` | `true` | Skip declarations used only after an intervening if statement. Set to `false` to recommend moving these declarations as well as declarations used in one branch. |
 
 ### `prefer-moving-to-variable` (`complexity`)
 

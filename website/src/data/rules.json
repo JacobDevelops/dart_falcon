@@ -16148,6 +16148,82 @@
   },
   {
     "crossFile": false,
+    "description": "Avoid singleton collection literals where SDK APIs accept a single value.",
+    "diagnostics": [
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "This singleton collection is unnecessary. Use add with its single element instead."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 6,
+        "message": "This singleton collection is unnecessary. Use add with its single element instead."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 7,
+        "message": "This singleton collection is unnecessary. Use add with its single element instead."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 8,
+        "message": "This singleton collection is unnecessary. Use add with its single element instead."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 9,
+        "message": "This singleton collection is unnecessary. Use contains with its single element instead."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 12,
+        "message": "This singleton collection is unnecessary. Use await the single Future directly with its single element instead."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 13,
+        "message": "This singleton collection is unnecessary. Use await the single Future directly with its single element instead."
+      },
+      {
+        "column": 65,
+        "file": null,
+        "line": 15,
+        "message": "This singleton collection is unnecessary. Use Stream.fromFuture with its single element instead."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 16,
+        "message": "This singleton collection is unnecessary. Use Stream.value with its single element instead."
+      }
+    ],
+    "docs": "Avoid singleton collection literals where SDK APIs accept a single value.\n\nOnly plain singleton lists/sets and semantically resolved SDK receivers are\nchecked. Collection control flow, spreads, maps, dynamic/custom APIs and named\narguments are excluded. Future.wait is checked only for a discarded awaited\nresult, because replacing it changes List<T> to T.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nvoid append(List<int> list, Set<int> set) {\n  list.addAll([1]);\n  list.addAll({2});\n  set.addAll([3]);\n  set.addAll({4});\n  set.containsAll({5});\n}\nFuture<void> futures(Future<int> value) async {\n  await Future.wait([value]);\n  await async.Future.any([value]);\n}\nStream<int> fromFuture(Future<int> value) => Stream.fromFutures([value]);\nStream<int> fromValue(int value) => async.Stream.fromIterable([value]);",
+      "crossFile": null,
+      "good": "import 'dart:async';\nclass Custom {\n  void addAll(Object value) {}\n  bool containsAll(Object value) => true;\n}\nvoid append(List<int> list, Set<int> set, Map<int, int> map,\n    Iterable<int> source, dynamic unknown, bool condition) {\n  list.addAll([]);\n  list.addAll([1, 2]);\n  list.addAll([...source]);\n  list.addAll([if (condition) 1]);\n  list.addAll([for (final value in source) value]);\n  set.containsAll(source);\n  map.addAll({1: 2});\n  unknown.addAll([1]);\n  Custom().addAll([1]);\n  Custom().containsAll({1});\n}\nFuture<List<int>> used(Future<int> value) async {\n  return await Future.wait([value]);\n}\nFuture<void> options(Future<int> value) async {\n  await Future.wait([value], eagerError: true);\n  await Future.wait([value], cleanUp: (value) {});\n}\nStream<int> multiple(Future<int> first, Future<int> second) => Stream.fromFutures([first, second]);\nvoid shadow(dynamic Future, dynamic Stream) {\n  Future.any([1]);\n  Stream.fromIterable([1]);\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-collections",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags Riverpod consumer widgets whose build reference is unused.",
     "diagnostics": [
       {
@@ -16204,6 +16280,64 @@
     },
     "group": "performance",
     "name": "avoid-unnecessary-consumer-widgets",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer synchronous declarations when an async Future only returns scalars.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 7,
+        "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 10,
+        "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 11,
+        "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
+      }
+    ],
+    "docs": "Prefer synchronous declarations when an async Future only returns scalars.\n\nOnly explicitly typed SDK Future top-level/local functions with known scalar\nreturns are reported. Methods/getters are excluded to preserve inherited\ncontracts. Awaiting, throwing, calls, accesses and operators exclude the body.\nNo automatic fix is offered: changing a public return type requires callers\nto be updated as well.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nFuture<int> immediate() async => 1;\nFuture<String> text() async => 'value';\nasync.Future<bool> flag() async => true;\nFuture<double> number() async {\n  return 1.5;\n}\nFuture<int> parameter(int value) async => value;\nFuture<int> local() async {\n  final value = 1;\n  return value;\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nFuture<int> forwarding() => Future<int>.value(1);\nFuture<int> awaited() async => await Future<int>.value(1);\nFuture<int> flatten(Future<int> value) async => value;\nFuture<int> union(FutureOr<int> value) async => value;\nFuture<dynamic> unknown(dynamic value) async => value;\nFuture<int> throwing() async { throw StateError('failed'); }\nFuture<int> canThrow() async => int.parse('1');\nFuture<int> asserts(int? value) async => value!;\nFuture<int> effects() async { print('effect'); return 1; }\nFuture<void> main() async {}\nabstract class Contract { Future<int> value(); }\nclass Implementation implements Contract {\n  @override\n  Future<int> value() async => 1;\n}\nclass Member {\n  Future<int> value() async => 1;\n}\nFuture<void> empty() async {}\nStream<int> generator() async* { yield 1; }\nvoid callback() {\n  final action = () async => 1;\n  print(action);\n}\nint get dangerous => throw StateError('failed');\nFuture<int> getter() async => dangerous;\nFuture<int> interpolation(Object value) async {\n  final text = '$value';\n  return 1;\n}\nFuture<int> iteration(Stream<int> values) async {\n  await for (final value in values) {}\n  return 1;\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-futures",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -16384,6 +16518,58 @@
     },
     "group": "performance",
     "name": "avoid-unnecessary-hook-widgets",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Move final/const scalar literals into their only branch, or after an if.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 2,
+        "message": "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 17,
+        "message": "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 22,
+        "message": "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 26,
+        "message": "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
+      }
+    ],
+    "docs": "Move final/const scalar literals into their only branch, or after an if.\n\nLiteral initialization has no observable side effects. Declaration-resolved\nreferences exclude shadowed names and captures. `ignore_const` defaults to\nfalse; `ignore_after_if` defaults to true. Effectful/late/mutable variables\nare deliberately excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "void example(bool enabled) {\n  final count = 3;\n  if (enabled) {\n    print(count);\n    print(count);\n  }\n}\nvoid alternative(bool enabled) {\n  final value = 1.5;\n  if (enabled) {\n    print('enabled');\n  } else {\n    print(value);\n  }\n}\nvoid shadowed(bool enabled) {\n  final count = 3;\n  if (enabled) { print(count); }\n  { final count = 4; print(count); }\n}\nvoid constant(bool enabled) {\n  const count = 3;\n  if (enabled) { print(count); }\n}\nvoid boolean(bool enabled) {\n  final value = false;\n  if (enabled) { print(value); }\n}",
+      "crossFile": null,
+      "good": "int compute() => 3;\nvoid example(bool enabled) {\n  final count = 3;\n  if (enabled) { print(count); } else { print(count); }\n  final effectful = compute();\n  if (enabled) { print(effectful); }\n  var mutable = 1;\n  if (enabled) { mutable++; print(mutable); }\n  late final deferred = 3;\n  if (enabled) { print(deferred); }\n  final condition = true;\n  if (condition) { print(condition); }\n  final escaped = 3;\n  if (enabled) { print(escaped); }\n  print(escaped);\n  final captured = 3;\n  if (enabled) { final callback = () => captured; print(callback); }\n  final first = 1, second = 2;\n  if (enabled) { print(first); print(second); }\n  final values = [1, 2];\n  if (enabled) { print(values); }\n}\nvoid constantPattern(bool condition, int value) {\n  const limit = 3;\n  if (condition) { print(limit); }\n  switch (value) {\n    case limit: break;\n    default: break;\n  }\n}\nvoid ifCasePattern(bool condition, int value) {\n  const limit = 3;\n  if (condition) { print(limit); }\n  if (value case limit) { print('matched'); }\n}"
+    },
+    "group": "performance",
+    "name": "move-variable-closer-to-its-usage",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -17120,6 +17306,58 @@
       "label": "Dart lints",
       "upstreamId": "prefer_foreach",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_foreach"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Await returned SDK Futures inside a try body protected by a catch clause.",
+    "diagnostics": [
+      {
+        "column": 12,
+        "file": null,
+        "line": 7,
+        "message": "Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 18,
+        "message": "Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 25,
+        "message": "Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 30,
+        "message": "Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead."
+      }
+    ],
+    "docs": "Await returned SDK Futures inside a try body protected by a catch clause.\n\nWithout awaiting, asynchronous failures bypass the local catch clauses.\nFunction-body boundaries prevent an outer try from affecting nested closures.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nFuture<int> fetch() async => 1;\nFuture<int> guarded() async {\n  try {\n    return fetch();\n  } catch (_) { return 0; }\n}\nFuture<int> typedCatch() async {\n  try {\n    return (fetch());\n  } on Exception { return 0; }\n}\nFuture<int> branch(bool condition) async {\n  try {\n    if (condition) {\n      return fetch();\n    }\n    return 0;\n  } catch (_) { return 0; }\n}\nFuture<int> nestedTry() async {\n  try {\n    try { return fetch();  }\n    finally { print('cleanup'); }\n  } catch (_) { return 0; }\n}\nasync.Future<int> prefixed(async.Future<int> value) async {\n  try { return value;  }\n  catch (_) { return 0; }\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nFuture<int> fetch() async => 1;\nFuture<int> forwarding() => fetch();\nFuture<int> outside() async { return fetch(); }\nFuture<int> arrow() async => fetch();\nFuture<int> awaited() async {\n  try { return await fetch(); } catch (_) { return 0; }\n}\nFuture<int> scalar() async {\n  try { return 1; } catch (_) { return 0; }\n}\nFuture<int> finalizerOnly() async {\n  try { return fetch(); } finally { print('done'); }\n}\nFuture<int> finalizerReturn() async {\n  try { return 1; } catch (_) { return 0; }\n  finally { return fetch(); }\n}\nFuture<int> catchReturn() async {\n  try { return 1; } catch (_) { return fetch(); }\n}\nFuture<int> nested() async {\n  try {\n    Future<int> inner() async { return fetch(); }\n    return await inner();\n  } catch (_) { return 0; }\n}\nFuture<dynamic> unknown(dynamic value) async {\n  try { return value; } catch (_) { return 0; }\n}"
+    },
+    "group": "performance",
+    "name": "prefer-return-await",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -26572,6 +26810,58 @@
   },
   {
     "crossFile": false,
+    "description": "Prefer `Iterable.every` to `where(predicate).isEmpty`.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 2,
+        "message": "This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 5,
+        "message": "This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 8,
+        "message": "This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 14,
+        "message": "This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'."
+      }
+    ],
+    "docs": "Prefer `Iterable.every` to `where(predicate).isEmpty`.\n\nThe complementary `.isNotEmpty` pattern belongs to `prefer-iterable-any`.\nOnly SDK Iterable.where calls with one positional predicate are matched, not\nunresolved lookalikes, overrides, or null-aware chains. An every callback must\nnegate the original predicate; no automatic fix is offered.",
+    "domains": [],
+    "examples": {
+      "bad": "bool noPositive(List<int> values) =>\n    values.where((value) => value > 0).isEmpty;\n\nbool noEmpty(Set<String> values) =>\n    values.where((value) => value.isEmpty).isEmpty;\n\nbool noEven(Iterable<int> values) =>\n    values.where((value) => value.isEven).isEmpty;\n\nbool noneMatch(List<int> values, bool Function(int) predicate) =>\n    values.where(predicate).isEmpty;\n\nbool parenthesized(List<int> values) =>\n    ((values.where((value) => value < 0))).isEmpty;",
+      "crossFile": null,
+      "good": "bool direct(List<int> values) => values.every((value) => value <= 0);\nbool directAny(List<int> values) => values.any((value) => value > 0);\n\n// Existing prefer-iterable-any owns the complementary chain.\nbool anyMatch(List<int> values) => values.where((value) => value > 0).isNotEmpty;\nbool unfiltered(List<int> values) => values.isEmpty;\nbool unresolved(dynamic values) => values.where((value) => true).isEmpty;\nbool nullable(List<int>? values) => values?.where((value) => true)?.isEmpty ?? true;\n\nclass Lookalike {\n  Lookalike where(bool Function(int) predicate) => this;\n  bool get isEmpty => true;\n}\nbool unrelated(Lookalike values) => values.where((value) => true).isEmpty;\n\n// Manual loops are not the DCM rule's call-chain contract.\nbool manual(List<int> values) {\n  for (final value in values) {\n    if (value > 0) return true;\n  }\n  return false;\n}"
+    },
+    "group": "style",
+    "name": "prefer-any-or-every",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags leading constructor-body asserts that could live in the initializer list.",
     "diagnostics": [
       {
@@ -27166,6 +27456,76 @@
       "label": "Dart lints",
       "upstreamId": "prefer_collection_literals",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_collection_literals"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require explanations for analyzer `ignore:` and `ignore_for_file:` comments.",
+    "diagnostics": [
+      {
+        "column": 50,
+        "file": null,
+        "line": 1,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 4,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 6,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 11,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 15,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 19,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 22,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      },
+      {
+        "column": 50,
+        "file": null,
+        "line": 25,
+        "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
+      }
+    ],
+    "docs": "Require explanations for analyzer `ignore:` and `ignore_for_file:` comments.\n\nAccept trailing prose (optionally after a second `//`) or an immediately\npreceding standalone comment. Blank lines, trailing code comments, empty\ncomments, and other ignore directives do not supply an explanation.\nRead CST comment tokens so directive-like text in strings is never linted.\n\n`ignore_global` (bool, default `true`) skips `ignore_for_file:` directives.",
+    "domains": [],
+    "examples": {
+      "bad": " // ignore: unused_import\nimport 'dart:math';\n\n // ignore_for_file: deprecated_member_use\n\n // ignore: unused_element, unused_local_variable\nvoid example() {}\n\n// A disconnected explanation.\n\n // ignore: unused_element\nvoid disconnected() {}\n\n//\n // ignore: unused_element\nvoid emptyComment() {}\n\nfinal value = 1; // This explains the variable, not the ignore.\n // ignore: unused_element\nvoid trailingComment() {}\n\n // ignore: unused_element //\nvoid emptyInline() {}\n\n // ignore: type=lint\nvoid allLints() {}",
+      "crossFile": null,
+      "good": "// Legacy API retained for compatibility.\n// ignore_for_file: deprecated_member_use\n\n// Needed for a platform-specific implementation.\n// ignore: unused_import\nimport 'dart:math';\n\n// ignore: unused_element // Called by the platform through reflection.\nvoid reflected() {}\n\n/* The generated visitor requires this hook. */\n// ignore: unused_element\nvoid hook() {}\n\n/// Entry point invoked externally.\n// ignore: unused_element\nvoid entryPoint() {}\n\n// ignore: unused_element This entry point is invoked externally.\nvoid inlineProse() {}\n\n// ignore: unused_element, long-method This generated hook needs both exceptions.\nvoid multipleCodes() {}\n\n// ignore: type=lint Compatibility shim maintained for an external caller.\nvoid allLintProse() {}\n\nconst ordinary = '// ignore: unused_element';\nconst raw = r'// ignore_for_file: unused_element';\nconst multiline = '''\n// ignore: unused_element\n''';\nconst rawMultiline = r'''\n// ignore_for_file: unused_element\n''';\n/* // ignore: unused_element */\n// This is prose mentioning // ignore: unused_element, not a directive."
+    },
+    "group": "style",
+    "name": "prefer-commenting-analyzer-ignores",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -28076,6 +28436,150 @@
     },
     "group": "style",
     "name": "prefer-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Match callback field names to a configured regular expression.",
+    "diagnostics": [
+      {
+        "column": 25,
+        "file": null,
+        "line": 3,
+        "message": "This callback field does not match '^on[A-Z]|^builder$|.*Builder$'; rename it to match the configured pattern."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 4,
+        "message": "This callback field does not match '^on[A-Z]|^builder$|.*Builder$'; rename it to match the configured pattern."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 5,
+        "message": "This callback field does not match '^on[A-Z]|^builder$|.*Builder$'; rename it to match the configured pattern."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 6,
+        "message": "This callback field does not match '^on[A-Z]|^builder$|.*Builder$'; rename it to match the configured pattern."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 7,
+        "message": "This non-function field matches callback pattern '^on[A-Z]|^builder$|.*Builder$'; rename it so it does not match."
+      }
+    ],
+    "docs": "Match callback field names to a configured regular expression.\n\n`name_pattern` must be a nonempty valid regex; otherwise the rule is inactive.\nLeading privacy underscores are ignored. Resolved function fields, including\naliases and Function, must match; proven non-function fields must not match.\nUnknown, dynamic and type-parameter types are excluded, as are inferred,\nstatic and annotated fields. Classes with supertypes are skipped to preserve\ninherited field/getter contracts.",
+    "domains": [],
+    "examples": {
+      "bad": "typedef Callback = void Function();\nclass Callbacks {\n  final void Function() tap;\n  void Function(int)? _changed;\n  Function? work;\n  Callback? alias;\n  String onValue = '';\n  Callbacks(this.tap);\n}",
+      "crossFile": null,
+      "good": "typedef Callback = void Function();\nclass Callbacks {\n  final void Function() onTap;\n  void Function(int)? _onChanged;\n  Callback? onAlias;\n  Function? onUntypedFunction;\n  static void Function()? staticCallback;\n  final inferred = () {};\n  int count = 0;\n  Callbacks(this.onTap);\n}\nabstract class Contract {\n  void Function() get tap;\n}\nclass Implementation implements Contract {\n  final void Function() tap;\n  Implementation(this.tap);\n}"
+    },
+    "group": "style",
+    "name": "prefer-correct-callback-field-name",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require configured error parameter names in catches and SDK error callbacks.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 3,
+        "message": "This error parameter does not match the configured names; rename it to one of: error, exception."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 4,
+        "message": "This error parameter does not match the configured names; rename it to one of: error, exception."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 5,
+        "message": "This error parameter does not match the configured names; rename it to one of: error, exception."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 6,
+        "message": "This error parameter does not match the configured names; rename it to one of: error, exception."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 7,
+        "message": "This error parameter does not match the configured names; rename it to one of: error, exception."
+      }
+    ],
+    "docs": "Require configured error parameter names in catches and SDK error callbacks.\n\nSet `allowed_names` to a nonempty string array to enable the rule. Optional\n`ignored_names` exempts names. Stack-trace parameters are not checked. Callback\nchecks require a resolved dart:async Future or Stream receiver; unrelated APIs,\ntear-offs and dynamic receivers are excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:async';\nvoid check(Future<int> future, Stream<int> stream) {\n  try {} catch (err) {}\n  future.then((value) => value, onError: (e) {});\n  future.catchError((failure) => 0);\n  stream.listen((value) {}, onError: (err, stack) {});\n  stream.handleError((err) {});\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nvoid check(Future<int> future, Stream<int> stream, dynamic unknown) {\n  try {} catch (error, stackTrace) {}\n  try {} catch (exception) {}\n  try {} catch (ignored) {}\n  try {} catch (_) {}\n  try {} catch (__) {}\n  future.catchError((_) => 0);\n  future.catchError((error) => 0);\n  stream.handleError((exception) {});\n  unknown.catchError((e) {});\n  future.then((value) => value);\n}"
+    },
+    "group": "style",
+    "name": "prefer-correct-error-name",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Match callback handler methods to a configured regular expression.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "This callback handler does not match '^handle[A-Z]'; rename it to match the configured pattern."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 5,
+        "message": "This callback handler does not match '^handle[A-Z]'; rename it to match the configured pattern."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 6,
+        "message": "This callback handler does not match '^handle[A-Z]'; rename it to match the configured pattern."
+      }
+    ],
+    "docs": "Match callback handler methods to a configured regular expression.\n\nNonempty valid regex `name_pattern` enables the rule. `ignore_public`\n(default false) exempts public methods. Direct method tear-offs passed as\npositional or named arguments are checked, including unqualified references\nunless shadowed by a lexical binding. Only ordinary unannotated methods\ndeclared on an enclosing class without supertypes are checked. Global\nfunctions, arbitrary object methods and closure wrappers are excluded.\nLeading privacy underscores are ignored.",
+    "domains": [],
+    "examples": {
+      "bad": "void listen({required void Function() onTap}) {}\nvoid consume(void Function() callback) {}\nclass Controller {\n  void tap() {}\n  void work() {}\n  void positionalWork() {}\n  void install() {\n    listen(onTap: this.tap);\n    listen(onTap: this.tap);\n    listen(onTap: work);\n    consume(positionalWork);\n  }\n}",
+      "crossFile": null,
+      "good": "void listen({required void Function() onTap}) {}\nvoid consume(void Function() callback) {}\nvoid globalWork() {}\nclass Controller {\n  void _handleTap() {}\n  void ordinaryMethod() {}\n  void install(void Function() ordinaryMethod) {\n    listen(onTap: this._handleTap);\n    consume(this._handleTap);\n    listen(onTap: () {});\n    listen(onTap: ordinaryMethod);\n    consume(globalWork);\n  }\n}\nclass Child extends Controller {\n  void ordinaryMethod() {}\n  void wire() { listen(onTap: this.ordinaryMethod); }\n}\nabstract class HandlerContract {\n  void tap();\n}\nclass HandlerImplementation implements HandlerContract {\n  void tap() {}\n  void wire() { listen(onTap: tap); }\n}"
+    },
+    "group": "style",
+    "name": "prefer-correct-handler-name",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -29446,6 +29950,40 @@
   },
   {
     "crossFile": false,
+    "description": "Prefer getters for synchronous, zero-argument methods that only read a field.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "This zero-argument method only reads a field; expose it as a getter instead."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "This zero-argument method only reads a field; expose it as a getter instead."
+      }
+    ],
+    "docs": "Prefer getters for synchronous, zero-argument methods that only read a field.\n\nOnly unannotated instance methods on classes without inheritance are checked.\nThe result must be a directly declared, non-late instance field, not another\ngetter or an arbitrary expression. Generic methods and overridden contracts\nare excluded. Both arrow bodies and single-return blocks are supported.",
+    "domains": [],
+    "examples": {
+      "bad": "class Box {\n  final int _size = 3;\n  int size() => _size;\n  int otherSize() { return this._size; }\n}",
+      "crossFile": null,
+      "good": "class Box {\n  int _size = 3;\n  late int _lazy;\n  external int externalValue;\n  int readExternal() => externalValue;\n  final String _label = 'box';\n  String toString() => _label;\n  int call() => _size;\n  final Map<String, Object?> _json = {};\n  Map<String, Object?> toJson() => _json;\n  int get size => _size;\n  int compute() => _size + 1;\n  int update() => ++_size;\n  int lazy() => _lazy;\n  int withArgument(int value) => _size;\n  T generic<T>() => throw StateError('missing');\n  Future<int> asyncSize() async => _size;\n  static int staticSize() => 3;\n  int get dynamicValue => _size;\n  int fromGetter() => dynamicValue;\n  int sideEffect() { _size++; return _size; }\n}\nclass Child extends Box {\n  int inherited() => _size;\n}"
+    },
+    "group": "style",
+    "name": "prefer-getter-over-method",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Prefer initializing formals when a parameter is copied directly into its field.",
     "diagnostics": [
       {
@@ -30380,6 +30918,34 @@
   },
   {
     "crossFile": false,
+    "description": "Match a file's sole class or enum name to its snake-case basename.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 1,
+        "message": "The sole class or enum 'Account' does not match this filename. Rename the file to 'account.dart' or rename the declaration to match the file."
+      }
+    ],
+    "docs": "Match a file's sole class or enum name to its snake-case basename.\n\nOther declarations may coexist with the type. Files with multiple classes or\nenums, generated inner-dot suffixes, and part-of files are left alone. Naming\nconvention violations themselves belong to the existing naming rules.",
+    "domains": [],
+    "examples": {
+      "bad": "class Account {\n  final int id;\n  Account(this.id);\n}",
+      "crossFile": null,
+      "good": "class Good {\n  void run() {}\n}"
+    },
+    "group": "style",
+    "name": "prefer-match-file-name",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags `with` clauses that mix in a plain class instead of a mixin.",
     "diagnostics": [
       {
@@ -30732,6 +31298,46 @@
     },
     "group": "style",
     "name": "prefer-named-boolean-parameters",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer named parameters when a declaration exceeds `max_number` (default 1).",
+    "diagnostics": [
+      {
+        "column": 39,
+        "file": null,
+        "line": 1,
+        "message": "This declaration has more than 2 positional parameters; convert the excess parameters to named parameters."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 3,
+        "message": "This declaration has more than 2 positional parameters; convert the excess parameters to named parameters."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 4,
+        "message": "This declaration has more than 2 positional parameters; convert the excess parameters to named parameters."
+      }
+    ],
+    "docs": "Prefer named parameters when a declaration exceeds `max_number` (default 1).\n\nChecks top-level functions, constructors, and methods on classes without\ninheritance. Overrides, operators, setters, closures, function types, `main`,\nexternal/annotated declarations, redirects and super-parameter constructors\nare excluded because their signatures can be imposed by another declaration.",
+    "domains": [],
+    "examples": {
+      "bad": "void configure(int width, int height, String label) {}\nclass Box {\n  Box(int width, int height, String label);\n  void resize(int width, int height, bool animate) {}\n}",
+      "crossFile": null,
+      "good": "void configure(int width, int height, {required String label}) {}\nvoid optional(int width, [int height = 0]) {}\nclass Base {\n  void resize(int width, int height) {}\n}\nclass Child extends Base {\n  @override\n  void resize(int width, int height) {}\n  void inheritedContext(int a, int b, int c) {}\n}\nfinal callback = (int a, int b, int c) {};\ntypedef Callback = void Function(int a, int b, int c);\nvoid main(List<String> args, Object? message) {}\nexternal int nativeFunction(int a, int b, int c);\n@deprecated\nvoid annotated(int a, int b, int c) {}\nclass Redirect {\n  factory Redirect(int a, int b, int c) = Target;\n}\nclass Target implements Redirect {\n  @deprecated\n  Target(int a, int b, int c);\n}\nclass Parent {\n  @deprecated\n  Parent(int a, int b, int c);\n}\nclass SuperChild extends Parent {\n  SuperChild(super.a, super.b, super.c);\n}"
+    },
+    "group": "style",
+    "name": "prefer-named-parameters",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -31554,6 +32160,76 @@
     },
     "group": "style",
     "name": "prefer-transform-over-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer explicit types over `var` in ordinary variable declarations.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 2,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 8,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This variable uses 'var'; replace it with an explicit type annotation."
+      }
+    ],
+    "docs": "Prefer explicit types over `var` in ordinary variable declarations.\n\nChecks local, field and top-level `var` declarations, regardless of initializer.\nExplicit types, final and const declarations are not checked. Destructuring\npatterns and implicit for-in binding forms are excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "int readCount() => 3;\nvar top = readCount();\nclass Box {\n  var count = readCount();\n}\nvoid main() {\n  var count = readCount();\n  var first = readCount(), second = readCount();\n  var number = 3;\n  var values = <int>[];\n  var unset;\n}",
+      "crossFile": null,
+      "good": "int readCount() => 3;\nconst topConstant = 3;\nfinal topFinal = readCount();\nclass Box {\n  Box();\n  Box.named();\n  final field = 3;\n  static const constant = 3;\n  int typedField = 3;\n}\nvoid main() {\n  int number = 3;\n  String text = 'hello';\n  List<int> items = <int>[];\n  Box box = Box();\n  Box other = Box.named();\n  Box explicitNew = new Box();\n  dynamic unset;\n  final finalValue = readCount();\n  const constantValue = 3;\n  int typed = readCount();\n}"
+    },
+    "group": "style",
+    "name": "prefer-type-over-var",
     "recommended": false,
     "source": {
       "kind": "Falcon",

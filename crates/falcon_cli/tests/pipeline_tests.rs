@@ -184,14 +184,14 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
 #[test]
 fn test_run_check_default_clean_imports_returns_zero() {
     let temp = tempdir().unwrap();
-    // a.dart is the entrypoint and references b.dart's Foo, so the cross-file
+    // a.dart is the entrypoint and references foo.dart's Foo, so the cross-file
     // rules (unused-files / unused-code) stay quiet alongside the per-file rules.
     fs::write(
         temp.path().join("a.dart"),
-        "import 'b.dart';\nvoid main() {\n  final foo = Foo();\n  assert(foo.hashCode >= 0);\n}\n",
+        "import 'foo.dart';\nvoid main() {\n  final foo = Foo();\n  assert(foo.hashCode >= 0);\n}\n",
     )
     .unwrap();
-    fs::write(temp.path().join("b.dart"), "class Foo {}\n").unwrap();
+    fs::write(temp.path().join("foo.dart"), "class Foo {}\n").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,

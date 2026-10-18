@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 500);
+    assert_eq!(RULE_METADATA.len(), 513);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         215
@@ -396,6 +396,10 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
             "Test filename and framework import eligibility before semantic collection.",
         ),
         (
+            "prefer-commenting-analyzer-ignores",
+            "Analyzer ignore comment tokens and adjacent explanation trivia.",
+        ),
+        (
             "prefer-relative-imports",
             "Import URIs and package directory context.",
         ),
@@ -458,6 +462,18 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
                     "use-design-system-item": {
                         "level": "warn",
                         "options": { "items": [{ "class_name": "Container" }] }
+                    },
+                    "prefer-correct-error-name": {
+                        "level": "warn",
+                        "options": { "allowed_names": ["error"] }
+                    },
+                    "prefer-correct-handler-name": {
+                        "level": "warn",
+                        "options": { "name_pattern": "^handle[A-Z]" }
+                    },
+                    "prefer-correct-callback-field-name": {
+                        "level": "warn",
+                        "options": { "name_pattern": "^on[A-Z]" }
                     }
                 },
                 "suspicious": {
