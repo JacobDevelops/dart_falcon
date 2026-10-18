@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 39 | 132 | 24 | 195 |
+| DCM-inspired | 30 | 132 | 24 | 186 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
 | Additional rules | 6 | 7 | 3 | 16 |
-| **Total** | **49** | **143** | **31** | **223** |
+| **Total** | **40** | **143** | **31** | **214** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (195)
+## Planned DCM-inspired rules (186)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -205,15 +205,6 @@ not re-added.
 | `dispose-fields` | correctness | FT | paid | Disposable fields not disposed in `dispose()`. | must-have |
 | `always-remove-listener` | correctness | FT | paid | `addListener` without `removeListener`. | must-have |
 | `avoid-recursive-widget-calls` | correctness | LT | paid | Widget builds itself → stack overflow. | must-have |
-| `avoid-shrink-wrap-in-lists` | performance | LT | paid | `shrinkWrap: true` perf trap in scrollables. | must-have |
-| `prefer-align-over-container` | style | LT | paid | Container used only for alignment → Align. | must-have |
-| `prefer-center-over-align` | style | LT | paid | Align used for centering → Center. | must-have |
-| `prefer-padding-over-container` | style | LT | paid | Container used only for padding → Padding. | must-have |
-| `prefer-constrained-box-over-container` | style | LT | paid | Container used only for constraints → ConstrainedBox. | must-have |
-| `prefer-transform-over-container` | style | LT | paid | Container used only for transform → Transform. | must-have |
-| `prefer-container` | style | LT | paid | Collapse stacked layout widgets into one Container. | must-have |
-| `prefer-for-loop-in-children` | style | S | paid | `.map().toList()` in children → collection-for. | must-have |
-| `prefer-action-button-tooltip` | a11y | LT | paid | IconButton/action lacking a tooltip (a11y). | must-have |
 | `avoid-unnecessary-stateful-widgets` | correctness | FT | paid | StatefulWidget with no state → Stateless. | must-have |
 | `avoid-mounted-in-setstate` | correctness | FT | paid | `mounted` check misuse around setState. | nice-to-have |
 | `prefer-single-setstate` | performance | FT | paid | Multiple setState calls collapsible. | nice-to-have |

@@ -66,14 +66,37 @@ pub(crate) fn scoped_constructor_invocation<'a>(
     state: &falcon_analyze::semantic_scope::SemanticState<'_>,
 ) -> Option<(DeclarationIdentity, &'a str, ArgList<'a>)> {
     if let Expr::Call(node) = expression.unparenthesized() {
-        let segments = falcon_analyze::expression_segments(node.callee(), false)?;
-        let head = *segments.first()?;
-        if state.environment.is_bound(head) || state.type_parameters.contains(head) {
+        let mut callee = node.callee().unparenthesized();
+        while let Expr::Field(field) = callee {
+            if field.is_null_safe() {
+                return None;
+            }
+            callee = field.object().unparenthesized();
+        }
+        let Expr::Ident(head) = callee else {
+            return None;
+        };
+        if value_name_is_shadowed(head.name(), state) {
             return None;
         }
     }
     let (identity, constructor, args) = constructor_invocation(expression, &state.model)?;
     Some((state.model.unaliased(identity), constructor, args))
+}
+
+/// Value lookup prefers lexical bindings and members declared by the enclosing type.
+pub(crate) fn value_name_is_shadowed(
+    name: &str,
+    state: &falcon_analyze::semantic_scope::SemanticState<'_>,
+) -> bool {
+    state.environment.is_bound(name)
+        || state.type_parameters.contains(name)
+        || state.constant_owner.as_ref().is_some_and(|identity| {
+            !state
+                .signatures
+                .declared_member_facts(identity, name)
+                .is_empty()
+        })
 }
 
 /// The constructor name range, excluding `new`/`const` and its arguments.

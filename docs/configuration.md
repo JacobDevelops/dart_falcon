@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 181 of 327 shipped
+If no config is found, falcon enables its own recommended set: 181 of 336 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -196,6 +196,12 @@ Option names use `snake_case` inside the `options` object.
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `allowed_duplicated_chains` | `2` | The occurrence index at which a repeated expression is flagged. `2` flags the 2nd and later duplicates; `3` flags the 3rd and later. Values below `2` are clamped to `2`. |
+
+### `prefer-container` (`style`, `flutter`)
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `min_sequence` | `3` | How many directly nested Container-compatible widgets (e.g. `Padding` → `Align` → `DecoratedBox`) are needed before suggesting one `Container`. Values below `3` are raised to `3`. Only the outermost widget of a run is reported. |
 
 ### `format-comment` (`style`)
 

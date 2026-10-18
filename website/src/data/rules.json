@@ -1,6 +1,114 @@
 [
   {
     "crossFile": false,
+    "description": "Requires useful tooltips on Flutter floating action buttons and icon buttons.",
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": null,
+        "line": 4,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 49,
+        "file": null,
+        "line": 5,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 57,
+        "file": null,
+        "line": 6,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 7,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 8,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 9,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 10,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 11,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 52,
+        "file": null,
+        "line": 12,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 13,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 14,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 15,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 18,
+        "message": "Provide a non-empty tooltip describing this action button."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 20,
+        "message": "Provide a non-empty tooltip describing this action button."
+      }
+    ],
+    "docs": "Requires useful tooltips on Flutter floating action buttons and icon buttons.\n\nTooltips describe actions to assistive technology. Resolved Flutter\nFloatingActionButton (unnamed, small, large, extended) and IconButton (unnamed,\nfilled, filledTonal, outlined) constructors are checked. Missing, literal null,\nand empty non-interpolated string tooltips are reported. Dynamic labels and\nother button APIs are not guessed; custom classes and shadowed names are ignored.\nThis checks the button's own tooltip argument, including extended FABs;\nlabels or enclosing Tooltip/Semantics widgets do not exempt the button.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget missing() => FloatingActionButton(onPressed: () {});\nWidget empty() => FloatingActionButton(tooltip: '', onPressed: () {});\nWidget nullLabel() => new FloatingActionButton(tooltip: null, onPressed: () {});\nWidget prefixed() => m.FloatingActionButton.small(onPressed: () {});\nWidget extended() => FloatingActionButton.extended(label: Text('Add'), onPressed: () {});\nWidget icon() => IconButton(icon: Icon(Icons.add), onPressed: () {});\nWidget filled() => IconButton.filled(tooltip: r'', icon: Icon(Icons.add), onPressed: () {});\nWidget constant() => const FloatingActionButton(onPressed: null);\nWidget adjacent() => FloatingActionButton(tooltip: '' '', onPressed: () {});\nWidget large() => FloatingActionButton.large(onPressed: () {});\nWidget outlined() => IconButton.outlined(icon: Icon(Icons.add), onPressed: () {});\nWidget tonal() => IconButton.filledTonal(icon: Icon(Icons.add), onPressed: () {});\nWidget wrapped() => Tooltip(\n  message: 'Add',\n  child: IconButton(icon: Icon(Icons.add), onPressed: () {}),\n);\nWidget iconLabel() => IconButton(icon: Icon(Icons.add, semanticLabel: 'Add'), onPressed: () {});",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget labeled() => FloatingActionButton(tooltip: 'Add', onPressed: () {});\nWidget iconLabeled() => IconButton(tooltip: 'Add', icon: Icon(Icons.add), onPressed: () {});\nWidget unknown(String? label) => FloatingActionButton(tooltip: label, onPressed: () {});\nWidget interpolated(String label) => FloatingActionButton(tooltip: '$label', onPressed: () {});\nWidget otherButton() => TextButton(child: Text('Add'), onPressed: () {});\nWidget shadowed(dynamic FloatingActionButton) => FloatingActionButton(onPressed: () {});\nWidget prefixShadow(dynamic m) => m.FloatingActionButton(onPressed: () {});\nWidget nestedShadow(dynamic IconButton) => Tooltip(message: 'Add', child: IconButton(onPressed: () {}));\nWidget localCustom() => CustomActionButton();\nclass CustomActionButton extends StatelessWidget {\n  Widget build(BuildContext context) => const SizedBox();\n}"
+    },
+    "group": "a11y",
+    "name": "prefer-action-button-tooltip",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a class that declares only static members.",
     "diagnostics": [
       {
@@ -8913,6 +9021,60 @@
   },
   {
     "crossFile": false,
+    "description": "Avoids shrink-wrapped Flutter lists nested in rows, columns, or other lists.",
+    "diagnostics": [
+      {
+        "column": 12,
+        "file": null,
+        "line": 5,
+        "message": "Avoid shrink wrapping a nested list; use slivers instead."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 8,
+        "message": "Avoid shrink wrapping a nested list; use slivers instead."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 11,
+        "message": "Avoid shrink wrapping a nested list; use slivers instead."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 14,
+        "message": "Avoid shrink wrapping a nested list; use slivers instead."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 17,
+        "message": "Avoid shrink wrapping a nested list; use slivers instead."
+      }
+    ],
+    "docs": "Avoids shrink-wrapped Flutter lists nested in rows, columns, or other lists.\n\nShrink wrapping repeatedly measures the list's contents; prefer slivers instead.\nOnly resolved Flutter `ListView` constructors with a literal `true` shrinkWrap\nargument inside a Flutter Row, Column, or ListView child argument are flagged.\nUnknown flags, false values, unrelated classes, and standalone lists are ignored.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget column() => Column(children: [\n  ListView(shrinkWrap: true),\n]);\nWidget row() => Row(children: [\n  new ListView(shrinkWrap: true),\n]);\nWidget prefixed() => m.Column(children: [\n  m.ListView(shrinkWrap: (true)),\n]);\nWidget nested() => ListView(children: [\n  ListView.builder(shrinkWrap: true, itemBuilder: (context, index) => Text('item')),\n]);\nWidget wrapped() => Column(children: [\n  Expanded(child: ListView(shrinkWrap: true)),\n]);",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget standalone() => ListView(shrinkWrap: true);\nWidget falseFlag() => Column(children: [ListView(shrinkWrap: false)]);\nWidget unknownFlag(bool flag) => Column(children: [ListView(shrinkWrap: flag)]);\nWidget noFlag() => Row(children: [ListView()]);\nWidget unrelatedParent() => Center(child: ListView(shrinkWrap: true));\nWidget localShadow(dynamic ListView) => Column(children: [ListView(shrinkWrap: true)]);\nWidget prefixShadow(dynamic m) => Column(children: [m.ListView(shrinkWrap: true)]);\nWidget deferred() => Column(children: [Builder(builder: (context) => ListView(shrinkWrap: true))]);"
+    },
+    "group": "performance",
+    "name": "avoid-shrink-wrap-in-lists",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid the slow asynchronous `dart:io` file-system queries.",
     "diagnostics": [
       {
@@ -17047,6 +17209,66 @@
   },
   {
     "crossFile": false,
+    "description": "Prefers `Align` over a `Container` used only for `alignment`.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer 'Align' over a Container used only for alignment."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Prefer 'Align' over a Container used only for alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer 'Align' over a Container used only for alignment."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Prefer 'Align' over a Container used only for alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Prefer 'Align' over a Container used only for alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Prefer 'Align' over a Container used only for alignment."
+      }
+    ],
+    "docs": "Prefers `Align` over a `Container` used only for `alignment`.\n\nThe unnamed Flutter constructor must have a provably non-null child and\na provably non-null `alignment` argument, with only an optional `key`.\nOther arguments, nullable or unresolved values, and shadowed constructors\nare ignored. The dedicated widget makes the layout intent explicit.\nContexts explicitly requiring `Container` are excluded.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid examples(Widget child, AlignmentGeometry value) {\n  Container(alignment: value, child: child);\n  new Container(alignment: value, child: child);\n  ui.Container(child: child, alignment: value);\n  new ui.Container(key: const Key(\"box\"), alignment: value, child: child);\n  LayoutContainer(alignment: value, child: child);\n  Container(key: const Key(\"ordered\"), child: child, alignment: (value));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid keepContainer(Widget child, AlignmentGeometry value, AlignmentGeometry? nullable, Widget? nullableChild, dynamic unknown) {\n  Container(alignment: value);\n  Container(child: child);\n  Container(alignment: null, child: child);\n  Container(alignment: nullable, child: child);\n  Container(alignment: unknown, child: child);\n  Container(alignment: value, child: null);\n  Container(alignment: value, child: nullableChild);\n  Container(alignment: value, width: 12, child: child);\n  Container(alignment: value, decoration: const BoxDecoration(), child: child);\n  Container(alignment: value, color: Colors.red, child: child);\n}\n\nObject parameterShadow(dynamic Container, Widget child, AlignmentGeometry value) =>\n    Container(alignment: value, child: child);\n\nObject prefixShadow(dynamic ui, Widget child, AlignmentGeometry value) =>\n    ui.Container(alignment: value, child: child);\n\nObject aliasShadow(dynamic LayoutContainer, Widget child, AlignmentGeometry value) =>\n    LayoutContainer(alignment: value, child: child);\n\nvoid localShadow(dynamic factory, Widget child, AlignmentGeometry value) {\n  final Container = factory;\n  Container(alignment: value, child: child);\n}\n\nvoid unusedTransformAlignment(Widget child, AlignmentGeometry value) {\n  Container(alignment: value, transformAlignment: Alignment.center, child: child);\n}"
+    },
+    "group": "style",
+    "name": "prefer-align-over-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags leading constructor-body asserts that could live in the initializer list.",
     "diagnostics": [
       {
@@ -17307,6 +17529,96 @@
       "label": "Pyramid Lint",
       "upstreamId": "prefer_async_callback",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefers `Center` over an `Align` whose alignment is known to be centered.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 17,
+        "message": "Prefer 'Center' over an Align with centered alignment."
+      }
+    ],
+    "docs": "Prefers `Center` over an `Align` whose alignment is known to be centered.\n\nReports Flutter's unnamed `Align` constructor with omitted alignment,\n`Alignment.center`, or a Flutter `Alignment(0, 0)` constructor. `key`,\n`child`, `widthFactor`, and `heightFactor` are preserved by `Center` and\nremain allowed, including an absent child. Other arguments, null or unknown\nalignments, and shadowed constructors or alignment names are ignored.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutAlign = Align;\n\nvoid examples(Widget child) {\n  Align();\n  const Align();\n  new Align(child: child);\n  ui.Align(alignment: ui.Alignment.center, child: child);\n  const ui.Align(alignment: ui.Alignment(0, 0));\n  Align(alignment: Alignment(0.0, 0), child: child);\n  Align(widthFactor: 2, heightFactor: 3, child: child);\n  Align(alignment: Alignment.center, widthFactor: 0.5, heightFactor: 2, child: child);\n  LayoutAlign(key: const Key('center'), child: child);\n  new ui.Align(alignment: new ui.Alignment(0, 0));\n  const Align(widthFactor: 2, heightFactor: 3);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutAlign = Align;\n\nvoid examples(Widget child, AlignmentGeometry value) {\n  Align(alignment: Alignment.topLeft, child: child);\n  Align(alignment: Alignment(0, 1), child: child);\n  Align(alignment: Alignment(1, 0), child: child);\n  Align(alignment: value, child: child);\n  Center(child: child);\n}\n\nObject parameterShadow(dynamic Align, Widget child) => Align(child: child);\nObject prefixShadow(dynamic ui, Widget child) => ui.Align(child: child);\nObject aliasShadow(dynamic LayoutAlign, Widget child) => LayoutAlign(child: child);\n\nvoid localShadow(dynamic factory, Widget child) {\n  final Align = factory;\n  Align(child: child);\n}\n\nvoid alignmentShadow(dynamic Alignment, Widget child) {\n  Align(alignment: Alignment.center, child: child);\n  Align(alignment: Alignment(0, 0), child: child);\n}\n\nvoid alignmentPrefixShadow(dynamic ui, Widget child) {\n  Align(alignment: ui.Alignment.center, child: child);\n  Align(alignment: ui.Alignment(0, 0), child: child);\n}"
+    },
+    "group": "style",
+    "name": "prefer-center-over-align",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -18083,6 +18395,66 @@
   },
   {
     "crossFile": false,
+    "description": "Prefers `ConstrainedBox` over a `Container` used only for `constraints`.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer 'ConstrainedBox' over a Container used only for constraints."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Prefer 'ConstrainedBox' over a Container used only for constraints."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer 'ConstrainedBox' over a Container used only for constraints."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Prefer 'ConstrainedBox' over a Container used only for constraints."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Prefer 'ConstrainedBox' over a Container used only for constraints."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Prefer 'ConstrainedBox' over a Container used only for constraints."
+      }
+    ],
+    "docs": "Prefers `ConstrainedBox` over a `Container` used only for `constraints`.\n\nThe unnamed Flutter constructor must have a provably non-null child and\na provably non-null `constraints` argument, with only an optional `key`.\nOther arguments, nullable or unresolved values, and shadowed constructors\nare ignored. The dedicated widget makes the layout intent explicit.\nContexts explicitly requiring `Container` are excluded.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid examples(Widget child, BoxConstraints value) {\n  Container(constraints: value, child: child);\n  new Container(constraints: value, child: child);\n  ui.Container(child: child, constraints: value);\n  new ui.Container(key: const Key(\"box\"), constraints: value, child: child);\n  LayoutContainer(constraints: value, child: child);\n  Container(key: const Key(\"ordered\"), child: child, constraints: (value));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid keepContainer(Widget child, BoxConstraints value, BoxConstraints? nullable, Widget? nullableChild, dynamic unknown) {\n  Container(constraints: value);\n  Container(child: child);\n  Container(constraints: null, child: child);\n  Container(constraints: nullable, child: child);\n  Container(constraints: unknown, child: child);\n  Container(constraints: value, child: null);\n  Container(constraints: value, child: nullableChild);\n  Container(constraints: value, width: 12, child: child);\n  Container(constraints: value, decoration: const BoxDecoration(), child: child);\n  Container(constraints: value, color: Colors.red, child: child);\n}\n\nObject parameterShadow(dynamic Container, Widget child, BoxConstraints value) =>\n    Container(constraints: value, child: child);\n\nObject prefixShadow(dynamic ui, Widget child, BoxConstraints value) =>\n    ui.Container(constraints: value, child: child);\n\nObject aliasShadow(dynamic LayoutContainer, Widget child, BoxConstraints value) =>\n    LayoutContainer(constraints: value, child: child);\n\nvoid localShadow(dynamic factory, Widget child, BoxConstraints value) {\n  final Container = factory;\n  Container(constraints: value, child: child);\n}\n\nvoid unusedTransformAlignment(Widget child, BoxConstraints value) {\n  Container(constraints: value, transformAlignment: Alignment.center, child: child);\n}"
+    },
+    "group": "style",
+    "name": "prefer-constrained-box-over-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags static methods that create and return an instance of their own class.",
     "diagnostics": [
       {
@@ -18161,6 +18533,90 @@
       "label": "Dart lints",
       "upstreamId": "prefer_constructors_over_static_methods",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_constructors_over_static_methods"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Suggests collapsing compatible nested layout widgets into one `Container`.",
+    "diagnostics": [
+      {
+        "column": 53,
+        "file": null,
+        "line": 4,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 5,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 6,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 7,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 8,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 51,
+        "file": null,
+        "line": 9,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 10,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 11,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 12,
+        "message": "Replace this layout widget sequence with a single Container."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 13,
+        "message": "Replace this layout widget sequence with a single Container."
+      }
+    ],
+    "docs": "Suggests collapsing compatible nested layout widgets into one `Container`.\n\nMatches at least three Flutter widgets in Container's outside-in order:\n`Transform`, margin `Padding`, `ConstrainedBox`, `ColoredBox`, inner `Padding`,\nand `Align`. Stages may be omitted, but not repeated or reordered. Only the\nunnamed constructors and their directly equivalent arguments qualify; inner\nkeys, alignment size factors, transform origins and hit-test overrides are\nexcluded. Decoration and clipping are excluded because their padding and\nclipping behavior cannot generally be reproduced by a Container. The final\nchild must be provably non-null to preserve Container's empty-child behavior.\nConstant contexts are excluded because Container has no const constructor.\nA concrete source-widget expected type is also excluded to preserve typing.\n\n## Options\n\n`min_sequence` (integer, default: 3) sets the minimum chain length, with a\nminimum effective value of 3 to avoid competing with single-widget rules.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget transformed(Widget child, dynamic matrix) => Transform(transform: matrix, child: Padding(padding: EdgeInsets.all(8), child: Align(alignment: Alignment.center, child: child)));\nWidget constrained(Widget child) => Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(alignment: Alignment.topLeft, child: child)));\nWidget colored(Widget child) => ColoredBox(color: Colors.red, child: Padding(padding: EdgeInsets.all(8), child: Align(child: child)));\nWidget prefixed(Widget child) => m.Padding(padding: EdgeInsets.all(8), child: m.ConstrainedBox(constraints: BoxConstraints.tightFor(height: 20), child: m.Align(child: child)));\nWidget explicitNew(Widget child) => new Padding(padding: EdgeInsets.all(8), child: new ColoredBox(color: Colors.blue, child: new Align(child: child)));\nWidget longChain(Widget child, dynamic matrix) => Transform(transform: matrix, child: Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: ColoredBox(color: Colors.red, child: Padding(padding: EdgeInsets.all(4), child: Align(child: child))))));\nWidget grouped(Widget child) => (Padding(padding: EdgeInsets.all(8), child: (ConstrainedBox(constraints: BoxConstraints.tightFor(height: 20), child: (Align(child: child))))));\nWidget alignedTransform(Widget child, Matrix4 matrix) => Transform(alignment: Alignment.center, transform: matrix, child: Padding(padding: EdgeInsets.all(8), child: Align(child: child)));\nWidget doublePadding(Widget child) => Padding(padding: EdgeInsets.all(8), child: Padding(padding: EdgeInsets.all(4), child: Align(child: child)));\nWidget outerKey(Widget child, Key key) => Padding(key: key, padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(child: child)));",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\n\nWidget shortChain(Widget child) => Padding(padding: EdgeInsets.all(8), child: Align(child: child));\nWidget wrongOrder(Widget child, dynamic matrix) => Align(child: Padding(padding: EdgeInsets.all(8), child: Transform(transform: matrix, child: child)));\nWidget innerKey(Widget child) => Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(key: Key('keep'), constraints: BoxConstraints.tightFor(width: 20), child: Align(child: child)));\nWidget sizeFactor(Widget child) => Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(widthFactor: 2, child: child)));\nWidget hitTests(Widget child, dynamic matrix) => Transform(transform: matrix, transformHitTests: false, child: Padding(padding: EdgeInsets.all(8), child: Align(child: child)));\nWidget decorated(Widget child) => DecoratedBox(decoration: BoxDecoration(border: Border.all()), child: Padding(padding: EdgeInsets.all(8), child: Align(child: child)));\nWidget shadowed(dynamic Padding, Widget child) => Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(child: child)));\nWidget separated(Widget child) => Padding(padding: EdgeInsets.all(8), child: Semantics(child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(child: child))));\nWidget nullableChild(Widget? child) => Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(child: child)));\nfinal explicitConst = const Padding(padding: EdgeInsets.all(8), child: ColoredBox(color: Color(0xffff0000), child: Align(child: Text('x'))));\nconst implicitConst = Center(child: Padding(padding: EdgeInsets.all(8), child: ColoredBox(color: Color(0xffff0000), child: Align(child: Text('x')))));\nfinal constList = const [Padding(padding: EdgeInsets.all(8), child: ColoredBox(color: Color(0xffff0000), child: Align(child: Text('x'))))];\nPadding concreteType(Widget child) => Padding(padding: EdgeInsets.all(8), child: ConstrainedBox(constraints: BoxConstraints.tightFor(width: 20), child: Align(child: child)));"
+    },
+    "group": "style",
+    "name": "prefer-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -19155,6 +19611,60 @@
     },
     "group": "style",
     "name": "prefer-for-in",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefers collection-for elements over eager map/toList chains in Flutter children.",
+    "diagnostics": [
+      {
+        "column": 56,
+        "file": null,
+        "line": 4,
+        "message": "Use a collection-for element instead of 'map(...).toList()' in children."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 5,
+        "message": "Use a collection-for element instead of 'map(...).toList()' in children."
+      },
+      {
+        "column": 64,
+        "file": null,
+        "line": 6,
+        "message": "Use a collection-for element instead of 'map(...).toList()' in children."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 7,
+        "message": "Use a collection-for element instead of 'map(...).toList()' in children."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 8,
+        "message": "Use a collection-for element instead of 'map(...).toList()' in children."
+      }
+    ],
+    "docs": "Prefers collection-for elements over eager map/toList chains in Flutter children.\n\nDirect `children` arguments are checked on resolved Flutter constructors.\nSpreads are left to `unnecessary-to-list-in-spreads` to avoid duplicate reports.\nThe map receiver must be a proven\nnon-null SDK List, Set, or Iterable, with a single untyped positional parameter\nand a synchronous arrow body. Named arguments, typed callbacks, async or block\nbodies, null-aware calls, and custom collection APIs are left unchanged. The\nsuggestion retains eager evaluation and element order; no automatic fix is made.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget direct(List<String> labels) => Column(children: labels.map((label) => Text(label)).toList());\nWidget row(Set<String> labels) => new Row(children: labels.map((label) => Text(label)).toList());\nWidget prefixed(Iterable<String> labels) => m.Column(children: labels.map((label) => m.Text(label)).toList());\nWidget listView(List<String> labels) => ListView(children: labels.map<Widget>((label) => Text(label)).toList());\nWidget literal() => Column(children: ['one', 'two'].map((label) => Text(label)).toList());",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as m;\n\nWidget loop(List<String> labels) => Column(children: [for (final label in labels) Text(label)]);\nWidget block(List<String> labels) => Column(children: labels.map((label) { return Text(label); }).toList());\nWidget typed(List<String> labels) => Column(children: labels.map((String label) => Text(label)).toList());\nWidget tearOff(List<String> labels) => Column(children: labels.map(Text.new).toList());\nWidget growable(List<String> labels) => Column(children: labels.map((label) => Text(label)).toList(growable: false));\nWidget unknown(dynamic labels) => Column(children: labels.map((label) => Text(label)).toList());\nWidget shadow(dynamic Column, List<String> labels) => Column(children: labels.map((label) => Text(label)).toList());\nWidget prefixShadow(dynamic m, List<String> labels) => m.Column(children: labels.map((label) => Text(label)).toList());\nWidget nullable(List<String>? labels) => Column(children: labels?.map((label) => Text(label)).toList() ?? []);\nWidget custom(Custom labels) => Column(children: labels.map((label) => Text(label)).toList());\nclass Custom {\n  Custom map(Widget Function(String) callback) => this;\n  List<Widget> toList() => [];\n}\nWidget spread(List<String> labels) => Column(children: [\n  ...labels.map((label) => Text(label)).toList(),\n]);"
+    },
+    "group": "style",
+    "name": "prefer-for-loop-in-children",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -20485,6 +20995,78 @@
   },
   {
     "crossFile": false,
+    "description": "Prefers `Padding` over a `Container` used only for `padding`.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Prefer 'Padding' over a Container used only for padding or margin."
+      }
+    ],
+    "docs": "Prefers `Padding` over a `Container` used only for `padding`.\n\nThe unnamed Flutter constructor must have a provably non-null child and\na provably non-null `padding` argument, with only an optional `key`.\nA lone `margin` is also replaceable by `Padding`; combining margin and\npadding is not reported.\nOther arguments, nullable or unresolved values, and shadowed constructors\nare ignored. The dedicated widget makes the layout intent explicit.\nContexts explicitly requiring `Container` are excluded.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid examples(Widget child, EdgeInsetsGeometry value) {\n  Container(padding: value, child: child);\n  new Container(padding: value, child: child);\n  ui.Container(child: child, padding: value);\n  new ui.Container(key: const Key(\"box\"), padding: value, child: child);\n  LayoutContainer(padding: value, child: child);\n  Container(key: const Key(\"ordered\"), child: child, padding: (value));\n  Container(margin: value, child: child);\n  ui.Container(key: const Key(\"margin\"), margin: value, child: child);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid keepContainer(Widget child, EdgeInsetsGeometry value, EdgeInsetsGeometry? nullable, Widget? nullableChild, dynamic unknown) {\n  Container(padding: value);\n  Container(child: child);\n  Container(padding: null, child: child);\n  Container(padding: nullable, child: child);\n  Container(padding: unknown, child: child);\n  Container(padding: value, child: null);\n  Container(padding: value, child: nullableChild);\n  Container(padding: value, width: 12, child: child);\n  Container(padding: value, decoration: const BoxDecoration(), child: child);\n  Container(padding: value, color: Colors.red, child: child);\n}\n\nObject parameterShadow(dynamic Container, Widget child, EdgeInsetsGeometry value) =>\n    Container(padding: value, child: child);\n\nObject prefixShadow(dynamic ui, Widget child, EdgeInsetsGeometry value) =>\n    ui.Container(padding: value, child: child);\n\nObject aliasShadow(dynamic LayoutContainer, Widget child, EdgeInsetsGeometry value) =>\n    LayoutContainer(padding: value, child: child);\n\nvoid localShadow(dynamic factory, Widget child, EdgeInsetsGeometry value) {\n  final Container = factory;\n  Container(padding: value, child: child);\n}\n\nvoid combined(Widget child, EdgeInsetsGeometry value) {\n  Container(padding: value, margin: value, child: child);\n}\n\nvoid unusedTransformAlignment(Widget child, EdgeInsetsGeometry value) {\n  Container(padding: value, transformAlignment: Alignment.center, child: child);\n}"
+    },
+    "group": "style",
+    "name": "prefer-padding-over-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags an `if` returning a boolean literal followed by the opposite literal.",
     "diagnostics": [
       {
@@ -20794,6 +21376,72 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "prefer-trailing-comma",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefers `Transform` over a `Container` used only for `transform`.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Prefer 'Transform' over a Container used only for transform."
+      }
+    ],
+    "docs": "Prefers `Transform` over a `Container` used only for `transform`.\n\nThe unnamed Flutter constructor must have a provably non-null child and\na provably non-null `transform` argument, with only an optional `key`.\n`transformAlignment` is also allowed and maps to `Transform.alignment`.\nOther arguments, nullable or unresolved values, and shadowed constructors\nare ignored. The dedicated widget makes the layout intent explicit.\nContexts explicitly requiring `Container` are excluded.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid examples(Widget child, Matrix4 value) {\n  Container(transform: value, child: child);\n  new Container(transform: value, child: child);\n  ui.Container(child: child, transform: value);\n  new ui.Container(key: const Key(\"box\"), transform: value, child: child);\n  LayoutContainer(transform: value, child: child);\n  Container(key: const Key(\"ordered\"), child: child, transform: (value));\n  Container(transform: value, transformAlignment: Alignment.center, child: child);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as ui;\n\ntypedef LayoutContainer = Container;\n\nvoid keepContainer(Widget child, Matrix4 value, Matrix4? nullable, Widget? nullableChild, dynamic unknown) {\n  Container(transform: value);\n  Container(child: child);\n  Container(transform: null, child: child);\n  Container(transform: nullable, child: child);\n  Container(transform: unknown, child: child);\n  Container(transform: value, child: null);\n  Container(transform: value, child: nullableChild);\n  Container(transform: value, width: 12, child: child);\n  Container(transform: value, decoration: const BoxDecoration(), child: child);\n  Container(transform: value, color: Colors.red, child: child);\n}\n\nObject parameterShadow(dynamic Container, Widget child, Matrix4 value) =>\n    Container(transform: value, child: child);\n\nObject prefixShadow(dynamic ui, Widget child, Matrix4 value) =>\n    ui.Container(transform: value, child: child);\n\nObject aliasShadow(dynamic LayoutContainer, Widget child, Matrix4 value) =>\n    LayoutContainer(transform: value, child: child);\n\nvoid localShadow(dynamic factory, Widget child, Matrix4 value) {\n  final Container = factory;\n  Container(transform: value, child: child);\n}"
+    },
+    "group": "style",
+    "name": "prefer-transform-over-container",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },

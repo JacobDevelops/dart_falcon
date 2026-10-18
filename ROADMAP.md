@@ -10,7 +10,7 @@ falcon is pre-1.0. This tracks shipped milestones and what's left, not a release
 
 All 142 official lints from the 1.0 catalog are registered. Against `dart analyze` 3.13.5, they match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths. `package_api_docs`, `package_prefixed_library_names`, and `unsafe_html` are no longer shipped because Dart 3.13.5 no longer implements them; existing config entries produce unknown-rule warnings. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
 
-Falcon's default set has been re-chosen independently of upstream presets, with 181 of 327 shipped rules recommended. Enable other rules explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
+Falcon's default set has been re-chosen independently of upstream presets, with 181 of 336 shipped rules recommended. Enable other rules explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
 
 Falcon uses an arena concrete syntax tree that retains every token and trivia, so syntax rules read from one tree without parser changes.
 
@@ -19,7 +19,7 @@ Falcon uses an arena concrete syntax tree that retains every token and trivia, s
 ### Remaining
 
 - **Rule-catalog expansion.** Three sources remain in the checklist:
-  - **DCM-inspired rules: 195** (39 must-have, 132 nice-to-have, 24 post-1.0).
+  - **DCM-inspired rules: 186** (30 must-have, 132 nice-to-have, 24 post-1.0).
     These are candidates from the DCM survey, not current pricing claims.
   - **Additional rules: 16** (6 must-have, 7 nice-to-have, 3 post-1.0).
   - **Cross-file rules: 12** (see below).

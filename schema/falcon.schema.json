@@ -107,7 +107,11 @@
             "a11y": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `a11y` group.",
-              "properties": {},
+              "properties": {
+                "prefer-action-button-tooltip": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
               "type": "object"
             },
             "complexity": {
@@ -440,6 +444,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
+                "avoid-shrink-wrap-in-lists": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-slow-async-io": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -747,6 +754,9 @@
                 "prefer-adjacent-string-concatenation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-align-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-asserts-in-initializer-lists": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -757,6 +767,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-async-callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-center-over-align": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-collection-literals": {
@@ -774,7 +787,13 @@
                 "prefer-const-literals-to-create-immutables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-constrained-box-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-constructors-over-static-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-container": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -808,6 +827,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-for-in": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-for-loop-in-children": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-function-declarations-over-variables": {
@@ -855,6 +877,9 @@
                 "prefer-null-aware-method-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-padding-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-returning-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -868,6 +893,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-trailing-comma": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-transform-over-container": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-typing-uninitialized-variables": {
@@ -1347,7 +1375,11 @@
             "a11y": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `a11y` group.",
-              "properties": {},
+              "properties": {
+                "prefer-action-button-tooltip": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
               "type": "object"
             },
             "complexity": {
@@ -1680,6 +1712,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
+                "avoid-shrink-wrap-in-lists": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-slow-async-io": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1987,6 +2022,9 @@
                 "prefer-adjacent-string-concatenation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-align-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-asserts-in-initializer-lists": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1997,6 +2035,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-async-callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-center-over-align": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-collection-literals": {
@@ -2014,7 +2055,13 @@
                 "prefer-const-literals-to-create-immutables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-constrained-box-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-constructors-over-static-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-container": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -2048,6 +2095,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-for-in": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-for-loop-in-children": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-function-declarations-over-variables": {
@@ -2095,6 +2145,9 @@
                 "prefer-null-aware-method-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-padding-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-returning-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2108,6 +2161,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-trailing-comma": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-transform-over-container": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-typing-uninitialized-variables": {
