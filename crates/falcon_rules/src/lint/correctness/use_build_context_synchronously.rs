@@ -17,6 +17,10 @@ use crate::lint::declarations::in_test_directory as is_test_file;
 #[path = "use_build_context_semantics.rs"]
 mod semantics;
 
+pub(crate) use semantics::{
+    Semantics as AsyncFacts, constant_bool, mounted_kind, mounted_receiver_kind,
+};
+
 #[derive(Default)]
 pub struct UseBuildContextSynchronously;
 
@@ -59,7 +63,7 @@ fn analyze_semantics(
         .collect()
 }
 
-fn async_gap_spans(program: Program<'_>, mut semantics: semantics::Semantics) -> Vec<Span> {
+pub(crate) fn async_gap_spans(program: Program<'_>, mut semantics: AsyncFacts) -> Vec<Span> {
     if semantics.uses.is_empty() {
         return Vec::new();
     }

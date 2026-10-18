@@ -12,3 +12,13 @@ extension FutureExtensions<T> on Future<T> {
     bool test(E error)?,
   });
 }
+abstract class Stream<T> {}
+abstract class StreamController<T> implements Sink<T> {
+  external factory StreamController();
+  Stream<T> get stream;
+  Future close();
+}
+abstract class Timer {
+  external factory Timer(Duration duration, void Function() callback);
+  void cancel();
+}

@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 21 | 132 | 24 | 177 |
+| DCM-inspired | 0 | 132 | 24 | 156 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 4 | 7 | 3 | 14 |
-| **Total** | **25** | **143** | **31** | **199** |
+| Additional rules | 0 | 7 | 3 | 10 |
+| **Total** | **0** | **143** | **31** | **174** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (177)
+## Planned DCM-inspired rules (156)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -240,19 +240,11 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `emit-new-bloc-state-instances` | correctness | FT | paid | Emitting the same state instance. | must-have |
-| `prefer-sealed-bloc-events` | correctness | FT | paid | Bloc events should be sealed. | must-have |
-| `prefer-sealed-bloc-state` | correctness | FT | paid | Bloc state should be sealed. | must-have |
-| `prefer-immutable-bloc-events` | correctness | FT | paid | Bloc events must be immutable. | must-have |
-| `prefer-immutable-bloc-state` | correctness | FT | paid | Bloc state must be immutable. | must-have |
-| `avoid-duplicate-bloc-event-handlers` | correctness | FT | paid | Same event registered twice. | must-have |
-| `check-is-not-closed-after-async-gap` | correctness | FT | paid | `emit` after await without an isClosed check. | must-have |
 | `handle-bloc-event-subclasses` | correctness | FT | paid | `on<Event>` missing subclass handling. | nice-to-have |
 | `avoid-passing-bloc-to-bloc` | suspicious | FT | paid | Bloc dependency anti-pattern. | nice-to-have |
 | `avoid-passing-build-context-to-blocs` | suspicious | FT | paid | BuildContext leaking into a bloc. | nice-to-have |
 | `avoid-bloc-public-fields` | style | LT | paid | Bloc encapsulation (fields). | nice-to-have |
 | `avoid-bloc-public-methods` | style | LT | paid | Bloc encapsulation (methods). | nice-to-have |
-| `avoid-emit-outside-bloc` | correctness | FT | n/a | Prevent emitting outside a Bloc. | must-have |
 | `avoid-passing-bloc-to-widget` | suspicious | FT | n/a | Avoid passing a Bloc directly to a widget. | nice-to-have |
 | `prefer-bloc-extensions` | style | LT | n/a | Prefer Bloc extensions for supported APIs. | nice-to-have |
 | `prefer-bloc-event-suffix` | style | S | paid | Event naming convention. | nice-to-have |
@@ -266,16 +258,7 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-ref-watch-outside-build` | correctness | FT | paid | `ref.watch` outside build. | must-have |
-| `avoid-ref-read-inside-build` | correctness | FT | paid | `ref.read` inside build. | must-have |
-| `use-ref-read-synchronously` | correctness | FT | paid | Ref used after await without mounted. | must-have |
-| `prefer-ref-read-for-methods` | correctness | FT | n/a | Prefer ref.read for method actions rather than watching state. | must-have |
-| `use-ref-and-state-synchronously` | correctness | FT | paid | Ref/state used after await without mounted. | must-have |
-| `avoid-calling-notifier-members-inside-build` | correctness | FT | paid | Mutating a notifier during build. | must-have |
-| `dispose-provided-instances` | correctness | FT | paid | Provided disposables not disposed. | must-have |
-| `dispose-provider-resources` | correctness | FT | n/a | Provider-created resources must use autoDispose or ref.onDispose for cleanup; avoid misleading scope-leak terminology. | must-have |
 | `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
-| `avoid-unnecessary-consumer-widgets` | performance | LT | paid | ConsumerWidget without ref use. | must-have |
 | `avoid-ref-inside-state-dispose` | correctness | FT | paid | ref used in dispose. | nice-to-have |
 | `avoid-public-notifier-properties` | style | LT | paid | Notifier exposing mutable state. | nice-to-have |
 | `prefer-immutable-provider-arguments` | correctness | FT | paid | Provider family args must be immutable. | nice-to-have |
@@ -290,10 +273,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-read-inside-build` | correctness | FT | paid | `.read` inside build. | must-have |
-| `avoid-watch-outside-build` | correctness | FT | paid | `.watch` outside build. | must-have |
-| `dispose-providers` | correctness | FT | paid | Provided disposables not disposed. | must-have |
-| `prefer-read-for-methods` | correctness | FT | n/a | Prefer read for method actions rather than watching state. | must-have |
 | `avoid-instantiating-in-value-provider` | correctness | FT | paid | `.value` provider creating a new instance. | nice-to-have |
 | `prefer-multi-provider` | style | LT | paid | Nested providers → MultiProvider. | nice-to-have |
 | `prefer-provider-extensions` | style | LT | paid | Use context extensions over `Provider.of`. | nice-to-have |
@@ -302,10 +281,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-conditional-hooks` | correctness | S | paid | Hooks called conditionally break rules-of-hooks. | must-have |
-| `avoid-hooks-outside-build` | correctness | FT | paid | Hook used outside a build method. | must-have |
-| `avoid-misused-hooks` | correctness | FT | paid | Hook misuse. | must-have |
-| `avoid-unnecessary-hook-widgets` | performance | LT | paid | HookWidget with no hooks. | must-have |
 | `prefer-use-callback` | performance | FT | paid | Wrap callbacks in `useCallback`. | nice-to-have |
 | `prefer-use-memo` | performance | FT | paid | Wrap values in `useMemo`. | nice-to-have |
 

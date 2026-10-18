@@ -111,3 +111,7 @@ class MapEntry<K, V> {
 }
 external void print(Object? object);
 external bool identical(Object? a, Object? b);
+abstract class Sink<T> {
+  void add(T data);
+  void close();
+}

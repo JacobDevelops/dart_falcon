@@ -65,19 +65,48 @@
   },
   {
     "name": "bloc",
-    "rules": []
+    "rules": [
+      "avoid-duplicate-bloc-event-handlers",
+      "avoid-emit-outside-bloc",
+      "check-is-not-closed-after-async-gap",
+      "emit-new-bloc-state-instances",
+      "prefer-immutable-bloc-events",
+      "prefer-immutable-bloc-state",
+      "prefer-sealed-bloc-events",
+      "prefer-sealed-bloc-state"
+    ]
   },
   {
     "name": "riverpod",
-    "rules": []
+    "rules": [
+      "avoid-calling-notifier-members-inside-build",
+      "avoid-ref-read-inside-build",
+      "avoid-ref-watch-outside-build",
+      "avoid-unnecessary-consumer-widgets",
+      "dispose-provided-instances",
+      "dispose-provider-resources",
+      "prefer-ref-read-for-methods",
+      "use-ref-and-state-synchronously",
+      "use-ref-read-synchronously"
+    ]
   },
   {
     "name": "provider",
-    "rules": []
+    "rules": [
+      "avoid-read-inside-build",
+      "avoid-watch-outside-build",
+      "dispose-providers",
+      "prefer-read-for-methods"
+    ]
   },
   {
     "name": "flutter_hooks",
-    "rules": []
+    "rules": [
+      "avoid-conditional-hooks",
+      "avoid-hooks-outside-build",
+      "avoid-misused-hooks",
+      "avoid-unnecessary-hook-widgets"
+    ]
   },
   {
     "name": "equatable",

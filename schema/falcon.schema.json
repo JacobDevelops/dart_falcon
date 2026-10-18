@@ -260,10 +260,19 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-calling-notifier-members-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-collection-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-conditional-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-contradictory-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-bloc-event-handlers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-duplicate-collection-elements": {
@@ -281,10 +290,16 @@
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-emit-outside-bloc": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-empty-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-hooks-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-inherited-widget-in-initstate": {
@@ -296,13 +311,25 @@
                 "avoid-missing-interpolation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-misused-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-mutable-equatable-subclass-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-recursive-widget-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-watch-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-relative-lib-imports": {
@@ -338,6 +365,9 @@
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-watch-outside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-web-libraries-in-flutter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -345,6 +375,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "cancel-subscriptions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "check-is-not-closed-after-async-gap": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "close-sinks": {
@@ -372,6 +405,18 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "dispose-focus-node-and-timer": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-provided-instances": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-provider-resources": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-providers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "emit-new-bloc-state-instances": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -419,7 +464,25 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-immutable-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-immutable-bloc-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-read-for-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-ref-read-for-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-relative-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-void-to-null": {
@@ -473,6 +536,12 @@
                 "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "use-ref-and-state-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-ref-read-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-setstate-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -496,6 +565,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-consumer-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-hook-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "move-variable-outside-iteration": {
@@ -1573,10 +1648,19 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-calling-notifier-members-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-collection-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-conditional-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-contradictory-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-bloc-event-handlers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-duplicate-collection-elements": {
@@ -1594,10 +1678,16 @@
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-emit-outside-bloc": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-empty-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-hooks-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-inherited-widget-in-initstate": {
@@ -1609,13 +1699,25 @@
                 "avoid-missing-interpolation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-misused-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-mutable-equatable-subclass-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-recursive-widget-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ref-watch-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-relative-lib-imports": {
@@ -1651,6 +1753,9 @@
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-watch-outside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-web-libraries-in-flutter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1658,6 +1763,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "cancel-subscriptions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "check-is-not-closed-after-async-gap": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "close-sinks": {
@@ -1685,6 +1793,18 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "dispose-focus-node-and-timer": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-provided-instances": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-provider-resources": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-providers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "emit-new-bloc-state-instances": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -1732,7 +1852,25 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-immutable-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-immutable-bloc-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-read-for-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-ref-read-for-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-relative-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-events": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-sealed-bloc-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-void-to-null": {
@@ -1786,6 +1924,12 @@
                 "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "use-ref-and-state-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-ref-read-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-setstate-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1809,6 +1953,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-slow-collection-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-consumer-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-hook-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "move-variable-outside-iteration": {

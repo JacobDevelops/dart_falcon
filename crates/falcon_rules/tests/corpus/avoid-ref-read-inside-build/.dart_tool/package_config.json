@@ -1,0 +1,23 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "riverpod",
+      "rootUri": "../packages/riverpod",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "flutter_riverpod",
+      "rootUri": "../packages/flutter_riverpod",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "hooks_riverpod",
+      "rootUri": "../packages/hooks_riverpod",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    }
+  ]
+}

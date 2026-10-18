@@ -21,7 +21,7 @@ use falcon_syntax::cst::*;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
-pub(super) struct Semantics {
+pub(crate) struct Semantics {
     pub uses: HashMap<NodeId, bool>,
     pub mounted: HashMap<NodeId, bool>,
     pub protected_callbacks: HashSet<NodeId>,
@@ -119,7 +119,7 @@ fn key(expression: Expr<'_>) -> NodeId {
     expression.syntax().id()
 }
 
-fn mounted_kind(receiver: &ResolvedType, state: &SemanticState<'_>) -> Option<bool> {
+pub(crate) fn mounted_kind(receiver: &ResolvedType, state: &SemanticState<'_>) -> Option<bool> {
     if let Some(owner) = state
         .signatures
         .resolved_member_owner(receiver, "mounted", &state.model)
@@ -302,7 +302,7 @@ fn context_type_kind(
         .flatten()
 }
 
-fn constant_bool<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Option<bool> {
+pub(crate) fn constant_bool<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Option<bool> {
     if let Expr::BoolLit(literal) = expression.unparenthesized() {
         return Some(literal.value());
     }
@@ -367,6 +367,13 @@ fn receiver_type<'a>(
     } else {
         inferred
     }
+}
+
+pub(crate) fn mounted_receiver_kind<'a>(
+    expression: Expr<'a>,
+    state: &SemanticState<'a>,
+) -> Option<bool> {
+    mounted_kind(&receiver_type(expression, state, &HashMap::new()), state)
 }
 
 impl<'a> Collector<'a> {

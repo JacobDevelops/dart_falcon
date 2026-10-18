@@ -1,0 +1,9 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {"name": "consumer_widget_fixture", "rootUri": "../", "packageUri": "lib/", "languageVersion": "3.0"},
+    {"name": "flutter", "rootUri": "../packages/flutter", "packageUri": "lib/", "languageVersion": "3.0"},
+    {"name": "flutter_riverpod", "rootUri": "../packages/flutter_riverpod", "packageUri": "lib/", "languageVersion": "3.0"},
+    {"name": "hooks_riverpod", "rootUri": "../packages/hooks_riverpod", "packageUri": "lib/", "languageVersion": "3.0"}
+  ]
+}

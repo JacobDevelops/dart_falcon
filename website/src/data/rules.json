@@ -3106,6 +3106,72 @@
   },
   {
     "crossFile": false,
+    "description": "Flags calls to Riverpod notifier methods during widget build.",
+    "diagnostics": [
+      {
+        "column": 31,
+        "file": null,
+        "line": 10,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 13,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 14,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 20,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 25,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 30,
+        "message": "Do not invoke notifier methods during build; move the action to a callback."
+      }
+    ],
+    "docs": "Flags calls to Riverpod notifier methods during widget build.\n\nBuild must not trigger notifier side effects. Method tear-offs and nested\ncallbacks are not calls during build; unrelated same-named types and Object\nmethods (`toString` and `noSuchMethod`) are ignored.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    ref.read(counterProvider).increment();\n    final counter = ref.watch(counterProvider);\n    counter.increment();\n    counter.reset();\n    ref.watch(asyncProvider).refresh();\n    return 0;\n  }\n}\nclass Arrow extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    ref.read(counterProvider).increment();\n    return 0;\n  }\n}\nObject consumer() => Consumer(builder: (context, ref, child) {\n  ref.read(counterProvider).increment();\n  return 0;\n});\nclass HookScreen extends hooks.HookConsumerWidget {\n  Object build(Object context, hooks.WidgetRef ref) {\n    ref.read(counterProvider).increment();\n    return 0;\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nclass Service { void increment() {} }\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final counter = ref.watch(counterProvider);\n    final callback = () => counter.increment();\n    void local() { counter.reset(); }\n    final tearoff = counter.increment;\n    final service = Service();\n    service.increment();\n    counter.toString();\n    return callback;\n  }\n  void action(WidgetRef ref) { ref.read(counterProvider).increment(); }\n}\nvoid outside(Counter counter) { counter.increment(); }\nclass Unrelated {\n  Object build(Object context, Counter counter) { counter.increment(); return 0; }\n}\nclass DeferredMenu extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      PopupMenuButton(itemBuilder: (context) {\n        ref.read(counterProvider).increment();\n        return 0;\n      });\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-calling-notifier-members-inside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags equality comparisons between non-constant SDK collections.",
     "diagnostics": [
       {
@@ -3154,6 +3220,138 @@
     },
     "group": "correctness",
     "name": "avoid-collection-equality-checks",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags hook calls in conditional branches, short-circuit operands, and loops.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 13,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 14,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 15,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 17,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 18,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 27,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 30,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 32,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 33,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 34,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 59,
+        "file": null,
+        "line": 35,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 38,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 42,
+        "message": "Avoid calling hooks conditionally. Move this call outside the condition or loop."
+      }
+    ],
+    "docs": "Flags hook calls in conditional branches, short-circuit operands, and loops.\n\nHooks depend on a stable invocation order across builds. Move the hook call\noutside the condition and put conditional work inside its callback instead.\nOnly hook-widget builds, custom useX functions, and HookBuilder builders\nare checked; invalid hook contexts belong to the other hook rules.\nPackage hooks and custom hooks proven to compose them are recognized by\nsemantic identity. If/ternary conditions, switch subjects, left operands,\nand for-loop initializers/iterables are unconditional. Nested functions\nstart separate execution contexts. This rule checks enclosing syntax, not\nconditional early exits, exception paths, lazy variables, or null-aware calls.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_hooks/flutter_hooks.dart';\n\nint useCounter() => useState(0);\n\nvoid useConditional(bool enabled, List<int> values) {\n  if (enabled) {\n    useState(0);\n  } else {\n    useMemoized(() => 1);\n  }\n  final first = enabled\n      ? useState(1)\n      : useState(2);\n  final and = enabled && useState(true);\n  final or = enabled || useState(false);\n  int? optional;\n  final fallback = optional ?? useState(1);\n  optional ??= useState(2);\n  for (final value in values) {\n    useState(value);\n  }\n  while (enabled) {\n    useMemoized(() => 1);\n    break;\n  }\n  do {\n    useState(0);\n  } while (enabled);\n  for (var index = 0; index < values.length; index++) {\n    useCounter();\n  }\n  final list = [if (enabled) useState(3)];\n  final mapped = [for (final value in values) useState(value)];\n  final map = {if (enabled) 'value': useState(1)};\n  final repeatedMap = {for (final value in values) value: useState(value)};\n  switch (first) {\n    case 1:\n      useState(0);\n      break;\n  }\n  final selected = switch (first) {\n    1 => useState(1),\n    _ => 0,\n  };\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nint useCounter() => hooks.useState(0);\n\nvoid useStable(bool enabled, List<int> values) {\n  final state = hooks.useState(0);\n  hooks.useMemoized(() {\n    if (enabled) return 1;\n    return 0;\n  });\n  hooks.useEffect(() {\n    for (final value in values) {\n      if (value > 0) print(value);\n    }\n  });\n  final condition = hooks.useState(true) && enabled;\n  final otherCondition = hooks.useState(false) || enabled;\n  final int? optional = hooks.useState<int?>(null);\n  final fallback = optional ?? 1;\n  final ternary = hooks.useState(true) ? 1 : 0;\n  if (hooks.useState(true)) print(state);\n  for (var index = hooks.useState(0); index < 2; index++) {\n    print(index);\n  }\n  final custom = useCounter();\n  final collection = [if (hooks.useState(true)) custom];\n  if (enabled) {\n    void callback() {\n      hooks.useState(0);\n    }\n    final callbackExpression = () => hooks.useState(0);\n  }\n}\n\nclass Unrelated {\n  int useState(int initial) => initial;\n\n  void useUnrelated(bool enabled) {\n    if (enabled) useState(0);\n  }\n}\n\nvoid unrelated(bool enabled, Unrelated service) {\n  if (enabled) service.useState(0);\n}\n\nvoid useShadowed(bool enabled, int Function(int) useState) {\n  if (enabled) useState(0);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-conditional-hooks",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -3272,6 +3470,60 @@
     },
     "group": "correctness",
     "name": "avoid-contradictory-expressions",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags later registrations of the same event type in a Bloc constructor.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 11,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 14,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 16,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 20,
+        "message": "This event already has a handler. Combine the handlers into one registration."
+      }
+    ],
+    "docs": "Flags later registrations of the same event type in a Bloc constructor.\n\nBloc permits only one `on<Event>` handler per event type. Combine the handlers\ninstead of registering the same event twice. This rule checks unconditional\nconstructor registrations on `this`, including unqualified calls, separately\nfor each constructor. Deferred callbacks, branches, other receivers, local\n`on` bindings, unresolved generic arguments, opaque mixins and classes\noverriding `on` are excluded. Bloc identity requires package resolution or\na matching bloc/flutter_bloc import and superclass.\n\n### Bad\n```dart\non<Started>((event, emit) {});\non<Started>((event, emit) {}); // A second handler for Started.\n```\n\n### Good\n```dart\non<Started>((event, emit) { initialize(); refresh(); });\n```",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\nfinal class Reset extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Start>((event, emit) {});\n    this.on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n    this.on<Stop>((event, emit) {});\n    on<Reset>((event, emit) {});\n    on<Reset>((event, emit) {});\n  }\n  CounterBloc.named() : super(0) {\n    on<Start>((event, emit) {});\n    on<Start>((event, emit) {});\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CounterBloc.named() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.other(CounterBloc other) : super(0) {\n    on<Start>((event, emit) {});\n    other.on<Start>((event, emit) {});\n  }\n  CounterBloc.local(void Function<T>(Object callback) on) : super(0) {\n    on<Start>((event, emit) {});\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.branch(bool flag) : super(0) {\n    if (flag) {\n      on<Start>((event, emit) {});\n    } else {\n      on<Start>((event, emit) {});\n    }\n  }\n}\n\nclass Registry {\n  Registry() {\n    on<Start>(() {});\n    on<Start>(() {});\n  }\n  void on<T>(Object callback) {}\n}\n\nclass CustomBloc extends Bloc<Event, int> {\n  CustomBloc() : super(0) {\n    on<Start>(() {});\n    on<Start>(() {});\n  }\n  void on<T>(Object callback) {}\n}\n\nclass InheritedCustomBloc extends CustomBloc {\n  InheritedCustomBloc() : super() {\n    on<Start>(() {});\n    on<Start>(() {});\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-bloc-event-handlers",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -3706,6 +3958,72 @@
   },
   {
     "crossFile": false,
+    "description": "Flags external calls and tear-offs of a Bloc or Cubit's `emit` method.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 11,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 12,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 13,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 14,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 15,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 15,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 20,
+        "message": "Do not emit state outside its Bloc or Cubit; use its events or public methods."
+      }
+    ],
+    "docs": "Flags external calls and tear-offs of a Bloc or Cubit's `emit` method.\n\nExternal code should dispatch Bloc events or call a Cubit's public domain\nmethods instead of bypassing its state-transition logic. Receivers must be\nconfirmed through `bloc`/`flutter_bloc` package identity or an imported API\nsuperclass. Ordinary and null-aware method calls, tear-offs and cascade\nsections are checked. Emission inside the owning class through `this`,\n`super`, or a receiver of that owner type is allowed; extensions are outside\nthe owner. Unknown/dynamic receivers and unrelated `emit` methods are not\nreported; no class-name suffix is assumed.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_bloc/flutter_bloc.dart';\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n}\nclass Event {}\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0);\n}\nvoid update(Counter counter, Counter? optional, CounterBloc bloc) {\n  counter.emit(1);\n  optional?.emit(2);\n  bloc.emit(3);\n  counter..emit(4);\n  counter..emit(5)..emit(6);\n}\nclass Presenter {\n  final Counter counter;\n  Presenter(this.counter);\n  void refresh() { counter.emit(7); }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n  void increment() { emit(state + 1); }\n  void explicit() { this.emit(1); }\n  void inherited() { super.emit(2); }\n  void cascade() { this..emit(3); }\n  void internal(Counter other) { other.emit(4); }\n}\nclass Other {\n  void emit(int value) {}\n}\nvoid unrelated(Other other, dynamic unknown, void Function(int) emit) {\n  other.emit(1);\n  unknown.emit(2);\n  emit(3);\n  other..emit(4);\n}\nvoid publicApi(Counter counter) { counter.increment(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-emit-outside-bloc",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid setState callbacks with empty block bodies.",
     "diagnostics": [
       {
@@ -3825,6 +4143,78 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-global-state",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags confirmed Flutter hooks outside hook builds, custom hooks, and HookBuilder/HookConsumer builders.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 5,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 19,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 23,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 31,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 36,
+        "message": "Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder."
+      }
+    ],
+    "docs": "Flags confirmed Flutter hooks outside hook builds, custom hooks, and HookBuilder/HookConsumer builders.\n\nOnly resolved flutter_hooks functions and useX/_useX functions that actually\ncompose them count as hooks. Nested callbacks do not inherit the enclosing\nbuild or custom-hook permission. Confirmed non-hook widget builds are left\nto avoid-misused-hooks; unresolved calls, unresolved build ancestry, and shadowed names are ignored.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nfinal initial = useState<int>(0).toString();\nvoid start() {\n  hooks.useEffect(() {});\n}\nint useComposed() => useState(0);\nvoid callCustom() {\n  useComposed();\n}\nclass Screen extends HookWidget {\n  void onPressed() {\n    useMemoized(() => 1);\n  }\n  Widget build(BuildContext context) {\n    final callback = () {\n      useState(1);\n    };\n    return HookBuilder(builder: (context) {\n      final nested = () {\n        useState(2);\n      };\n      return const SizedBox();\n    });\n  }\n}\nvoid _useFeature() {\n  final callback = () {\n    useState(3);\n  };\n}\nclass Service {\n  void build() {\n    useState(4);\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nint useFeature() => useState(1);\nint _usePrivate() => hooks.useMemoized(() => 2);\nint useBusiness() => 3;\nvoid ordinary() { useBusiness(); }\nvoid shadowed(int Function(int) useState) { useState(0); }\nvoid shadowedPrefix(dynamic hooks) { hooks.useState(0); }\nclass Screen extends HookWidget {\n  Widget build(BuildContext context) {\n    useState<int>(0);\n    useFeature();\n    _usePrivate();\n    int _useLocal() => hooks.useState<int>(1);\n    _useLocal();\n    return HookBuilder(builder: (context) {\n      hooks.useEffect(() {});\n      return const SizedBox();\n    });\n  }\n  int _useMethod() => useState(2);\n}\nclass RiverScreen extends HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass NonHookScreen extends StatelessWidget {\n  Widget build(BuildContext context) {\n    useState(0); // Owned by avoid-misused-hooks, not this rule.\n    return const SizedBox();\n  }\n}\n\nclass StatefulHooks extends StatefulHookWidget {}\nclass HooksState extends State<StatefulHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulRiverHooks extends StatefulHookConsumerWidget {}\nclass RiverHooksState extends ConsumerState<StatefulRiverHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return HookConsumer(builder: (context, ref, child) {\n      useState(1);\n      return const SizedBox();\n    });\n  }\n}\nclass UnknownScreen extends MissingHookBase {\n  Widget build(BuildContext context) {\n    useState(0); // Unresolved ancestry is not proof of an invalid context.\n    return const SizedBox();\n  }\n}\nmixin CounterHooks {\n  int useCounter() => useState(0);\n}\nextension ContextHooks on BuildContext {\n  int useCounter() => useState(0);\n}\n\nmixin HookScreenBuild on HookWidget {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nmixin UnconstrainedBuild {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-hooks-outside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -4056,6 +4446,66 @@
   },
   {
     "crossFile": false,
+    "description": "Flags confirmed Flutter hooks called directly in non-hook Flutter widget builds.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 8,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 12,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 27,
+        "message": "Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget."
+      }
+    ],
+    "docs": "Flags confirmed Flutter hooks called directly in non-hook Flutter widget builds.\n\nWidget ancestry must resolve. HookWidget/HookConsumerWidget builds and State\nbuilds for StatefulHookWidget/StatefulHookConsumerWidget are excluded, as is\nunknown ancestry. Custom useX functions must compose resolved flutter_hooks\ncalls; spelling alone is insufficient. Nested callbacks belong to\navoid-hooks-outside-build instead.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nint useFeature() => useState(1);\nclass Screen extends StatelessWidget {\n  Widget build(BuildContext context) {\n    useState<int>(0).toString();\n    useMemoized(() => 1);\n    useFeature();\n    for (var i = 0; i < 2; i++) {\n      useState(i);\n    }\n    return const SizedBox();\n  }\n}\nabstract class BaseScreen extends StatelessWidget {}\nclass DerivedScreen extends BaseScreen {\n  Widget build(BuildContext context) {\n    hooks.useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulScreen extends StatefulWidget {}\nclass ScreenState extends State<StatefulScreen> {\n  Widget build(BuildContext context) {\n    hooks.useEffect(() {});\n    return const SizedBox();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nint useBusiness() => 2;\nvoid ordinary() { useState(0); } // Outside-build rule owns this.\nclass Screen extends HookWidget {\n  Widget build(BuildContext context) {\n    useState<int>(0);\n    return const SizedBox();\n  }\n}\nclass RiverScreen extends HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    useMemoized(() => 1);\n    return const SizedBox();\n  }\n}\nclass NonHookScreen extends StatelessWidget {\n  Widget build(BuildContext context) {\n    useBusiness(); // A custom useX name alone is not a hook.\n    final callback = () { useState(0); }; // Outside-build owns callbacks.\n    return HookBuilder(builder: (context) {\n      useState(1);\n      return const SizedBox();\n    });\n  }\n}\nclass Service {\n  int build() => useState(0); // Not a Flutter widget.\n}\nclass ShadowedScreen extends StatelessWidget {\n  final int Function(int) useState;\n  ShadowedScreen(this.useState);\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulScreen extends StatefulWidget {}\nclass ScreenState extends State<StatefulScreen> {\n  void event() { useState(0); } // Not a build method.\n}\n\nclass StatefulHooks extends StatefulHookWidget {}\nclass HooksState extends State<StatefulHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass StatefulRiverHooks extends StatefulHookConsumerWidget {}\nclass RiverHooksState extends ConsumerState<StatefulRiverHooks> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return HookConsumer(builder: (context, ref, child) {\n      useState(1);\n      return const SizedBox();\n    });\n  }\n}\nclass UnknownScreen extends MissingHookBase {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass UnknownState extends State<dynamic> {\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-misused-hooks",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags mutable instance fields on subclasses inheriting Equatable equality.",
     "diagnostics": [
       {
@@ -4162,6 +4612,90 @@
   },
   {
     "crossFile": false,
+    "description": "Flags non-listening Provider reads directly inside Flutter widget builds.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 8,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 9,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 11,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 19,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 25,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 33,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 34,
+        "message": "Use watch instead of read for values used during build."
+      }
+    ],
+    "docs": "Flags non-listening Provider reads directly inside Flutter widget builds.\n\nA read does not rebuild the widget when its value changes. This checks\npackage:provider context extensions and `Provider.of(listen: false)` on a\nFlutter BuildContext. Nested callbacks are skipped: their execution phase\ndepends on the receiving API, not their lexical position. BuildWithChild\noverrides on nested's single-child widgets are also build entry points;\ndidChangeDependencies permits subscriptions but is not a build.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\nimport 'package:nested/nested.dart';\n\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.read<int>();\n    final value = (context.read<String>());\n    if (true) context.read<bool>();\n    Provider.of<int>(context, listen: false);\n    return context.read<Widget>();\n  }\n}\nclass StatefulView extends StatefulWidget {\n  State<StatefulView> createState() => ViewState();\n}\nclass ViewState extends State<StatefulView> {\n  Widget build(BuildContext other) {\n    return other.read<Widget>();\n  }\n}\n\nclass SingleView extends SingleChildStatelessWidget {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.read<int>();\n    Provider.of<int>(context, listen: false);\n    return child ?? SizedBox();\n  }\n}\n\nclass SingleState extends SingleChildState<SingleChildStatefulWidget> {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.read<int>();\n    Provider.of<int>(context, listen: false);\n    return child ?? SizedBox();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.watch<int>();\n    Provider.of<int>(context);\n    Provider.of<int>(context, listen: true);\n    final callback = () => context.read<int>();\n    void local() { context.read<int>(); }\n    return SizedBox();\n  }\n  void callback(BuildContext context) { context.read<int>(); }\n}\nclass NotAWidget {\n  void build(BuildContext context) { context.read<int>(); }\n}\nclass Other { T read<T>() => throw 0; }\nvoid readOther(Other context) { context.read<int>(); }\n\nclass DependentState extends State<StatefulWidget> {\n  BuildContext get context => throw 0;\n  void didChangeDependencies() {\n    context.read<int>();\n    Provider.of<int>(context, listen: false);\n  }\n  Widget helper(BuildContext context) => Text('${context.read<int>()}');\n  Widget build(BuildContext context) => helper(context);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-read-inside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Warns when a widget's build method constructs the same widget again.",
     "diagnostics": [
       {
@@ -4206,6 +4740,144 @@
     },
     "group": "correctness",
     "name": "avoid-recursive-widget-calls",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags one-time Riverpod reads of provider state during widget build.",
+    "diagnostics": [
+      {
+        "column": 23,
+        "file": null,
+        "line": 6,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 7,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 8,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 12,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 15,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 69,
+        "file": null,
+        "line": 17,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      },
+      {
+        "column": 60,
+        "file": null,
+        "line": 19,
+        "message": "Use 'ref.watch' in build so provider changes rebuild the widget."
+      }
+    ],
+    "docs": "Flags one-time Riverpod reads of provider state during widget build.\n\nUse watch to rebuild when state changes. Nested callbacks and notifier action reads are excluded.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final value = ref.read(countProvider);\n    if (value > 0) { return ref.read(countProvider); }\n    return ref.read<int>(countProvider);\n  }\n}\nclass Arrow extends ConsumerWidget {\n  Object build(Object context, WidgetRef reader) => reader.read(countProvider);\n}\nclass ScreenState extends ConsumerState<Object> {\n  Object build(Object context) => ref.read(countProvider);\n}\nObject consumer() => Consumer(builder: (context, ref, child) => ref.read(countProvider));\nclass HookScreen extends hooks.HookConsumerWidget {\n  Object build(Object context, hooks.WidgetRef ref) => ref.read(countProvider);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final callback = () => ref.read(countProvider);\n    void local() { ref.read(countProvider); }\n    return ref.watch(countProvider);\n  }\n  int action(WidgetRef ref) => ref.read(countProvider);\n}\nint outside(WidgetRef ref) => ref.read(countProvider);\nfinal plain = Provider<int>((ref) => ref.read(countProvider));\nclass Unrelated {\n  int read(Object value) => 0;\n  Object build(Object context, Unrelated ref) => ref.read(countProvider);\n}\nObject consumer() => Consumer(builder: (context, ref, child) => () => ref.read(countProvider));\nclass DeferredMenu extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      PopupMenuButton(itemBuilder: (context) => ref.read(countProvider));\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-ref-read-inside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Riverpod WidgetRef.watch subscriptions outside synchronous widget build bodies.",
+    "diagnostics": [
+      {
+        "column": 36,
+        "file": null,
+        "line": 6,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 7,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 9,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 10,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 15,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 18,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 21,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 25,
+        "message": "Use 'ref.read' outside build instead of subscribing with 'ref.watch'."
+      }
+    ],
+    "docs": "Flags Riverpod WidgetRef.watch subscriptions outside synchronous widget build bodies.\n\nSubscriptions belong in build; event callbacks and other widget methods\nshould read once. Consumer builders and package-confirmed Flutter builder,\nitemBuilder and separatorBuilder callbacks inside build are build contexts.\nProvider Ref callbacks are left unchanged, including those inside widgets.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  void action(WidgetRef ref) { ref.watch(countProvider);  }\n  int getCount(WidgetRef reader) => reader.watch(countProvider);\n  Object build(Object context, WidgetRef ref) {\n    final callback = () => ref.watch(countProvider);\n    void local() { ref.watch(countProvider); }\n    return callback;\n  }\n}\nclass ScreenState extends ConsumerState<Object> {\n  void initState() { ref.watch(countProvider); }\n  Object build(Object context) => 0;\n}\nvoid action(WidgetRef reader) { reader.watch(countProvider); }\nclass HookScreen extends hooks.HookConsumerWidget {\n  Object build(Object context, WidgetRef ref) => 0;\n  void action(hooks.WidgetRef ref) { ref.watch(countProvider); }\n}\nclass MenuScreen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      PopupMenuButton(itemBuilder: (context) => ref.watch(countProvider));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_hooks/flutter_hooks.dart' as flutter_hooks;\nimport 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Screen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    final value = ref.watch(countProvider);\n    return value;\n  }\n  int action(WidgetRef ref) => ref.read(countProvider);\n}\nclass ScreenState extends ConsumerState<Object> {\n  Object build(Object context) => ref.watch(countProvider);\n}\nfinal dependent = Provider<int>((ref) => ref.watch(countProvider));\nObject consumer() => Consumer(builder: (context, ref, child) => ref.watch(countProvider));\nclass Unrelated { int watch(Object value) => 0; }\nint unrelated(Unrelated ref) => ref.watch(countProvider);\nint unknown(dynamic ref) => ref.watch(countProvider);\nclass BuilderScreen extends ConsumerWidget {\n  static final dependent = Provider<int>((Ref ref) => ref.watch(countProvider));\n  Object build(Object context, WidgetRef ref) =>\n      Builder(builder: (context) => ref.watch(countProvider));\n}\nclass SliverBuilderScreen extends ConsumerWidget {\n  Object build(Object context, WidgetRef ref) =>\n      SliverChildBuilderDelegate((context, index) => ref.watch(countProvider));\n}\nclass OtherBuilders extends hooks.HookConsumerWidget {\n  Object build(Object context, WidgetRef ref) {\n    SliverList.builder(itemBuilder: (context, index) => ref.watch(countProvider));\n    SliverGrid.builder(itemBuilder: (context, index) => ref.watch(countProvider));\n    ReorderableListView.builder(itemBuilder: (context, index) => ref.watch(countProvider));\n    AnimatedList(itemBuilder: (context, index, animation) => ref.watch(countProvider));\n    return flutter_hooks.HookBuilder(builder: (context) => ref.watch(countProvider));\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-ref-watch-outside-build",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -5114,6 +5786,96 @@
   },
   {
     "crossFile": false,
+    "description": "Flags listening Provider accesses proven to run outside Flutter builds.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 12,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 13,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 30,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 33,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 37,
+        "message": "Use read instead of subscribing outside build."
+      }
+    ],
+    "docs": "Flags listening Provider accesses proven to run outside Flutter builds.\n\nProvider watch/select and listening Provider.of calls subscribe to widget\nupdates. Use read in initState, dispose, non-widget classes and deferred\ncallbacks. didChangeDependencies may establish dependencies; buildWithChild\non nested's SingleChildStatelessWidget/SingleChildState is a build entry.\nOnly confirmed Flutter BuildContext receivers with provider imports match.\nWidget helpers, unresolved bases and callback arguments with an unknown\nexecution phase are skipped. Named on… callbacks are deferred events.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nvoid action(BuildContext context) {\n  context.watch<int>();\n  context.select<String, int>((value) => value.length);\n  Provider.of<String>(context);\n  Provider.of<int>(context, listen: true);\n}\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    final callback = () => context.watch<int>();\n    void local() { context.watch<String>(); }\n    return SizedBox();\n  }\n}\n\nclass PlainService {\n  void action(BuildContext context) {\n    context.watch<int>();\n  }\n  void build(BuildContext context) {\n    Provider.of<int>(context);\n  }\n}\n\nclass ViewState extends State<StatefulWidget> {\n  BuildContext get context => throw 0;\n  void initState() {\n    context.watch<int>();\n  }\n  void dispose() {\n    Provider.of<int>(context);\n  }\n  Widget build(BuildContext context) => GestureDetector(\n    onTap: () {\n      context.watch<int>();\n    },\n  );\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.watch<int>();\n    context.select<String, int>((value) => value.length);\n    Provider.of<int>(context);\n    Provider.of<int>(context, listen: true);\n    return SizedBox();\n  }\n  // Helpers can establish dependencies while called synchronously from build.\n  Widget label(BuildContext context) => Text('${context.watch<int>()}');\n  void action(BuildContext context) {\n    context.watch<int>();\n  }\n}\nvoid callback(BuildContext context, bool listen) {\n  context.read<int>();\n  Provider.of<int>(context, listen: false);\n  Provider.of<int>(context, listen: listen);\n}\nclass Other { T watch<T>() => throw 0; }\nvoid unrelated(Other context) { context.watch<int>(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-watch-outside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Disallow importing web-only `dart:` libraries from Flutter code.",
     "diagnostics": [
       {
@@ -5557,6 +6319,102 @@
       "label": "Dart lints",
       "upstreamId": "cancel_subscriptions",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/cancel_subscriptions"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc `add` and `emit` calls after an await without a fresh `isClosed` check.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 22,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 28,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 31,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 34,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 38,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 48,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 49,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 54,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 59,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      }
+    ],
+    "docs": "Flags Bloc `add` and `emit` calls after an await without a fresh `isClosed` check.\n\nA Bloc or Cubit can close while asynchronous work is suspended. Check\n`!isClosed` before dispatching or emitting, or return when `isClosed` is true.\nEach await invalidates earlier checks. Both guarded branches and terminating\nearly-return guards are recognized, and nested functions are independent.\nAwaits in call arguments invalidate even an enclosing guard.\nCalls must target the enclosing package-backed Bloc/Cubit, or an Emitter\nparameter of its event handler. An Emitter also accepts its own `!isDone`\nguard. Unrelated receivers, shadowed names and opaque mixins are ignored.\nAnalysis follows straight-line statements and enclosing if branches;\nuncertain loops, switch/try flow, pattern conditions, conditional collection\nelements and optional/short-circuit evaluation are not treated as proof of\nan unguarded asynchronous path.\n\n### Bad\n```dart\nawait load();\nemit(Loaded());\n```\n\n### Good\n```dart\nawait load();\nif (isClosed) return;\nemit(Loaded());\n```",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  Future<void> unguarded() async {\n    await load();\n    emit(1);\n  }\n  Future<void> explicitReceiver() async {\n    await load();\n    this.emit(2);\n  }\n  Future<void> staleCheck() async {\n    if (!isClosed) {\n      await load();\n      emit(3);\n    }\n  }\n  Future<void> wrongGuard(CounterCubit other) async {\n    await load();\n    if (!other.isClosed) {\n      emit(4);\n    }\n  }\n  Future<void> staleReturn() async {\n    if (isClosed) return;\n    await load();\n    emit(5);\n  }\n  Future<void> awaitedArgument() async {\n    emit(await value());\n  }\n  Future<void> guardedAwaitedArgument() async {\n    if (!isClosed) emit(await value());\n  }\n  Future<void> gapBeforeConditionalArgument(bool ready) async {\n    await load();\n    emit(ready ? await value() : 0);\n  }\n  Future<int> value() async => 6;\n  Future<void> load() async {}\n}\n\nclass CounterBloc extends Bloc<int, int> {\n  CounterBloc() : super(0) {\n    on<int>((event, emit) async {\n      await load();\n      add(1);\n      emit(2);\n    });\n  }\n  Future<void> handle(int event, Emitter<int> emit) async {\n    await load();\n    emit(3);\n  }\n  Future<void> shadowedGuard(bool isClosed) async {\n    await load();\n    if (!isClosed) {\n      add(4);\n    }\n  }\n  Future<void> load() async {}\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  void synchronous() { emit(0); }\n  Future<void> branchGuard() async {\n    await load();\n    if (!isClosed) { emit(1); }\n  }\n  Future<void> conjunctionGuard(bool ready) async {\n    await load();\n    if (!isClosed && ready) { emit(1); }\n  }\n  Future<void> disjunctionReturn(bool paused) async {\n    await load();\n    if (isClosed || paused) return;\n    emit(1);\n  }\n  Future<void> returnGuard() async {\n    await load();\n    if (isClosed) return;\n    emit(2);\n  }\n  Future<void> elseGuard() async {\n    await load();\n    if (this.isClosed) { print('closed'); } else { this.emit(3); }\n  }\n  Future<void> throwGuard() async {\n    await load();\n    if (isClosed) { throw StateError('closed'); }\n    emit(4);\n  }\n  Future<void> freshGuard() async {\n    await load();\n    if (isClosed) return;\n    await load();\n    if (isClosed) return;\n    emit(5);\n  }\n  Future<void> nestedIsolation() async {\n    await load();\n    final callback = () { emit(6); };\n    print(callback);\n  }\n  Future<void> nestedAwaitIsolation() async {\n    final callback = () async { await load(); };\n    print(callback);\n    emit(7);\n  }\n  void nestedAwaitArgument() {\n    emit((() async { await load(); return 7; }).hashCode);\n  }\n  Future<void> conditionalAwaitArgument(bool ready) async {\n    emit(ready ? await value() : 0);\n  }\n  Future<int> value() async => 7;\n  Future<void> unrelatedReceiver(CounterCubit other) async {\n    await load();\n    other.emit(8);\n  }\n  Future<void> localShadow(void Function(int) emit) async {\n    await load();\n    emit(9);\n  }\n  Future<void> shortCircuit() async {\n    await load();\n    !isClosed && send();\n  }\n  bool send() { emit(10); return true; }\n  Future<void> load() async {}\n}\n\nclass Service {\n  Future<void> run() async {\n    await load();\n    emit(1);\n  }\n  void emit(int value) {}\n  Future<void> load() async {}\n}\n\nclass CustomCubit extends Cubit<int> {\n  CustomCubit() : super(0);\n  void emit(int value) {}\n}\n\nclass ChildCustomCubit extends CustomCubit {\n  Future<void> inheritedOverride() async {\n    await Future<void>.value();\n    emit(1);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "check-is-not-closed-after-async-gap",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -6644,6 +7502,312 @@
     },
     "group": "correctness",
     "name": "dispose-focus-node-and-timer",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags provider-created instances with a dispose method that lack ref.onDispose cleanup.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 15,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 18,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 20,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 24,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 32,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 37,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 42,
+        "message": "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+      }
+    ],
+    "docs": "Flags provider-created instances with a dispose method that lack ref.onDispose cleanup.\n\nRiverpod autoDispose destroys provider state, not arbitrary disposable objects.\nRegister each owned instance's dispose method with the provider's ref.onDispose.\nOnly package-confirmed Provider/FutureProvider/StreamProvider callbacks and\nresolved constructor-created resources are checked. Nested deferred closures,\nborrowed values, unknown types, and types without a recognized release method\nare excluded. Direct cleanup and named local callbacks are recognized; opaque\ncleanup calls mentioning the resource conservatively count as registration.\nBorrowed factory returns are recognized only when their simple body is visible\nin this file; constructor metadata does not expose bodies from other libraries.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Service {\n  Service();\n  Service.named();\n  void dispose() {}\n}\nclass Child extends Service {}\n\nfinal plain = Provider((ref) {\n  final service = Service();\n  return service;\n});\nfinal automatic = Provider.autoDispose((ref) {\n  final service = Service();\n  return service;\n});\nfinal arrow = Provider((ref) => Service());\nfinal explicitNew = Provider((ref) {\n  final service = new Service();\n  return service;\n});\nfinal named = Provider((ref) {\n  final service = Service.named();\n  return service;\n});\nfinal inherited = Provider((ref) {\n  final service = Child();\n  return service;\n});\nfinal wrongInstance = Provider((ref) {\n  final owned = Service();\n  ref.onDispose(() {});\n  return owned;\n});\nfinal mereMention = Provider((ref) {\n  final service = Service();\n  ref.onDispose(() { service.dispose; });\n  return service;\n});\nfinal deferred = Provider((ref) {\n  final service = Service();\n  ref.onDispose(() { final later = () => service.dispose(); });\n  return service;\n});",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart';\n\nclass Service { Service(); void dispose() {} }\nclass Value { Value(); }\nfinal shared = Service();\nfinal tearOff = Provider((ref) {\n  final service = Service();\n  ref.onDispose(service.dispose);\n  return service;\n});\nfinal arrowCleanup = Provider((ref) {\n  final service = Service();\n  ref.onDispose(() => service.dispose());\n  return service;\n});\nfinal blockCleanup = Provider.autoDispose((ref) {\n  final service = Service();\n  ref.onDispose(() { service.dispose(); });\n  return service;\n});\nfinal borrowed = Provider((ref) => shared);\nfinal immutable = Provider((ref) => Value());\nfinal deferred = Provider((ref) => () => Service());\nfinal twoInstances = Provider((ref) {\n  final first = Service();\n  final second = Service();\n  ref.onDispose(first.dispose);\n  ref.onDispose(() { second.dispose(); });\n  return first;\n});\nService outsideProvider() => Service();\nvoid ordinaryCallback(Object Function(Ref) callback) {}\nvoid unrelatedApi() { ordinaryCallback((ref) => Service()); }"
+    },
+    "group": "correctness",
+    "name": "dispose-provided-instances",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags provider-created resources without autoDispose or ref.onDispose cleanup.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 16,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 20,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 24,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 33,
+        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+      }
+    ],
+    "docs": "Flags provider-created resources without autoDispose or ref.onDispose cleanup.\n\nResources created in a long-lived Riverpod provider need an explicit lifetime.\nUse an autoDispose provider or register the resource's cleanup with ref.onDispose.\nChecks package-confirmed Provider, FutureProvider and StreamProvider callbacks\nfor resolved constructor-created instances with a zero-required-argument\nclose or cancel method. Dispose types are left to dispose-provided-instances.\nBorrowed values, deferred closures and unknown types are excluded. This\nlifetime policy is separate from disposing arbitrary provided instances:\nautoDispose alone does not invoke an object's dispose.\nSDK sinks, sockets and subscriptions are left to the shipped leak rules unless\nreturned as provider state. Simple source-visible factories returning borrowed\nvalues are excluded, while allocating factories remain eligible.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); Channel.named(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Child extends Channel {}\nfinal channel = Provider((ref) {\n  final resource = Channel();\n  return resource;\n});\nfinal subscription = Provider((ref) {\n  final resource = Subscription();\n  return resource;\n});\nfinal named = Provider((ref) {\n  final resource = Channel.named();\n  return resource;\n});\nfinal explicitNew = Provider((ref) {\n  final resource = new Channel();\n  return resource;\n});\nfinal inherited = Provider((ref) {\n  final resource = Child();\n  return resource;\n});\nfinal emptyCleanup = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(() {});\n  return resource;\n});\nfinal wrongCleanup = Provider((ref) {\n  final first = Channel();\n  final second = Channel();\n  ref.onDispose(second.close);\n  return first;\n});",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Value { Value(); }\nfinal shared = Channel();\nfinal automatic = Provider.autoDispose((ref) => Channel());\nfinal automaticSubscription = Provider.autoDispose((ref) => Subscription());\nfinal registered = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(resource.close);\n  return resource;\n});\nfinal blockCleanup = Provider((ref) {\n  final resource = Subscription();\n  ref.onDispose(() { resource.cancel(); });\n  return resource;\n});\nfinal disposed = Provider((ref) {\n  final resource = Service();\n  ref.onDispose(() => resource.dispose());\n  return resource;\n});\nfinal borrowed = Provider((ref) => shared);\nfinal value = Provider((ref) => Value());\nfinal deferred = Provider((ref) => () => Channel());\nChannel outsideProvider() => Channel();\nvoid ordinaryCallback(Object Function(Ref) callback) {}\nvoid unrelatedApi() { ordinaryCallback((ref) => Channel()); }"
+    },
+    "group": "correctness",
+    "name": "dispose-provider-resources",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires cleanup callbacks for disposable values created by package:provider's Provider.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 21,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 23,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 24,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 26,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 27,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 28,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 29,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 30,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 33,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      }
+    ],
+    "docs": "Requires cleanup callbacks for disposable values created by package:provider's Provider.\n\nThe created value's inferred type must declare or inherit an instance method\nnamed `dispose`, `close`, or `cancel`. Each such method must be called on the\ndispose callback's value parameter, not another object or a shadowing local.\nValue constructors do not own their values. Creation is proven only for direct\ngenerative constructors or simple same-file function tear-offs returning one.\nUnknown factories, non-inline cleanup, and path-sensitive guarantees are outside\nthis rule's scope.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:provider/provider.dart' as p;\n\nclass Disposable {\n  void dispose() {}\n}\n\nclass Closable {\n  void close() {}\n}\n\nclass Cancelable {\n  void cancel() {}\n}\n\nclass InheritedDisposable extends Disposable {}\n\nfinal other = Disposable();\nDisposable makeDisposable(dynamic context) => Disposable();\n\nvoid examples() {\n  p.Provider(create: (_) => Disposable());\n  p.Provider(create: (_) => Closable());\n  p.Provider(create: (_) => Cancelable());\n  p.Provider(create: makeDisposable);\n  p.Provider(create: (_) { return Disposable(); });\n  new p.Provider(create: (_) => InheritedDisposable());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) {});\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => other.dispose());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value.toString());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) {\n    void later() { value.dispose(); }\n  });\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) {\n    { final value = other; value.dispose(); }\n  });\n}",
+      "crossFile": null,
+      "good": "import 'package:provider/provider.dart' as p;\n\nclass Disposable {\n  void dispose() {}\n}\n\nclass Closable {\n  void close() {}\n}\n\nclass Cancelable {\n  void cancel() {}\n}\n\nclass InheritedDisposable extends Disposable {}\nclass Plain {}\nDisposable makeDisposable(dynamic context) => Disposable();\n\nclass StaticCleanup { static void dispose() {} }\n\nfinal shared = Disposable();\nT getIt<T>() => shared as T;\nclass Api extends Disposable {\n  Api();\n  factory Api.cached() => singleton;\n  static final singleton = Api();\n  static Api instance() => singleton;\n}\n\n// A local constructor with the same spelling is not a package provider.\nclass Provider {\n  Provider({required Object Function(Object?) create});\n}\n\nvoid examples() {\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value.dispose());\n  p.Provider(create: (_) => Closable(), dispose: (_, value) { value.close(); });\n  p.Provider(create: (_) => Cancelable(), dispose: (_, value) => value.cancel());\n  new p.Provider(create: (_) => InheritedDisposable(), dispose: (_, value) => value.dispose());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value..dispose());\n  p.Provider.value(value: Disposable());\n  p.Provider(create: makeDisposable, dispose: (_, value) => value.dispose());\n  p.Provider(create: (_) { return Disposable(); }, dispose: (_, value) { value.dispose(); });\n  p.Provider(create: (_) => Plain());\n  p.Provider(create: (_) => StaticCleanup());\n  Provider(create: (_) => Disposable());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value!.dispose());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => (value as Disposable).dispose());\n  final existing = Disposable();\n  p.Provider(create: (_) => existing);\n  p.Provider(create: (dynamic context) => context.read<Disposable>());\n  p.Provider(create: (_) => getIt<Disposable>());\n  p.Provider(create: (_) => Api.instance());\n  p.Provider(create: (_) => Api.cached());\n}"
+    },
+    "group": "correctness",
+    "name": "dispose-providers",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc and Cubit emissions that reuse their current state instance.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 10,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 12,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 13,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 14,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 15,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 22,
+        "message": "Create a new state instance instead of emitting the current state."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 23,
+        "message": "Create a new state instance instead of emitting the current state."
+      }
+    ],
+    "docs": "Flags Bloc and Cubit emissions that reuse their current state instance.\n\nRe-emitting the same object, including a cascade that mutates that object,\ncan suppress state updates. Create a new state (for example with `copyWith`)\ninstead. Checks require a confirmed `bloc` or `flutter_bloc` API owner and\nrecognize inherited `emit`, `this.emit`, `super.emit`, and Bloc `on` handler\nemitter parameters, including `Emitter`-typed parameters in tear-off handlers.\nLocal bindings and overridden `emit`/`state` members are\nexcluded. Only direct `state`, `this.state`, `super.state`, parentheses and\ncascades rooted in those reads are checked; arbitrary aliases are not traced.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\n\nclass Snapshot {\n  int count = 0;\n  Snapshot copyWith() => Snapshot();\n}\nclass Counter extends Cubit<Snapshot> {\n  Counter() : super(Snapshot());\n  void unchanged() {\n    emit(state);\n    emit(this.state);\n    this.emit(state);\n    super.emit((state));\n    emit(state..count = 1);\n    emit((this.state)..count = 2);\n  }\n}\nclass Event {}\nclass CounterBloc extends Bloc<Event, Snapshot> {\n  CounterBloc() : super(Snapshot()) {\n    on<Event>((event, emit) {\n      emit(state);\n      emit(this.state..count = 3);\n    });\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\n\nclass Snapshot {\n  int count = 0;\n  Snapshot copyWith() => Snapshot();\n}\nclass Counter extends Cubit<Snapshot> {\n  Counter() : super(Snapshot());\n  void changed() {\n    emit(Snapshot());\n    emit(state.copyWith());\n    emit(Snapshot()..count++);\n  }\n  void shadowedState(Snapshot state) { emit(state); }\n  void shadowedEmit(void Function(Snapshot) emit) { emit(state); }\n  void nested() {\n    void emit(Snapshot value) {}\n    emit(this.state);\n  }\n}\nclass Event {}\nclass CounterBloc extends Bloc<Event, Snapshot> {\n  CounterBloc() : super(Snapshot()) {\n    on<Event>((event, emit) {\n      emit(state.copyWith());\n      void nested(void Function(Snapshot) emit) { emit(state); }\n    });\n  }\n}\nclass Unrelated {\n  final state = Snapshot();\n  void emit(Snapshot value) {}\n  void run() { emit(state); }\n}"
+    },
+    "group": "correctness",
+    "name": "emit-new-bloc-state-instances",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -8204,6 +9368,264 @@
   },
   {
     "crossFile": false,
+    "description": "Flags Bloc event classes without an explicit @immutable annotation.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Annotate this Bloc event with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 18,
+        "message": "Annotate this Bloc event with @immutable."
+      }
+    ],
+    "docs": "Flags Bloc event classes without an explicit @immutable annotation.\n\nImmutable models keep state changes predictable and discourage accidental mutation.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nsuperclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nEach class must carry @immutable or @Immutable itself; inheritance is not enough.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Action {}\nclass First extends Action {}\nclass Second extends Action {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\nclass Another extends fb.Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\n\n@immutable\nclass Annotated extends Action {}\nclass MissingOwnAnnotation extends Annotated {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\n@immutable\nsealed class Action {}\n@immutable\nfinal class First extends Action {}\n@immutable\nfinal class Second extends Action {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\n@immutable\nfinal class Other {}\nclass Another extends Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-immutable-bloc-events",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc state classes without an explicit @immutable annotation.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Annotate this Bloc state with @immutable."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 18,
+        "message": "Annotate this Bloc state with @immutable."
+      }
+    ],
+    "docs": "Flags Bloc state classes without an explicit @immutable annotation.\n\nImmutable models keep state changes predictable and discourage accidental mutation.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nor Cubit superclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nEach class must carry @immutable or @Immutable itself; inheritance is not enough.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Snapshot {}\nclass First extends Snapshot {}\nclass Second extends Snapshot {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\nclass Another extends fb.Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\n\n@immutable\nclass Annotated extends Snapshot {}\nclass MissingOwnAnnotation extends Annotated {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\n@immutable\nsealed class Snapshot {}\n@immutable\nfinal class First extends Snapshot {}\n@immutable\nfinal class Second extends Snapshot {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\n@immutable\nfinal class Other {}\nclass Another extends Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-immutable-bloc-state",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags void method actions on a listening Provider lookup during build.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 12,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 13,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 14,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 31,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 32,
+        "message": "Use read instead of watch when invoking a provided method."
+      }
+    ],
+    "docs": "Flags void method actions on a listening Provider lookup during build.\n\nUse context.read or Provider.of(listen: false) for actions instead. Only\nresolved void methods in confirmed widget build/buildWithChild methods are\nchecked; queries, property reads and unresolved values keep subscriptions.\nWidget helpers and didChangeDependencies are not assumed to run in build.\nOutside build, avoid-watch-outside-build owns the diagnostic.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\nimport 'package:nested/nested.dart';\n\nclass Service {\n  void save() {}\n  void refresh() {}\n  void reset() {}\n}\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.watch<Service>().save();\n    context.watch<Service>().refresh();\n    context.watch<Service>().reset();\n    Provider.of<Service>(context).save();\n    Provider.of<Service>(context, listen: true).refresh();\n    return SizedBox();\n  }\n}\n\nclass SingleView extends SingleChildStatelessWidget {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).refresh();\n    return child ?? SizedBox();\n  }\n}\n\nclass SingleState extends SingleChildState<SingleChildStatefulWidget> {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).refresh();\n    return child ?? SizedBox();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nclass Service {\n  int get value => 1;\n  void save() {}\n  int calculate() => 1;\n}\nvoid actions(BuildContext context) {\n  context.read<Service>().save();\n  Provider.of<Service>(context, listen: false).save();\n  final value = context.watch<Service>().value;\n  final method = context.watch<Service>().save;\n  final instance = context.watch<Service>();\n  context.watch<Unknown>().save();\n}\nclass Unknown {}\nclass Other { Service watch() => Service(); }\nvoid unrelated(Other context) { context.watch().save(); }\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    final query = context.watch<Service>().calculate();\n    final selected = context.select<Service, int>((value) => value.value).toString();\n    return SizedBox();\n  }\n}\n\nclass DependentState extends State<StatefulWidget> {\n  BuildContext get context => throw 0;\n  void didChangeDependencies() {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).save();\n  }\n  Widget helper(BuildContext context) {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).save();\n    return SizedBox();\n  }\n  Widget build(BuildContext context) => helper(context);\n}"
+    },
+    "group": "correctness",
+    "name": "prefer-read-for-methods",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags watching a Riverpod notifier solely to invoke one of its methods.",
+    "diagnostics": [
+      {
+        "column": 30,
+        "file": null,
+        "line": 9,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 10,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 48,
+        "file": null,
+        "line": 11,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 12,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 13,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 14,
+        "message": "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods."
+      }
+    ],
+    "docs": "Flags watching a Riverpod notifier solely to invoke one of its methods.\n\nActions should read the notifier rather than establish a rebuild subscription. Only package-confirmed Ref receivers and notifier types are matched.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nvoid actions(WidgetRef ref) {\n  ref.watch(counterProvider).increment();\n  ref.watch(counterProvider).reset();\n  final increment = ref.watch(counterProvider).increment;\n  ref.watch<Counter>(counterProvider).increment();\n  (ref.watch(counterProvider)).reset();\n  ref.watch(asyncProvider).refresh();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal countProvider = Provider<int>((ref) => 0);\nclass Counter extends Notifier<int> { void increment() {} void reset() {} int get value => 0; }\nclass AsyncCounter extends AsyncNotifier<int> { void refresh() {} }\nfinal counterProvider = Provider<Counter>((ref) => Counter());\nfinal asyncProvider = Provider<AsyncCounter>((ref) => AsyncCounter());\nvoid actions(WidgetRef ref) {\n  ref.read(counterProvider).increment();\n  final increment = ref.read(counterProvider).increment;\n  final state = ref.watch(counterProvider).value;\n  final notifier = ref.watch(counterProvider);\n  notifier.increment();\n  ref.watch(counterProvider).toString();\n}\nclass Service { void invoke() {} }\nfinal serviceProvider = Provider<Service>((ref) => Service());\nvoid service(WidgetRef ref) { ref.watch(serviceProvider).invoke(); }\nvoid unknown(dynamic ref) { ref.watch(counterProvider).increment(); }"
+    },
+    "group": "correctness",
+    "name": "prefer-ref-read-for-methods",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Prefer relative imports for libraries of the same package under `lib/`.",
     "diagnostics": [],
     "docs": "Prefer relative imports for libraries of the same package under `lib/`.\n\nThe rule runs only\nfor files inside the enclosing package's `lib/` directory (the nearest\n`pubspec.yaml` names the package; files outside any package, or in a package\nwithout a `name`, are skipped). An `import` whose URI is a `package:` URI\nnaming the file's own package, such as `import 'package:my_pkg/src/a.dart';`\ninside `my_pkg/lib/`, is reported and should be written relative\n(`import 'src/a.dart';`). Imports of other packages, `dart:` libraries,\nexports, and conditional alternatives are not checked. Incompatible with\n`always-use-package-imports`.",
@@ -8221,6 +9643,114 @@
       "label": "Dart lints",
       "upstreamId": "prefer_relative_imports",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/prefer_relative_imports"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc event classes without a sealed or final modifier.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Declare this Bloc event sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Declare this Bloc event sealed or final."
+      }
+    ],
+    "docs": "Flags Bloc event classes without a sealed or final modifier.\n\nClosed hierarchies make exhaustive handling reliable.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nsuperclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nBoth sealed and final satisfy the rule.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Action {}\nclass First extends Action {}\nclass Second extends Action {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\nclass Another extends fb.Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\nsealed class Action {}\nfinal class First extends Action {}\nfinal class Second extends Action {}\nclass Example extends Bloc<Action, int> { Example() : super(0); }\nfinal class Other {}\nclass Another extends Bloc<Other, int> { Another() : super(0); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-sealed-bloc-events",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Bloc state classes without a sealed or final modifier.",
+    "diagnostics": [
+      {
+        "column": 16,
+        "file": null,
+        "line": 5,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Declare this Bloc state sealed or final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Declare this Bloc state sealed or final."
+      }
+    ],
+    "docs": "Flags Bloc state classes without a sealed or final modifier.\n\nClosed hierarchies make exhaustive handling reliable.\nIdentifies roots from the generic arguments of package-confirmed Bloc\nor Cubit superclasses, then checks those roots and their resolved subclasses.\nUnrelated name suffixes and unresolved model types are ignored.\nBoth sealed and final satisfy the rule.\nRoots and declarations must be in the current file; separate part files are not joined.",
+    "domains": [
+      "bloc"
+    ],
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\nimport 'package:meta/meta.dart';\n\nabstract class Snapshot {}\nclass First extends Snapshot {}\nclass Second extends Snapshot {}\nclass Deep extends First {}\nclass Other {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\nclass Another extends fb.Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}",
+      "crossFile": null,
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:meta/meta.dart';\n\nsealed class Snapshot {}\nfinal class First extends Snapshot {}\nfinal class Second extends Snapshot {}\nclass Example extends Bloc<int, Snapshot> { Example() : super(First()); }\nfinal class Other {}\nclass Another extends Cubit<Other> { Another() : super(Other()); }\n\nclass UnrelatedEvent {}\nclass UnrelatedState {}\nclass NoSuffix {}"
+    },
+    "group": "correctness",
+    "name": "prefer-sealed-bloc-state",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -10149,6 +11679,132 @@
   },
   {
     "crossFile": false,
+    "description": "Flags notifier ref and state accesses after an async gap without ref.mounted.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 32,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 38,
+        "message": "Check ref.mounted before using notifier ref or state after an async gap."
+      }
+    ],
+    "docs": "Flags notifier ref and state accesses after an async gap without ref.mounted.\n\nA notifier may be disposed while its asynchronous method is suspended. Guard\nsubsequent accesses with ref.mounted. Only Riverpod 3 AnyNotifier-declared\nref and state members are checked; older APIs without ref.mounted, shadowed\nlocals, unrelated classes, and mounted checks themselves are excluded.\nNested function bodies form independent async boundaries.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Count extends Notifier<int> {\n  Future<void> increment() async {\n    await pause();\n    state += 1;\n  }\n  Future<void> explicitThis() async {\n    await pause();\n    this.state = 2;\n  }\n  Future<void> read() async {\n    await pause();\n    ref.read(provider);\n  }\n  Future<void> staleGuard() async {\n    if (!ref.mounted) return;\n    await pause();\n    state = 3;\n  }\n  Future<void> secondGap() async {\n    await pause();\n    if (!ref.mounted) return;\n    await pause();\n    state = 4;\n  }\n}\nabstract class AsyncCount extends AsyncNotifier<int> {\n  Future<void> increment() async {\n    await pause();\n    state = 5;\n  }\n}\nabstract class StreamCount extends StreamNotifier<int> {\n  Future<void> increment() async {\n    await pause();\n    state = 6;\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Count extends Notifier<int> {\n  Future<void> beforeAwait() async {\n    state += 1;\n    await pause();\n  }\n  Future<void> guarded() async {\n    await pause();\n    if (ref.mounted) state += 1;\n  }\n  Future<void> earlyReturn() async {\n    await pause();\n    if (!ref.mounted) return;\n    state += 1;\n    ref.read(provider);\n  }\n  Future<void> explicitGuard() async {\n    await pause();\n    if (!this.ref.mounted) return;\n    this.state = 1;\n  }\n  Future<void> shortCircuit() async {\n    await pause();\n    if (ref.mounted && state > 0) state = 2;\n  }\n  Future<void> shadowed() async {\n    int state = 1;\n    await pause();\n    state += 1;\n  }\n  Future<void> nested() async {\n    await pause();\n    void callback() { state = 1; }\n    callback();\n  }\n  Future<void> parenthesizedGuard() async {\n    await pause();\n    if (!(ref).mounted) return;\n    state = 1;\n  }\n}\nclass Unrelated {\n  int state = 0;\n  Future<void> update() async {\n    await pause();\n    state += 1;\n  }\n}\nabstract class OlderNotifier extends BuildlessNotifier<int> {\n  Future<void> update() async {\n    await pause();\n    state = 1;\n  }\n}\nconst alive = true;\nabstract class ConstantGuard extends Notifier<int> {\n  Future<void> update() async {\n    await pause();\n    if (ref.mounted == alive) state = 1;\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "use-ref-and-state-synchronously",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Riverpod WidgetRef.read calls after an async gap without a mounted guard.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 31,
+        "message": "Check that the widget is mounted before calling ref.read after an async gap."
+      }
+    ],
+    "docs": "Flags Riverpod WidgetRef.read calls after an async gap without a mounted guard.\n\nA widget may be disposed while awaiting a future. Check Flutter mounted before\nreading a provider. Only resolved Riverpod WidgetRef receivers are checked;\nnotifier references are handled by use-ref-and-state-synchronously. Nested\nfunction bodies form independent async boundaries.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Example extends ConsumerState<Object> {\n  Future<void> afterAwait() async {\n    await pause();\n    ref.read(provider);\n  }\n  Future<void> explicitThis() async {\n    await pause();\n    this.ref.read(provider);\n  }\n  Future<void> staleGuard() async {\n    if (!mounted) return;\n    await pause();\n    ref.read(provider);\n  }\n  Future<void> branch(bool condition) async {\n    if (condition) await pause();\n    ref.read(provider);\n  }\n  Future<void> secondGap() async {\n    await pause();\n    if (!mounted) return;\n    await pause();\n    ref.read(provider);\n  }\n}\nFuture<void> parameter(WidgetRef ref) async {\n  await pause();\n  ref.read(provider);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:flutter/widgets.dart';\nfinal provider = Object();\nFuture<void> pause() async {}\nabstract class Example extends ConsumerState<Object> {\n  Future<void> beforeAwait() async {\n    ref.read(provider);\n    await pause();\n  }\n  Future<void> guarded() async {\n    await pause();\n    if (mounted) ref.read(provider);\n  }\n  Future<void> earlyReturn() async {\n    await pause();\n    if (!mounted) return;\n    ref.read(provider);\n  }\n  Future<void> nested() async {\n    await pause();\n    void callback() { ref.read(provider); }\n    callback();\n  }\n  Future<void> contextGuard(BuildContext context) async {\n    await pause();\n    if (!context.mounted) return;\n    ref.read(provider);\n  }\n}\nclass Unrelated {\n  Object read(Object provider) => provider;\n}\nFuture<void> unrelated(Unrelated ref) async {\n  await pause();\n  ref.read(provider);\n}\nabstract class Count extends Notifier<int> {\n  Future<void> notifierHandledElsewhere() async {\n    await pause();\n    ref.read(provider);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "use-ref-read-synchronously",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Require a mounted check before calling setState after an async gap.",
     "diagnostics": [
       {
@@ -10689,6 +12345,168 @@
     },
     "group": "performance",
     "name": "avoid-slow-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Riverpod consumer widgets whose build reference is unused.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This widget does not use its ref; convert it to a HookWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 26,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 36,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 40,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 48,
+        "message": "This widget does not use its ref; convert it to a StatelessWidget."
+      }
+    ],
+    "docs": "Flags Riverpod consumer widgets whose build reference is unused.\nA direct ConsumerWidget or HookConsumerWidget subclass can use a regular\nwidget when it does not need its WidgetRef. References are matched to the\nparameter declaration, so nested consumers with their own ref do not count.\nAbstract/generic classes, mixins, interfaces, missing bodies and uncertain\nreference types are excluded, as are locally subclassed widgets and helpers\nthat use a WidgetRef parameter.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\n\nfinal provider = Object();\n\nclass PlainConsumer extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nclass HookConsumer extends hooks.HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    return const SizedBox();\n  }\n}\n\nclass NestedConsumer extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    return Consumer(builder: (context, ref, child) {\n      ref.watch(provider);\n      return const SizedBox();\n    });\n  }\n}\n\nclass LocalShadow extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    {\n      final ref = 'a local string';\n      print(ref);\n    }\n    return const SizedBox();\n  }\n}\n\nclass RenamedReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef unused) => const SizedBox();\n}\n\nclass ClosureShadow extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    void visit(String ref) { print(ref); }\n    visit('shadow');\n    return const SizedBox();\n  }\n}\n\nclass PrefixedConsumer extends hooks.ConsumerWidget {\n  Widget build(BuildContext context, hooks.WidgetRef reference) => const SizedBox();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\n\nfinal provider = Object();\n\nclass WatchesProvider extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    ref.watch(provider);\n    return const SizedBox();\n  }\n}\n\nclass CapturesReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) {\n    void callback() { ref.read(provider); }\n    callback();\n    return const SizedBox();\n  }\n}\n\nclass PassesReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => render(ref);\n  Widget render(WidgetRef reference) {\n    reference.watch(provider);\n    return const SizedBox();\n  }\n}\n\nclass HelperConsumesReference extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n  Widget render(WidgetRef reference) {\n    reference.watch(provider);\n    return const SizedBox();\n  }\n}\n\nclass HookReadsProvider extends hooks.HookConsumerWidget {\n  Widget build(BuildContext context, WidgetRef reference) {\n    reference.read(provider);\n    return const SizedBox();\n  }\n}\n\nmixin Behavior {}\nclass MixedConsumer extends ConsumerWidget with Behavior {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nabstract class AbstractConsumer extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nclass InferredReference extends ConsumerWidget {\n  Widget build(BuildContext context, ref) => const SizedBox();\n}\n\nclass UncertainHelper extends ConsumerWidget {\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n  void helper(ref) { print(ref); }\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-consumer-widgets",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags confirmed hook widgets and `HookBuilder` callbacks that do not use hooks.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 21,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 22,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 23,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 25,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 33,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 38,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 42,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 43,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 52,
+        "message": "This widget does not use hooks; replace it with a regular widget."
+      }
+    ],
+    "docs": "Flags confirmed hook widgets and `HookBuilder` callbacks that do not use hooks.\n\nReplace an unused hook widget with a regular widget to simplify its lifecycle.\nOnly concrete, directly package-derived `HookWidget` and `HookConsumerWidget`\nclasses with their own build body, and inline `HookBuilder` callbacks, are\nchecked. Every call except a generative constructor of a confirmed Flutter\n`Widget` subtype retains its immediate hook owner. Getter reads and cascades\nalso retain that owner; nested callbacks do not retain an outer owner.\nAbstract classes, inherited builds, and unresolved hook widget identities are\nskipped. Classes extended elsewhere in the same library are skipped; subclasses\nin other libraries are not visible and must be checked before conversion.\nIndirect hooks through overloaded operators or setters are not tracked.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nclass EmptyBlock extends HookWidget {\n  @override\n  Widget build(BuildContext context) { return const SizedBox(); }\n}\n\nclass EmptyArrow extends hooks.HookWidget {\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass EmptyConsumer extends HookConsumerWidget {\n  @override\n  Widget build(BuildContext context, WidgetRef ref) => const SizedBox();\n}\n\nfinal emptyArrow = HookBuilder(builder: (context) => const SizedBox());\nfinal emptyBlock = hooks.HookBuilder(builder: (context) { return const SizedBox(); });\nfinal explicitNew = new HookBuilder(builder: (context) => const SizedBox());\n\nclass OuterWithoutHooks extends HookWidget {\n  @override\n  Widget build(BuildContext context) => HookBuilder(builder: (context) {\n    useState(0);\n    return const SizedBox();\n  });\n}\n\nclass CallbackOnly extends HookWidget {\n  @override\n  Widget build(BuildContext context) => Clickable(onPressed: () { useState(0); });\n}\n\nfinal nestedCallback = hooks.HookBuilder(builder: (context) {\n  return Clickable(onPressed: () { hooks.useState(0); });\n});\n\nfinal prefixedNew = new hooks.HookBuilder(builder: (context) => const SizedBox());\nfinal parenthesized = (hooks.HookBuilder(builder: (context) => const SizedBox()));\n\nclass Clickable extends StatelessWidget {\n  const Clickable({required this.onPressed});\n  final void Function() onPressed;\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass PlainFieldRead extends HookWidget {\n  const PlainFieldRead(this.child);\n  final Widget child;\n  @override\n  Widget build(BuildContext context) => child;\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nimport 'package:hooks_riverpod/hooks_riverpod.dart';\n\nclass StateUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    useState(0);\n    return const SizedBox();\n  }\n}\nclass ConsumerUser extends HookConsumerWidget {\n  @override\n  Widget build(BuildContext context, WidgetRef ref) {\n    hooks.useEffect(() {});\n    return const SizedBox();\n  }\n}\nWidget useContent() { useState(0); return const SizedBox(); }\nWidget _useContent() => useContent();\nclass CustomHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => useContent();\n}\nclass PrivateHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => _useContent();\n}\nWidget indirectlyUsesHooks() { useState(0); return const SizedBox(); }\nclass IndirectUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => indirectlyUsesHooks();\n}\nabstract class AbstractWidget extends HookWidget {\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass InheritedBuild extends StateUser {}\nfinal withHook = HookBuilder(builder: (context) {\n  useState(0);\n  return const SizedBox();\n});\nfinal withCustomHook = hooks.HookBuilder(builder: (context) => useContent());\nfinal withIndirectHook = HookBuilder(builder: indirectlyUsesHooksWithContext);\nWidget indirectlyUsesHooksWithContext(BuildContext context) => indirectlyUsesHooks();\n\nclass MethodHookUser extends HookWidget {\n  Widget content() { useState(0); return const SizedBox(); }\n  @override\n  Widget build(BuildContext context) => content();\n}\n\nfinal prefixedHook = hooks.HookBuilder(builder: (context) {\n  hooks.useState(0);\n  return const SizedBox();\n});\nfinal prefixedNewHook = new hooks.HookBuilder(builder: (context) {\n  hooks.useEffect(() {});\n  return const SizedBox();\n});\n\nclass GeneratedHooks extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    final states = List.generate(3, (_) => useState(0));\n    return const SizedBox();\n  }\n}\n\nclass HookBundle {\n  final state = useState(0);\n  HookBundle();\n  factory HookBundle.create() {\n    useState(0);\n    return HookBundle();\n  }\n}\nclass FactoryHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    new HookBundle.create();\n    return const SizedBox();\n  }\n}\nclass FieldInitializerHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    HookBundle();\n    return const SizedBox();\n  }\n}\n\nWidget get hookContent { useState(0); return const SizedBox(); }\nclass TopLevelGetterUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => hookContent;\n}\nclass MemberGetterUser extends HookWidget {\n  Widget get content { useState(0); return const SizedBox(); }\n  @override\n  Widget build(BuildContext context) => content;\n}\nclass ExplicitGetterUser extends HookWidget {\n  Widget get content { useState(0); return const SizedBox(); }\n  @override\n  Widget build(BuildContext context) => this.content;\n}\n\nclass HookActions extends StatelessWidget {\n  void init() { useState(0); }\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass CascadeHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => HookActions()..init();\n}\n\nclass UnknownCallUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    Unknown();\n    return const SizedBox();\n  }\n}\nclass ExplicitUnknownCallUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) {\n    new Unknown();\n    return const SizedBox();\n  }\n}\n\nclass HookBase extends HookWidget {\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass HookChild extends HookBase {\n  @override\n  Widget build(BuildContext context) {\n    useState(0);\n    return super.build(context);\n  }\n}\n\nclass StaticHooks {\n  static Widget content() { useState(0); return const SizedBox(); }\n}\nclass StaticHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => StaticHooks.content();\n}\nextension ContextHooks on BuildContext {\n  Widget hookContent() { useState(0); return const SizedBox(); }\n}\nclass ExtensionHookUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => context.hookContent();\n}\n\nclass Panel extends StatelessWidget {\n  const Panel();\n  static Widget withCounter() {\n    useState(0);\n    return const Panel();\n  }\n  factory Panel.counted() {\n    useState(0);\n    return const Panel();\n  }\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\nclass StaticWidgetMethodUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => Panel.withCounter();\n}\nclass WidgetFactoryUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => Panel.counted();\n}\nclass ExplicitWidgetFactoryUser extends HookWidget {\n  @override\n  Widget build(BuildContext context) => new Panel.counted();\n}\n\nclass ShadowedWidgetConstructor extends HookWidget {\n  Widget SizedBox() {\n    useState(0);\n    return const Panel();\n  }\n  @override\n  Widget build(BuildContext context) => SizedBox();\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-hook-widgets",
     "recommended": false,
     "source": {
       "kind": "Falcon",
