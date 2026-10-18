@@ -278,7 +278,15 @@
         "conditional-uri-does-not-exist": "off",
         "do-not-use-environment": "off",
         "public-member-api-docs": "off",
-        "unreachable-from-main": "off"
+        "unreachable-from-main": "off",
+        "prefer-early-return": "warn",
+        "prefer-returning-condition": "warn",
+        "prefer-switch-expression": "warn",
+        "prefer-for-in": "warn",
+        "prefer-named-boolean-parameters": "warn",
+        "avoid-unnecessary-if": "warn",
+        "avoid-unnecessary-return": "warn",
+        "avoid-redundant-else": "warn"
       },
       "suspicious": {
         "avoid-print": "warn",

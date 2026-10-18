@@ -667,6 +667,41 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("no_leading_underscores_for_library_prefixes"),
     ),
+    RuleMeta::file::<lint::style::prefer_early_return::PreferEarlyReturn>(
+        "prefer-early-return",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_returning_condition::PreferReturningCondition>(
+        "prefer-returning-condition",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_switch_expression::PreferSwitchExpression>(
+        "prefer-switch-expression",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_for_in::PreferForIn>(
+        "prefer-for-in",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_named_boolean_parameters::PreferNamedBooleanParameters>(
+        "prefer-named-boolean-parameters",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
     RuleMeta::file::<lint::style::no_leading_underscores_for_local_identifiers::NoLeadingUnderscoresForLocalIdentifiers>(
         "no-leading-underscores-for-local-identifiers",
         RuleGroup::Style,
@@ -792,6 +827,27 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         NONE,
         true,
         RuleSource::Lints("unnecessary_string_escapes"),
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_if::AvoidUnnecessaryIf>(
+        "avoid-unnecessary-if",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_return::AvoidUnnecessaryReturn>(
+        "avoid-unnecessary-return",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_redundant_else::AvoidRedundantElse>(
+        "avoid-redundant-else",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
     ),
     RuleMeta::resolved::<lint::style::unnecessary_string_interpolations::UnnecessaryStringInterpolations>(
         "unnecessary-string-interpolations",
@@ -2295,6 +2351,10 @@ pub const RULE_ALIASES: &[(&str, &str)] = &[
     ("no_magic_number", "no-magic-number"),
     ("avoid_empty_blocks", "no-empty-block"),
     ("no_empty_block", "no-empty-block"),
+    (
+        "avoid-unnecessary-conditionals",
+        "avoid-bool-literals-in-conditional-expressions",
+    ),
 ];
 
 /// Resolve a possibly-legacy rule id to its canonical id. Returns the input

@@ -509,6 +509,9 @@
                 "avoid-redundant-argument-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-redundant-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-redundant-pattern-field-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -534,6 +537,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-types-on-closure-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-if": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-return": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-constructor-parameters": {
@@ -710,6 +719,9 @@
                 "prefer-double-quotes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-early-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-final-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -723,6 +735,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-for-in": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-function-declarations-over-variables": {
@@ -764,13 +779,22 @@
                 "prefer-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-named-boolean-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-null-aware-method-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-returning-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-single-quotes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-spread-collections": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-switch-expression": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-trailing-comma": {
@@ -1637,6 +1661,9 @@
                 "avoid-redundant-argument-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-redundant-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-redundant-pattern-field-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1662,6 +1689,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-types-on-closure-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-if": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-return": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-constructor-parameters": {
@@ -1838,6 +1871,9 @@
                 "prefer-double-quotes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-early-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-final-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1851,6 +1887,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-for-in": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-function-declarations-over-variables": {
@@ -1892,13 +1931,22 @@
                 "prefer-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-named-boolean-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-null-aware-method-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-returning-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-single-quotes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-spread-collections": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-switch-expression": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-trailing-comma": {
