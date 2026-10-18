@@ -1,0 +1,3 @@
+name: nested_path_fixture
+environment:
+  sdk: ^3.9.0

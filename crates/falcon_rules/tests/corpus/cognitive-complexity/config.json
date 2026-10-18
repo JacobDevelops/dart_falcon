@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "cognitive-complexity": {
+          "level": "warn",
+          "options": {
+            "max_complexity": 2
+          }
+        }
+      }
+    }
+  }
+}

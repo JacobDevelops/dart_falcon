@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 of 388 shipped
+If no config is found, falcon enables its own recommended set: 215 of 416 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -179,8 +179,21 @@ Option names use `snake_case` inside the `options` object.
 | `max-switch-cases` | `max_cases` | `10` | Flag switch statements with more than this many non-default cases. |
 | `cyclomatic-complexity` | `max_complexity` | `20` | Flag functions whose cyclomatic complexity (1 + decision points: `if`, ternary, `&&`, `\|\|`, `??`, loops, `catch`, non-default `case`, pattern `when` guards) exceeds this value. |
 | `maximum-nesting-level` | `max_nesting` | `5` | Flag functions whose deepest nesting of control-flow blocks (`if`/`for`/`while`/`do`/`switch`/`try`) exceeds this value. |
+| `avoid-long-records` | `max_fields` | `6` | Limit positional and named fields together in record values and types. |
+| `avoid-complex-arithmetic-expressions` | `max_terms` | `6` | Limit connected numeric arithmetic terms; calls are opaque and parentheses do not reset the count. |
+| `avoid-if-with-many-branches` | `max_branches` | `3` | Limit branches in an if/else-if chain, including a final else. |
+| `avoid-nested-switches` | `max_nesting` | `1` | Limit nested switch statements; nested callable bodies restart the count. |
+| `avoid-nested-switch-expressions` | `max_nesting` | `1` | Limit nested switch expressions; nested callable bodies restart the count. |
+| `avoid-nested-try-statements` | `max_nesting` | `2` | Limit nested try statements; nested callable bodies restart the count. |
+| `max-statements` | `max_statements` | `20` | Limit statements per function body, excluding blocks, labels, empty statements, and local function declarations; nested bodies are independent. |
+| `cognitive-complexity` | `max_complexity` | `15` | Limit nesting-weighted decisions, catches, alternatives, and logical operator sequences; nested callable bodies are independent. |
+| `widget-tree-depth` | `max_nesting` | `8` | Limit resolved Flutter widget construction depth, counting the root as one and excluding SizedBox. Lists, parentheses, and conditional branches add no levels. Helper calls, callbacks, and extracted references establish independent trees. |
 | `avoid-complex-conditions` | `threshold` | `10` | Flag a connected `&&`/`\|\|` expression with more operands than this. Parentheses and `!` keep the count; any other expression is one operand. |
 | `avoid-complex-loop-conditions` | `threshold` | `1` | Same counting for `while`, `do`-`while` and C-style `for` conditions, including collection `for`. For-in iterables, initializers and updaters are not counted. |
+
+### Test registration helpers
+
+`avoid-empty-test-groups` (`correctness`) and `prefer-unique-test-names` (`suspicious`) accept `include_methods` (array of strings, default `[]`). List custom test registration helper names, for example `"include_methods": ["testCase"]`, to count these calls as tests in addition to canonical test-framework registrations.
 
 ### Identifier and naming rules
 

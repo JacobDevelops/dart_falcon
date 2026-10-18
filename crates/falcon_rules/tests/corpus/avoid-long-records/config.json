@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "avoid-long-records": {
+          "level": "warn",
+          "options": {
+            "max_fields": 2
+          }
+        }
+      }
+    }
+  }
+}

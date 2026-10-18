@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "avoid-if-with-many-branches": {
+          "level": "warn",
+          "options": {
+            "max_branches": 2
+          }
+        }
+      }
+    }
+  }
+}

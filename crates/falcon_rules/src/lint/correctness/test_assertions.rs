@@ -4,7 +4,7 @@ use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{AnalyzeContext, QualifiedName};
 use falcon_syntax::cst::*;
 
-pub(super) fn enabled(program: Program<'_>, ctx: &AnalyzeContext<'_>) -> bool {
+pub(crate) fn enabled(program: Program<'_>, ctx: &AnalyzeContext<'_>) -> bool {
     crate::lint::declarations::has_test_file_suffix(ctx.file_path)
         && program.imports().any(|import| {
             let uri = import.uri().value();
@@ -13,7 +13,7 @@ pub(super) fn enabled(program: Program<'_>, ctx: &AnalyzeContext<'_>) -> bool {
 }
 
 /// Resolve only top-level package functions, never local or receiver methods.
-pub(super) fn package_call<'a>(
+pub(crate) fn package_call<'a>(
     call: CallExpr<'a>,
     state: &SemanticState<'a>,
 ) -> Option<(&'a str, &'static str)> {
@@ -62,7 +62,7 @@ pub(super) fn package_call<'a>(
     None
 }
 
-pub(super) fn is_framework(package: &str) -> bool {
+pub(crate) fn is_framework(package: &str) -> bool {
     matches!(package, "test" | "test_core" | "test_api" | "flutter_test")
 }
 

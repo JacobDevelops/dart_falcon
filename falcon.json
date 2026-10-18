@@ -33,6 +33,15 @@
         "max-lines-for-file": "warn",
         "max-lines-for-function": "warn",
         "max-parameters-for-function": "warn",
+        "avoid-long-records": "warn",
+        "avoid-complex-arithmetic-expressions": "warn",
+        "avoid-if-with-many-branches": "warn",
+        "avoid-nested-switches": "warn",
+        "avoid-nested-switch-expressions": "warn",
+        "avoid-nested-try-statements": "warn",
+        "max-statements": "warn",
+        "cognitive-complexity": "warn",
+        "widget-tree-depth": "warn",
         "max-switch-cases": "warn",
         "maximum-nesting-level": "warn",
         "no-boolean-literal-compare": "warn",
@@ -54,6 +63,8 @@
         "avoid-collapsible-if": "warn"
       },
       "correctness": {
+        "avoid-empty-test-groups": "warn",
+        "prefer-expect-later": "warn",
         "avoid-web-libraries-in-flutter": "warn",
         "no-logic-in-create-state": "warn",
         "avoid-relative-lib-imports": "warn",
@@ -186,6 +197,8 @@
         "use-existing-variable": "warn",
         "use-existing-destructuring": "warn",
         "avoid-unnecessary-overrides-in-state": "warn",
+        "prefer-correct-test-file-name": "warn",
+        "prefer-test-matchers": "warn",
         "sort-child-properties-last": "warn",
         "use-full-hex-values-for-flutter-colors": "warn",
         "camel-case-extensions": "warn",
@@ -380,6 +393,8 @@
         "prefer-for-loop-in-children": "warn"
       },
       "suspicious": {
+        "prefer-unique-test-names": "warn",
+        "avoid-top-level-members-in-tests": "warn",
         "avoid-print": "warn",
         "avoid-empty-else": "warn",
         "avoid-shadowing-type-parameters": "warn",
