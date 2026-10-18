@@ -86,18 +86,16 @@ fn braced_interpolation_inherits_async_body_context() {
 }
 
 #[test]
-fn braced_interpolation_keeps_sync_body_context() {
-    for body in ["", "sync*"] {
-        let src = format!("void f() {body} {{ var x = '${{await f()}}'; }}");
-        let parsed = parse(&src);
-        let node = string_lit(parsed.tree.program(&src));
-        assert_eq!(node.interpolations().count(), 0, "{src}");
-        assert_eq!(parsed.errors.len(), 1, "{src}: {:?}", parsed.errors);
-        assert_eq!(
-            parsed.errors[0].message, "expected '}' after interpolation expression",
-            "{src}"
-        );
-    }
+fn braced_interpolation_in_plain_sync_body_rejects_await() {
+    let src = "void f() { var x = '${await f()}'; }";
+    let parsed = parse(src);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(node.interpolations().count(), 0);
+    assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+    assert_eq!(
+        parsed.errors[0].message,
+        "expected '}' after interpolation expression"
+    );
 }
 
 #[test]
@@ -131,16 +129,11 @@ fn interpolation_closures_have_their_own_body_context() {
 }
 
 #[test]
-fn generator_yield_interpolation_inherits_its_body_marker() {
+fn generator_yield_interpolation_parses_await_as_an_operator() {
     for body in ["sync*", "async*"] {
         let source = format!("void f() {body} {{ yield '${{await g()}}'; }}");
         let parsed = parse(&source);
-        assert_eq!(
-            parsed.errors.len(),
-            usize::from(body == "sync*"),
-            "{source}: {:?}",
-            parsed.errors
-        );
+        assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
         assert_eq!(
             parsed
                 .tree
@@ -148,7 +141,8 @@ fn generator_yield_interpolation_inherits_its_body_marker() {
                 .descendants()
                 .filter(|node| node.kind() == NodeKind::AwaitExpr)
                 .count(),
-            usize::from(body == "async*")
+            1,
+            "{source}"
         );
     }
 }
