@@ -1,14 +1,14 @@
 //! Omit implicit `super()` initializers and provably redundant member prefixes.
 //!
 //! Member checks require a final class or enum without library-local subclasses,
-//! matching resolved read/write owners, and no shadowing local binding. Open
-//! classes retain super dispatch because future subclasses can override members.
+//! matching resolved read/write owners, and no shadowing lexical or library binding.
+//! Open classes retain super dispatch because future subclasses can override members.
 //! Constructor checks remain available without resolution.
 
 use std::collections::HashSet;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DocName, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -120,6 +120,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         let name = field.field().name();
         if state.environment.is_bound(name) && !state.is_own_field(name) {
+            return;
+        }
+        // Own members precede library bindings, but inherited members do not.
+        if state
+            .signatures
+            .declared_member_facts(identity, name)
+            .is_empty()
+            && !matches!(state.model.resolve_library_name(name), DocName::Absent)
+        {
             return;
         }
         // Lexical declarations shadow throughout their block, even before the
