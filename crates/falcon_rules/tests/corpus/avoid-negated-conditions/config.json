@@ -1,0 +1,29 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-negated-conditions": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/good_options.dart",
+        "**/bad_options.dart"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "avoid-negated-conditions": {
+              "level": "warn",
+              "options": {
+                "ignore_null_checks": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

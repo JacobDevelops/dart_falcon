@@ -1,0 +1,73 @@
+//! Require assignments to be standalone statements, arrow bodies or loop operations.
+//! `ignore_null_aware_assignments` (default false) exempts `??=`.
+//! Conditions and chained assignments are handled by their dedicated rules.
+
+use super::avoid_assignments_as_conditions::is_in_condition;
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+};
+use falcon_diagnostics::Diagnostic;
+use falcon_syntax::cst::*;
+
+#[derive(Default)]
+pub struct AvoidNestedAssignments;
+
+impl Rule for AvoidNestedAssignments {
+    fn prepare<'a>(
+        &self,
+        _program: Program<'a>,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let ignore_null_aware = crate::lint::options::for_rule(ctx, "avoid-nested-assignments")
+            .and_then(|options| options.get("ignore_null_aware_assignments"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+            ignore_null_aware,
+        }))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diags: Vec<Diagnostic>,
+    ignore_null_aware: bool,
+}
+
+falcon_analyze::structural_visitor! {
+impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+
+    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+        if let Expr::Assign(assign) = node
+            && !(self.ignore_null_aware && assign.op() == AssignOp::NullCoalesceEq)
+            && !is_in_condition(assign.syntax())
+            && !matches!(assign.value().unparenthesized(), Expr::Assign(_))
+        {
+            let mut parent = assign.syntax().parent();
+            while parent.is_some_and(|node| node.kind() == NodeKind::ParenExpr) {
+                parent = parent.and_then(|node| node.parent());
+            }
+            let chained = parent.is_some_and(|parent| {
+                let value = match (Expr::cast(parent), CascadeOp::cast(parent)) {
+                    (Some(Expr::Assign(outer)), _) => Some(outer.value()),
+                    (_, Some(CascadeOp::Assign(outer))) => Some(outer.value()),
+                    (_, Some(CascadeOp::IndexAssign(outer))) => Some(outer.value()),
+                    _ => None,
+                };
+                value.is_some_and(|value| value.unparenthesized().syntax() == assign.syntax())
+            });
+            if !chained && parent.is_some_and(|node| !matches!(node.kind(),
+                NodeKind::ExprStmt | NodeKind::ArrowBody | NodeKind::ForExprsInit | NodeKind::ForUpdates))
+            {
+                self.diags.push(self.ctx.diagnostic(
+                    "avoid-nested-assignments", "Move this assignment out of the surrounding expression.", assign.span(),
+                ));
+            }
+        }
+        StructuralTraversal::Continue
+    }
+}
+}

@@ -1,0 +1,29 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-nested-assignments": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/good_options.dart",
+        "**/bad_options.dart"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "avoid-nested-assignments": {
+              "level": "warn",
+              "options": {
+                "ignore_null_aware_assignments": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

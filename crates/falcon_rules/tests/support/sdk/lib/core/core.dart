@@ -109,12 +109,10 @@ class MapEntry<K, V> {
   final V value;
   const MapEntry(this.key, this.value);
 }
-external void print(Object? object);
-external bool identical(Object? a, Object? b);
-abstract class Sink<T> {
-  void add(T data);
-  void close();
-}
+// Constructor declaration excerpts:
+// https://api.dart.dev/dart-core/Uri/Uri.html
+// https://api.dart.dev/dart-core/Uri/Uri.http.html
+// https://api.dart.dev/dart-core/Uri/Uri.https.html
 abstract class Uri {
   external factory Uri({
     String? scheme,
@@ -127,6 +125,31 @@ abstract class Uri {
     Map<String, dynamic>? queryParameters,
     String? fragment,
   });
-  external factory Uri.http(String authority, [String path, Map<String, dynamic>? queryParameters]);
-  external factory Uri.https(String authority, [String path, Map<String, dynamic>? queryParameters]);
+  external factory Uri.http(
+    String authority, [
+    String unencodedPath = '',
+    Map<String, dynamic>? queryParameters,
+  ]);
+  external factory Uri.https(
+    String authority, [
+    String unencodedPath = '',
+    Map<String, dynamic>? queryParameters,
+  ]);
+}
+external void print(Object? object);
+external bool identical(Object? a, Object? b);
+abstract class Sink<T> {
+  void add(T data);
+  void close();
+}
+
+// Declaration excerpts pinned to Dart SDK 3.13.5:
+// https://github.com/dart-lang/sdk/blob/3.13.5/sdk/lib/core/exceptions.dart
+abstract interface class Exception {
+  external factory Exception([message]);
+}
+// https://github.com/dart-lang/sdk/blob/3.13.5/sdk/lib/core/errors.dart
+class Error {
+  Error();
+  external StackTrace? get stackTrace;
 }

@@ -1,0 +1,41 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-banned-annotations": {
+          "level": "warn",
+          "options": {
+            "rules": [
+              {
+                "deny": [
+                  "legacy",
+                  "Marker.old"
+                ],
+                "message": "Use the supported alternative."
+              },
+              {
+                "deny": [
+                  "*",
+                  null
+                ],
+                "message": "Invalid mixed lists are ignored."
+              },
+              {
+                "deny": [
+                  "["
+                ],
+                "message": "Invalid globs are ignored."
+              },
+              {
+                "deny": [
+                  "**"
+                ],
+                "message": " "
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

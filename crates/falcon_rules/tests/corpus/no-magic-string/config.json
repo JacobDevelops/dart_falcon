@@ -1,0 +1,32 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "no-magic-string": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/good_options.dart",
+        "**/bad_options.dart"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "no-magic-string": {
+              "level": "warn",
+              "options": {
+                "allow_only_once": true,
+                "ignored_invocations": [
+                  "trace"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

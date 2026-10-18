@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 445);
+    assert_eq!(RULE_METADATA.len(), 463);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         215
@@ -311,6 +311,15 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
             "avoid-abbreviations-in-doc-comments",
             "Raw documentation comment lines.",
         ),
+        ("avoid-banned-exports", "Export directive URI matches."),
+        (
+            "avoid-barrel-files",
+            "Whole-file exports without declarations.",
+        ),
+        (
+            "avoid-double-slash-imports",
+            "Import directive URI path segments.",
+        ),
         (
             "avoid-duplicate-test-assertions",
             "Test filename and framework import eligibility before semantic collection.",
@@ -437,6 +446,24 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
                     "use-design-system-item": {
                         "level": "warn",
                         "options": { "items": [{ "class_name": "Container" }] }
+                    }
+                },
+                "suspicious": {
+                    "avoid-banned-names": {
+                        "level": "warn",
+                        "options": { "rules": [{ "deny": ["Probe"], "message": "Use another name." }] }
+                    },
+                    "avoid-banned-types": {
+                        "level": "warn",
+                        "options": { "rules": [{ "deny": ["Probe"], "message": "Use another type." }] }
+                    },
+                    "avoid-banned-annotations": {
+                        "level": "warn",
+                        "options": { "rules": [{ "deny": ["override"], "message": "Use another annotation." }] }
+                    },
+                    "banned-usage": {
+                        "level": "warn",
+                        "options": { "rules": [{ "deny": ["print"], "message": "Use another function." }] }
                     }
                 }
             }

@@ -1,0 +1,47 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "banned-usage": {
+          "level": "warn",
+          "options": {
+            "rules": [
+              {
+                "deny": [
+                  "legacy",
+                  "GenericClient",
+                  "Client.old",
+                  "Client.new",
+                  "Client.named",
+                  "Client.flag",
+                  "Choice.legacy",
+                  "T"
+                ],
+                "message": "Use the supported alternative."
+              },
+              {
+                "deny": [
+                  "*",
+                  null
+                ],
+                "message": "Invalid mixed lists are ignored."
+              },
+              {
+                "deny": [
+                  "["
+                ],
+                "message": "Invalid globs are ignored."
+              },
+              {
+                "deny": [
+                  "**"
+                ],
+                "message": " "
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

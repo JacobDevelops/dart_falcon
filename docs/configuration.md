@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 of 445 shipped
+If no config is found, falcon enables its own recommended set: 215 of 463 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -168,6 +168,54 @@ rule's default, and a bad option never aborts a run.
 ```
 
 Option names use `snake_case` inside the `options` object.
+
+### Banned declarations and API usage (group `suspicious`)
+
+`avoid-banned-names`, `avoid-banned-types`, `avoid-banned-annotations`,
+`avoid-banned-exports` and `banned-usage` do nothing until configured.
+Like `banned-imports`, each entry in `options.rules` contains a `deny` match
+list and a nonblank `message`. Matches are case-sensitive globs; malformed
+entries are ignored.
+
+```json
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-banned-names": {
+          "level": "warn",
+          "options": {
+            "rules": [
+              { "deny": ["temp", "legacy*"], "message": "Use a descriptive, current identifier instead." }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+| Rule | Matched value |
+|------|---------------|
+| `avoid-banned-names` | Declared identifier names, excluding overridden members. |
+| `avoid-banned-types` | Resolved type declaration names, including expanded type aliases. |
+| `avoid-banned-annotations` | Exact dotted source annotation names, including import prefixes and named constructors. |
+| `avoid-banned-exports` | Export URI strings, including conditional alternatives. |
+| `banned-usage` | Resolved top-level names or `Type.member` selectors; unnamed constructors use `Type.new`. |
+
+For `banned-usage`, a bare class name matches references to the type itself,
+not construction. Ban `Client.new` or `Client.named` to target its constructors.
+
+### Suspicious expression rules
+
+| Rule | Option | Default | Meaning |
+|------|--------|---------|---------|
+| `avoid-nested-assignments` | `ignore_null_aware_assignments` | `false` | Exempt nested `??=` assignments. |
+| `avoid-negated-conditions` | `ignore_null_checks` | `false` | Exempt negated null checks. |
+| `no-magic-string` | `allow_only_once` | `false` | Allow a string value that occurs only once in the file. |
+| `no-magic-string` | `ignored_invocations` | `["print", "debugPrint"]` | Invocation names whose string arguments are exempt. |
+| `avoid-referencing-subclasses` | `ignored_annotations` | `["freezed"]` | Exempt classes with one of these annotations. |
 
 ### Metric thresholds (group `complexity`)
 

@@ -72,7 +72,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
 }
 }
 
-fn is_in_condition(mut child: SyntaxNode<'_>) -> bool {
+pub(super) fn is_in_condition(mut child: SyntaxNode<'_>) -> bool {
     while let Some(parent) = child.parent() {
         match parent.kind() {
             NodeKind::ExprCondition | NodeKind::ForCondition | NodeKind::ExprGuard => return true,

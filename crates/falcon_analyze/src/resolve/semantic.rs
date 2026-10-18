@@ -3713,6 +3713,8 @@ pub struct ParameterFacts {
     pub ty: ResolvedType,
     pub is_named: bool,
     pub is_super: bool,
+    /// Whether this is a `this.x` formal or a primary constructor's `var`/`final` field.
+    pub is_field: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -6500,6 +6502,9 @@ impl SignatureIndex {
                             falcon_syntax::cst::ParamKind::Named { .. }
                         ),
                         is_super: parameter.initializing() == Some(InitializingFormal::Super),
+                        is_field: parameter.initializing() == Some(InitializingFormal::This)
+                            || (constructor.is_primary
+                                && (parameter.is_var() || parameter.is_final())),
                     })
                     .collect(),
             })
