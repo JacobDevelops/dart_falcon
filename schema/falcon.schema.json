@@ -229,10 +229,25 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-contradictory-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-collection-elements": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-map-keys": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-switch-case-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-missing-interpolation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-global-variables": {
@@ -245,6 +260,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-type-to-string": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unmodified-loop-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
@@ -1381,10 +1399,25 @@
                 "always-use-package-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-contradictory-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-collection-elements": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-map-keys": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-switch-case-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-dynamic-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-missing-interpolation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-global-variables": {
@@ -1397,6 +1430,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-type-to-string": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unmodified-loop-condition": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {

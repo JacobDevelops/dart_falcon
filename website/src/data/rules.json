@@ -2674,6 +2674,322 @@
   },
   {
     "crossFile": false,
+    "description": "Flags pairs of conditions that are always false with `&&` or true with `||`.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 12,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 14,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 15,
+        "message": "These conditions are always true together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 16,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "These conditions are always false together. Correct the contradictory comparison."
+      }
+    ],
+    "docs": "Flags pairs of conditions that are always false with `&&` or true with `||`.\n\nChecks a stable boolean against its negation, complementary primitive equality\ncomparisons, and incompatible integer comparisons against integer literals.\nOnly directly paired conditions (allowing parentheses) are compared. Reads must\nbe local variables or parameters; getters, fields, calls, dynamic values, and\nuser-defined operators are excluded. Integer bounds use exact arithmetic;\nfloating-point bounds are excluded because NaN invalidates total ordering.",
+    "domains": [],
+    "examples": {
+      "bad": "void conditions(bool ready, int count, int other, String name) {\n  if (ready && !ready) {}\n  if (!ready || ready) {}\n  if ((ready) && !(ready)) {}\n  if (count == 2 && count != 2) {}\n  if (count == other && other != count) {}\n  if (name == 'Ada' || 'Ada' != name) {}\n  if (count == 3 && count == 4) {}\n  if (count < 4 && count > 4) {}\n  if (count >= 4 && count < 4) {}\n  if (count > 3 && count < 4) {}\n  if (count <= -2 && count > -1) {}\n  if (4 < count && count <= 4) {}\n  if (count <= 4 || count >= 5) {}\n  if (count != 1 || count != 2) {}\n  if (count == 4 && count > 4) {}\n  if (count >= 9007199254740993 && count < 9007199254740993) {}\n}",
+      "crossFile": null,
+      "good": "void conditions(bool ready, bool other, int count, int limit, double floating,\n    dynamic unknown, String name) {\n  if (ready && !other) {}\n  if (count == 3 || count == 4) {}\n  if (count < 4 && count > 2) {}\n  if (count <= 4 && count >= 4) {}\n  if (count < 4 || count > 4) {}\n  if (count >= 3 && count != 3) {}\n  if (count < 4 && limit > 4) {}\n  if (name == 'a b' && name != 'ab') {}\n  // NaN makes both sides false, so this is not a tautology.\n  if (floating < 4 || floating >= 4) {}\n  if (unknown == 3 && unknown == 4) {}\n  if (next() && !next()) {}\n  if (changing && !changing) {}\n  if (nextNumber() == 3 && nextNumber() != 3) {}\n}\n\nbool next() => DateTime.now().millisecondsSinceEpoch.isEven;\nint nextNumber() => DateTime.now().millisecondsSinceEpoch;\nbool get changing => next();\n\nclass Custom {\n  bool operator <(int other) => next();\n  bool operator >(int other) => next();\n  @override\n  bool operator ==(Object other) => next();\n  @override\n  int get hashCode => 0;\n}\n\nvoid overloaded(Custom value) {\n  if (value < 4 && value > 4) {}\n  if (value == 3 && value != 3) {}\n}\n\nclass Source {\n  bool get ready => next();\n  int get count => nextNumber();\n  void reads() {\n    if (ready && !ready) {}\n    if (count == 3 && count != 3) {}\n  }\n}\n\nclass StoredValues {\n  final bool ready = true;\n  final int count = 0;\n\n  void reads() {\n    if (ready && !ready) {}\n    if (count == 3 && count != 3) {}\n    if (count > 4 && count < 4) {}\n  }\n}\n\nclass ChangingValues extends StoredValues {\n  @override\n  bool get ready => next();\n  @override\n  int get count => nextNumber();\n}\n\nbool globalReady = true;\nint globalCount = 0;\nvoid globals() {\n  if (globalReady && !globalReady) {}\n  if (globalCount > 4 && globalCount < 4) {}\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-contradictory-expressions",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated scalar literals and stable local reads in list and set literals.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 2,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 3,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 4,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 5,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 6,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 7,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 8,
+        "message": "Duplicate collection element. Remove or replace the repeated element."
+      }
+    ],
+    "docs": "Flags repeated scalar literals and stable local reads in list and set literals.\n\nDuplicate entries often indicate a copy-and-paste mistake. Comparisons retain\nliteral spelling. Calls, getters, spreads, and control-flow elements end the\ncomparison region, since they can change values or contribute unknown items.\nMap keys are covered separately by `avoid-duplicate-map-keys`.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(int value, String text) {\n  final a = [1, 1];\n  final b = {'a', 'a'};\n  final c = [true, true];\n  final d = [null, null];\n  final e = [value, value];\n  final g = [text, text];\n  final h = [1, 2, 1];\n}",
+      "crossFile": null,
+      "good": "int next() => 1;\nvoid f(int value, bool condition, List<int> other) {\n  final a = [1, 2];\n  final b = ['a b', 'ab'];\n  final c = [next(), next()];\n  final d = [value, value++];\n  final e = [value, next(), value];\n  final g = [1, ...other, 1];\n  final h = [if (condition) 1 else 1];\n  final i = [[1], [1]];\n  final j = ['$value', '$value'];\n}\nclass Base {\n  int value = 0;\n  List<int> values() => [value, value];\n}\nclass Changing extends Base {\n  int counter = 0;\n  @override\n  int get value => counter++;\n  @override\n  set value(int next) {}\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-collection-elements",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated literal keys in map literals, including literal spreads and collection `if` entries.",
+    "diagnostics": [
+      {
+        "column": 26,
+        "file": null,
+        "line": 2,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 3,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 4,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 5,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 6,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 7,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 8,
+        "message": "Duplicate map key replaces an earlier entry. Remove or change the key."
+      }
+    ],
+    "docs": "Flags repeated literal keys in map literals, including literal spreads and collection `if` entries.\n\nA later key replaces the earlier value. Only scalar literal keys with equal\ntoken spelling are compared; arbitrary expressions and unknown spreads are\nleft alone. Mutually exclusive `if` branches are checked independently.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool condition) {\n  final first = {'a': 1, 'a': 2};\n  final second = {1: 'a', 1: 'b'};\n  final third = {true: 1, true: 2};\n  final fourth = {null: 1, null: 2};\n  final fifth = {'a': 1, ...{'a': 2}};\n  final sixth = {'a': 1, if (condition) 'a': 2};\n  final seventh = {if (condition) 'a': 1, 'a': 2};\n}",
+      "crossFile": null,
+      "good": "int next() => 1;\nvoid f(bool condition, Map<String, int> other) {\n  final distinct = {'a': 1, 'b': 2};\n  final types = <Object, int>{1: 1, '1': 2};\n  final branches = {if (condition) 'a': 1 else 'a': 2};\n  final unknown = {'a': 1, ...other};\n  final effects = {next(): 1, next(): 2};\n  final spaces = {'a b': 1, 'ab': 2};\n  final scopes = {'a': {'a': 1}};\n  final interpolated = {'$condition': 1, '$condition': 2};\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-map-keys",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated `when` guards on syntactically identical switch patterns.",
+    "diagnostics": [
+      {
+        "column": 14,
+        "file": null,
+        "line": 3,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 5,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 7,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 9,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 15,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 22,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 24,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 26,
+        "message": "Duplicate switch pattern and condition. Remove or change the repeated guard."
+      }
+    ],
+    "docs": "Flags repeated `when` guards on syntactically identical switch patterns.\n\nRepeating a pattern and guard usually leaves the later arm unreachable.\nThis rule compares guard and pattern tokens, preserving literal contents;\nConstant, literal, logical-or, and parenthesized patterns are left to\n`no-duplicate-case-values`. Different patterns may legitimately share a guard.\nGuards must use stable primitive variable reads and built-in comparisons;\nunknown getters, overloaded operators, and calls are not considered repeatable.\nThe immutable String properties `length`, `isEmpty`, and `isNotEmpty` are\nsupported on stable String variables.",
+    "domains": [],
+    "examples": {
+      "bad": "int f(Object value, bool ready, int count) => switch (value) {\n  int() when ready => 1,\n  int() when ready => 2,\n  String() when count > 1 => 3,\n  String() when count>1 => 4,\n  bool() when !ready => 5,\n  bool() when !ready => 6,\n  double() when count == 2 => 7,\n  double() when count == 2 => 8,\n  _ => 0,\n};\nvoid g(Object value, bool ready) {\n  switch (value) {\n    case int() when ready: break;\n    case int() when ready: break;\n    default: break;\n  }\n}\n\nint stringGuards(Object value, String text) => switch (value) {\n  int() when text.isEmpty => 1,\n  int() when text.isEmpty => 2,\n  String() when text.length > 2 => 3,\n  String() when text.length > 2 => 4,\n  bool() when text.isNotEmpty => 5,\n  bool() when text.isNotEmpty => 6,\n  _ => 0,\n};",
+      "crossFile": null,
+      "good": "bool next() => true;\nint f(Object value, bool ready, int count) => switch (value) {\n  int() when ready => 1,\n  String() when ready => 2,\n  int() when !ready => 3,\n  double() when count > 1 => 4,\n  double() when count > 2 => 5,\n  bool() when next() => 6,\n  bool() when next() => 7,\n  _ => 0,\n};\nint g(String value) => switch (value) {\n  'a b' => 1,\n  'ab' => 2,\n  _ => 3,\n};\n\nbool get changing => next();\nconst code = 1;\n\nint getterGuard(Object value) => switch (value) {\n  int() when changing => 1,\n  int() when changing => 2,\n  _ => 0,\n};\n\nclass Flags {\n  bool get ready => next();\n}\n\nint customGetter(Object value, Flags flags) => switch (value) {\n  int() when flags.ready => 1,\n  int() when flags.ready => 2,\n  _ => 0,\n};\n\n// Constant cases are owned by no-duplicate-case-values, even with guards.\nint literalCases(int value, bool ready) => switch (value) {\n  1 when ready => 1,\n  1 when ready => 2,\n  code when !ready => 3,\n  code when !ready => 4,\n  2 || 3 when ready => 5,\n  2 || 3 when ready => 6,\n  (4) when ready => 7,\n  (4) when ready => 8,\n  _ => 0,\n};\n\nint dynamicGuard(Object value, dynamic unknown) => switch (value) {\n  int() when unknown == 1 => 1,\n  int() when unknown == 1 => 2,\n  _ => 0,\n};\n\nclass StoredGuard {\n  final bool ready = true;\n  final String text = '';\n\n  int guard(Object value) => switch (value) {\n    int() when ready => 1,\n    int() when ready => 2,\n    String() when text.isEmpty => 3,\n    String() when text.isEmpty => 4,\n    _ => 0,\n  };\n}\n\nclass ChangingGuard extends StoredGuard {\n  @override\n  bool get ready => next();\n  @override\n  String get text => next() ? '' : 'changing';\n}\n\nbool globalReady = true;\nint globalGuard(Object value) => switch (value) {\n  int() when globalReady => 1,\n  int() when globalReady => 2,\n  _ => 0,\n};"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-switch-case-conditions",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid method calls or property accesses on a `dynamic` target.",
     "diagnostics": [
       {
@@ -2893,6 +3209,124 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-global-state",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags missing interpolation around visible String variables or member accesses and calls.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 9,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 10,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 12,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 13,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 14,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 15,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 16,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 17,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 19,
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 20,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 24,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 26,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 30,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 33,
+        "message": "This string is a visible String variable's name; use the variable or interpolate its value."
+      }
+    ],
+    "docs": "Flags missing interpolation around visible String variables or member accesses and calls.\n\nA plain string equal to an in-scope variable name may print the name instead\nof its value. This check requires a positional argument of an unqualified call\nand a local binding with a declared nonnullable `dart:core` String type.\nConstructors, receiver methods, annotations, named arguments, raw/escaped/adjacent\nstrings, and calls whose arguments already read that variable are excluded.\nKeys in maps, indexes, comparisons, and patterns are not positional arguments.\n\nIn `'$object.property'` and `'$function(value)'`, only the identifier is\ninterpolated. The rule requires the receiver to have the named readable\nmember, or a known callable type, before suggesting `${...}`. Unknown members,\ndynamic receivers, filenames such as `'assets/$name.png'`, and string-valued\nmethod names in logs are left alone. Raw and escaped dollars and braced\ninterpolations are never flagged. Reports the first incomplete interpolation\nin each segment, rather than an entire multiline literal.",
+    "domains": [],
+    "examples": {
+      "bad": "class Label {\n  final String value;\n  const Label(this.value);\n}\n\nString render(String value) => value;\n\nvoid example(Label label, String value) {\n  print('value: $label.value');\n  print(\"empty: $label.value.isEmpty\");\n  print('$render(value)');\n  print('rendered: $render()');\n  print('''$label.value''');\n  print('prefix ' '$label.value');\n  print('$value.length and $label.value');\n  print('backslash: \\\\ $label.value');\n  print(\"${'$label.value'}\");\n  print('''prefix\n$label.value''');\n  print('value');\n}\n\nvoid localNames(String parameter) {\n  print('parameter');\n  final String title = 'Heading';\n  print('title');\n  String mutable = 'Current';\n  print(\"mutable\");\n  const String constant = 'Fixed';\n  print('constant');\n  {\n    final String nested = 'Inner';\n    print('nested');\n  }\n}",
+      "crossFile": null,
+      "good": "class Label {\n  final String value;\n  const Label(this.value);\n}\n\nString render(String value) => value;\n\nvoid example(Label label, String value) {\n  print('value: ${label.value}');\n  print('${render(value)}');\n  print(r'$label.value');\n  print(r'$render(value)');\n  print('\\$label.value');\n  print('\\$render(value)');\n  print('$label.');\n  print('$label...');\n  print('$value.42');\n  print('$label .value');\n  print('$render (value)');\n  print('${label}.value');\n  print('${render}(value)');\n  print('$value');\n  print('literal label');\n  print('''literal \\$label.value''');\n  print('$label' '.value');\n  print(r'$label.value' '$value');\n  print(\"${'$label'}.value\");\n  print('${{\"closing\": \"}\"}}.value');\n  print('$label\\u002evalue');\n  print('$render\\u0028value)');\n  final String name = 'avatar';\n  final String domain = 'example';\n  final String methodName = 'render';\n  print('assets/$name.png');\n  print('user@$domain.com');\n  print('logs $methodName()');\n  print(r'value');\n  print('\\u0076alue');\n  print('value' ' suffix');\n  print('$label.unknown');\n  print('$value.png');\n  print('''\n${label.value}.length\n''');\n}\n\nvoid shadowing(String title, String? optional, dynamic unknown) {\n  {\n    final int title = 42;\n    print('title');\n  }\n  print('optional');\n  print('unknown');\n  print('notInScope');\n}\n\nclass Key {\n  final String value;\n  const Key(this.value);\n}\n\nclass Preferences {\n  void setString(String key, String value) {}\n}\n\nvoid named({required String key}) {}\nvoid consume(Object first, Object second) {}\n\nvoid keys(Preferences prefs, Map<String, String> json, String key) {\n  final String email = 'address';\n  final String token = 'secret';\n  final String name = 'person';\n  final fields = {'email': email};\n  prefs.setString('token', token);\n  print(json['name']);\n  print(key == 'name');\n  switch (key) {\n    case 'name':\n      break;\n  }\n  print(Key('email'));\n  print(const Key('email'));\n  named(key: 'email');\n  consume('email', email.length);\n  consume('email', '$email');\n  final String assignment = 'name';\n  print(fields);\n  print(assignment);\n  @Key('email')\n  void annotated() {}\n}\n\nString returnName(String name) => 'name';\n\nclass Cache {\n  String? get(String key) => null;\n  void remove(String key) {}\n}\nvoid storageKeys(Cache prefs, String token, String id) {\n  prefs.remove('token');\n  prefs.get('id');\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-missing-interpolation",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -3134,6 +3568,82 @@
       "label": "Dart lints",
       "upstreamId": "avoid_type_to_string",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_type_to_string"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags loop conditions whose local scalar inputs are never modified by the loop.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 2,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 15,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 23,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 27,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 33,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 41,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 47,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 54,
+        "message": "None of the local variables in this condition are modified by the loop. Check for a missing update."
+      }
+    ],
+    "docs": "Flags loop conditions whose local scalar inputs are never modified by the loop.\n\nA forgotten update can make a `while`, `do` or condition-bearing `for` loop\nrepeat forever. Conditions must consist of resolved local scalar bindings,\nliterals, operators, and immutable String length/emptiness properties. Any\nwrite to a referenced declaration in the body, condition or for-update avoids\na report; initialization and writes after the loop do not count. Shadowed\nnames are distinct bindings. Literal-only conditions belong to other rules.\n\nUnknown types, mutable-object properties, calls in conditions, captured\nwrites, and loops containing a possible break, labeled continue, return,\nthrow, yield, await, or resolved Never-returning call are deliberately ignored.\nExit checks include nested constructs; this is not an infinite-loop proof.",
+    "domains": [],
+    "examples": {
+      "bad": "void unchangedBool(bool running) {\n  while (running) {\n    print(running);\n  }\n}\n\nvoid unchangedComparison(int count, int limit) {\n  while (count < limit) {\n    print(count);\n  }\n  count++;\n}\n\nvoid unchangedString(String text) {\n  while (text.isNotEmpty) {\n    print(text);\n  }\n}\n\nvoid unchangedDo(bool running) {\n  do {\n    print(running);\n  } while (running);\n}\n\nvoid unrelatedUpdate(int count) {\n  for (var index = 0; count > 0; index++) {\n    print(index);\n  }\n}\n\nvoid shadowedWrite(int count) {\n  while (count > 0) {\n    var count = 1;\n    count--;\n    print(count);\n  }\n}\n\nvoid initializationIsNotUpdate() {\n  for (var index = 0; index < 10;) {\n    print(index);\n  }\n}\n\nvoid multipleInputs(int left, int right, bool active) {\n  while (active && left != right) {\n    print(left);\n  }\n}\n\nvoid inferredLiteral() {\n  var running = true;\n  while (!(!running)) {\n    print(running);\n  }\n}",
+      "crossFile": null,
+      "good": "void updatedWhile(int count) {\n  while (count > 0) {\n    count--;\n  }\n}\n\nvoid updatedDo(int count) {\n  do {\n    count -= 1;\n  } while (count > 0);\n}\n\nvoid updatedFor() {\n  for (var index = 0; index < 10; index++) {\n    print(index);\n  }\n}\n\nvoid oneInputChanges(int left, int right) {\n  while (left < right) {\n    right--;\n  }\n}\n\nvoid explicitExit(bool running, bool stop) {\n  while (running) {\n    if (stop) break;\n  }\n}\n\nvoid returns(bool running) {\n  while (running) {\n    return;\n  }\n}\n\nvoid throws(bool running) {\n  while (running) {\n    throw StateError('stopped');\n  }\n}\n\nvoid mutatingCondition(int count) {\n  while (count-- > 0) {\n    print(count);\n  }\n}\n\nvoid unknownCondition(bool Function() next) {\n  while (next()) {\n    print('next');\n  }\n}\n\nvoid mutableProperty(List<int> items) {\n  while (items.isNotEmpty) {\n    items.removeLast();\n  }\n}\n\nvoid dynamicCondition(dynamic running) {\n  while (running) {\n    print(running);\n  }\n}\n\nbool globalRunning = true;\nvoid globalCondition() {\n  while (globalRunning) {\n    print(globalRunning);\n  }\n}\n\nvoid intentionalInfinite() {\n  while (true) {}\n  for (;;) {}\n}\n\nvoid closureWrite() {\n  var running = true;\n  final stop = () { running = false; };\n  while (running) {\n    stop();\n  }\n}\n\nvoid localFunctionWrite() {\n  var running = true;\n  void stop() { running = false; }\n  while (running) {\n    stop();\n  }\n}\n\nFuture<void> asynchronousExit(bool running, Future<void> Function() wait) async {\n  while (running) {\n    await wait();\n  }\n}\n\nvoid patternUpdate(int left, int right) {\n  while (left < right) {\n    (left, right) = (right, left);\n  }\n}\n\nvoid nestedWrite(int count, List<int> items) {\n  while (count > 0) {\n    for (count in items) {\n      print(count);\n    }\n  }\n}\n\nvoid labeledContinue(bool ready) {\n  outer: for (var index = 0; index < 10; index++) {\n    while (ready) {\n      continue outer;\n    }\n  }\n}\n\nNever stop() => throw StateError('stopped');\n\nvoid neverReturningCall(bool ready) {\n  while (ready) {\n    stop();\n  }\n}\n\nclass Terminator {\n  Never terminate() => throw StateError('stopped');\n}\n\nvoid neverReturningMethod(bool ready, Terminator terminator) {\n  while (ready) {\n    terminator.terminate();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-unmodified-loop-condition",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

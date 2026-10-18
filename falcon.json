@@ -99,7 +99,13 @@
         "diagnostic-describe-all-properties": "off",
         "always-use-package-imports": "off",
         "prefer-relative-imports": "off",
-        "deprecated-member-use-from-same-package": "off"
+        "deprecated-member-use-from-same-package": "off",
+        "avoid-duplicate-map-keys": "warn",
+        "avoid-duplicate-collection-elements": "warn",
+        "avoid-duplicate-switch-case-conditions": "warn",
+        "avoid-missing-interpolation": "warn",
+        "avoid-contradictory-expressions": "warn",
+        "avoid-unmodified-loop-condition": "warn"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",

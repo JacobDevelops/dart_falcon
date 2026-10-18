@@ -1,12 +1,18 @@
 //! Correctness lint rules.
 
 pub mod always_use_package_imports;
+pub mod avoid_contradictory_expressions;
+pub mod avoid_duplicate_collection_elements;
+pub mod avoid_duplicate_map_keys;
+pub mod avoid_duplicate_switch_case_conditions;
 pub mod avoid_dynamic_calls;
 pub mod avoid_global_state;
+pub mod avoid_missing_interpolation;
 pub mod avoid_mutable_global_variables;
 pub mod avoid_relative_lib_imports;
 pub mod avoid_returning_widgets;
 pub mod avoid_type_to_string;
+pub mod avoid_unmodified_loop_condition;
 pub mod avoid_unused_parameters;
 pub mod avoid_web_libraries_in_flutter;
 pub mod await_only_futures;

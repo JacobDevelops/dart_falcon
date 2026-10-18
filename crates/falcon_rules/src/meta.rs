@@ -289,6 +289,24 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::PyramidLint("max_parameters_for_function"),
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_duplicate_collection_elements::AvoidDuplicateCollectionElements>(
+        "avoid-duplicate-collection-elements", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_map_keys::AvoidDuplicateMapKeys>(
+        "avoid-duplicate-map-keys", RuleGroup::Correctness, NONE, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_duplicate_switch_case_conditions::AvoidDuplicateSwitchCaseConditions>(
+        "avoid-duplicate-switch-case-conditions", RuleGroup::Correctness, NONE, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_missing_interpolation::AvoidMissingInterpolation>(
+        "avoid-missing-interpolation", RuleGroup::Correctness, NONE, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_contradictory_expressions::AvoidContradictoryExpressions>(
+        "avoid-contradictory-expressions", RuleGroup::Correctness, NONE, true, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unmodified_loop_condition::AvoidUnmodifiedLoopCondition>(
+        "avoid-unmodified-loop-condition", RuleGroup::Correctness, NONE, true, RuleSource::Falcon,
+    ),
     RuleMeta::file::<lint::complexity::max_switch_cases::MaxSwitchCases>(
         "max-switch-cases",
         RuleGroup::Complexity,
