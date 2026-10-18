@@ -1,0 +1,1 @@
+const ordinary = 4;

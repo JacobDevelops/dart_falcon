@@ -311,6 +311,15 @@
                 "avoid-conditional-hooks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-constant-assert-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-constant-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-constant-switches": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-contradictory-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -320,10 +329,28 @@
                 "avoid-duplicate-bloc-event-handlers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-cascades": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-duplicate-collection-elements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-exports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-factories": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-initializers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-duplicate-map-keys": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-mixins": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-named-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-duplicate-switch-case-conditions": {
@@ -366,6 +393,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-controller": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-missing-enum-constant-in-map": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
@@ -440,6 +470,9 @@
                 "avoid-unsafe-collection-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unsafe-reduce": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unused-after-null-check": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -501,6 +534,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "function-always-returns-null": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "function-always-returns-same-value": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "handle-bloc-event-subclasses": {
@@ -1999,6 +2038,15 @@
                 "avoid-conditional-hooks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-constant-assert-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-constant-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-constant-switches": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-contradictory-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2008,10 +2056,28 @@
                 "avoid-duplicate-bloc-event-handlers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-cascades": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-duplicate-collection-elements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-duplicate-exports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-factories": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-initializers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-duplicate-map-keys": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-mixins": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-duplicate-named-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-duplicate-switch-case-conditions": {
@@ -2054,6 +2120,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-controller": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-missing-enum-constant-in-map": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-missing-interpolation": {
@@ -2128,6 +2197,9 @@
                 "avoid-unsafe-collection-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unsafe-reduce": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unused-after-null-check": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2189,6 +2261,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "function-always-returns-null": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "function-always-returns-same-value": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "handle-bloc-event-subclasses": {

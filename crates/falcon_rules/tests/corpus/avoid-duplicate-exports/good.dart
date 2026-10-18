@@ -1,0 +1,18 @@
+export 'a.dart' show A;
+export 'a.dart' show B;
+export 'b.dart' show B, C;
+export 'b.dart' show C, D;
+export 'c.dart' hide C;
+export 'c.dart' show C;
+export 'd.dart' hide A;
+export 'd.dart' hide B;
+export 'e.dart';
+export 'e.dart' if (dart.library.io) 'io.dart';
+export 'f.dart' if (dart.library.io) 'one.dart';
+export 'f.dart' if (dart.library.io) 'two.dart';
+export 'g.dart' if (dart.library.io) 'io.dart';
+export 'g.dart' if (dart.library.html) 'html.dart';
+export '//host/a/../network.dart';
+export '/host/network.dart';
+export 'percent%2E.dart';
+export 'percent.dart';

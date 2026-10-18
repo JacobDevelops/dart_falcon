@@ -202,6 +202,23 @@ pub fn evaluate_constant_with_local_values_in_context(
     evaluator.evaluate_with_context(expression, expected)
 }
 
+/// Evaluates only build-independent values, including across constant references.
+/// Conditional import/export paths and captured locals with unknown dependency
+/// provenance remain unknown; local bindings still shadow library declarations.
+pub fn evaluate_stable_constant_with_local_values(
+    expression: Expr<'_>,
+    owner: Option<&DeclarationIdentity>,
+    locals: &LocalConstants<'_>,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+) -> Option<ConstantValue> {
+    let fields = HashMap::new();
+    let mut evaluator = ConstEvaluator::new(owner, &fields, model, signatures);
+    evaluator.local_constants = Some(locals);
+    evaluator.stable_evaluation = true;
+    evaluator.evaluate(expression)
+}
+
 /// Evaluates a constant name without manufacturing an expression node.
 pub fn evaluate_constant_name_with_local_values<'syntax>(
     names: impl Iterator<Item = Identifier<'syntax>>,
@@ -327,6 +344,9 @@ struct ConstEvaluator<'a, 'model> {
     owner: Option<&'a DeclarationIdentity>,
     fields: &'a HashMap<&'a str, Expr<'a>>,
     local_constants: Option<&'a LocalConstants<'a>>,
+    /// Reject environment defaults, conditional library paths, and captured
+    /// locals whose dependency provenance was discarded.
+    stable_evaluation: bool,
     owner_model: SemanticModel<'model>,
     model: SemanticModel<'model>,
     unqualified_fields: bool,
@@ -359,6 +379,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             owner,
             fields,
             local_constants: None,
+            stable_evaluation: false,
             owner_model: model,
             model,
             unqualified_fields: true,
@@ -741,7 +762,11 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 .local_constants
                 .and_then(|locals| locals.get(*local_name))
         {
-            return (**value).clone();
+            return if self.stable_evaluation {
+                None
+            } else {
+                (**value).clone()
+            };
         }
         let local_owner = if names.len() == 1 {
             self.unqualified_fields
@@ -770,12 +795,33 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             } else {
                 self.static_scope.clone()
             };
+            if self.stable_evaluation
+                && let Some(owner) = scope.as_ref()
+            {
+                let receiver = ResolvedType::Interface {
+                    occurrence: Default::default(),
+                    identity: owner.clone(),
+                    arguments: Default::default(),
+                    nullable: false,
+                    extension_type: false,
+                };
+                if self
+                    .signatures
+                    .resolved_readable_member_owner(&receiver, local_name, &self.model)
+                    .is_some()
+                {
+                    return None;
+                }
+            }
             if let Some(scope) = scope
                 && let Some(value) = self.static_member(scope, local_name, false)
             {
                 return value;
             }
         } else if let Some(owner) = self.model.resolve_dotted(&names[..names.len() - 1]) {
+            if self.stable_evaluation && self.model.configurable_constant_path(&owner) {
+                return None;
+            }
             // A private static member is invisible outside its library.
             if !self.model.member_visible(&owner, local_name) {
                 return None;
@@ -789,9 +835,18 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         else {
             // A type literal names a declared type rather than a value.
             let ty = self.model.resolve_type_name(names)?;
+            if self.stable_evaluation
+                && let ResolvedType::Interface { identity, .. } = &ty
+                && self.model.configurable_constant_path(identity)
+            {
+                return None;
+            }
             return constant_type(&self.signatures.instantiate_to_bounds(&ty))
                 .map(ConstantValue::Type);
         };
+        if self.stable_evaluation && self.model.configurable_constant_path(&identity) {
+            return None;
+        }
         if let Some(signature) = self.signatures.function(&identity) {
             return Some(ConstantValue::TearOff(
                 declaration_key(&identity),
@@ -1086,6 +1141,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         type_args: Vec<ResolvedType>,
         args: ArgList<'_>,
     ) -> Option<ConstantValue> {
+        if self.stable_evaluation && self.model.configurable_constant_path(&identity) {
+            return None;
+        }
         if let Some(value) = self.environment_constant(&identity, constructor.as_ref(), args) {
             return value;
         }
@@ -1196,10 +1254,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         self.construct(identity, constructor.as_ref(), type_args, positional, named)
     }
 
-    /// `bool`/`int`/`String.fromEnvironment` and `bool.hasEnvironment`, folded
-    /// as the CLI analyzer does with an empty declared-variable map. Web bool
-    /// declarations remain unknown; other names use `defaultValue` or the
-    /// type's default. `None` for any other constructor.
+    /// `bool`/`int`/`String.fromEnvironment` and `bool.hasEnvironment`.
+    /// Stable evaluation leaves them unknown; ordinary evaluation folds as the
+    /// CLI analyzer does with an empty declared-variable map. Web bool declarations
+    /// remain unknown. `None` means this is not an environment constructor.
     fn environment_constant(
         &mut self,
         identity: &DeclarationIdentity,
@@ -1207,6 +1265,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         args: ArgList<'_>,
     ) -> Option<Option<ConstantValue>> {
         let is_core = |name| identity.is_sdk("dart:core", name);
+        if self.stable_evaluation
+            && ((constructor == "fromEnvironment"
+                && (is_core("bool") || is_core("int") || is_core("String")))
+                || (constructor == "hasEnvironment" && is_core("bool")))
+        {
+            return Some(None);
+        }
         let fallback = match constructor {
             "hasEnvironment" if is_core("bool") => return Some(Some(ConstantValue::Bool(false))),
             "fromEnvironment" if is_core("bool") => ConstantValue::Bool(false),

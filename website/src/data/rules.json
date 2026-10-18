@@ -4766,6 +4766,228 @@
   },
   {
     "crossFile": false,
+    "description": "Flags assertions whose Boolean condition is statically constant.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 3,
+        "message": "Assertion always passes; remove it or assert a runtime condition."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 4,
+        "message": "Assertion always fails; fix the condition or replace it with an explicit failure."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 5,
+        "message": "Assertion always passes; remove it or assert a runtime condition."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 8,
+        "message": "Assertion always passes; remove it or assert a runtime condition."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 9,
+        "message": "Assertion always passes; remove it or assert a runtime condition."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 10,
+        "message": "Assertion always fails; fix the condition or replace it with an explicit failure."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 15,
+        "message": "Assertion always passes; remove it or assert a runtime condition."
+      }
+    ],
+    "docs": "Flags assertions whose Boolean condition is statically constant.\nRemove an always-passing assertion or fix an always-failing condition.",
+    "domains": [],
+    "examples": {
+      "bad": "const enabled = true;\nvoid example() {\n  assert(enabled);\n  assert(1 == 2, 'failure');\n  assert(true);\n}\nclass Example {\n  Example() : assert(enabled);\n  const Example.named() : assert(1 < 2);\n  Example.other() : assert(false);\n}\n\nclass Settings {\n  static const enabled = true;\n  const Settings() : assert(enabled);\n}",
+      "crossFile": null,
+      "good": "const enabled = true;\nvoid example(bool enabled) {\n  assert(enabled);\n  assert(!enabled, 'runtime');\n}\nclass Example {\n  const Example(int value) : assert(value > 0);\n}\n\nvoid runtimeAndPatterns(bool enabled, Object value, List<bool> flags) {\n  assert(enabled == true);\n  assert(enabled != false);\n  for (final enabled in flags) {\n    assert(enabled);\n  }\n  if (value case bool enabled) {\n    assert(enabled);\n  }\n  const local = true;\n  // Captured locals have no environment-dependency provenance.\n  assert(local);\n  assert(const bool.fromEnvironment('FLAG'));\n}\nconst environment = bool.hasEnvironment('FLAG');\nconst derived = !environment;\nvoid environmentAssert() {\n  assert(derived);\n}\nclass InitializerShadow {\n  const InitializerShadow(bool enabled) : assert(enabled);\n}\n\nconst shadowedGetter = true;\nclass GetterShadow {\n  bool get shadowedGetter => DateTime.now().millisecondsSinceEpoch.isEven;\n  void check() {\n    assert(shadowedGetter);\n  }\n}\nclass InheritedGetterShadow extends GetterShadow {\n  void inheritedCheck() {\n    assert(shadowedGetter);\n  }\n}\n\nvoid shadowedMethod() {}\nclass MethodShadow {\n  void shadowedMethod() {}\n  void check() {\n    assert(shadowedMethod == shadowedMethod);\n  }\n}\n\nconst extensionFlag = true;\nextension on String {\n  bool get extensionFlag => isEmpty;\n  void checkUnnamedExtension() {\n    assert(extensionFlag);\n  }\n}\nextension NamedFlag on List<int> {\n  bool get extensionFlag => isEmpty;\n  void checkNamedExtension() {\n    assert(extensionFlag);\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-constant-assert-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags statically constant binary branch, loop, collection, and expression conditions.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 5,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 6,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 7,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 8,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 9,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 10,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 15,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 17,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 20,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 31,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 32,
+        "message": "Condition is statically constant; keep only the reachable branch or remove the unreachable code."
+      }
+    ],
+    "docs": "Flags statically constant binary branch, loop, collection, and expression conditions.\nReplace the condition with the reachable branch or remove the unreachable code.",
+    "domains": [],
+    "examples": {
+      "bad": "const enabled = true;\nvoid example(int x) {\n  if (enabled == true) {}\n  if (3 > 2) {}\n  while (1 == 2) {}\n  do {} while (1 == 2);\n  for (; enabled == true; ) { break; }\n  final result = enabled == true ? 1 : x;\n  final list = [if (enabled == true) 1];\n  final map = {if (enabled == true) 1: 2};\n  print([result, list, map]);\n}\n\nvoid guards(Object value) {\n  if (value case int _ when enabled == true) {}\n  switch (value) {\n    case int _ when enabled == true: print(value);\n  }\n  final result = switch (value) {\n    int _ when enabled == true => 1,\n    _ => 0,\n  };\n  print(result);\n}\n\nenum Choice { first, second }\nclass Settings {\n  static const enabled = true;\n}\nvoid enumAndStatic() {\n  if (Choice.first == Choice.second) {}\n  if (Settings.enabled == true) {}\n}",
+      "crossFile": null,
+      "good": "const enabled = true;\nvoid example(bool enabled, int x) {\n  if (enabled) {}\n  while (x > 0) { x--; }\n  do { x++; } while (enabled);\n  for (; x < 10; x++) {}\n  final result = enabled ? 1 : x;\n  final list = [if (enabled) 1];\n  final map = {if (enabled) 1: 2};\n  print([result, list, map]);\n}\n\nconst flag = true;\nvoid shadowedPatterns(Object value) {\n  if (value case bool flag when flag == true) {}\n  switch (value) {\n    case bool flag when flag == true: print(flag);\n  }\n  final values = [for (final flag in <bool>[true, false]) if (flag == true) 1];\n  final maps = {for (final flag in <bool>[true, false]) if (flag == true) 1: 2};\n  print([values, maps]);\n}\n\nvoid literalAndLocal() {\n  if (true) {}\n  while (true) { break; }\n  const local = true;\n  // Captured locals have no environment-dependency provenance.\n  if (local == true) {}\n  if (const bool.fromEnvironment('FLAG') == true) {}\n}\nconst environment = bool.fromEnvironment('FLAG');\nconst derived = !environment;\nvoid environmentCondition() {\n  if (derived == true) {}\n}\n\nconst shadowedGetter = true;\nclass GetterShadow {\n  bool get shadowedGetter => DateTime.now().millisecondsSinceEpoch.isEven;\n  void check() {\n    if (shadowedGetter == true) {}\n  }\n}\nclass InheritedGetterShadow extends GetterShadow {\n  void inheritedCheck() {\n    if (shadowedGetter == true) {}\n  }\n}\n\nvoid shadowedMethod() {}\nclass MethodShadow {\n  void shadowedMethod() {}\n  void check() {\n    if (shadowedMethod == shadowedMethod) {}\n  }\n}\n\nconst extensionFlag = true;\nextension on String {\n  bool get extensionFlag => isEmpty;\n  void checkUnnamedExtension() {\n    if (extensionFlag == true) {}\n  }\n}\nextension NamedFlag on List<int> {\n  bool get extensionFlag => isEmpty;\n  void checkNamedExtension() {\n    if (extensionFlag == true) {}\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-constant-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags switch statements and expressions with a statically constant subject.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 3,
+        "message": "Switch subject is statically constant; replace the switch with the matching branch."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 7,
+        "message": "Switch subject is statically constant; replace the switch with the matching branch."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 11,
+        "message": "Switch subject is statically constant; replace the switch with the matching branch."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 21,
+        "message": "Switch subject is statically constant; replace the switch with the matching branch."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 25,
+        "message": "Switch subject is statically constant; replace the switch with the matching branch."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 29,
+        "message": "Switch subject is statically constant; replace the switch with the matching branch."
+      }
+    ],
+    "docs": "Flags switch statements and expressions with a statically constant subject.\nReplace the switch with the matching branch.",
+    "domains": [],
+    "examples": {
+      "bad": "const selected = 2;\nvoid example() {\n  switch (selected) {\n    case 2: print('two');\n    default: print('other');\n  }\n  final value = switch ('yes') {\n    'yes' => 1,\n    _ => 0,\n  };\n  switch (1 + 2) {\n    case 3: print(value);\n  }\n}\n\nenum Choice { first, second }\nclass Settings {\n  static const selected = 2;\n}\nvoid enumAndStatic() {\n  switch (Choice.first) {\n    case Choice.first: break;\n    case Choice.second: break;\n  }\n  switch (Settings.selected) {\n    case 2: break;\n    default: break;\n  }\n  final value = switch (Choice.second) {\n    Choice.first => 1,\n    Choice.second => 2,\n  };\n  print(value);\n}",
+      "crossFile": null,
+      "good": "const selected = 2;\nvoid example(int selected) {\n  switch (selected) {\n    case 2: print('two');\n    default: print('other');\n  }\n  final value = switch (selected) {\n    2 => 'two',\n    _ => 'other',\n  };\n  print(value);\n}\n\nvoid runtimeAndPatterns(Object value, List<int> values) {\n  for (final selected in values) {\n    switch (selected) {\n      case 2: break;\n      default: break;\n    }\n  }\n  if (value case int selected) {\n    final result = switch (selected) { 2 => true, _ => false };\n    print(result);\n  }\n  final result = [\n    for (final selected in values)\n      switch (selected) { 2 => true, _ => false },\n  ];\n  const local = 2;\n  // Captured locals have no environment-dependency provenance.\n  switch (local) {\n    case 2: break;\n    default: break;\n  }\n  switch (const int.fromEnvironment('NUMBER')) {\n    case 2: break;\n    default: break;\n  }\n  print(result);\n}\nconst environment = String.fromEnvironment('MODE');\nconst derived = environment == 'debug';\nvoid environmentSwitch() {\n  switch (derived) {\n    case true: break;\n    case false: break;\n  }\n}\n\nconst shadowedGetter = 1;\nclass GetterShadow {\n  int get shadowedGetter => DateTime.now().millisecondsSinceEpoch;\n  void check() {\n    switch (shadowedGetter) {\n      case 1: break;\n      default: break;\n    }\n  }\n}\nclass InheritedGetterShadow extends GetterShadow {\n  void inheritedCheck() {\n    switch (shadowedGetter) {\n      case 1: break;\n      default: break;\n    }\n  }\n}\n\nvoid shadowedMethod() {}\nclass MethodShadow {\n  void shadowedMethod() {}\n  void check() {\n    switch (shadowedMethod) {\n      default: break;\n    }\n  }\n}\n\nconst extensionFlag = true;\nextension on String {\n  bool get extensionFlag => isEmpty;\n  void checkUnnamedExtension() {\n    switch (extensionFlag) {\n      case true: break;\n      case false: break;\n    }\n  }\n}\nextension NamedFlag on List<int> {\n  bool get extensionFlag => isEmpty;\n  void checkNamedExtension() {\n    switch (extensionFlag) {\n      case true: break;\n      case false: break;\n    }\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-constant-switches",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags pairs of conditions that are always false with `&&` or true with `||`.",
     "diagnostics": [
       {
@@ -5022,6 +5244,64 @@
   },
   {
     "crossFile": false,
+    "description": "Flags repeated field or index assignment targets within one cascade.",
+    "diagnostics": [
+      {
+        "column": 24,
+        "file": null,
+        "line": 2,
+        "message": "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target"
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 3,
+        "message": "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target"
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 4,
+        "message": "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 5,
+        "message": "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 6,
+        "message": "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target"
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 7,
+        "message": "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target"
+      }
+    ],
+    "docs": "Flags repeated field or index assignment targets within one cascade.\nCalls are not assumed redundant. Different right-hand sides still overwrite\nthe same target; targets involving calls or mutation are conservatively skipped.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(dynamic value) {\n  value..name = 'first'..name = 'second';\n  value..count = 1..count = 1;\n  value..[0] = 1..[0] = 2;\n  value..child.name = 'a'..child.name = 'b';\n  value..name = 'a'..other = 'b'..name = 'c';\n  value..[1 + 2] = 0..[1+2] = 1;\n}",
+      "crossFile": null,
+      "good": "void f(dynamic value, dynamic next) {\n  value..first = 1..second = 1;\n  value..[0] = 1..[1] = 1;\n  value..child.name = 'a'..other.name = 'a';\n  value..reset()..reset();\n  value..set(1)..set(2);\n  value..count += 1..count += 1;\n  value..[next()] = 1..[next()] = 2;\n  value..child().name = 1..child().name = 2;\n}\nvoid stateful(dynamic writer, dynamic value, int i) {\n  writer..indent = 2..writeln('x')..indent = 0;\n  value..[++i] = 1..[++i] = 2;\n  value..[--i] = 1..[--i] = 2;\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-cascades",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags repeated scalar literals and stable local reads in list and set literals.",
     "diagnostics": [
       {
@@ -5076,6 +5356,210 @@
     },
     "group": "correctness",
     "name": "avoid-duplicate-collection-elements",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags export directives whose visible names are already covered by another export.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 2,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 8,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 10,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 11,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 14,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 16,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 18,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 19,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 21,
+        "message": "This export adds no names beyond another export of the same library — remove the redundant directive"
+      }
+    ],
+    "docs": "Flags export directives whose visible names are already covered by another export.\nURI values and conditional branches must match; show/hide chains are compared\nas sets, so disjoint or partially overlapping visibility remains untouched.",
+    "domains": [],
+    "examples": {
+      "bad": "export 'a.dart';\nexport 'a.dart';\nexport 'b.dart';\nexport 'b.dart' show B;\nexport 'c.dart' show C, D;\nexport 'c.dart' show C;\nexport 'd.dart' hide D;\nexport 'd.dart' show E;\nexport 'e.dart' hide E;\nexport 'e.dart' hide E, F;\nexport 'f.dart' show F;\nexport 'f.dart';\nexport 'g.dart' if (dart.library.io) 'io.dart';\nexport 'g.dart' if (dart.library.io) 'io.dart' show G;\nexport 'h.dart';\nexport \"h.dart\";\nexport 'relative.dart';\nexport './relative.dart' show Relative;\nexport 'nested/../relative.dart' show Relative;\nexport 'sub/a.dart';\nexport './sub/a.dart' show A;",
+      "crossFile": null,
+      "good": "export 'a.dart' show A;\nexport 'a.dart' show B;\nexport 'b.dart' show B, C;\nexport 'b.dart' show C, D;\nexport 'c.dart' hide C;\nexport 'c.dart' show C;\nexport 'd.dart' hide A;\nexport 'd.dart' hide B;\nexport 'e.dart';\nexport 'e.dart' if (dart.library.io) 'io.dart';\nexport 'f.dart' if (dart.library.io) 'one.dart';\nexport 'f.dart' if (dart.library.io) 'two.dart';\nexport 'g.dart' if (dart.library.io) 'io.dart';\nexport 'g.dart' if (dart.library.html) 'html.dart';\nexport '//host/a/../network.dart';\nexport '/host/network.dart';\nexport 'percent%2E.dart';\nexport 'percent.dart';"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-exports",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags factories in one type with the same implementation, ignoring factory names and alpha-renaming parameters by position.",
+    "diagnostics": [
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "This factory has the same implementation as 'A.first' — remove it or add unique functionality"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 9,
+        "message": "This factory has the same implementation as 'B.empty' — remove it or add unique functionality"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 14,
+        "message": "This factory has the same implementation as 'C.first' — remove it or add unique functionality"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 19,
+        "message": "This factory has the same implementation as 'D.first' — remove it or add unique functionality"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 24,
+        "message": "This factory has the same implementation as 'E.first' — remove it or add unique functionality"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 28,
+        "message": "This factory has the same implementation as 'F.first' — remove it or add unique functionality"
+      }
+    ],
+    "docs": "Flags factories in one type with the same implementation, ignoring factory\nnames and alpha-renaming parameters by position. Local bindings and closures\nare skipped rather than confusing shadowed names with constructor parameters.",
+    "domains": [],
+    "examples": {
+      "bad": "class A {\n  A(int value);\n  factory A.first(int data) => A(data);\n  factory A.second(int renamed) => A(renamed);\n}\nclass B {\n  B();\n  factory B.empty() => B();\n  factory B.withData(String unused) => B();\n}\nclass C {\n  C(int value);\n  factory C.first(int x) { return C(x + 1); }\n  factory C.second(int y) => C(y + 1);\n}\nclass D {\n  D(int left, int right);\n  factory D.first(int x, int y) => D(x, y);\n  factory D.second(int a, int b) => D(a, b);\n}\nclass E {\n  E(String value);\n  factory E.first() => E('constant');\n  factory E.second() => E( 'constant' );\n}\nclass F {\n  factory F.first() = G;\n  factory F.second() = G;\n}\nclass G implements F { G(); }",
+      "crossFile": null,
+      "good": "class A {\n  A(int value);\n  factory A.first(int data) => A(data);\n  factory A.second(int data) => A(data + 1);\n}\nclass B {\n  B(String value);\n  factory B.first() => B('a b');\n  factory B.second() => B('ab');\n}\nclass C {\n  C(int left, int right);\n  factory C.first(int x, int y) => C(x, y);\n  factory C.second(int a, int b) => C(b, a);\n}\nclass D {\n  D(int value);\n  factory D.first(int x) => D(x);\n}\nclass E {\n  E(int value);\n  factory E.first(int x) => E(x);\n}\nclass F {\n  F(int value);\n  factory F.first(dynamic value) => F(value.first);\n  factory F.second(dynamic other) => F(other.second);\n}\nclass H {\n  H(int value);\n  factory H.first(int data) { final x = data + 1; return H(x); }\n  factory H.second(int data) { final x = data + 2; return H(x); }\n}\nclass Foo {\n  Foo._();\n  int value = 0;\n  int count = 0;\n  factory Foo.a(int value) => Foo._()..value = value;\n  factory Foo.b(int count) => Foo._()..count = count;\n}\nclass V {\n  V._(Object value);\n  factory V.fromInt(int v) => V._(v);\n  factory V.fromString(String v) => V._(v);\n}\nclass P {\n  P(double value);\n  factory P.small({double v = 4}) => P(v);\n  factory P.large({double v = 16}) => P(v);\n}\nabstract class Q {\n  const factory Q.a() = R;\n  factory Q.b() = R;\n}\nclass R implements Q { const R(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-factories",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags final/const variables with identical initializers in the same scope.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 3,
+        "message": "This initializer duplicates 'first' — reuse that variable or correct this initializer"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "This initializer duplicates 'first' — reuse that variable or correct this initializer"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "This initializer duplicates 'first' — reuse that variable or correct this initializer"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 15,
+        "message": "This initializer duplicates 'first' — reuse that variable or correct this initializer"
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 19,
+        "message": "This initializer duplicates 'first' — reuse that variable or correct this initializer"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 23,
+        "message": "This initializer duplicates 'first' — reuse that variable or correct this initializer"
+      }
+    ],
+    "docs": "Flags final/const variables with identical initializers in the same scope.\nCalls, construction, await, mutation, collection allocation, and closures are\nexcluded. Non-declaration statements invalidate local candidates, so writes\nor calls between reads cannot turn an intentional state snapshot into a lint.",
+    "domains": [],
+    "examples": {
+      "bad": "void fields(dynamic param) {\n  final first = param.value.isNotEmpty;\n  final second = param.value.isNotEmpty;\n}\nvoid identifiers(int input) {\n  final first = input;\n  final second = input;\n}\nvoid operators(int input) {\n  final first = input + 1;\n  final second = input + 1;\n}\nvoid constants() {\n  const first = 'same';\n  const second = 'same';\n}\nclass A {\n  final first = 42;\n  final second = 42;\n}\nclass B {\n  static const first = true;\n  static const second = true;\n}",
+      "crossFile": null,
+      "good": "void changed(int input) {\n  final first = input;\n  input = 2;\n  final second = input;\n}\nvoid effects(dynamic object) {\n  final first = object.value;\n  object.update();\n  final second = object.value;\n}\nvoid calls(dynamic object) {\n  final first = object.read();\n  final second = object.read();\n}\nvoid allocations() {\n  final first = Object();\n  final second = Object();\n  final third = <int>[];\n  final fourth = <int>[];\n}\nvoid scopes(int input) {\n  if (input > 0) { final first = input; }\n  if (input < 0) { final second = input; }\n}\nvoid distinct(dynamic object) {\n  final first = object.first;\n  final second = object.second;\n  final text = 'a b';\n  final other = 'ab';\n}\nvoid mutable(int input) {\n  var first = input;\n  var second = input;\n}\nclass A {\n  final first = Object();\n  final second = Object();\n}\nclass B {\n  final first = 1;\n  static final second = 1;\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-initializers",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -5141,6 +5625,152 @@
     "group": "correctness",
     "name": "avoid-duplicate-map-keys",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags repeated mixins in a with clause or a same-library superclass chain.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 3,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 4,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 5,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 6,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 7,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 11,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 13,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 14,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 15,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 19,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      },
+      {
+        "column": 52,
+        "file": null,
+        "line": 21,
+        "message": "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin"
+      }
+    ],
+    "docs": "Flags repeated mixins in a with clause or a same-library superclass chain.\nImplemented interfaces do not count. Unknown ancestry and intervening member\noverrides are skipped: reapplying a mixin can intentionally restore methods.",
+    "domains": [],
+    "examples": {
+      "bad": "mixin M {}\nmixin N<T> {}\nclass A with M, M {}\nclass B with N<int>, N<int> {}\nclass C = Object with M, M;\nclass D with M, M {}\nenum E with M, M { value }\nmixin class MC {}\nclass Base with M {}\nclass Middle extends Base {}\nclass Inherited extends Middle with M {}\nclass AliasBase = Object with M;\nclass InheritedAlias extends AliasBase with M {}\nclass Direct extends MC with MC {}\nclass Forward extends Later with M {}\nclass Later with M {}\nmixin Greeter { String greet() => 'hi'; }\nmixin Spacer { String other() => 'other'; }\nclass NoConflict with Greeter, Spacer, Greeter {}\nclass GreeterBase with Greeter { String other() => 'other'; }\nclass NoConflictInherited extends GreeterBase with Greeter {}",
+      "crossFile": null,
+      "good": "import 'one.dart' as one;\nimport 'two.dart' as two;\nmixin M {}\nmixin N<T> {}\nclass A with M, N<int> {}\nclass B with N<int>, N<String> {}\nclass C with one.M, two.M {}\nclass D with M {}\nclass E with M {}\nclass F = Object with M, N<double>;\nenum G with M { value }\nclass InterfaceOnly implements M {}\nclass Applied extends InterfaceOnly with M {}\nclass GenericBase<T> with N<T> {}\nclass DifferentArguments extends GenericBase<int> with N<String> {}\nclass UnknownBase extends missing.Base with M {}\nclass SeparateBase with M {}\nclass Separate extends SeparateBase with N<int> {}\nmixin Greeter { String greet() => 'hi'; }\nmixin OtherGreeter { String greet() => 'other'; }\nclass BaseGreeter with Greeter {}\nclass Polite extends BaseGreeter { String greet() => 'good day'; }\nclass Restored extends Polite with Greeter {}\nclass OwnOverride with Greeter { String greet() => 'good day'; }\nclass RestoredOwn extends OwnOverride with Greeter {}\nclass LaterOverride with Greeter, OtherGreeter {}\nclass RestoredLater extends LaterOverride with Greeter {}\nclass Reapplied with Greeter, OtherGreeter, Greeter {}\nclass UnknownBetween with Greeter, missing.Other, Greeter {}\nmixin Delegating on Greeter { String greet() => super.greet(); }\nclass DelegatingBase extends BaseGreeter with Delegating {}\nclass DelegatingAgain extends DelegatingBase with Delegating {}"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-mixins",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags imports of the same library that differ only in their name prefix.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 2,
+        "message": "This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 6,
+        "message": "This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 8,
+        "message": "This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 10,
+        "message": "This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate"
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 12,
+        "message": "This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate"
+      }
+    ],
+    "docs": "Flags imports of the same library that differ only in their name prefix.\nConditional URIs, deferred loading, combinators, and metadata must match.\nConsolidate uses under one import before removing the other directive.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'a.dart' as first;\nimport 'a.dart' as second;\nimport 'b.dart';\nimport 'b.dart' as b;\nimport 'c.dart' as c;\nimport 'c.dart';\nimport 'd.dart' as d show D;\nimport 'd.dart' as other show D;\nimport 'e.dart' deferred as e;\nimport 'e.dart' deferred as otherE;\nimport 'f.dart' if (dart.library.io) 'io.dart' as f;\nimport 'f.dart' if (dart.library.io) 'io.dart' as otherF;",
+      "crossFile": null,
+      "good": "import 'a.dart' as same;\nimport 'b.dart' as same;\nimport 'c.dart' as c show A;\nimport 'c.dart' as otherC show B;\nimport 'd.dart' as d hide A;\nimport 'd.dart' as otherD hide B;\nimport 'e.dart' as e;\nimport 'e.dart' deferred as otherE;\nimport 'f.dart' if (dart.library.io) 'io.dart' as f;\nimport 'f.dart' if (dart.library.html) 'html.dart' as otherF;\nimport 'g.dart' if (dart.library.io) 'one.dart' as g;\nimport 'g.dart' if (dart.library.io) 'two.dart' as otherG;\nimport 'plain.dart';\nimport 'plain.dart';"
+    },
+    "group": "correctness",
+    "name": "avoid-duplicate-named-imports",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -6134,6 +6764,73 @@
     },
     "group": "correctness",
     "name": "avoid-missing-controller",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require enum-keyed map literals to include every declared enum value.",
+    "diagnostics": [
+      {
+        "column": 20,
+        "file": null,
+        "line": 5,
+        "message": "Include every Color value in this map; missing: green, blue."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 6,
+        "message": "Include every Color value in this map; missing: blue."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 7,
+        "message": "Include every Color value in this map; missing: red, green."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 8,
+        "message": "Include every Color value in this map; missing: red, blue."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 9,
+        "message": "Include every Color value in this map; missing: green, blue."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 13,
+        "message": "Include every Color value in this map; missing: green."
+      }
+    ],
+    "docs": "Require enum-keyed map literals to include every declared enum value.\n\nKey types and constant identities come from resolution, including contextual\ntypes, imported enums, aliases and dot shorthands. Constant branches and\nstatically known spreads contribute keys; unknown coverage disables the check.",
+    "domains": [],
+    "examples": {
+      "bad": "enum Color { red, green, blue }\nconst alias = Color.red;\ntypedef Shade = Color;\n\nfinal incomplete = {Color.red: 'red'};\nfinal aliases = {alias: 1, Color.green: 2};\nfinal typedefKey = <Shade, int>{Color.blue: 3};\nMap<Color, int> contextual() => {Color.green: 2};\nfinal conditional = <Color, int>{if (true) Color.red: 1};\n\nvoid local() {\n  const red = Color.red;\n  final map = {red: 1, Color.blue: 3};\n}",
+      "crossFile": [
+        {
+          "content": "enum Color { red, green, blue }\nconst redAlias = Color.red;",
+          "path": "colors.dart"
+        },
+        {
+          "content": "import 'colors.dart' as colors;\n\nfinal partial = {colors.Color.red: 1};\nfinal complete = {colors.redAlias: 1, colors.Color.green: 2, colors.Color.blue: 3};\nfinal empty = <colors.Color, int>{};\n\nclass Color {\n  static const red = Color();\n  static const blue = Color();\n  const Color();\n}\nfinal unrelated = {Color.red: 1};",
+          "path": "main.dart"
+        }
+      ],
+      "good": "enum Color { red, green, blue }\nenum Other { red, green, blue }\nconst redAlias = Color.red;\n\nfinal complete = {Color.red: 1, Color.green: 2, Color.blue: 3};\nfinal aliases = {redAlias: 1, Color.green: 2, Color.blue: 3};\nfinal strings = {'red': 1};\nfinal integers = <int, String>{};\nfinal unrelated = <Object, int>{Color.red: 1, Other.green: 2};\nfinal nullable = <Color?, int>{null: 0, Color.red: 1, Color.green: 2, Color.blue: 3};\n\nMap<Color, int> unknownKey(Color color) => {color: 1};\nMap<Color, int> unknownSpread(Map<Color, int> source) => {...source};\nMap<Color, int> dynamicBranch(bool flag) => {\n  Color.red: 1,\n  if (flag) Color.green: 2 else Color.blue: 3,\n};\nMap<Color, int> forValues() => {for (final color in Color.values) color: 1};\n\nclass NotAnEnum {\n  static const first = NotAnEnum();\n  static const second = NotAnEnum();\n  const NotAnEnum();\n}\nfinal notEnum = {NotAnEnum.first: 1};"
+    },
+    "group": "correctness",
+    "name": "avoid-missing-enum-constant-in-map",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -7854,6 +8551,76 @@
     },
     "group": "correctness",
     "name": "avoid-unsafe-collection-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warn when SDK Iterable.reduce can receive an empty collection.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 6,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 7,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 8,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 12,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 21,
+        "message": "Reducing a possibly empty iterable can throw; use fold or check for emptiness."
+      }
+    ],
+    "docs": "Warn when SDK Iterable.reduce can receive an empty collection.\n\nConstant nonempty collections and fresh literals with an unconditional\nelement are safe. Immediate isEmpty/isNotEmpty branches are recognized only\nwhen no intervening expression can mutate the receiver. Custom reduce\nmembers and unresolved receivers are excluded.",
+    "domains": [],
+    "examples": {
+      "bad": "int sum(int a, int b) => a + b;\n\nvoid unsafe(List<int> list, Set<int> set, Iterable<int> iterable, List<int>? nullable) {\n  list.reduce(sum);\n  set.reduce((a, b) => a + b);\n  iterable.reduce(sum);\n  nullable?.reduce(sum);\n  <int>[].reduce(sum);\n  list..reduce(sum);\n  if (list.isNotEmpty) {\n    list.clear();\n    list.reduce((a, b) => a + b);\n  }\n}\n\nint mutatingCallback(List<int> list) {\n  int Function(int, int) callback() {\n    list.clear();\n    return sum;\n  }\n  return list.isNotEmpty ? list.reduce(callback()) : 0;\n}",
+      "crossFile": null,
+      "good": "class Custom {\n  int reduce(int Function(int, int) combine) => 0;\n}\n\nint safe(List<int> list, Custom custom, dynamic unknown) {\n  custom.reduce((a, b) => a + b);\n  unknown.reduce((a, b) => a + b);\n  [1, 2].reduce((a, b) => a + b);\n  <int>{1}.reduce((a, b) => a + b);\n  const values = [1, 2];\n  values.reduce((a, b) => a + b);\n  list.fold<int>(0, (a, b) => a + b);\n  if (list.isNotEmpty) {\n    return list.reduce((a, b) => a + b);\n  }\n  return 0;\n}\n\nint guarded(List<int> list) => list.isEmpty ? 0 : list.reduce((a, b) => a + b);\nint negated(List<int> list) {\n  if (!list.isEmpty) return list.reduce((a, b) => a + b);\n  return 0;\n}\n\nextension CustomReduce on String {\n  String reduce(String Function(String, String) combine) => this;\n}\nString customExtension(String value) => value.reduce((a, b) => a + b);"
+    },
+    "group": "correctness",
+    "name": "avoid-unsafe-reduce",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -10120,6 +10887,122 @@
       "label": "Dart lints",
       "upstreamId": "exhaustive_cases",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/exhaustive_cases"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags value functions with a proven explicit null return on every path.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 2,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 3,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 4,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 14,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 20,
+        "message": "This function returns null on every path; remove the return value or return a meaningful value."
+      }
+    ],
+    "docs": "Flags value functions with a proven explicit null return on every path.\nBare returns and implicit fallthrough are deliberately not treated as proof.",
+    "domains": [],
+    "examples": {
+      "bad": "const empty = null;\nObject? arrow() => null;\nObject? direct() { return null; }\nObject? both(bool flag) {\n  if (flag) { return null; } else { return null; }\n}\nObject? trailing(bool flag) {\n  if (flag) return null;\n  return null;\n}\nObject? lexical() {\n  return empty;\n}\nObject? nested(bool flag) {\n  Object inner() => 4;\n  if (flag) { if (flag) return null; else return null; }\n  return null;\n}\nclass Example {\n  Object? method() => null;\n}",
+      "crossFile": null,
+      "good": "Object? mixed(bool flag) { if (flag) return null; return 1; }\nObject? fallthrough(bool flag) { if (flag) return null; }\nObject? empty() {}\nvoid bare() { return; }\nvoid explicitVoid() { return null; }\nObject? variable(Object? value) => value;\nObject? shadow(Object? empty) { return empty; }\nObject? nested(Object? value) {\n  Object inner() => 1;\n  return value;\n}\nObject? finallyWins() { try { return null; } finally { return 1; } }\nObject? loop(bool flag) { while (flag) { return null; } return null; }\nIterable<Object?> generator() sync* { yield null; }\nFuture<Object?> asynchronous() async => null;\nObject? get emptyGetter => null;\nclass Example { Object? get value => null; }\n\ntypedef VoidCallback = void Function();\nvoid onPressed(VoidCallback callback) {}\nvoid useEffect(Object? Function() callback) {}\nvoid callbacks() {\n  VoidCallback callback = () => null;\n  onPressed(() { return null; });\n  useEffect(() { return null; });\n  callback();\n}\nabstract class Contract {\n  Object? result();\n  Object? get value;\n}\nclass Implementation implements Contract {\n  @override\n  Object? result() => null;\n  @override\n  Object? get value => null;\n}\nconst environmentValue = bool.fromEnvironment('RETURN_NULL') ? null : 1;\nObject? environmentDependent() => environmentValue;\nObject? capturedConstant() {\n  const value = null;\n  return value;\n}\n\nconst shadowedResult = null;\nclass OwnGetterShadow {\n  Object? current;\n  Object? get shadowedResult => current;\n  Object? result() => shadowedResult;\n}\nclass GetterBase {\n  Object? current;\n  Object? get shadowedResult => current;\n}\nclass InheritedGetterShadow extends GetterBase {\n  Object? result() => shadowedResult;\n}\n\nextension NamedGetterShadow on String {\n  Object? get shadowedResult => this;\n  Object? namedResult() => shadowedResult;\n}\nextension on List<int> {\n  Object? get shadowedResult => this;\n  Object? unnamedResult() => shadowedResult;\n}"
+    },
+    "group": "correctness",
+    "name": "function-always-returns-null",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warns when distinct return paths in a function produce the same scalar constant.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 2,
+        "message": "This function returns the same constant on every path; simplify the function or return a meaningful result."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 5,
+        "message": "This function returns the same constant on every path; simplify the function or return a meaningful result."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 9,
+        "message": "This function returns the same constant on every path; simplify the function or return a meaningful result."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 13,
+        "message": "This function returns the same constant on every path; simplify the function or return a meaningful result."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 19,
+        "message": "This function returns the same constant on every path; simplify the function or return a meaningful result."
+      }
+    ],
+    "docs": "Warns when distinct return paths in a function produce the same scalar constant.\nOnly synchronous value functions and scalar constants are considered. Unsupported\ncontrol flow (including loops, switches and exception handling) fails closed.",
+    "domains": [],
+    "examples": {
+      "bad": "const answer = 6 * 7;\nint both(bool flag) {\n  if (flag) { return 2 + 2; } else { return 4; }\n}\nString trailing(bool flag) {\n  if (flag) return 'same';\n  return \"same\";\n}\nint lexical(bool flag) {\n  if (flag) return answer;\n  return 42;\n}\nint nested(bool flag) {\n  Object? inner() => null;\n  if (flag) { if (flag) return 4; else return 4; }\n  return 4;\n}\nclass Example {\n  int method(bool flag) {\n    if (flag) return 42;\n    return 42;\n  }\n}",
+      "crossFile": null,
+      "good": "int mixed(bool flag) { if (flag) return 1; return 2; }\nint? fallthrough(bool flag) { if (flag) return 1; }\nObject? empty() {}\nObject? nullOnly() => null;\nint variable(int value) => value;\nconst answer = 42;\nint shadow(int answer) => answer;\nint nested(int value) {\n  Object? inner() => null;\n  return value;\n}\nint finallyWins() { try { return 1; } finally { return 2; } }\nint loop(bool flag) { while (flag) { return 1; } return 1; }\nList<int> allocated() => [1, 2];\nList<int> allocatedBranches(bool flag) { if (flag) return [1]; return [1]; }\nIterable<int> generator() sync* { yield 1; }\nFuture<int> asynchronous() async => 1;\nint get answerGetter => 42;\nclass Example { int get value => 42; }\n\nint arrow() => 42;\nbool direct() { return true; }\ntypedef VoidCallback = void Function();\nvoid onPressed(VoidCallback callback) {}\nvoid useEffect(Object? Function() callback) {}\nvoid callbacks() {\n  VoidCallback callback = () => true;\n  onPressed(() { return true; });\n  useEffect(() { return true; });\n  callback();\n}\nabstract class Contract {\n  int result(bool flag);\n  int get value;\n}\nclass Implementation implements Contract {\n  @override\n  int result(bool flag) { if (flag) return 42; return 42; }\n  @override\n  int get value => 42;\n}\nbool differentEnvironmentFlags(bool branch) {\n  if (branch) return const bool.fromEnvironment('FIRST');\n  return const bool.fromEnvironment('SECOND');\n}\nconst environmentFlag = bool.fromEnvironment('FIRST');\nconst wrappedFlag = !environmentFlag;\nbool transitiveEnvironment(bool branch) {\n  if (branch) return wrappedFlag;\n  return true;\n}\nbool capturedEnvironment(bool branch) {\n  const first = bool.fromEnvironment('FIRST');\n  const second = bool.fromEnvironment('SECOND');\n  if (branch) return first;\n  return second;\n}\n\nconst shadowedResult = 42;\nclass OwnGetterShadow {\n  int current = 0;\n  int get shadowedResult => current;\n  int result(bool flag) {\n    if (flag) return shadowedResult;\n    return 42;\n  }\n}\nclass GetterBase {\n  int current = 0;\n  int get shadowedResult => current;\n}\nclass InheritedGetterShadow extends GetterBase {\n  int result(bool flag) {\n    if (flag) return shadowedResult;\n    return 42;\n  }\n}\n\nextension NamedGetterShadow on String {\n  int get shadowedResult => length;\n  int namedResult(bool flag) {\n    if (flag) return shadowedResult;\n    return 42;\n  }\n}\nextension on List<int> {\n  int get shadowedResult => length;\n  int unnamedResult(bool flag) {\n    if (flag) return shadowedResult;\n    return 42;\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "function-always-returns-same-value",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
