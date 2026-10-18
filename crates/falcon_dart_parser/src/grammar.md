@@ -620,6 +620,12 @@ independent of the enclosing field, top-level variable, or local declaration.
 - Syntax errors produce `ParseError` values; recovery synchronizes at boundaries appropriate
   to the enclosing production and can retain `ErrorNode` or `Expr::Error` nodes.
 - The lexer emits one `StringLit` token per literal. Parsing scans interpolation regions
-  within that token, builds identifiers for `$name`, and parses `${...}` expressions;
-  interpolation expressions that fail parsing report errors without adding a region.
+  within that token, builds identifiers for `$name`, and parses `${...}` expressions
+  with the enclosing async or generator body marker. Grammar-local context flags
+  (such as constructor-initializer ambiguity) do not cross the string boundary.
+  Interpolation expressions that fail parsing report errors without adding a region.
+  Backslashes escape characters in string text, not in `${...}` expression code;
+  an unquoted `\}` still terminates the interpolation and reports the invalid
+  expression token. Quoted strings and comments inside the expression keep their
+  own lexical rules.
 - Pattern matching (section 8) requires Dart 3.x.

@@ -511,10 +511,12 @@ impl<'src> Parser<'src> {
                     return marker.complete(p, NodeKind::UnaryExpr);
                 }
                 match p.cur().kind {
-                    // Outside async bodies `await` is an identifier, except where
-                    // it plainly leads an operand (`await foo();`): the front end
-                    // parses that as a misplaced await expression, and so do we.
-                    TokenKind::Await if p.ctx.body.is_async() || p.await_operand_ahead() => {
+                    // Outside async and generator bodies `await` is an identifier,
+                    // except where it plainly leads an operand (`await foo();`): the
+                    // front end parses that as a misplaced await expression, and so do we.
+                    TokenKind::Await
+                        if p.ctx.body != AsyncMarker::Sync || p.await_operand_ahead() =>
+                    {
                         let marker = p.start();
                         p.advance();
                         p.parse_unary();

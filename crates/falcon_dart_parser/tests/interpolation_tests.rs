@@ -62,6 +62,92 @@ fn braced_binary_interpolation() {
 }
 
 #[test]
+fn braced_interpolation_inherits_async_body_context() {
+    for body in ["async", "async*"] {
+        for expression in ["await f()", "await value", "'${await f()}'"] {
+            let src = format!("void f() {body} {{ var x = '${{{expression}}}'; }}");
+            let parsed = parse(&src);
+            assert!(parsed.errors.is_empty(), "{src}: {:?}", parsed.errors);
+            let node = string_lit(parsed.tree.program(&src));
+            let interpolation = node.interpolations().next().unwrap();
+            if expression.starts_with("await") {
+                assert!(matches!(interpolation.expr(), Expr::Await(_)), "{src}");
+            } else {
+                let Expr::StringLit(nested) = interpolation.expr() else {
+                    panic!("{src}");
+                };
+                assert!(matches!(
+                    nested.interpolations().next().unwrap().expr(),
+                    Expr::Await(_)
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn braced_interpolation_in_plain_sync_body_rejects_await() {
+    let src = "void f() { var x = '${await f()}'; }";
+    let parsed = parse(src);
+    let node = string_lit(parsed.tree.program(src));
+    assert_eq!(node.interpolations().count(), 0);
+    assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+    assert_eq!(
+        parsed.errors[0].message,
+        "expected '}' after interpolation expression"
+    );
+}
+
+#[test]
+fn interpolation_closures_have_their_own_body_context() {
+    for source in [
+        "void f() async { var x = '${() { var await = 1; return await; }}'; }",
+        "void f() async* { yield '${() { yield(1); }}'; }",
+        "class C { var g; C() : g = '${() {}}'; }",
+        "class C { var g; C() : g = c ? '${() {}}' : null; }",
+    ] {
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
+        let nodes: Vec<_> = parsed.tree.root(source).descendants().collect();
+        assert!(
+            nodes.iter().any(|node| node.kind() == NodeKind::FuncExpr),
+            "{source}"
+        );
+        assert!(
+            !nodes.iter().any(|node| node.kind() == NodeKind::AwaitExpr),
+            "{source}"
+        );
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|node| node.kind() == NodeKind::YieldStmt)
+                .count(),
+            usize::from(source.contains("async*")),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn generator_yield_interpolation_parses_await_as_an_operator() {
+    for body in ["sync*", "async*"] {
+        let source = format!("void f() {body} {{ yield '${{await g()}}'; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
+        assert_eq!(
+            parsed
+                .tree
+                .root(&source)
+                .descendants()
+                .filter(|node| node.kind() == NodeKind::AwaitExpr)
+                .count(),
+            1,
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn braced_interpolation_retains_interior_trivia_but_expression_stays_precise() {
     let src = format!(
         "void f() {{ var x = {}; }}",
