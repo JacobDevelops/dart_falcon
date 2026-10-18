@@ -2733,6 +2733,42 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("sort_pub_dependencies"),
     ),
+    RuleMeta::resolved::<lint::style::avoid_unnecessary_super::AvoidUnnecessarySuper>(
+        "avoid-unnecessary-super", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_unnecessary_getter::AvoidUnnecessaryGetter>(
+        "avoid-unnecessary-getter", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_block::AvoidUnnecessaryBlock>(
+        "avoid-unnecessary-block", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_continue::AvoidUnnecessaryContinue>(
+        "avoid-unnecessary-continue", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_unnecessary_call::AvoidUnnecessaryCall>(
+        "avoid-unnecessary-call", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_unnecessary_length_check::AvoidUnnecessaryLengthCheck>(
+        "avoid-unnecessary-length-check", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_negations::AvoidUnnecessaryNegations>(
+        "avoid-unnecessary-negations", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_local_variable::AvoidUnnecessaryLocalVariable>(
+        "avoid-unnecessary-local-variable", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_reassignment::AvoidUnnecessaryReassignment>(
+        "avoid-unnecessary-reassignment", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::use_existing_variable::UseExistingVariable>(
+        "use-existing-variable", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::use_existing_destructuring::UseExistingDestructuring>(
+        "use-existing-destructuring", RuleGroup::Style, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_unnecessary_overrides_in_state::AvoidUnnecessaryOverridesInState>(
+        "avoid-unnecessary-overrides-in-state", RuleGroup::Style, FLUTTER, false, RuleSource::Falcon,
+    ),
 ];
 
 /// Legacy rule ids mapped to their canonical id. Covers the pre-1.0

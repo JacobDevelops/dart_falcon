@@ -1,0 +1,21 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "avoid-unnecessary-getter": { "level": "warn", "options": { "ignore_upcast": true } }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/bad_upcast.dart"],
+      "linter": {
+        "rules": {
+          "style": {
+            "avoid-unnecessary-getter": { "level": "warn", "options": { "ignore_upcast": false } }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+bool single(bool flag) => !flag;
+bool equality(bool flag, bool another) => flag == another;
+bool unequal(bool flag, bool another) => flag != another;
+bool different(bool flag, bool another) => !flag == another;
+bool conjunction(bool flag, bool another) => !flag && !another;
+bool disjunction(bool flag, bool another) => !flag || !another;
+int arithmetic(int value) => -(-value);
+int bitwise(int value) => ~(~value);
+bool relational(int a, int b) => !(a < b);
+bool floating(double a, double b) => !(a >= b);
+bool doubleNegation(bool flag) => !!flag;
+bool parenthesized(bool flag) => !(!flag);
+bool triple(bool flag) => !!!flag;
+bool nested(bool a, bool b) => !!(a && !(!b));
+bool stackedLiteral() => !!true;
