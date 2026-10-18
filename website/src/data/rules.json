@@ -6356,21 +6356,21 @@
         "message": "Check 'isClosed' after the await before adding an event or emitting a state."
       },
       {
-        "column": 7,
+        "column": 5,
         "file": null,
-        "line": 37,
+        "line": 31,
         "message": "Check 'isClosed' after the await before adding an event or emitting a state."
       },
       {
-        "column": 7,
+        "column": 20,
         "file": null,
-        "line": 38,
+        "line": 34,
         "message": "Check 'isClosed' after the await before adding an event or emitting a state."
       },
       {
         "column": 5,
         "file": null,
-        "line": 43,
+        "line": 38,
         "message": "Check 'isClosed' after the await before adding an event or emitting a state."
       },
       {
@@ -6378,16 +6378,34 @@
         "file": null,
         "line": 48,
         "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 49,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 54,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 59,
+        "message": "Check 'isClosed' after the await before adding an event or emitting a state."
       }
     ],
-    "docs": "Flags Bloc `add` and `emit` calls after an await without a fresh `isClosed` check.\n\nA Bloc or Cubit can close while asynchronous work is suspended. Check\n`!isClosed` before dispatching or emitting, or return when `isClosed` is true.\nEach await invalidates earlier checks. Both guarded branches and terminating\nearly-return guards are recognized, and nested functions are independent.\nCalls must target the enclosing package-backed Bloc/Cubit, or an Emitter\nparameter of its event handler. An Emitter also accepts its own `!isDone`\nguard. Unrelated receivers, shadowed names and opaque mixins are ignored.\nAnalysis follows straight-line statements and enclosing if branches;\nuncertain loops, switch/try flow, pattern conditions, conditional collection\nelements and optional/short-circuit evaluation are not treated as proof of\nan unguarded asynchronous path.\n\n### Bad\n```dart\nawait load();\nemit(Loaded());\n```\n\n### Good\n```dart\nawait load();\nif (isClosed) return;\nemit(Loaded());\n```",
+    "docs": "Flags Bloc `add` and `emit` calls after an await without a fresh `isClosed` check.\n\nA Bloc or Cubit can close while asynchronous work is suspended. Check\n`!isClosed` before dispatching or emitting, or return when `isClosed` is true.\nEach await invalidates earlier checks. Both guarded branches and terminating\nearly-return guards are recognized, and nested functions are independent.\nAwaits in call arguments invalidate even an enclosing guard.\nCalls must target the enclosing package-backed Bloc/Cubit, or an Emitter\nparameter of its event handler. An Emitter also accepts its own `!isDone`\nguard. Unrelated receivers, shadowed names and opaque mixins are ignored.\nAnalysis follows straight-line statements and enclosing if branches;\nuncertain loops, switch/try flow, pattern conditions, conditional collection\nelements and optional/short-circuit evaluation are not treated as proof of\nan unguarded asynchronous path.\n\n### Bad\n```dart\nawait load();\nemit(Loaded());\n```\n\n### Good\n```dart\nawait load();\nif (isClosed) return;\nemit(Loaded());\n```",
     "domains": [
       "bloc"
     ],
     "examples": {
-      "bad": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  Future<void> unguarded() async {\n    await load();\n    emit(1);\n  }\n  Future<void> explicitReceiver() async {\n    await load();\n    this.emit(2);\n  }\n  Future<void> staleCheck() async {\n    if (!isClosed) {\n      await load();\n      emit(3);\n    }\n  }\n  Future<void> wrongGuard(CounterCubit other) async {\n    await load();\n    if (!other.isClosed) {\n      emit(4);\n    }\n  }\n  Future<void> staleReturn() async {\n    if (isClosed) return;\n    await load();\n    emit(5);\n  }\n  Future<void> load() async {}\n}\n\nclass CounterBloc extends Bloc<int, int> {\n  CounterBloc() : super(0) {\n    on<int>((event, emit) async {\n      await load();\n      add(1);\n      emit(2);\n    });\n  }\n  Future<void> handle(int event, Emitter<int> emit) async {\n    await load();\n    emit(3);\n  }\n  Future<void> shadowedGuard(bool isClosed) async {\n    await load();\n    if (!isClosed) {\n      add(4);\n    }\n  }\n  Future<void> load() async {}\n}",
+      "bad": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  Future<void> unguarded() async {\n    await load();\n    emit(1);\n  }\n  Future<void> explicitReceiver() async {\n    await load();\n    this.emit(2);\n  }\n  Future<void> staleCheck() async {\n    if (!isClosed) {\n      await load();\n      emit(3);\n    }\n  }\n  Future<void> wrongGuard(CounterCubit other) async {\n    await load();\n    if (!other.isClosed) {\n      emit(4);\n    }\n  }\n  Future<void> staleReturn() async {\n    if (isClosed) return;\n    await load();\n    emit(5);\n  }\n  Future<void> awaitedArgument() async {\n    emit(await value());\n  }\n  Future<void> guardedAwaitedArgument() async {\n    if (!isClosed) emit(await value());\n  }\n  Future<void> gapBeforeConditionalArgument(bool ready) async {\n    await load();\n    emit(ready ? await value() : 0);\n  }\n  Future<int> value() async => 6;\n  Future<void> load() async {}\n}\n\nclass CounterBloc extends Bloc<int, int> {\n  CounterBloc() : super(0) {\n    on<int>((event, emit) async {\n      await load();\n      add(1);\n      emit(2);\n    });\n  }\n  Future<void> handle(int event, Emitter<int> emit) async {\n    await load();\n    emit(3);\n  }\n  Future<void> shadowedGuard(bool isClosed) async {\n    await load();\n    if (!isClosed) {\n      add(4);\n    }\n  }\n  Future<void> load() async {}\n}",
       "crossFile": null,
-      "good": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  void synchronous() { emit(0); }\n  Future<void> branchGuard() async {\n    await load();\n    if (!isClosed) { emit(1); }\n  }\n  Future<void> conjunctionGuard(bool ready) async {\n    await load();\n    if (!isClosed && ready) { emit(1); }\n  }\n  Future<void> disjunctionReturn(bool paused) async {\n    await load();\n    if (isClosed || paused) return;\n    emit(1);\n  }\n  Future<void> returnGuard() async {\n    await load();\n    if (isClosed) return;\n    emit(2);\n  }\n  Future<void> elseGuard() async {\n    await load();\n    if (this.isClosed) { print('closed'); } else { this.emit(3); }\n  }\n  Future<void> throwGuard() async {\n    await load();\n    if (isClosed) { throw StateError('closed'); }\n    emit(4);\n  }\n  Future<void> freshGuard() async {\n    await load();\n    if (isClosed) return;\n    await load();\n    if (isClosed) return;\n    emit(5);\n  }\n  Future<void> nestedIsolation() async {\n    await load();\n    final callback = () { emit(6); };\n    print(callback);\n  }\n  Future<void> nestedAwaitIsolation() async {\n    final callback = () async { await load(); };\n    print(callback);\n    emit(7);\n  }\n  Future<void> unrelatedReceiver(CounterCubit other) async {\n    await load();\n    other.emit(8);\n  }\n  Future<void> localShadow(void Function(int) emit) async {\n    await load();\n    emit(9);\n  }\n  Future<void> shortCircuit() async {\n    await load();\n    !isClosed && send();\n  }\n  bool send() { emit(10); return true; }\n  Future<void> load() async {}\n}\n\nclass Service {\n  Future<void> run() async {\n    await load();\n    emit(1);\n  }\n  void emit(int value) {}\n  Future<void> load() async {}\n}\n\nclass CustomCubit extends Cubit<int> {\n  CustomCubit() : super(0);\n  void emit(int value) {}\n}\n\nclass ChildCustomCubit extends CustomCubit {\n  Future<void> inheritedOverride() async {\n    await Future<void>.value();\n    emit(1);\n  }\n}"
+      "good": "import 'package:bloc/bloc.dart';\n\nclass CounterCubit extends Cubit<int> {\n  CounterCubit() : super(0);\n  void synchronous() { emit(0); }\n  Future<void> branchGuard() async {\n    await load();\n    if (!isClosed) { emit(1); }\n  }\n  Future<void> conjunctionGuard(bool ready) async {\n    await load();\n    if (!isClosed && ready) { emit(1); }\n  }\n  Future<void> disjunctionReturn(bool paused) async {\n    await load();\n    if (isClosed || paused) return;\n    emit(1);\n  }\n  Future<void> returnGuard() async {\n    await load();\n    if (isClosed) return;\n    emit(2);\n  }\n  Future<void> elseGuard() async {\n    await load();\n    if (this.isClosed) { print('closed'); } else { this.emit(3); }\n  }\n  Future<void> throwGuard() async {\n    await load();\n    if (isClosed) { throw StateError('closed'); }\n    emit(4);\n  }\n  Future<void> freshGuard() async {\n    await load();\n    if (isClosed) return;\n    await load();\n    if (isClosed) return;\n    emit(5);\n  }\n  Future<void> nestedIsolation() async {\n    await load();\n    final callback = () { emit(6); };\n    print(callback);\n  }\n  Future<void> nestedAwaitIsolation() async {\n    final callback = () async { await load(); };\n    print(callback);\n    emit(7);\n  }\n  void nestedAwaitArgument() {\n    emit((() async { await load(); return 7; }).hashCode);\n  }\n  Future<void> conditionalAwaitArgument(bool ready) async {\n    emit(ready ? await value() : 0);\n  }\n  Future<int> value() async => 7;\n  Future<void> unrelatedReceiver(CounterCubit other) async {\n    await load();\n    other.emit(8);\n  }\n  Future<void> localShadow(void Function(int) emit) async {\n    await load();\n    emit(9);\n  }\n  Future<void> shortCircuit() async {\n    await load();\n    !isClosed && send();\n  }\n  bool send() { emit(10); return true; }\n  Future<void> load() async {}\n}\n\nclass Service {\n  Future<void> run() async {\n    await load();\n    emit(1);\n  }\n  void emit(int value) {}\n  Future<void> load() async {}\n}\n\nclass CustomCubit extends Cubit<int> {\n  CustomCubit() : super(0);\n  void emit(int value) {}\n}\n\nclass ChildCustomCubit extends CustomCubit {\n  Future<void> inheritedOverride() async {\n    await Future<void>.value();\n    emit(1);\n  }\n}"
     },
     "group": "correctness",
     "name": "check-is-not-closed-after-async-gap",

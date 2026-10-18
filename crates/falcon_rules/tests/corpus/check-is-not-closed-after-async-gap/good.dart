@@ -47,6 +47,13 @@ class CounterCubit extends Cubit<int> {
     print(callback);
     emit(7);
   }
+  void nestedAwaitArgument() {
+    emit((() async { await load(); return 7; }).hashCode);
+  }
+  Future<void> conditionalAwaitArgument(bool ready) async {
+    emit(ready ? await value() : 0);
+  }
+  Future<int> value() async => 7;
   Future<void> unrelatedReceiver(CounterCubit other) async {
     await load();
     other.emit(8);

@@ -4,6 +4,7 @@
 //! `!isClosed` before dispatching or emitting, or return when `isClosed` is true.
 //! Each await invalidates earlier checks. Both guarded branches and terminating
 //! early-return guards are recognized, and nested functions are independent.
+//! Awaits in call arguments invalidate even an enclosing guard.
 //! Calls must target the enclosing package-backed Bloc/Cubit, or an Emitter
 //! parameter of its event handler. An Emitter also accepts its own `!isDone`
 //! guard. Unrelated receivers, shadowed names and opaque mixins are ignored.
@@ -180,6 +181,17 @@ impl<'a> Collector<'a> {
         let Some(body) = function_body(call.syntax()) else {
             return false;
         };
+        if self.awaits.iter().any(|awaited| {
+            contains(call.args().span(), awaited.span())
+                && function_body(awaited.syntax()) == Some(body)
+                && !awaited
+                    .syntax()
+                    .ancestors()
+                    .take_while(|node| *node != call.syntax())
+                    .any(uncertain_expression)
+        }) {
+            return true;
+        }
         let emitter = self.emitter_calls.get(&call.syntax().id()).copied();
         let mut child = call.syntax();
         while let Some(parent) = child.parent() {

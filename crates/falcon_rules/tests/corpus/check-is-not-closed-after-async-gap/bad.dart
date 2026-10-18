@@ -27,6 +27,17 @@ class CounterCubit extends Cubit<int> {
     await load();
     emit(5); /* expect: check-is-not-closed-after-async-gap */
   }
+  Future<void> awaitedArgument() async {
+    emit(await value()); /* expect: check-is-not-closed-after-async-gap */
+  }
+  Future<void> guardedAwaitedArgument() async {
+    if (!isClosed) emit(await value()); /* expect: check-is-not-closed-after-async-gap */
+  }
+  Future<void> gapBeforeConditionalArgument(bool ready) async {
+    await load();
+    emit(ready ? await value() : 0); /* expect: check-is-not-closed-after-async-gap */
+  }
+  Future<int> value() async => 6;
   Future<void> load() async {}
 }
 
