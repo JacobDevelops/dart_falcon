@@ -18,6 +18,18 @@
       "rootUri": "../packages/hooks_riverpod",
       "packageUri": "lib/",
       "languageVersion": "3.0"
+    },
+    {
+      "name": "flutter",
+      "rootUri": "../packages/flutter",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "flutter_hooks",
+      "rootUri": "../packages/flutter_hooks",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
     }
   ]
 }

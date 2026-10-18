@@ -18,6 +18,12 @@
       "rootUri": "../packages/hooks_riverpod",
       "packageUri": "lib/",
       "languageVersion": "3.0"
+    },
+    {
+      "name": "state_notifier",
+      "rootUri": "../packages/state_notifier",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
     }
   ]
 }
