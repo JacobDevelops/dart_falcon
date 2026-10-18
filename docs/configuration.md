@@ -98,8 +98,9 @@ A bare `**` (or `**/*`) entry disables positive filtering entirely.
 ## `linter`
 
 - `enabled` (default `true`): when `false`, no file rule runs. Cross-file checks are configured separately.
-- `domains`: per-domain gating. Keys are domain names (currently `flutter`);
-  values are `all`, `recommended`, or `none`.
+- `domains`: per-domain gating. Keys are domain names (`flutter`, `test`,
+  `bloc`, `riverpod`, `provider`, `flutter_hooks`, `equatable`); values are
+  `all`, `recommended`, or `none`.
 - `rules`: falcon's recommended set plus per-group rule levels.
 
 ### Language server reloads
@@ -138,7 +139,7 @@ For each rule falcon resolves an effective severity (or "disabled"):
 
 1. If `linter.enabled` is `false` → disabled.
 2. An **explicit** entry under the rule's group wins and bypasses domain gating.
-3. Otherwise, a domain-scoped rule follows its domain setting (currently `flutter`). `all` enables every rule in that domain; `none` disables them; `recommended` enables only recommended rules when falcon's recommended set is active. A missing domain setting defaults to `recommended`.
+3. Otherwise, a domain-scoped rule follows its domain setting (`flutter`, `test`, `bloc`, `riverpod`, `provider`, `flutter_hooks`, or `equatable`). `all` enables every rule in that domain; `none` disables them; `recommended` enables only recommended rules when falcon's recommended set is active. A missing domain setting defaults to `recommended`.
 4. Otherwise, the rule runs only if it is recommended and falcon's recommended set is active.
 
 With no config file, only falcon's recommended rules run, at warning severity.

@@ -20,6 +20,12 @@ macro_rules! metadata_enum {
                     $(Self::$variant => $label),+
                 }
             }
+
+            pub const fn names(self) -> &'static [&'static str] {
+                match self {
+                    $(Self::$variant => &[$label]),+
+                }
+            }
         }
     };
 }
@@ -36,6 +42,12 @@ metadata_enum!(RuleGroup {
 
 metadata_enum!(Domain {
     Flutter => "flutter",
+    Test => "test",
+    Bloc => "bloc",
+    Riverpod => "riverpod",
+    Provider => "provider",
+    FlutterHooks => "flutter_hooks",
+    Equatable => "equatable",
 });
 
 #[derive(Clone, Copy)]
@@ -129,11 +141,7 @@ impl RuleMeta {
     }
 
     pub fn domain_names(&self) -> &'static [&'static str] {
-        const FLUTTER_NAMES: &[&str] = &[Domain::Flutter.as_str()];
-        match self.domain {
-            None => &[],
-            Some(Domain::Flutter) => FLUTTER_NAMES,
-        }
+        self.domain.map_or(&[], Domain::names)
     }
 
     pub const fn is_cross_file(&self) -> bool {

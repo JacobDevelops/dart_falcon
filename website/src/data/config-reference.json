@@ -39,8 +39,68 @@
       "recommended",
       "none"
     ],
+    "description": "Activation level for the `bloc` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.bloc",
+    "type": "string"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `equatable` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.equatable",
+    "type": "string"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
     "description": "Activation level for the `flutter` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
     "path": "linter.domains.flutter",
+    "type": "string"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `flutter_hooks` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.flutter_hooks",
+    "type": "string"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `provider` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.provider",
+    "type": "string"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `riverpod` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.riverpod",
+    "type": "string"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `test` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.test",
     "type": "string"
   },
   {

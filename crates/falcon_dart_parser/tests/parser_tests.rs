@@ -1451,6 +1451,71 @@ fn test_expr_switch_expression() {
 }
 
 #[test]
+fn switch_guard_parentheses_do_not_start_arrow_functions() {
+    for guard in ["(flag)", "(flag = other)", "(required)"] {
+        let source = format!("main() {{ x switch {{ _ when {guard} => 1, _ => 0 }}; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{guard}: {:?}", parsed.errors);
+        let Expr::Switch(switch) = first_stmt_expr(parsed.tree.program(&source)) else {
+            panic!("expected switch expression");
+        };
+        assert_eq!(switch.arms().len(), 2, "{guard}");
+        let Expr::Paren(condition) = switch.arms().next().unwrap().guard().unwrap() else {
+            panic!("expected parenthesized guard: {guard}");
+        };
+        if guard == "(flag = other)" {
+            assert!(matches!(condition.expr(), Expr::Assign(_)));
+        } else {
+            assert!(matches!(condition.expr(), Expr::Ident(_)));
+        }
+    }
+}
+
+#[test]
+fn switch_guards_preserve_nested_closures_and_parameter_defaults() {
+    for guard in [
+        "(() => true)()",
+        "(() { return true; })()",
+        "(([flag = true]) => flag)()",
+        "(({flag = true}) => flag)()",
+        "check((flag) => flag)",
+    ] {
+        let source = format!("main() {{ x switch {{ _ when {guard} => 1, _ => 0 }}; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{guard}: {:?}", parsed.errors);
+        let Expr::Switch(switch) = first_stmt_expr(parsed.tree.program(&source)) else {
+            panic!("expected switch expression");
+        };
+        assert_eq!(switch.arms().len(), 2, "{guard}");
+        assert!(
+            matches!(switch.arms().next().unwrap().guard(), Some(Expr::Call(_))),
+            "{guard}"
+        );
+    }
+}
+
+#[test]
+fn switch_guard_arrow_lookahead_respects_nested_delimiters() {
+    for guard in [
+        "(items?[0] ?? false)",
+        "items?[0] == (() => true)()",
+        "flag ? true : (other)",
+        "switch (x) { _ when (flag) => true, _ => false }",
+        "x is Map<String, int> && (flag)",
+        "f<int, String>(x) && (flag)",
+    ] {
+        let source = format!("main() {{ x switch {{ _ when {guard} => 1, _ => 0 }}; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{guard}: {:?}", parsed.errors);
+        let Expr::Switch(switch) = first_stmt_expr(parsed.tree.program(&source)) else {
+            panic!("expected switch expression");
+        };
+        assert_eq!(switch.arms().len(), 2, "{guard}");
+        assert!(switch.arms().next().unwrap().guard().is_some(), "{guard}");
+    }
+}
+
+#[test]
 fn test_dot_shorthand_bare() {
     let source = "main() { .red; }";
     let parsed = parse(source);

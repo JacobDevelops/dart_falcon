@@ -98,7 +98,8 @@ impl<'src> Parser<'src> {
             self.parse_pattern();
             if self.eat(TokenKind::When).is_some() {
                 let marker = self.start();
-                self.parse_expr();
+                let arrow = self.switch_guard_arrow();
+                self.with_ctx(|ctx| ctx.switch_guard_arrow = arrow, Self::parse_expr);
                 marker.complete(self, NodeKind::ExprGuard);
             }
             self.expect(TokenKind::Arrow);
@@ -107,6 +108,35 @@ impl<'src> Parser<'src> {
             self.eat(TokenKind::Comma);
         }
         self.expect(TokenKind::RBrace);
+    }
+
+    fn switch_guard_arrow(&self) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut i = self.pos;
+        loop {
+            match self.tokens.get(i)?.kind {
+                TokenKind::Arrow if depth == 0 => return Some(i),
+                TokenKind::Eof => return None,
+                TokenKind::Comma | TokenKind::RBrace | TokenKind::Semicolon if depth == 0 => {
+                    return None;
+                }
+                TokenKind::Lt => {
+                    if let Some(end) = self.after_generic_type_args(i) {
+                        i = end;
+                        continue;
+                    }
+                }
+                TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::QmarkLBracket
+                | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth = depth.checked_sub(1)?;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
     }
 
     fn parse_typed_collection(&mut self, marker: Marker) -> CompletedMarker {
@@ -277,14 +307,14 @@ impl<'src> Parser<'src> {
         marker.complete(self, NodeKind::BinaryExpr)
     }
 
-    /// Scan a balanced `<...>` starting at the cursor (which must be `<`),
+    /// Scan a balanced `<...>` starting at `start` (which must be `<`),
     /// returning the token index immediately *after* the closing `>` when the
     /// span contains only type-ish tokens, or `None` when some token means the
     /// `<` is really a comparison operator. Shared by generic-invocation and
     /// generic-instantiation detection.
-    fn after_generic_type_args(&self) -> Option<usize> {
+    fn after_generic_type_args(&self, start: usize) -> Option<usize> {
         use TokenKind::*;
-        debug_assert_eq!(self.cur().kind, Lt);
+        debug_assert_eq!(self.kind_at(start), Lt);
         let mut depth = 0i32;
         // Angle depth captured at each open `(`/`[`/`{`. Records and function types
         // nest inside type arguments (`Foo<(int, Bar<T>)>`, `Foo<int Function()>`),
@@ -292,7 +322,7 @@ impl<'src> Parser<'src> {
         // angle opened *outside* the current bracket group. That would be an
         // expression `>`/shift (`a < b ? (d >> e) : 0`), not a type-arg close.
         let mut bracket_stack: Vec<i32> = Vec::new();
-        let mut i = self.pos;
+        let mut i = start;
         while let Some(tok) = self.tokens.get(i) {
             match &tok.kind {
                 Lt => depth += 1,
@@ -331,7 +361,7 @@ impl<'src> Parser<'src> {
                 _ => return None,
             }
             i += 1;
-            if i - self.pos > 512 {
+            if i - start > 512 {
                 return None;
             }
         }
@@ -342,7 +372,7 @@ impl<'src> Parser<'src> {
     /// list — a balanced `<...>` closed immediately before `(`, `.`, or `?.`.
     /// Distinguishes `f<T>()` from the comparison in `a < b ? () => c() : null`.
     fn is_generic_invocation(&self) -> bool {
-        self.after_generic_type_args()
+        self.after_generic_type_args(self.pos)
             .is_some_and(|idx| self.after_type_args_is_call(idx))
     }
 
@@ -351,7 +381,7 @@ impl<'src> Parser<'src> {
     /// token, whose following token cannot continue a `<` comparison (Dart's own
     /// disambiguation rule, per the constructor-tearoffs spec).
     fn is_generic_instantiation(&self) -> bool {
-        match self.after_generic_type_args() {
+        match self.after_generic_type_args(self.pos) {
             Some(idx) if !self.after_type_args_is_call(idx) => {
                 self.token_ends_generic_instantiation(idx)
             }
@@ -901,10 +931,22 @@ impl<'src> Parser<'src> {
     /// Returns `true` when the `(` at `self.pos` starts a function expression
     /// rather than a parenthesised expression or record literal.
     ///
-    /// Fast path: a modifier keyword (`final`, `var`, `required`, `covariant`)
-    /// immediately inside the parens unambiguously signals a parameter list.
+    /// A switch guard's top-level arm arrow takes precedence over lambda
+    /// lookahead, including contextual modifier keywords used as expressions.
+    /// Otherwise a modifier keyword (`final`, `var`, `required`, `covariant`)
+    /// immediately inside the parens signals a parameter list.
     fn looks_like_function_expr(&self) -> bool {
         debug_assert_eq!(self.cur().kind, TokenKind::LParen);
+
+        let close = self.matching_close(
+            self.pos,
+            Brackets::ParenOnly,
+            |kind| kind == TokenKind::Semicolon,
+            None,
+        );
+        if close.is_some_and(|i| Some(i + 1) == self.ctx.switch_guard_arrow) {
+            return false;
+        }
 
         if matches!(
             self.peek(1).kind,
@@ -913,13 +955,7 @@ impl<'src> Parser<'src> {
             return true;
         }
 
-        self.matching_close(
-            self.pos,
-            Brackets::ParenOnly,
-            |kind| kind == TokenKind::Semicolon,
-            None,
-        )
-        .is_some_and(|i| {
+        close.is_some_and(|i| {
             matches!(
                 self.kind_at(i + 1),
                 TokenKind::Arrow | TokenKind::Async | TokenKind::Sync | TokenKind::LBrace
