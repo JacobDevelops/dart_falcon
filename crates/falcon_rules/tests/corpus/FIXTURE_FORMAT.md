@@ -264,7 +264,7 @@ List<String> items = [];
 ### Message Mismatch
 - Check the message threshold (default: 0.85 Jaro-Winkler similarity)
 - Use `msg: "..."` annotation to specify expected message
-- Run with `--verbose` to see actual vs. expected messages
+- Run `falcon check` on the fixture to see the actual message
 
 ### Good File Showing Violations
 - Remove any `/* expect: */` annotations from good.dart

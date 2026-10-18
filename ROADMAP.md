@@ -18,14 +18,15 @@ Falcon uses an arena concrete syntax tree that retains every token and trivia, s
 
 ### Remaining
 
-- **Rule-catalog expansion.** Two sources remain in the checklist:
+- **Rule-catalog expansion.** Three sources remain in the checklist:
   - **DCM-inspired rules: 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
     These are candidates from the DCM survey, not current pricing claims.
-  - **Cross-file rules: 11** (see below).
+  - **Additional rules: 18** (8 must-have, 7 nice-to-have, 3 post-1.0).
+  - **Cross-file rules: 12** (see below).
 - **New domains.** Alongside `flutter`, add `test`, `bloc`, `riverpod`,
   `provider`, `flutter_hooks`, and `equatable` domains (from the DCM survey),
   activated per file/framework so framework users get targeted checks.
-- **Cross-file rules.** Seven ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The 11 planned additions are Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`, `unexported-public-api`; and four Tier 3 post-1.0 rules.
+- **Cross-file rules.** Seven ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The 12 planned additions are Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`, `architecture-layer-boundaries`, `unexported-public-api`; and four Tier 3 post-1.0 rules.
 - **e2e OSS corpus.** Add a `cargo xtask e2e` harness for pinned, shallow clones of large Dart/Flutter repos, including immich, AppFlowy, flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples, and dart-lang/sdk `tests/language`. It should catch panics and parser/internal errors, snapshot diagnostic counts, and smoke-test migration of common `analysis_options.yaml` presets. Run a fast subset in PR CI and the full set nightly.
 - **Fix `prefer-iterable-every` porting bug.** Our port detects the *negated*
   `!where(pred).isEmpty` (which is `any(pred)` semantics, overlapping
