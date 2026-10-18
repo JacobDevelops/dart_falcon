@@ -3481,15 +3481,64 @@
   {
     "crossFile": false,
     "description": "Reports repeated identical, side-effect-free assertions in a straight-line block.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 11,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 19,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 28,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 29,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 35,
+        "message": "This assertion is repeated; remove the duplicate assertion."
+      }
+    ],
     "docs": "Reports repeated identical, side-effect-free assertions in a straight-line block.\n\nOnly `_test.dart` files importing `test` or `flutter_test` are inspected.\nCalls must resolve to the test framework or matcher package. Comparisons use\nthe actual and matcher source spelling. Literal/local actual values, standard\nmatcher constants and simple framework matcher factories are eligible.\nUnknown local matcher objects and asynchronous local actuals are excluded.\nIntervening non-assertion statements, branches, effectful arguments, awaited\ncalls, and chained calls end the comparison run.",
     "domains": [
       "test"
     ],
     "examples": {
-      "bad": "import 'package:test/test.dart';\nvoid example() { expect(1, 1); expect(1, 1); }",
+      "bad": "import 'package:test/test.dart';\nimport 'package:test/test.dart' as t;\nvoid main() {\n  test('integer', () {\n    expect(1, 1);\n    expect(1, 1);\n  });\n  test('local variable', () {\n    final value = true;\n    expect(value, isTrue);\n    expect(value, isTrue);\n  });\n  test('prefixed', () {\n    t.expect(false, false);\n    t.expect(false, false);\n  });\n  test('later', () {\n    expectLater(1, 1);\n    expectLater(1, 1);\n  });\n  test('nonadjacent pure assertions', () {\n    expect(1, 1);\n    expect(2, 2);\n    expect(1, 1);\n  });\n  test('three copies', () {\n    expect(null, null);\n    expect(null, null);\n    expect(null, null);\n  });\n}\nvoid matcherExamples() {\n  test('string matcher factory', () {\n    expect('value', equals('value'));\n    expect('value', equals('value'));\n  });\n}",
       "crossFile": null,
-      "good": "void expect(Object? a, Object? b) {}\nvoid example() { expect(1, 1); expect(1, 1); }"
+      "good": "import 'package:test/test.dart';\nvoid change() {}\nint next() => 1;\nclass Checker { void expect(Object? a, Object? b) {} }\nvoid main() {\n  test('assignment resets', () {\n    var value = 1;\n    expect(value, 1);\n    value = 2;\n    expect(value, 1);\n  });\n  test('call resets', () { expect(1, 1); change(); expect(1, 1); });\n  test('branches', () { if (next() == 1) { expect(1, 1); } else { expect(1, 1); } });\n  test('first test', () { expect(1, 1); });\n  test('second test', () { expect(1, 1); });\n  test('different matcher', () { expect(1, 1); expect(1, 2); });\n  test('effectful actual', () { expect(next(), 1); expect(next(), 1); });\n  test('local shadow', () { void expect(Object? a, Object? b) {} expect(1, 1); expect(1, 1); });\n  test('object member', () { final c = Checker(); c.expect(1, 1); c.expect(1, 1); });\n  test('await boundary', () async { await expectLater(1, 1); await expectLater(1, 1); });\n  test('different reason', () { expect(1, 1, reason: 'a'); expect(1, 1, reason: 'b'); });\n}\nvoid matcherBoundaries() {\n  test('effectful matcher', () {\n    expect(1, equals(next()));\n    expect(1, equals(next()));\n  });\n  test('interpolated actual', () {\n    expect('${next()}', 1);\n    expect('${next()}', 1);\n  });\n  test('shadowed matcher factory', () {\n    Object? equals(Object? value) => value;\n    expect(1, equals(1));\n    expect(1, equals(1));\n  });\n}\n\nvoid asynchronousBoundaries(Object queue, Object eventMatcher) {\n  test('stateful asynchronous matcher', () {\n    expectLater(queue, eventMatcher);\n    expectLater(queue, eventMatcher);\n  });\n  test('chained side effect breaks run', () {\n    expectLater(1, 1);\n    expectLater(1, 1).then((_) { next(); });\n    expectLater(1, 1);\n  });\n}"
     },
     "group": "correctness",
     "name": "avoid-duplicate-test-assertions",
@@ -7273,15 +7322,64 @@
   {
     "crossFile": false,
     "description": "Reports inline test callbacks that contain no recognized assertion calls.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "This test has no assertion; add an expectation or verification."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "This test has no assertion; add an expectation or verification."
+      }
+    ],
     "docs": "Reports inline test callbacks that contain no recognized assertion calls.\n\nOnly `_test.dart` files importing `test` or `flutter_test` are inspected,\nand `test`/`testWidgets` must resolve to a framework package. Assertions\ninclude framework expectations, asynchronous expectation wrappers, `fail`,\nand mockito/mocktail verification calls. Assertions in unused local closures\nor functions and nested tests do not satisfy the enclosing test.\n\n## Options\n\n`include_assertions` is a list of additional assertion function names. These\nnames explicitly trust project helpers, including local functions; prefixed\nnames can be supplied as written at their call sites.",
     "domains": [
       "test"
     ],
     "examples": {
-      "bad": "import 'package:test/test.dart';\nvoid main() { test('not a test filename', () {}); }",
+      "bad": "import 'package:test/test.dart';\nimport 'package:test/test.dart' as t;\nimport 'package:flutter_test/flutter_test.dart' as f;\nvoid main() {\n  test('empty', () {});\n  test('setup only', () { final value = 1; print(value); });\n  t.test('arrow', () => print('nothing asserted'));\n  test('unused closure', () { final assertion = () { expect(1, 1); }; });\n  test('local shadow', () { void expect(Object? a, Object? b) {} expect(1, 1); });\n  test('unused local function', () { void assertion() { expect(1, 1); } });\n  f.testWidgets('widget without expectation', (tester) async { await tester.pump(); });\n}\nclass Checker { void expect(Object? a, Object? b) {} }\nvoid objectAssertion() {\n  test('object method is not an assertion', () { Checker().expect(1, 1); });\n}",
       "crossFile": null,
-      "good": "void test(String name, Function body) {}\nvoid main() { test('not a package test', () {}); }"
+      "good": "import 'package:test/test.dart';\nimport 'package:test/test.dart' as t;\nimport 'package:flutter_test/flutter_test.dart' as f;\nimport 'package:mocktail/mocktail.dart' as mock;\nvoid checkResult() {}\nvoid main() {\n  test('expect', () { expect(1, 1); });\n  t.test('prefixed', () => t.expect(1, 1));\n  test('later', () async { await expectLater(1, 1); });\n  test('async wrapper', () { expectAsync0(() {}); });\n  test('async argument wrapper', () { expectAsync1((value) {}); });\n  test('async until', () { expectAsyncUntil1((value) {}, () => true); });\n  test('fail', () { fail('unreachable'); });\n  test('verify', () { mock.verify(() {}); });\n  test('verify never', () { mock.verifyNever(() {}); });\n  test('verify order', () { mock.verifyInOrder([() {}]); });\n  test('configured helper', () { checkResult(); });\n  f.testWidgets('widget', (tester) async { await tester.pump(); f.expect(1, 1); });\n}\nclass OtherSuite { void test(String name, Function body) {} void run() { test('not a package test', () {}); } }\nvoid localSuite() { void test(String name, Function body) {} test('local', () {}); }\n\nvoid runCallback(void Function() callback) => callback();\nvoid nestedAssertions() {\n  test('passed callback', () { runCallback(() { expect(1, 1); }); });\n  test('invoked closure', () { (() { expect(1, 1); })(); });\n  test('called local function', () { void check() { expect(1, 1); } check(); });\n  test('passed local closure', () { final check = () { expect(1, 1); }; runCallback(check); });\n  test('collection callback', () { [1].forEach((value) { expect(value, 1); }); });\n}\n\nvoid interactionAssertions(Object instance) {\n  test('no more interactions', () { mock.verifyNoMoreInteractions(instance); });\n  test('zero interactions', () { mock.verifyZeroInteractions(instance); });\n}"
     },
     "group": "correctness",
     "name": "missing-test-assertion",
