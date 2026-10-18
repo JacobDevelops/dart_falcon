@@ -1,6 +1,192 @@
 [
   {
     "crossFile": false,
+    "description": "Warn about unlabeled interactive gesture targets.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 11,
+        "message": "Provide an accessible label for this interactive widget."
+      }
+    ],
+    "docs": "Warn about unlabeled interactive gesture targets.\n\nChecks resolved Flutter GestureDetector, InkWell, and InkResponse constructors.\nDirect Text children, Icon semanticLabel, or labeled Semantics/Tooltip\nancestors supply labels. Inert/excluded gestures and unknown/custom children\nare skipped. Dynamic labels are accepted; null and empty literals are not.\nThis is a local heuristic, not compliance validation. Image labels and action\nbutton tooltips are covered by avoid-missing-image-alt and\nprefer-action-button-tooltip respectively.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions() {\n  GestureDetector(onTap: () {});\n  f.InkWell(onTap: () {}, child: Icon(null));\n  InkResponse(onTap: () {}, child: Text(' '));\n  GestureDetector(onTap: () {}, child: Icon(null));\n  InkWell(onTap: () {}, child: Text(''));\n  InkResponse(onTap: () {});\n  Tooltip(message: '', child: InkWell(onTap: () {}));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(String label) {\n  IconButton(tooltip: 'Add');\n  f.IconButton.filled(tooltip: label);\n  FloatingActionButton(child: Text('Add'));\n  GestureDetector(onTap: () {}, child: Text('Open'));\n  InkWell(onTap: () {}, child: Icon(null, semanticLabel: 'Open'));\n  Semantics(label: 'Open', child: InkResponse(onTap: () {}));\n  Tooltip(message: 'Add', child: IconButton());\n  GestureDetector(excludeFromSemantics: true);\n  TextButton(child: Text('Save'));\n  GestureDetector();\n  InkWell(onTap: null);\n  InkResponse();\n  IconButton(icon: customLabel());\n  GestureDetector(onTap: () {}, child: customLabel());\n}\nvoid shadow(dynamic IconButton) { IconButton(); }\nWidget customLabel() => Text('Custom label');"
+    },
+    "group": "a11y",
+    "name": "accessible-widget-labels",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      }
+    ],
+    "docs": "Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage.\nExplicitly null labels are missing; empty labels and dynamic label expressions\nare accepted. Explicit true or dynamic excludeFromSemantics values are exempt;\nonly an absent flag or literal false proves an image needs a label.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Image(image: image);\n  Image.asset(\"a\");\n  new Image.network(\"a\", semanticLabel: null);\n  const Image(excludeFromSemantics: false);\n  f.Image.memory(image);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Image(semanticLabel: \"Photo\");\n  Image.asset(\"a\", semanticLabel: label);\n  Image.network(\"a\", excludeFromSemantics: true);\n  const Image(semanticLabel: \"Icon\");\n  I.memory(image, semanticLabel: \"Preview\");\n}"
+    },
+    "group": "a11y",
+    "name": "avoid-missing-image-alt",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warn about explicitly undersized Flutter touch targets.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Provide a touch target at least 44 logical pixels wide and high."
+      }
+    ],
+    "docs": "Warn about explicitly undersized Flutter touch targets.\n\nSizedBox and Container are checked when their direct child is interactive.\nCupertinoButton needs 44 logical pixels; other supported targets need 48.\nGestures without an active callback are skipped. Dynamic dimensions, indirect\nconstraints, and non-interactive children are not inferred.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets() {\n  SizedBox(width: 47, child: IconButton());\n  SizedBox(height: 24.0, child: FloatingActionButton());\n  f.Container(width: 0, child: GestureDetector(onTap: () {}));\n  new SizedBox(width: 32, height: 32, child: InkWell(onTap: () {}));\n  const SizedBox(height: (47.5), child: TextButton());\n  Container(width: -1, child: ElevatedButton());\n  SizedBox(width: 43, child: CupertinoButton(onPressed: () {}));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets(double size) {\n  SizedBox(width: 48, height: 48, child: IconButton());\n  Container(width: 60, child: GestureDetector(onTap: () {}));\n  SizedBox(width: size, child: InkWell());\n  SizedBox(width: 16, child: Text('Decoration'));\n  SizedBox(child: FloatingActionButton());\n  IconButton();\n  SizedBox(width: 16);\n  SizedBox(width: 44, height: 44, child: CupertinoButton(onPressed: () {}));\n  SizedBox(width: 1, child: GestureDetector());\n  SizedBox(width: 1, child: InkWell(onTap: null));\n  SizedBox(width: 1, child: InkResponse());\n}\nvoid shadow(dynamic SizedBox) { SizedBox(width: 1, child: IconButton()); }"
+    },
+    "group": "a11y",
+    "name": "minimum-touch-target",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires useful tooltips on Flutter floating action buttons and icon buttons.",
     "diagnostics": [
       {
@@ -3339,6 +3525,78 @@
   },
   {
     "crossFile": false,
+    "description": "Require GlobalKey fields to be passed to a widget.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 6,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 10,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Pass this GlobalKey field to a widget."
+      }
+    ],
+    "docs": "Require GlobalKey fields to be passed to a widget.\n\nChecks owned GlobalKey-subtype instance fields in concrete Flutter State\nclasses. Abstract State bases and injected fields are skipped. Passing a\nfield anywhere in a call argument counts conservatively, since helpers may\nattach it to a widget. Shadowed locals and currentState/currentContext receiver\nreads do not count as passing the key.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\ntypedef FormKey = GlobalKey;\nclass Missing extends State<Widget> {\n  final _first = GlobalKey();\n  final GlobalKey _second = GlobalKey();\n  final _third = f.GlobalKey();\n  final _fourth = LabeledGlobalKey('fourth');\n  final _fifth = FormKey();\n  final _shadowed = GlobalKey();\n  final _stateRead = GlobalKey();\n  final _contextRead = GlobalKey();\n  void inspect() {\n    observe(_stateRead.currentState);\n    observe(this._contextRead.currentContext);\n  }\n  Widget build() {\n    final _shadowed = GlobalKey();\n    return IconButton(key: _shadowed);\n  }\n}\nvoid observe(Object? value) {}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass Used extends State<Widget> {\n  final _direct = GlobalKey();\n  final _helper = GlobalKey();\n  final _conditional = GlobalKey();\n  final _inherited = GlobalKey();\n  final GlobalKey injected;\n  Used(this.injected);\n  Widget first() => IconButton(key: this._direct);\n  void second() => attach(_helper);\n  void third(bool choose) => attach(choose ? _conditional : null);\n}\nclass Child extends Used {\n  Child(GlobalKey key) : super(key);\n  void attachInherited() => attach(_inherited);\n}\nabstract class Base extends State<Widget> {\n  final inherited = GlobalKey();\n}\nclass Controller { final key = GlobalKey(); }\nclass Wrapper extends Widget { final key = GlobalKey(); }\nvoid attach(Object? key) {}\nvoid locals() { final local = GlobalKey(); }"
+    },
+    "group": "correctness",
+    "name": "always-pass-global-key",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires Flutter Listenable registrations in State to be removed.",
     "diagnostics": [
       {
@@ -3815,6 +4073,96 @@
     "group": "correctness",
     "name": "avoid-contradictory-expressions",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Avoid releasing late State fields from dispose: they may be unset or lazily initialized solely to release them.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 17,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 18,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 19,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 21,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 22,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 23,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 25,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+      }
+    ],
+    "docs": "Avoid releasing late State fields from dispose: they may be unset or lazily\ninitialized solely to release them. Nullable fields permit conditional cleanup.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends f.State<f.StatefulWidget> {\n  late Resource unset;\n  late final Resource lazy = Resource();\n  late Resource stream, subscription;\n  late Resource? optional;\n  late Resource first = Resource(), second = Resource();\n  late Resource initializedInInitState;\n  void initState() { initializedInInitState = Resource(); }\n  void dispose() {\n    unset.dispose();\n    this.lazy.dispose();\n    stream.close();\n    subscription.cancel();\n    optional?.dispose();\n    optional!.close();\n    unset..dispose();\n    (this.lazy)..close();\n    first.dispose();\n    second.cancel();\n    initializedInInitState.dispose();\n    super.dispose();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends State<StatefulWidget> {\n  Resource? optional;\n  final eager = Resource();\n  late Resource deferred;\n  static late Resource shared;\n  void cleanup() { deferred.dispose(); }\n  void dispose() {\n    optional?.dispose();\n    eager.dispose();\n    shared.dispose();\n    final deferred = Resource();\n    deferred.dispose();\n    void release(Resource deferred) { deferred.dispose(); }\n    super.dispose();\n  }\n}\nclass Other {\n  late Resource resource;\n  void dispose() { resource.dispose(); }\n}\nclass Holder extends State<StatefulWidget> {\n  late Resource resource;\n  void dispose() {\n    final other = Other();\n    other.resource.dispose();\n    super.dispose();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-disposing-late-fields",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -4618,6 +4966,60 @@
   },
   {
     "crossFile": false,
+    "description": "Flags Opacity directly wrapping a Flutter Image, including named constructors.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      }
+    ],
+    "docs": "Flags Opacity directly wrapping a Flutter Image, including named constructors.\nPrefer Image.opacity (or image color blending) to compositing the whole widget.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Opacity(opacity: .5, child: Image(image: image));\n  Opacity(opacity: .2, child: Image.asset(\"a\"));\n  const Opacity(opacity: .5, child: Image());\n  f.Opacity(opacity: .5, child: f.Image.network(\"a\"));\n  new Opacity(opacity: .5, child: I.asset(\"a\"));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Opacity(opacity: .5, child: SizedBox());\n  Image(image: image, opacity: image);\n  Opacity(opacity: .5);\n  Opacity(opacity: .5, child: Container(child: Image()));\n  Opacity(opacity: .5, child: child);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-incorrect-image-opacity",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid inherited-widget subscriptions during initState.",
     "diagnostics": [
       {
@@ -4717,6 +5119,66 @@
     "group": "correctness",
     "name": "avoid-late-context",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require Flutter text fields to expose their updated value.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      }
+    ],
+    "docs": "Require Flutter text fields to expose their updated value.\n\nTextField, TextFormField, CupertinoTextField, and EditableText need a non-null\ncontroller or a value callback supported by that API. Explicit readOnly:true\nand enabled:false fields are display-only and skipped. Dynamic expressions\nare accepted; unrelated classes and shadowed constructors are ignored.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid fields() {\n  TextField();\n  TextFormField();\n  f.CupertinoTextField.borderless();\n  new EditableText(controller: null);\n  TextField(controller: null, onChanged: null);\n  TextFormField(onSaved: null);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid fields(Object? controller, Function callback) {\n  TextField(controller: controller);\n  TextFormField(onChanged: callback);\n  f.CupertinoTextField.borderless(onSubmitted: callback);\n  EditableText(onChanged: callback);\n  TextFormField(onSaved: callback);\n  TextFormField(onFieldSubmitted: callback);\n  TextField(controller: TextEditingController());\n  TextField(readOnly: true);\n  TextFormField(enabled: false);\n  CupertinoTextField.borderless(readOnly: true);\n  EditableText(readOnly: true);\n}\nvoid shadow(dynamic TextField) { TextField(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-missing-controller",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -4895,6 +5357,66 @@
     "group": "correctness",
     "name": "avoid-misused-hooks",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Check mounted before invoking Flutter State.setState, never inside its callback.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 6,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 9,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 12,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 15,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 18,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 23,
+        "message": "Check mounted before calling setState, not inside its callback."
+      }
+    ],
+    "docs": "Check mounted before invoking Flutter State.setState, never inside its callback.\nA check inside the callback cannot prevent setState's unmounted-State assertion.\nDeferred nested closures and local functions have independent mounted checks.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\nclass S extends f.State<f.StatefulWidget> {\n  int value = 0;\n  void update(f.BuildContext other) {\n    setState(() {\n      if (mounted) value++;\n    });\n    this.setState(() {\n      if (this.mounted) value++;\n    });\n    setState(() {\n      if (context.mounted) value++;\n    });\n    setState((() {\n      if (!other.mounted) return;\n      value++;\n    }));\n    setState(() => value = mounted ? 1 : 0);\n  }\n}\nclass Child extends S {\n  void inherited() {\n    setState(() { if (mounted) value++; });\n  }\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nimport 'package:flutter/material.dart' as f;\nclass Flag { bool get mounted => true; }\nclass S extends f.State<f.StatefulWidget> {\n  int value = 0;\n  void subscribe(Stream<int> stream) {\n    setState(() {\n      stream.listen((event) {\n        if (!mounted) return;\n        value = event;\n      });\n      void later() {\n        if (!context.mounted) return;\n        value++;\n      }\n      value++;\n    });\n  }\n  void update(f.BuildContext other, Flag flag) {\n    if (mounted) setState(() { value++; });\n    if (other.mounted) this.setState(() { value++; });\n    if (!mounted) return;\n    setState(() { value++; });\n    setState(() {\n      bool mounted = true;\n      if (mounted) value++;\n      if (flag.mounted) value++;\n    });\n    void setState(void Function() callback) { callback(); }\n    setState(() { if (this.mounted) value++; });\n  }\n}\nclass Overridden extends S {\n  bool get mounted => true;\n  void updateFlag() { setState(() { if (mounted) value++; }); }\n}\nclass Fake {\n  bool mounted = true;\n  void setState(void Function() callback) { callback(); }\n  void update() { setState(() { if (mounted) return; }); }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-mounted-in-setstate",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -9826,6 +10348,60 @@
   },
   {
     "crossFile": false,
+    "description": "Require an explicit heroTag on Flutter FloatingActionButton constructors.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide an explicit heroTag for this floating action button."
+      }
+    ],
+    "docs": "Require an explicit heroTag on Flutter FloatingActionButton constructors.\n\nThe default tag is shared, so multiple buttons can collide during a Hero\ntransition. Set a unique tag or explicitly pass null to disable the transition.\nIncludes unnamed, small, large, and extended constructors; package identities\nexclude local lookalikes and shadowed names. Matches the DCM rule of this id.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\ntypedef Action = FloatingActionButton;\nvoid actions() {\n  FloatingActionButton();\n  new FloatingActionButton.small();\n  const f.FloatingActionButton.large();\n  FloatingActionButton.extended(label: Text('Add'));\n  Action();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(Object tag) {\n  FloatingActionButton(heroTag: 'add');\n  const FloatingActionButton.small(heroTag: 1);\n  f.FloatingActionButton.large(heroTag: tag);\n  FloatingActionButton.extended(label: Text('Add'), heroTag: null);\n  FloatingActionButton(heroTag: (null));\n  Hero(tag: 'flight');\n}\nvoid shadow(dynamic FloatingActionButton) { FloatingActionButton(); }"
+    },
+    "group": "correctness",
+    "name": "prefer-define-hero-tag",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags Bloc event classes without an explicit @immutable annotation.",
     "diagnostics": [
       {
@@ -12583,6 +13159,60 @@
   },
   {
     "crossFile": false,
+    "description": "Avoids Flutter's non-const `Border.all` factory.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      }
+    ],
+    "docs": "Avoids Flutter's non-const `Border.all` factory. Use\n`Border.fromBorderSide(const BorderSide(...))` when the side is constant.\nOnly invocations whose arguments can all be constant qualify.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef B = Border;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Border.all();\n  Border.all(width: 2);\n  new Border.all();\n  f.Border.all(color: 0xff112233);\n  B.all(width: 3);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef B = Border;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  const Border();\n  const Border.fromBorderSide(BorderSide());\n  Border.fromBorderSide(BorderSide(width: 2));\n  f.Border();\n  const B();\n}"
+    },
+    "group": "performance",
+    "name": "avoid-border-all",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoids shrink-wrapped Flutter lists nested in rows, columns, or other lists.",
     "diagnostics": [
       {
@@ -12869,6 +13499,60 @@
     },
     "group": "performance",
     "name": "avoid-unnecessary-consumer-widgets",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags a resolved Flutter GestureDetector without any non-null event handlers.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Remove this GestureDetector or provide an event handler."
+      }
+    ],
+    "docs": "Flags a resolved Flutter GestureDetector without any non-null event handlers.\nSuch a detector adds no gestures; remove it or supply a handler. Any explicitly\nsupplied non-null on* callback, including a dynamic callback, is retained.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef Detector = GestureDetector;\nvoid examples(Widget child) {\n  GestureDetector();\n  GestureDetector(child: child);\n  f.GestureDetector(child: TextButton());\n  Detector(onTap: null, child: child);\n  new GestureDetector(onLongPress: null);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nvoid callback() {}\nvoid examples(Widget child, void Function()? handler) {\n  GestureDetector(onTap: callback, child: child);\n  GestureDetector(onLongPress: callback);\n  GestureDetector(onDoubleTap: callback, child: TextButton());\n  GestureDetector(onTap: handler);\n  GestureDetector(onTap: null, onLongPress: callback);\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-gesture-detector",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -13705,6 +14389,120 @@
   },
   {
     "crossFile": false,
+    "description": "Merge consecutive Flutter State.setState statements in the same block.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "Merge this setState callback into the preceding setState call."
+      }
+    ],
+    "docs": "Merge consecutive Flutter State.setState statements in the same block.\nIntervening statements and control-flow boundaries are not collapsible runs.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\nclass S extends f.State<f.StatefulWidget> {\n  int value = 0;\n  void update() {\n    setState(() { value++; });\n    setState(() { value++; });\n    this.setState(() { value++; });\n    value++;\n    this.setState(() { value++; });\n    (setState(() { value++; }));\n    if (mounted) {\n      setState(() => value++);\n      setState(() => value++);\n    }\n    void nested() {\n      setState(() { value++; });\n      setState(() { value++; });\n    }\n  }\n}\nclass Child extends S {\n  void inherited() {\n    setState(() { value++; });\n    setState(() { value++; });\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> {\n  int value = 0;\n  void update() {\n    setState(() { value++; value++; });\n    value++;\n    setState(() { value++; });\n    if (mounted) setState(() { value++; });\n    else setState(() { value--; });\n    { setState(() { value++; }); }\n    { setState(() { value++; }); }\n  }\n  void shadow() {\n    void setState(void Function() callback) { callback(); }\n    setState(() { value++; });\n    setState(() { value++; });\n  }\n}\nclass Fake {\n  void setState(void Function() callback) { callback(); }\n  void update() { setState(() {}); setState(() {}); }\n}\nclass Override extends S {\n  void setState(void Function() callback) { callback(); }\n  void update() { setState(() {}); setState(() {}); }\n}"
+    },
+    "group": "performance",
+    "name": "prefer-single-setstate",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags SingleChildScrollView directly containing a Flutter Column with no arguments other than children.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+      }
+    ],
+    "docs": "Flags SingleChildScrollView directly containing a Flutter Column with no\narguments other than children. Column-specific layout settings and keys are\nretained instead of suggesting a ListView that cannot directly preserve them.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SingleChildScrollView(child: Column());\n  const SingleChildScrollView(child: Column(children: []));\n  new SingleChildScrollView(child: Column(children: [child]));\n  f.SingleChildScrollView(child: f.Column());\n  V(child: Column());\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  ListView(children: [child]);\n  SingleChildScrollView(child: Row());\n  SingleChildScrollView(child: child);\n  Column(children: [child]);\n  SingleChildScrollView();\n}"
+    },
+    "group": "performance",
+    "name": "prefer-using-list-view",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a `Container` used only to add fixed `width`/`height` whitespace.",
     "diagnostics": [
       {
@@ -13971,6 +14769,58 @@
       "label": "Dart lints",
       "upstreamId": "use_string_buffers",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/use_string_buffers"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warns when credential-like variables or fields receive nonempty string or numeric literals.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 1,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 3,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 7,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      }
+    ],
+    "docs": "Warns when credential-like variables or fields receive nonempty string or numeric literals.\n\nNames such as `password`, `apiKey`, `clientSecret`, and `accessToken` are\nchecked case-insensitively, including snake_case and private spellings.\nString values matching their variable name are ignored as storage-key names.\nRead credentials from secure runtime configuration instead. This is a naming\nheuristic, not a general-purpose secrets scanner.",
+    "domains": [],
+    "examples": {
+      "bad": "const password = 'not-a-real-password';\nclass Settings {\n  final _apiKey = 'fixture-key';\n  String clientSecret = '';\n  void update() {\n    clientSecret = 'fixture-secret';\n    this.clientSecret = 'other-fixture-secret';\n  }\n}\nconst ACCESS_TOKEN = 'fixture-token';",
+      "crossFile": null,
+      "good": "String readSecret() => '';\nfinal password = readSecret();\nconst apiKey = '';\nconst secretCount = 3;\nconst token = 'not-a-credential-name';\nconst accessToken = 'access_token';\nconst _authToken = 'AUTH-TOKEN';\nclass StorageKeys {\n  static const password = 'password';\n}\nvoid update(String supplied) {\n  final clientSecret = supplied;\n  final accessToken = 'prefix-$supplied';\n}"
+    },
+    "group": "security",
+    "name": "avoid-hardcoded-credentials",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -18143,6 +18993,60 @@
       "label": "Dart lints",
       "upstreamId": "avoid_void_async",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_void_async"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Padding directly wrapping a Flutter Container that can own the padding.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      }
+    ],
+    "docs": "Flags Padding directly wrapping a Flutter Container that can own the padding.\nContainers with existing padding, margin, alignment, sizing, constraints,\ntransforms, color, decoration or foregroundDecoration are excluded: moving\npadding across those layout and paint stages can change the result.\nThis is distinct from prefer-padding-over-container and prefer-container's\nthree-widget layout sequence.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: Container(child: child));\n  Padding(padding: 2, child: Container(key: image, child: child));\n  new Padding(padding: 3, child: Container());\n  f.Padding(padding: 4, child: f.Container(child: child));\n  P(padding: 5, child: Container(child: child));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: SizedBox());\n  Padding(padding: 1, child: Container(padding: 2));\n  Padding(padding: 1, child: Container(width: 20));\n  Padding(padding: 1, child: Container(margin: 2));\n  Padding(padding: 1, child: Container(color: color));\n}"
+    },
+    "group": "style",
+    "name": "avoid-wrapping-in-padding",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -26255,6 +27159,60 @@
   },
   {
     "crossFile": false,
+    "description": "Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width and height are stable variable reads or numeric literals with identical token spelling.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Use SizedBox.square when width and height are the same."
+      }
+    ],
+    "docs": "Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width\nand height are stable variable reads or numeric literals with identical token\nspelling. Calls, getters, indexing, missing/null dimensions and existing named\nconstructors are excluded. No automatic fix is offered.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef S = SizedBox;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SizedBox(width: 10, height: 10);\n  const SizedBox(width: 20, height: 20);\n  new SizedBox(width: size, height: size);\n  f.SizedBox(width: 2.5, height: 2.5);\n  S(width: 4, height: 4, child: child);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef S = SizedBox;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SizedBox(width: 10, height: 20);\n  SizedBox(width: 10);\n  SizedBox(height: 10);\n  SizedBox(width: null, height: null);\n  SizedBox.square(dimension: 10);\n}"
+    },
+    "group": "style",
+    "name": "prefer-sized-box-square",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags an `addAll` cascade on a collection literal that a spread would express.",
     "diagnostics": [
       {
@@ -26685,6 +27643,48 @@
       "label": "Pyramid Lint",
       "upstreamId": "prefer_underscore_for_unused_callback_parameters",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefers Flutter's `VoidCallback` alias over a nongeneric `void Function()` type.",
+    "diagnostics": [
+      {
+        "column": 13,
+        "file": null,
+        "line": 1,
+        "message": "This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable)."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 2,
+        "message": "This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable)."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 3,
+        "message": "This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable)."
+      }
+    ],
+    "docs": "Prefers Flutter's `VoidCallback` alias over a nongeneric `void Function()` type.\n\nImport `VoidCallback` from `package:flutter/foundation.dart` and use\n`VoidCallback?` for nullable callbacks. Functions with parameters, type\nparameters, or a non-void return type are not covered.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "void invoke(void Function() callback) => callback();\nvoid Function()? callback;\ntypedef Handler = void Function();",
+      "crossFile": null,
+      "good": "VoidCallback? callback;\nvoid takesArgument(void Function(int) callback) {}\nvoid returnsValue(int Function() callback) {}\nvoid generic(void Function<T>() callback) {}\ntypedef void Legacy();"
+    },
+    "group": "style",
+    "name": "prefer-void-callback",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

@@ -1,0 +1,15 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "fixture",
+      "rootUri": "../",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "flutter",
+      "rootUri": "../packages/flutter",
+      "packageUri": "lib/"
+    }
+  ]
+}

@@ -162,6 +162,57 @@ const NONE: Option<Domain> = None;
 
 /// The sole constructor table for registered rules.
 pub const RULE_METADATA: &[RuleMeta] = &[
+    RuleMeta::file::<lint::security::avoid_hardcoded_credentials::AvoidHardcodedCredentials>(
+        "avoid-hardcoded-credentials", RuleGroup::Security, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_void_callback::PreferVoidCallback>(
+        "prefer-void-callback", RuleGroup::Style, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::a11y::accessible_widget_labels::AccessibleWidgetLabels>(
+        "accessible-widget-labels", RuleGroup::A11y, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::a11y::minimum_touch_target::MinimumTouchTarget>(
+        "minimum-touch-target", RuleGroup::A11y, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::a11y::avoid_missing_image_alt::AvoidMissingImageAlt>(
+        "avoid-missing-image-alt", RuleGroup::A11y, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_mounted_in_setstate::AvoidMountedInSetstate>(
+        "avoid-mounted-in-setstate", RuleGroup::Correctness, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_disposing_late_fields::AvoidDisposingLateFields>(
+        "avoid-disposing-late-fields", RuleGroup::Correctness, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_missing_controller::AvoidMissingController>(
+        "avoid-missing-controller", RuleGroup::Correctness, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::always_pass_global_key::AlwaysPassGlobalKey>(
+        "always-pass-global-key", RuleGroup::Correctness, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_incorrect_image_opacity::AvoidIncorrectImageOpacity>(
+        "avoid-incorrect-image-opacity", RuleGroup::Correctness, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::prefer_define_hero_tag::PreferDefineHeroTag>(
+        "prefer-define-hero-tag", RuleGroup::Correctness, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::prefer_single_setstate::PreferSingleSetstate>(
+        "prefer-single-setstate", RuleGroup::Performance, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::avoid_border_all::AvoidBorderAll>(
+        "avoid-border-all", RuleGroup::Performance, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::prefer_using_list_view::PreferUsingListView>(
+        "prefer-using-list-view", RuleGroup::Performance, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::performance::avoid_unnecessary_gesture_detector::AvoidUnnecessaryGestureDetector>(
+        "avoid-unnecessary-gesture-detector", RuleGroup::Performance, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_wrapping_in_padding::AvoidWrappingInPadding>(
+        "avoid-wrapping-in-padding", RuleGroup::Style, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_sized_box_square::PreferSizedBoxSquare>(
+        "prefer-sized-box-square", RuleGroup::Style, FLUTTER, false, RuleSource::Falcon,
+    ),
     // ── complexity ──────────────────────────────────────────────────────────
     RuleMeta::file::<lint::complexity::avoid_unnecessary_containers::AvoidUnnecessaryContainers>(
         "avoid-unnecessary-containers",

@@ -1,0 +1,15 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "flutter_rule_fixture",
+      "rootUri": "../",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "flutter",
+      "rootUri": "../packages/flutter",
+      "packageUri": "lib/"
+    }
+  ]
+}

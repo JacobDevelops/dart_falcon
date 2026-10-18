@@ -5,7 +5,7 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePrep
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-pub(super) fn is_state(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
+pub(crate) fn is_state(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
     state
         .signatures
         .is_subtype_of(ty, &DeclarationIdentity::flutter("State"), &state.model)
@@ -41,7 +41,7 @@ fn context_expression(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
         })
 }
 
-pub(super) fn is_setstate(call: CallExpr<'_>, state: &SemanticState<'_>) -> bool {
+pub(crate) fn is_setstate(call: CallExpr<'_>, state: &SemanticState<'_>) -> bool {
     let receiver = match call.callee().unparenthesized() {
         Expr::Ident(name)
             if name.name() == "setState" && !state.environment.is_bound("setState") =>
