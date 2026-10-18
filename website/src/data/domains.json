@@ -33,5 +33,29 @@
       "use-once-constructors-once-provider",
       "use-spacer-as-expanded-child"
     ]
+  },
+  {
+    "name": "test",
+    "rules": []
+  },
+  {
+    "name": "bloc",
+    "rules": []
+  },
+  {
+    "name": "riverpod",
+    "rules": []
+  },
+  {
+    "name": "provider",
+    "rules": []
+  },
+  {
+    "name": "flutter_hooks",
+    "rules": []
+  },
+  {
+    "name": "equatable",
+    "rules": []
   }
 ]
