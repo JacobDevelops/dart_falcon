@@ -318,7 +318,13 @@
         "no-duplicate-case-values": "warn",
         "no-self-comparisons": "warn",
         "overridden-fields": "off",
-        "avoid-types-as-parameter-names": "off"
+        "avoid-types-as-parameter-names": "off",
+        "avoid-commented-out-code": "warn",
+        "avoid-shadowing": "warn",
+        "avoid-shadowed-extension-methods": "warn",
+        "avoid-assignments-as-conditions": "warn",
+        "avoid-bitwise-operators-with-booleans": "warn",
+        "cascade-after-null-coalescing": "warn"
       }
     }
   },

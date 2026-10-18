@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 60 | 132 | 24 | 216 |
+| DCM-inspired | 55 | 132 | 24 | 211 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
-| Additional rules | 8 | 7 | 3 | 18 |
-| **Total** | **72** | **143** | **31** | **246** |
+| Additional rules | 7 | 7 | 3 | 17 |
+| **Total** | **66** | **143** | **31** | **240** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (216)
+## Planned DCM-inspired rules (211)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -98,12 +98,6 @@ provisional and should be confirmed at implementation time.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-commented-out-code` | suspicious | S | paid | Commented-out code blocks left behind. | must-have |
-| `avoid-shadowing` | suspicious | LT | paid | Local shadows an outer member. | must-have |
-| `avoid-shadowed-extension-methods` | suspicious | LT | paid | Local shadows an extension member. | must-have |
-| `avoid-assignments-as-conditions` | suspicious | S | paid | `if (x = y)` likely-bug. | must-have |
-| `avoid-bitwise-operators-with-booleans` | suspicious | S | paid | `&`/`\|` on bools instead of `&&`/`\|\|`. | must-have |
-| `cascade-after-null-coalescing` | suspicious | S | n/a | Warn when a cascade after `??` changes apparent precedence; distinct from cascade style checks. | must-have |
 | `avoid-banned-names` | suspicious | S | paid | Config-driven forbidden identifiers. | nice-to-have |
 | `avoid-banned-types` | suspicious | FT | paid | Config-driven forbidden types. | nice-to-have |
 | `avoid-banned-annotations` | suspicious | S | paid | Config-driven forbidden annotations. | nice-to-have |

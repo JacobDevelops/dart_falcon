@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 304);
+    assert_eq!(RULE_METADATA.len(), 310);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         170
@@ -316,6 +316,10 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         (
             "avoid-abbreviations-in-doc-comments",
             "Raw documentation comment lines.",
+        ),
+        (
+            "avoid-commented-out-code",
+            "Raw non-documentation comment tokens.",
         ),
         ("avoid-relative-lib-imports", "Import URI path segments."),
         (

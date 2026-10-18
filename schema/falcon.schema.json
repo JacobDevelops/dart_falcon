@@ -972,6 +972,15 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `suspicious` group.",
               "properties": {
+                "avoid-assignments-as-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bitwise-operators-with-booleans": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-commented-out-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-dynamic": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -990,6 +999,12 @@
                 "avoid-returning-null-for-void": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-shadowed-extension-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-shadowing": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-shadowing-type-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1000,6 +1015,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "cascade-after-null-coalescing": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "control-flow-in-finally": {
@@ -2142,6 +2160,15 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `suspicious` group.",
               "properties": {
+                "avoid-assignments-as-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bitwise-operators-with-booleans": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-commented-out-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-dynamic": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2160,6 +2187,12 @@
                 "avoid-returning-null-for-void": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-shadowed-extension-methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-shadowing": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-shadowing-type-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2170,6 +2203,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "cascade-after-null-coalescing": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "control-flow-in-finally": {

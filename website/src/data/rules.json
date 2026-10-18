@@ -23325,6 +23325,294 @@
   },
   {
     "crossFile": false,
+    "description": "Flags assignments evaluated inside control-flow conditions.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 11,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 12,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 13,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 14,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 15,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 16,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 17,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 18,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 19,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 20,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 21,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 22,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 23,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 24,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 26,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 28,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 31,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 33,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 39,
+        "message": "Avoid assignments inside conditions; move the assignment out or use a comparison."
+      }
+    ],
+    "docs": "Flags assignments evaluated inside control-flow conditions.\n\nAssignments can hide a mistyped `==` or an unexpected state change. Move the\nassignment before the condition, or use a comparison. This checks all assignment\noperators in `if`, `while`, `do`/`while`, traditional `for`, ternary, and collection\nconditions, including nested expressions and `if case` or switch guards.\nLoop initializers, updates, and branches are excluded unless nested within a\nsurrounding condition. Closure bodies never inherit an outer condition, but\nconditions inside them are checked. Increment/decrement operators and assert\narguments are outside this rule's scope.",
+    "domains": [],
+    "examples": {
+      "bad": "class Box {\n  bool value = false;\n}\n\nbool identity(bool value) => value;\n\nvoid conditions(bool input, bool other, bool? nullable, Box box) {\n  var flag = false;\n  var count = 0;\n  if (flag = input) {}\n  while (flag = input) { break; }\n  do { count++; } while (flag = input);\n  for (; flag = input;) { break; }\n  final answer = (flag = input) ? 1 : 2;\n  final list = [if (flag = input) answer];\n  final set = {if (flag = input) answer};\n  final map = {if (flag = input) 'answer': answer};\n  if ((nullable ??= input) && other) {}\n  if (identity(flag = other)) {}\n  if ((count += 1) > 2) {}\n  final generated = [for (; flag = input;) answer];\n  final keyed = {for (; flag = input;) 'answer': answer};\n  if (input ? (flag = other) : false) {}\n  if ((box..value = input).value) {}\n  final values = [false];\n  if ((values..[0] = input).first) {}\n  if (() {\n    if (flag = input) {}\n    return true;\n  }()) {}\n  if (input case true when (flag = other)) {}\n  switch (input) {\n    case true when (flag = other):\n      break;\n    default:\n      break;\n  }\n  final switched = switch (input) {\n    true when (flag = other) => 1,\n    _ => 0,\n  };\n}",
+      "crossFile": null,
+      "good": "bool invoke(bool Function() callback) => callback();\n\nvoid conditions(bool input, bool other, bool? nullable) {\n  var flag = false;\n  var count = 0;\n  flag = input;\n  if (flag == other) { flag = other; }\n  while (flag) { flag = false; }\n  do { flag = input; } while (flag);\n  for (flag = input; flag; flag = false) { count++; }\n  final branch = input ? (flag = other) : false;\n  final list = [if (input) flag = other];\n  final map = {if (input) 'value': flag = other};\n  final generated = [for (flag = input; flag; flag = false) count];\n  final keyed = {for (flag = input; flag; flag = false) 'value': count};\n  if (() { flag = input; return flag; }()) {}\n  while ((() => flag = input)()) { break; }\n  if (invoke(() => flag = input)) {}\n  final ternary = (() => flag = input)() ? 1 : 2;\n  final closures = [if ((() => flag = input)()) 1];\n  if ((++count) > 2) {}\n  assert(flag = input);\n  nullable ??= other;\n  switch (input) {\n    case true when (() => flag = other)():\n      flag = false;\n      break;\n    default:\n      break;\n  }\n  final switched = switch (input) {\n    true when input => flag = other,\n    _ => false,\n  };\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-assignments-as-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags `&` and `|` applied to two non-nullable boolean operands.",
+    "diagnostics": [
+      {
+        "column": 13,
+        "file": null,
+        "line": 2,
+        "message": "Use '&&' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 3,
+        "message": "Use '||' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "Use '&&' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 6,
+        "message": "Use '||' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 7,
+        "message": "Use '&&' instead of a bitwise operator on booleans."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 8,
+        "message": "Use '||' instead of a bitwise operator on booleans."
+      }
+    ],
+    "docs": "Flags `&` and `|` applied to two non-nullable boolean operands.\n\nPrefer `&&` and `||` to express logical intent and short-circuit evaluation.\nBoth operands must resolve to core `bool`; integer, dynamic, nullable, and\nunresolved operands are left alone. Exclusive-or and compound assignments\nare not replacements for logical conjunction or disjunction.",
+    "domains": [],
+    "examples": {
+      "bad": "void example(bool left, bool right) {\n  final a = left & right;\n  final b = left | right;\n  final c = true & false;\n  final local = true;\n  final d = local | right;\n  final e = (left == right) & (a != b);\n  final f = (!left) | (!right);\n}",
+      "crossFile": null,
+      "good": "void example(bool left, bool right, int bits, dynamic unknown) {\n  final a = left && right;\n  final b = left || right;\n  final c = bits & 3;\n  final d = bits | 4;\n  final e = left ^ right;\n  final f = unknown & right;\n  left &= right;\n  left |= right;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-bitwise-operators-with-booleans",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags ordinary comments that contain recognizable Dart statements.",
+    "diagnostics": [
+      {
+        "column": 42,
+        "file": null,
+        "line": 2,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 3,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 4,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 5,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 7,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 8,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 9,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 11,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 13,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      },
+      {
+        "column": 40,
+        "file": null,
+        "line": 15,
+        "message": "Remove commented-out code; version control preserves obsolete implementations."
+      }
+    ],
+    "docs": "Flags ordinary comments that contain recognizable Dart statements.\n\nDelete obsolete code rather than keeping it in comments. This deliberately\nconservative heuristic recognizes declarations, calls, assignments, and\nreturn/throw statements with code punctuation. Documentation comments,\nfenced examples, prose, and TODO/FIXME notes are not reported.",
+    "domains": [],
+    "examples": {
+      "bad": "void example() {\n   // print('old');\n   // final count = 3;\n   // value = false;\n   // return null;\n  /* throw StateError('obsolete'); */\n   // service.refresh();\n   // final int count = 1;\n   // return 42;\n}\n // void obsolete(String value) {\n// }\n // class Obsolete {\n// }\n /*\n * print('old block');\n */",
+      "crossFile": null,
+      "good": "/// Example implementation:\n/// print('documented');\n/** final count = 3; */\nvoid example() {\n  // Explain why this call is required.\n  // Use service.refresh(); after reconnecting.\n  // TODO: print('enable when ready');\n  // FIXME: value = false;\n  // The value = false; means it is disabled.\n  // Max retries = 3;\n  // The value = false;\n  // ```dart\n  // print('example');\n  // ```\n  // Values include `true` and `false`.\n  print('live');\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-commented-out-code",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags explicit `dynamic` type annotations.",
     "diagnostics": [
       {
@@ -23813,6 +24101,188 @@
   },
   {
     "crossFile": false,
+    "description": "Flags extension instance methods and accessors hidden by their target's members.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 15,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 16,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 17,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 18,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 19,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 23,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 27,
+        "message": "The extension target already has this member. Rename the extension member."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 31,
+        "message": "The extension target already has this member. Rename the extension member."
+      }
+    ],
+    "docs": "Flags extension instance methods and accessors hidden by their target's members.\n\nInstance members take precedence over implicit extension invocation, so a\ncolliding extension member needs an explicit extension override to be called.\nRename it instead. The target is resolved by declaration identity, including\naliases and inherited members; getters, fields and setters can also hide a\nmethod. Static extension declarations and other extensions do not compete.\nUnresolved, dynamic and nullable targets are skipped; type parameters are\nchecked only when their resolved non-nullable bound proves the collision.\nThis checks extension declarations, not local variables inside extensions.\nSDK members absent from the precise instance-signature inventory are skipped.",
+    "domains": [],
+    "examples": {
+      "bad": "class Base {\n  void inherited() {}\n}\n\nclass Target extends Base {\n  void run() {}\n  int get size => 0;\n  int field = 0;\n  set setting(int value) {}\n}\n\ntypedef Alias = Target;\n\nextension Hidden on Target {\n  void run() {}\n  void inherited() {}\n  void size() {}\n  void field() {}\n  int get setting => 1;\n}\n\nextension Aliased on Alias {\n  void run() {}\n}\n\nextension Bounded<T extends Target> on T {\n  void inherited() {}\n}\n\nextension on Target {\n  set size(int value) {}\n}",
+      "crossFile": null,
+      "good": "class Target {\n  void run() {}\n  static void staticOnly() {}\n}\n\nclass Unrelated {\n  void differentOwner() {}\n}\n\nextension Renamed on Target {\n  void customRun() {}\n  void differentOwner() {}\n  void staticOnly() {}\n  static void run() {}\n}\n\nextension NullableTarget on Target? {\n  void run() {}\n}\n\nextension DynamicTarget on dynamic {\n  void run() {}\n}\n\nextension First on Target {\n  void extensionOnly() {}\n}\n\nextension Second on Target {\n  void extensionOnly() {}\n}\n\nextension Unbounded<T> on T {\n  void run() {}\n}\n\nclass OrdinarySubclass extends Target {\n  void run() {}\n}\n\nextension StaticIntMember on int {\n  void parse() {}\n}\n\nextension StaticBigIntMember on BigInt {\n  void two() {}\n}\n\nextension StaticDurationMember on Duration {\n  void zero() {}\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-shadowed-extension-methods",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags local bindings and parameters that hide an enclosing type's member.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 13,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 14,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 15,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 16,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 17,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 18,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 19,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 22,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 25,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 29,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 36,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 42,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 43,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 51,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 57,
+        "message": "This binding shadows an enclosing member. Rename the binding."
+      }
+    ],
+    "docs": "Flags local bindings and parameters that hide an enclosing type's member.\n\nRenaming the local keeps unqualified member references unambiguous. Checks\nvariables, local functions, closure and executable parameters, loop bindings,\ncatch bindings and declaration patterns inside type members. Declared static\nmembers are visible in static bodies; inherited instance members are checked\nonly in instance bodies using resolved declaration identities. Initializing\nformals, type-signature parameter names and primary constructor declarations\nare excluded. This rule does not check shadowing of other locals or globals.\nUnknown inherited types are not guessed from their spelling.\nSDK members are checked only when the signature inventory proves an instance\nmember; unclassified SDK name-table entries are deliberately not used.",
+    "domains": [],
+    "examples": {
+      "bad": "class Parent {\n  int inherited = 0;\n}\n\nclass Example extends Parent {\n  int value = 0;\n  int get total => 0;\n  set status(int next) {}\n  static int counter = 0;\n  void refresh() {}\n\n  void locals() {\n    final value = 1;\n    var total = 2;\n    final inherited = 3;\n    void refresh() {}\n    final (status, other) = (1, 2);\n    for (final value in <int>[1]) {}\n    try {} catch (value) {}\n  }\n\n  void parameters(int value) {}\n\n  void closure() {\n    final callback = (int total) => total;\n  }\n\n  static void staticBody() {\n    final counter = 1;\n  }\n}\n\nextension Helpers on Example {\n  void helper() {}\n  void run() {\n    final helper = 1;\n  }\n}\n\nextension TargetMembers on Example {\n  void inspect() {\n    final value = 1;\n    final inherited = 2;\n  }\n}\n\nenum Choice {\n  first;\n\n  static void inspect() {\n    final first = 1;\n  }\n}\n\nclass LazyInitializer {\n  int value = 0;\n  late final callback = (int value) => value;\n}",
+      "crossFile": null,
+      "good": "class Unrelated {\n  int unrelated = 0;\n}\n\nclass Example {\n  int value;\n  static int count = 0;\n  Example(this.value);\n\n  void namesDiffer(int input) {\n    final localValue = input;\n    final unrelated = 2;\n    final callback = (int other) => other;\n  }\n\n  static void noInstanceScope(int value) {\n    final callback = (int value) => value;\n  }\n\n  void signatureOnly(void Function(int value) callback) {}\n\n  void assignmentIsNotDeclaration() {\n    (value, count) = (value, count);\n  }\n}\n\nvoid topLevel(int value) {\n  final count = value;\n}\n\nclass Another {\n  void namesAreLocalToTheOwner() {\n    final value = 1;\n    final count = 2;\n  }\n}\n\nextension Separate on Example {\n  void unrelated() {}\n  static void staticScope() {\n    final unrelated = 1;\n  }\n}\n\nabstract class SignatureOnly {\n  int value = 0;\n  void abstractMethod(int value);\n  external void externalMethod(int value);\n  void typedCallback(void callback(int value)) {}\n}\n\nclass EagerInitializer {\n  int value = 0;\n  final callback = (int value) => value;\n}\n\nclass ContextHolder {\n  Object get context => Object();\n}\n\nclass Screen extends ContextHolder {\n  Object build(Object context) => context;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-shadowing",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a type parameter that shadows a type parameter of an enclosing declaration.",
     "diagnostics": [
       {
@@ -24196,6 +24666,88 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-unrelated-type-assertions",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags a cascade after an unparenthesized null-coalescing expression.",
+    "diagnostics": [
+      {
+        "column": 39,
+        "file": null,
+        "line": 6,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 9,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 11,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 12,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 13,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 14,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 15,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 16,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 17,
+        "message": "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback."
+      }
+    ],
+    "docs": "Flags a cascade after an unparenthesized null-coalescing expression.\n\nIn `a ?? b..method()`, the cascade applies to the result of `a ?? b`, not\njust `b`. Parenthesize the receiver as `(a ?? b)..method()` or the fallback\nas `a ?? (b..method())` to make that choice explicit. The receiver may also\nbe a ternary whose trailing else expression ends in `??`. Explicit receiver\nparentheses and parentheses around the fallback are respected, and `??`\nnested in other receiver subexpressions is not flagged.\nBoth ordinary and null-aware cascades are checked without type inference.",
+    "domains": [],
+    "examples": {
+      "bad": "class Box {\n  int value = 0;\n  void reset() { value = 0; }\n}\n\nBox choose(Box? first, Box second) => first ?? second..reset();\n\nvoid cascades(Box? first, Box? middle, Box second) {\n  final assigned = first ?? second..value = 1;\n  first ?? second..reset()..value = 2;\n  final nested = first ?? middle ?? second..reset();\n  final list = [first ?? second..reset()];\n  final wrapped = (first ?? second..reset());\n  final nullable = first ?? middle?..reset();\n  final operandOnly = first ?? (second)..reset();\n  final ternary = first == null ? second : middle ?? second..reset();\n  final deepTernary = first == null ? second : middle == null ? second : first ?? second..reset();\n}",
+      "crossFile": null,
+      "good": "class Box {\n  int value = 0;\n  void reset() { value = 0; }\n}\n\nBox choose(Box? first, Box second) => (first ?? second)..reset();\n\nvoid cascades(Box? first, Box? middle, Box second, bool condition) {\n  final explicitReceiver = (first ?? second)..value = 1;\n  final explicitFallback = first ?? (second..reset());\n  final multiple = (first ?? second)..reset()..value = 2;\n  final nestedReceiver = ((first ?? middle) ?? second)..reset();\n  final nestedFallback = first ?? (middle ?? (second..reset()));\n  final ordinary = second..reset();\n  final nullAware = (first ?? middle)?..reset();\n  final conditional = (condition ? first : second)?..reset();\n  final methodCall = (first ?? second).reset();\n  final ternaryReceiver = (condition ? first : middle ?? second)..reset();\n  final ternaryFallback = condition ? second : (middle ?? (second..reset()));\n  final parenthesizedElse = condition ? second : (first ?? second)..reset();\n  final coalescingThen = condition ? first ?? second : second..reset();\n}"
+    },
+    "group": "suspicious",
+    "name": "cascade-after-null-coalescing",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
