@@ -2935,6 +2935,11 @@ const PACKAGE_TYPES: Allowlist = &[
             "DiagnosticableTreeMixin",
         ],
     ),
+    ("provider", &["Provider"]),
+    (
+        "nested",
+        &["SingleChildStatelessWidget", "SingleChildState"],
+    ),
 ];
 
 const PACKAGE_MEMBERS: Allowlist = &[

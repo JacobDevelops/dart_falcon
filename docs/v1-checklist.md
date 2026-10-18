@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 21 | 132 | 24 | 177 |
+| DCM-inspired | 18 | 132 | 24 | 174 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 4 | 7 | 3 | 14 |
-| **Total** | **25** | **143** | **31** | **199** |
+| Additional rules | 3 | 7 | 3 | 13 |
+| **Total** | **21** | **143** | **31** | **195** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (177)
+## Planned DCM-inspired rules (174)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -290,10 +290,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-read-inside-build` | correctness | FT | paid | `.read` inside build. | must-have |
-| `avoid-watch-outside-build` | correctness | FT | paid | `.watch` outside build. | must-have |
-| `dispose-providers` | correctness | FT | paid | Provided disposables not disposed. | must-have |
-| `prefer-read-for-methods` | correctness | FT | n/a | Prefer read for method actions rather than watching state. | must-have |
 | `avoid-instantiating-in-value-provider` | correctness | FT | paid | `.value` provider creating a new instance. | nice-to-have |
 | `prefer-multi-provider` | style | LT | paid | Nested providers → MultiProvider. | nice-to-have |
 | `prefer-provider-extensions` | style | LT | paid | Use context extensions over `Provider.of`. | nice-to-have |

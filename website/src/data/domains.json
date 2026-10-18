@@ -73,7 +73,12 @@
   },
   {
     "name": "provider",
-    "rules": []
+    "rules": [
+      "avoid-read-inside-build",
+      "avoid-watch-outside-build",
+      "dispose-providers",
+      "prefer-read-for-methods"
+    ]
   },
   {
     "name": "flutter_hooks",

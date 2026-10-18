@@ -302,6 +302,9 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-recursive-widget-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -338,6 +341,9 @@
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-watch-outside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-web-libraries-in-flutter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -372,6 +378,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "dispose-focus-node-and-timer": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-providers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -417,6 +426,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-closures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-relative-imports": {
@@ -1615,6 +1627,9 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-read-inside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-recursive-widget-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1651,6 +1666,9 @@
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-watch-outside-build": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-web-libraries-in-flutter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1685,6 +1703,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "dispose-focus-node-and-timer": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "dispose-providers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -1730,6 +1751,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-closures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-read-for-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-relative-imports": {

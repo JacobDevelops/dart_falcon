@@ -4162,6 +4162,90 @@
   },
   {
     "crossFile": false,
+    "description": "Flags non-listening Provider reads directly inside Flutter widget builds.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 8,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 9,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 11,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 19,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 25,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 33,
+        "message": "Use watch instead of read for values used during build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 34,
+        "message": "Use watch instead of read for values used during build."
+      }
+    ],
+    "docs": "Flags non-listening Provider reads directly inside Flutter widget builds.\n\nA read does not rebuild the widget when its value changes. This checks\npackage:provider context extensions and `Provider.of(listen: false)` on a\nFlutter BuildContext. Nested callbacks are skipped: their execution phase\ndepends on the receiving API, not their lexical position. BuildWithChild\noverrides on nested's single-child widgets are also build entry points;\ndidChangeDependencies permits subscriptions but is not a build.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\nimport 'package:nested/nested.dart';\n\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.read<int>();\n    final value = (context.read<String>());\n    if (true) context.read<bool>();\n    Provider.of<int>(context, listen: false);\n    return context.read<Widget>();\n  }\n}\nclass StatefulView extends StatefulWidget {\n  State<StatefulView> createState() => ViewState();\n}\nclass ViewState extends State<StatefulView> {\n  Widget build(BuildContext other) {\n    return other.read<Widget>();\n  }\n}\n\nclass SingleView extends SingleChildStatelessWidget {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.read<int>();\n    Provider.of<int>(context, listen: false);\n    return child ?? SizedBox();\n  }\n}\n\nclass SingleState extends SingleChildState<SingleChildStatefulWidget> {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.read<int>();\n    Provider.of<int>(context, listen: false);\n    return child ?? SizedBox();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.watch<int>();\n    Provider.of<int>(context);\n    Provider.of<int>(context, listen: true);\n    final callback = () => context.read<int>();\n    void local() { context.read<int>(); }\n    return SizedBox();\n  }\n  void callback(BuildContext context) { context.read<int>(); }\n}\nclass NotAWidget {\n  void build(BuildContext context) { context.read<int>(); }\n}\nclass Other { T read<T>() => throw 0; }\nvoid readOther(Other context) { context.read<int>(); }\n\nclass DependentState extends State<StatefulWidget> {\n  BuildContext get context => throw 0;\n  void didChangeDependencies() {\n    context.read<int>();\n    Provider.of<int>(context, listen: false);\n  }\n  Widget helper(BuildContext context) => Text('${context.read<int>()}');\n  Widget build(BuildContext context) => helper(context);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-read-inside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Warns when a widget's build method constructs the same widget again.",
     "diagnostics": [
       {
@@ -5109,6 +5193,96 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-unused-parameters",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags listening Provider accesses proven to run outside Flutter builds.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 12,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 13,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 30,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 33,
+        "message": "Use read instead of subscribing outside build."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 37,
+        "message": "Use read instead of subscribing outside build."
+      }
+    ],
+    "docs": "Flags listening Provider accesses proven to run outside Flutter builds.\n\nProvider watch/select and listening Provider.of calls subscribe to widget\nupdates. Use read in initState, dispose, non-widget classes and deferred\ncallbacks. didChangeDependencies may establish dependencies; buildWithChild\non nested's SingleChildStatelessWidget/SingleChildState is a build entry.\nOnly confirmed Flutter BuildContext receivers with provider imports match.\nWidget helpers, unresolved bases and callback arguments with an unknown\nexecution phase are skipped. Named on… callbacks are deferred events.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nvoid action(BuildContext context) {\n  context.watch<int>();\n  context.select<String, int>((value) => value.length);\n  Provider.of<String>(context);\n  Provider.of<int>(context, listen: true);\n}\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    final callback = () => context.watch<int>();\n    void local() { context.watch<String>(); }\n    return SizedBox();\n  }\n}\n\nclass PlainService {\n  void action(BuildContext context) {\n    context.watch<int>();\n  }\n  void build(BuildContext context) {\n    Provider.of<int>(context);\n  }\n}\n\nclass ViewState extends State<StatefulWidget> {\n  BuildContext get context => throw 0;\n  void initState() {\n    context.watch<int>();\n  }\n  void dispose() {\n    Provider.of<int>(context);\n  }\n  Widget build(BuildContext context) => GestureDetector(\n    onTap: () {\n      context.watch<int>();\n    },\n  );\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.watch<int>();\n    context.select<String, int>((value) => value.length);\n    Provider.of<int>(context);\n    Provider.of<int>(context, listen: true);\n    return SizedBox();\n  }\n  // Helpers can establish dependencies while called synchronously from build.\n  Widget label(BuildContext context) => Text('${context.watch<int>()}');\n  void action(BuildContext context) {\n    context.watch<int>();\n  }\n}\nvoid callback(BuildContext context, bool listen) {\n  context.read<int>();\n  Provider.of<int>(context, listen: false);\n  Provider.of<int>(context, listen: listen);\n}\nclass Other { T watch<T>() => throw 0; }\nvoid unrelated(Other context) { context.watch<int>(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-watch-outside-build",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -6644,6 +6818,96 @@
     },
     "group": "correctness",
     "name": "dispose-focus-node-and-timer",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires cleanup callbacks for disposable values created by package:provider's Provider.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 21,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 23,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 24,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 26,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 27,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 28,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 29,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 30,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 33,
+        "message": "Dispose the created value in this Provider's dispose callback."
+      }
+    ],
+    "docs": "Requires cleanup callbacks for disposable values created by package:provider's Provider.\n\nThe created value's inferred type must declare or inherit an instance method\nnamed `dispose`, `close`, or `cancel`. Each such method must be called on the\ndispose callback's value parameter, not another object or a shadowing local.\nValue constructors do not own their values. Creation is proven only for direct\ngenerative constructors or simple same-file function tear-offs returning one.\nUnknown factories, non-inline cleanup, and path-sensitive guarantees are outside\nthis rule's scope.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:provider/provider.dart' as p;\n\nclass Disposable {\n  void dispose() {}\n}\n\nclass Closable {\n  void close() {}\n}\n\nclass Cancelable {\n  void cancel() {}\n}\n\nclass InheritedDisposable extends Disposable {}\n\nfinal other = Disposable();\nDisposable makeDisposable(dynamic context) => Disposable();\n\nvoid examples() {\n  p.Provider(create: (_) => Disposable());\n  p.Provider(create: (_) => Closable());\n  p.Provider(create: (_) => Cancelable());\n  p.Provider(create: makeDisposable);\n  p.Provider(create: (_) { return Disposable(); });\n  new p.Provider(create: (_) => InheritedDisposable());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) {});\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => other.dispose());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value.toString());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) {\n    void later() { value.dispose(); }\n  });\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) {\n    { final value = other; value.dispose(); }\n  });\n}",
+      "crossFile": null,
+      "good": "import 'package:provider/provider.dart' as p;\n\nclass Disposable {\n  void dispose() {}\n}\n\nclass Closable {\n  void close() {}\n}\n\nclass Cancelable {\n  void cancel() {}\n}\n\nclass InheritedDisposable extends Disposable {}\nclass Plain {}\nDisposable makeDisposable(dynamic context) => Disposable();\n\nclass StaticCleanup { static void dispose() {} }\n\nfinal shared = Disposable();\nT getIt<T>() => shared as T;\nclass Api extends Disposable {\n  Api();\n  factory Api.cached() => singleton;\n  static final singleton = Api();\n  static Api instance() => singleton;\n}\n\n// A local constructor with the same spelling is not a package provider.\nclass Provider {\n  Provider({required Object Function(Object?) create});\n}\n\nvoid examples() {\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value.dispose());\n  p.Provider(create: (_) => Closable(), dispose: (_, value) { value.close(); });\n  p.Provider(create: (_) => Cancelable(), dispose: (_, value) => value.cancel());\n  new p.Provider(create: (_) => InheritedDisposable(), dispose: (_, value) => value.dispose());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value..dispose());\n  p.Provider.value(value: Disposable());\n  p.Provider(create: makeDisposable, dispose: (_, value) => value.dispose());\n  p.Provider(create: (_) { return Disposable(); }, dispose: (_, value) { value.dispose(); });\n  p.Provider(create: (_) => Plain());\n  p.Provider(create: (_) => StaticCleanup());\n  Provider(create: (_) => Disposable());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => value!.dispose());\n  p.Provider(create: (_) => Disposable(), dispose: (_, value) => (value as Disposable).dispose());\n  final existing = Disposable();\n  p.Provider(create: (_) => existing);\n  p.Provider(create: (dynamic context) => context.read<Disposable>());\n  p.Provider(create: (_) => getIt<Disposable>());\n  p.Provider(create: (_) => Api.instance());\n  p.Provider(create: (_) => Api.cached());\n}"
+    },
+    "group": "correctness",
+    "name": "dispose-providers",
     "recommended": true,
     "source": {
       "kind": "Falcon",
@@ -8200,6 +8464,84 @@
       "label": "Dart lints",
       "upstreamId": "null_closures",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/null_closures"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags void method actions on a listening Provider lookup during build.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 12,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 13,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 14,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 31,
+        "message": "Use read instead of watch when invoking a provided method."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 32,
+        "message": "Use read instead of watch when invoking a provided method."
+      }
+    ],
+    "docs": "Flags void method actions on a listening Provider lookup during build.\n\nUse context.read or Provider.of(listen: false) for actions instead. Only\nresolved void methods in confirmed widget build/buildWithChild methods are\nchecked; queries, property reads and unresolved values keep subscriptions.\nWidget helpers and didChangeDependencies are not assumed to run in build.\nOutside build, avoid-watch-outside-build owns the diagnostic.",
+    "domains": [
+      "provider"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\nimport 'package:nested/nested.dart';\n\nclass Service {\n  void save() {}\n  void refresh() {}\n  void reset() {}\n}\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    context.watch<Service>().save();\n    context.watch<Service>().refresh();\n    context.watch<Service>().reset();\n    Provider.of<Service>(context).save();\n    Provider.of<Service>(context, listen: true).refresh();\n    return SizedBox();\n  }\n}\n\nclass SingleView extends SingleChildStatelessWidget {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).refresh();\n    return child ?? SizedBox();\n  }\n}\n\nclass SingleState extends SingleChildState<SingleChildStatefulWidget> {\n  Widget buildWithChild(BuildContext context, Widget? child) {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).refresh();\n    return child ?? SizedBox();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart';\n\nclass Service {\n  int get value => 1;\n  void save() {}\n  int calculate() => 1;\n}\nvoid actions(BuildContext context) {\n  context.read<Service>().save();\n  Provider.of<Service>(context, listen: false).save();\n  final value = context.watch<Service>().value;\n  final method = context.watch<Service>().save;\n  final instance = context.watch<Service>();\n  context.watch<Unknown>().save();\n}\nclass Unknown {}\nclass Other { Service watch() => Service(); }\nvoid unrelated(Other context) { context.watch().save(); }\nclass View extends StatelessWidget {\n  Widget build(BuildContext context) {\n    final query = context.watch<Service>().calculate();\n    final selected = context.select<Service, int>((value) => value.value).toString();\n    return SizedBox();\n  }\n}\n\nclass DependentState extends State<StatefulWidget> {\n  BuildContext get context => throw 0;\n  void didChangeDependencies() {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).save();\n  }\n  Widget helper(BuildContext context) {\n    context.watch<Service>().save();\n    Provider.of<Service>(context).save();\n    return SizedBox();\n  }\n  Widget build(BuildContext context) => helper(context);\n}"
+    },
+    "group": "correctness",
+    "name": "prefer-read-for-methods",
+    "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

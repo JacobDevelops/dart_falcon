@@ -128,6 +128,10 @@
         "avoid-unnecessary-stateful-widgets": "warn",
         "avoid-duplicate-test-assertions": "warn",
         "missing-test-assertion": "warn",
+        "avoid-read-inside-build": "warn",
+        "avoid-watch-outside-build": "warn",
+        "dispose-providers": "warn",
+        "prefer-read-for-methods": "warn",
         "list-all-equatable-fields": "warn",
         "add-equatable-props": "warn",
         "avoid-mutable-equatable-subclass-fields": "warn"
