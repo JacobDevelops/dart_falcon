@@ -126,6 +126,8 @@ pub(super) struct Ctx<'src> {
     pub(super) pattern_binding: bool,
     /// Bracketed sub-parses clear this latch; body-marker scopes must not restore it.
     pub(super) in_ctor_init_value: bool,
+    /// The enclosing switch guard's top-level arrow is an arm separator, not a lambda.
+    pub(super) switch_guard_arrow: Option<usize>,
     pub(super) body: AsyncMarker,
     pub(super) ctor_name: Option<&'src str>,
 }
@@ -136,6 +138,7 @@ impl Default for Ctx<'_> {
             suppress_conditional_qmark: false,
             pattern_binding: false,
             in_ctor_init_value: false,
+            switch_guard_arrow: None,
             body: AsyncMarker::Sync,
             ctor_name: None,
         }

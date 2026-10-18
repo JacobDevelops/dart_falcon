@@ -98,7 +98,8 @@ impl<'src> Parser<'src> {
             self.parse_pattern();
             if self.eat(TokenKind::When).is_some() {
                 let marker = self.start();
-                self.parse_expr();
+                let arrow = self.switch_guard_arrow();
+                self.with_ctx(|ctx| ctx.switch_guard_arrow = arrow, Self::parse_expr);
                 marker.complete(self, NodeKind::ExprGuard);
             }
             self.expect(TokenKind::Arrow);
@@ -107,6 +108,28 @@ impl<'src> Parser<'src> {
             self.eat(TokenKind::Comma);
         }
         self.expect(TokenKind::RBrace);
+    }
+
+    fn switch_guard_arrow(&self) -> Option<usize> {
+        let mut depth = 0usize;
+        for (offset, token) in self.tokens.iter_from(self.pos)?.enumerate() {
+            match token.kind {
+                TokenKind::Arrow if depth == 0 => return Some(self.pos + offset),
+                TokenKind::Eof => return None,
+                TokenKind::Comma | TokenKind::RBrace | TokenKind::Semicolon if depth == 0 => {
+                    return None;
+                }
+                TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::QmarkLBracket
+                | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth = depth.checked_sub(1)?;
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     fn parse_typed_collection(&mut self, marker: Marker) -> CompletedMarker {
@@ -901,10 +924,22 @@ impl<'src> Parser<'src> {
     /// Returns `true` when the `(` at `self.pos` starts a function expression
     /// rather than a parenthesised expression or record literal.
     ///
-    /// Fast path: a modifier keyword (`final`, `var`, `required`, `covariant`)
-    /// immediately inside the parens unambiguously signals a parameter list.
+    /// A switch guard's top-level arm arrow takes precedence over lambda
+    /// lookahead, including contextual modifier keywords used as expressions.
+    /// Otherwise a modifier keyword (`final`, `var`, `required`, `covariant`)
+    /// immediately inside the parens signals a parameter list.
     fn looks_like_function_expr(&self) -> bool {
         debug_assert_eq!(self.cur().kind, TokenKind::LParen);
+
+        let close = self.matching_close(
+            self.pos,
+            Brackets::ParenOnly,
+            |kind| kind == TokenKind::Semicolon,
+            None,
+        );
+        if close.is_some_and(|i| Some(i + 1) == self.ctx.switch_guard_arrow) {
+            return false;
+        }
 
         if matches!(
             self.peek(1).kind,
@@ -913,13 +948,7 @@ impl<'src> Parser<'src> {
             return true;
         }
 
-        self.matching_close(
-            self.pos,
-            Brackets::ParenOnly,
-            |kind| kind == TokenKind::Semicolon,
-            None,
-        )
-        .is_some_and(|i| {
+        close.is_some_and(|i| {
             matches!(
                 self.kind_at(i + 1),
                 TokenKind::Arrow | TokenKind::Async | TokenKind::Sync | TokenKind::LBrace
