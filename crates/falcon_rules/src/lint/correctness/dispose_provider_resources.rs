@@ -4,9 +4,10 @@
 //! Use an autoDispose provider or register the resource's cleanup with ref.onDispose.
 //! Checks package-confirmed Provider, FutureProvider and StreamProvider callbacks
 //! for resolved constructor-created instances with a zero-required-argument
-//! dispose, close or cancel method. Borrowed values, deferred closures and unknown
-//! types are excluded. This lifetime policy is separate from disposing arbitrary
-//! provided instances: autoDispose alone does not invoke an object's dispose.
+//! close or cancel method. Dispose types are left to dispose-provided-instances.
+//! Borrowed values, deferred closures and unknown types are excluded. This
+//! lifetime policy is separate from disposing arbitrary provided instances:
+//! autoDispose alone does not invoke an object's dispose.
 //! SDK sinks, sockets and subscriptions are left to the shipped leak rules unless
 //! returned as provider state. Simple source-visible factories returning borrowed
 //! values are excluded, while allocating factories remain eligible.

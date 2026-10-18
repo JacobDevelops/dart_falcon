@@ -165,7 +165,7 @@ impl<'a> Collector<'a> {
         let methods: &[&str] = if self.provided_instances {
             &["dispose"]
         } else {
-            &["dispose", "close", "cancel"]
+            &["close", "cancel"]
         };
         let Some(method) = methods.iter().copied().find(|method| {
             state

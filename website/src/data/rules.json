@@ -7587,48 +7587,42 @@
         "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
       },
       {
-        "column": 38,
+        "column": 9,
         "file": null,
-        "line": 15,
+        "line": 16,
         "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
       },
       {
         "column": 9,
         "file": null,
-        "line": 17,
+        "line": 20,
         "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
       },
       {
         "column": 9,
         "file": null,
-        "line": 21,
+        "line": 24,
         "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
       },
       {
         "column": 9,
         "file": null,
-        "line": 25,
+        "line": 28,
         "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
       },
       {
         "column": 9,
         "file": null,
-        "line": 29,
-        "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
-      },
-      {
-        "column": 9,
-        "file": null,
-        "line": 34,
+        "line": 33,
         "message": "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
       }
     ],
-    "docs": "Flags provider-created resources without autoDispose or ref.onDispose cleanup.\n\nResources created in a long-lived Riverpod provider need an explicit lifetime.\nUse an autoDispose provider or register the resource's cleanup with ref.onDispose.\nChecks package-confirmed Provider, FutureProvider and StreamProvider callbacks\nfor resolved constructor-created instances with a zero-required-argument\ndispose, close or cancel method. Borrowed values, deferred closures and unknown\ntypes are excluded. This lifetime policy is separate from disposing arbitrary\nprovided instances: autoDispose alone does not invoke an object's dispose.\nSDK sinks, sockets and subscriptions are left to the shipped leak rules unless\nreturned as provider state. Simple source-visible factories returning borrowed\nvalues are excluded, while allocating factories remain eligible.",
+    "docs": "Flags provider-created resources without autoDispose or ref.onDispose cleanup.\n\nResources created in a long-lived Riverpod provider need an explicit lifetime.\nUse an autoDispose provider or register the resource's cleanup with ref.onDispose.\nChecks package-confirmed Provider, FutureProvider and StreamProvider callbacks\nfor resolved constructor-created instances with a zero-required-argument\nclose or cancel method. Dispose types are left to dispose-provided-instances.\nBorrowed values, deferred closures and unknown types are excluded. This\nlifetime policy is separate from disposing arbitrary provided instances:\nautoDispose alone does not invoke an object's dispose.\nSDK sinks, sockets and subscriptions are left to the shipped leak rules unless\nreturned as provider state. Simple source-visible factories returning borrowed\nvalues are excluded, while allocating factories remain eligible.",
     "domains": [
       "riverpod"
     ],
     "examples": {
-      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); Channel.named(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Child extends Channel {}\nfinal channel = Provider((ref) {\n  final resource = Channel();\n  return resource;\n});\nfinal subscription = Provider((ref) {\n  final resource = Subscription();\n  return resource;\n});\nfinal disposable = Provider((ref) => Service());\nfinal named = Provider((ref) {\n  final resource = Channel.named();\n  return resource;\n});\nfinal explicitNew = Provider((ref) {\n  final resource = new Channel();\n  return resource;\n});\nfinal inherited = Provider((ref) {\n  final resource = Child();\n  return resource;\n});\nfinal emptyCleanup = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(() {});\n  return resource;\n});\nfinal wrongCleanup = Provider((ref) {\n  final first = Channel();\n  final second = Channel();\n  ref.onDispose(second.close);\n  return first;\n});",
+      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); Channel.named(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Child extends Channel {}\nfinal channel = Provider((ref) {\n  final resource = Channel();\n  return resource;\n});\nfinal subscription = Provider((ref) {\n  final resource = Subscription();\n  return resource;\n});\nfinal named = Provider((ref) {\n  final resource = Channel.named();\n  return resource;\n});\nfinal explicitNew = Provider((ref) {\n  final resource = new Channel();\n  return resource;\n});\nfinal inherited = Provider((ref) {\n  final resource = Child();\n  return resource;\n});\nfinal emptyCleanup = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(() {});\n  return resource;\n});\nfinal wrongCleanup = Provider((ref) {\n  final first = Channel();\n  final second = Channel();\n  ref.onDispose(second.close);\n  return first;\n});",
       "crossFile": null,
       "good": "import 'package:riverpod/riverpod.dart';\n\nclass Channel { Channel(); void close() {} }\nclass Subscription { Subscription(); void cancel() {} }\nclass Service { Service(); void dispose() {} }\nclass Value { Value(); }\nfinal shared = Channel();\nfinal automatic = Provider.autoDispose((ref) => Channel());\nfinal automaticSubscription = Provider.autoDispose((ref) => Subscription());\nfinal registered = Provider((ref) {\n  final resource = Channel();\n  ref.onDispose(resource.close);\n  return resource;\n});\nfinal blockCleanup = Provider((ref) {\n  final resource = Subscription();\n  ref.onDispose(() { resource.cancel(); });\n  return resource;\n});\nfinal disposed = Provider((ref) {\n  final resource = Service();\n  ref.onDispose(() => resource.dispose());\n  return resource;\n});\nfinal borrowed = Provider((ref) => shared);\nfinal value = Provider((ref) => Value());\nfinal deferred = Provider((ref) => () => Channel());\nChannel outsideProvider() => Channel();\nvoid ordinaryCallback(Object Function(Ref) callback) {}\nvoid unrelatedApi() { ordinaryCallback((ref) => Channel()); }"
     },

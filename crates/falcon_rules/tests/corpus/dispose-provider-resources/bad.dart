@@ -12,7 +12,6 @@ final subscription = Provider((ref) {
   final resource = Subscription(); /* expect: dispose-provider-resources */
   return resource;
 });
-final disposable = Provider((ref) => Service()); /* expect: dispose-provider-resources */
 final named = Provider((ref) {
   final resource = Channel.named(); /* expect: dispose-provider-resources */
   return resource;
