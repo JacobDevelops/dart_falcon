@@ -28,10 +28,16 @@ impl Rule for AvoidUnnecessaryConsumerWidgets {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
-        let subclassed = program
-            .declarations()
+        let subclassed = std::iter::once(program)
+            .chain(
+                ctx.library
+                    .into_iter()
+                    .flat_map(|library| library.siblings().iter().copied()),
+            )
+            .flat_map(|program| program.declarations())
             .filter_map(|declaration| match declaration {
                 TopLevelDecl::Class(class) => class.extends(),
+                TopLevelDecl::ClassTypeAlias(alias) => Some(alias.superclass()),
                 _ => None,
             })
             .filter_map(|ty| match model.resolve_type(ty) {
