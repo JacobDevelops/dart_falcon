@@ -10812,6 +10812,70 @@
   },
   {
     "crossFile": false,
+    "description": "Flags else branches after an if body that unconditionally returns or throws.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 3,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 8,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 13,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 17,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 22,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 27,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 31,
+        "message": "This else is redundant after an exiting branch; move its body after the if."
+      }
+    ],
+    "docs": "Flags else branches after an if body that unconditionally returns or throws.\n\nThe then branch must directly end in return, throw, or rethrow. Keep the\nelse body's scope when moving it after the if. Identical branches belong to\nno-equal-then-else; a trailing bare return belongs to avoid-unnecessary-return\ninstead, because removing that return is the smaller simplification.\nOnly if statements directly inside blocks are checked, not nested unbraced\nbranches or else-if links, where moving statements can change control flow.",
+    "domains": [],
+    "examples": {
+      "bad": "int returning(bool ready) {\n  if (ready) { return 1; }\n  else { print('other'); }\n  return 2;\n}\nvoid early(bool ready) {\n  if (ready) { return; }\n  else { print('other'); }\n  print('after');\n}\nint unbraced(bool ready) {\n  if (ready) return 1;\n  else return 2;\n}\nvoid throwing(bool ready) {\n  if (ready) { throw StateError('stop'); }\n  else { print('other'); }\n}\nvoid rethrowing(bool ready) {\n  try { throw StateError('stop'); } catch (error) {\n    if (ready) { rethrow; }\n    else { print(error); }\n  }\n}\nint comments(bool ready) {\n  if (ready) { return 1; /* explanation */ }\n  else { return 1; }\n}\nint exitingChain(bool first, bool second) {\n  if (first) return 1;\n  else if (second) return 2;\n  else return 3;\n}",
+      "crossFile": null,
+      "good": "void work(bool ready) {\n  if (ready) { print('first'); } else { print('second'); }\n}\nvoid trailing(bool ready) {\n  if (ready) { return; } else { print('second'); }\n}\nvoid conditional(bool ready, bool other) {\n  if (ready) { if (other) return; } else { print('second'); }\n  print('after');\n}\nint identical(bool ready) {\n  if (ready) { return 1; } else { return 1; }\n}\nvoid noElse(bool ready) {\n  if (ready) return;\n  print('after');\n}\nvoid loop(bool ready) {\n  while (ready) {\n    if (ready) { break; } else { print('second'); }\n  }\n}\nvoid chain(bool first, bool second) {\n  if (first) { print('first'); }\n  else if (second) { return; }\n  else { print('third'); }\n  print('after');\n}\nint nestedUnbraced(bool first, bool second) {\n  if (first) if (second) return 1; else return 2;\n  return 3;\n}\nvoid loopUnbraced(bool ready) {\n  while (ready) if (ready) return; else print('step');\n}"
+    },
+    "group": "style",
+    "name": "avoid-redundant-else",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags redundant field names in object and record patterns.",
     "diagnostics": [
       {
@@ -11445,6 +11509,134 @@
       "label": "Dart lints",
       "upstreamId": "avoid_types_on_closure_parameters",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_types_on_closure_parameters"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags an if branch that only returns the same expression as the following return.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "This branch returns the same value as the following return; check or remove the redundant branch."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "This branch returns the same value as the following return; check or remove the redundant branch."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "This branch returns the same value as the following return; check or remove the redundant branch."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "This branch returns the same value as the following return; check or remove the redundant branch."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 19,
+        "message": "This branch returns the same value as the following return; check or remove the redundant branch."
+      }
+    ],
+    "docs": "Flags an if branch that only returns the same expression as the following return.\n\nThe if must have no else and its body must be a single value-return statement.\nExpressions are compared by token spelling, preserving literal contents. Check\nwhether the branch should return something different; when removing it, retain\nany side effects in the condition. Bare returns belong to avoid-unnecessary-return.\nIf-case patterns are excluded because their bindings can shadow return values.",
+    "domains": [],
+    "examples": {
+      "bad": "int literal(bool ready) {\n  if (ready) { return 1; }\n  return 1;\n}\nString text(bool ready) {\n  if (ready) return 'same';\n  return 'same';\n}\nint variable(bool ready, int value) {\n  if (ready) { return value; }\n  return value;\n}\nint grouped(bool ready) {\n  if (ready) { return (2); }\n  return 2;\n}\nclass Example {\n  int method(bool ready) {\n    if (ready) return 3;\n    return 3;\n  }\n}",
+      "crossFile": null,
+      "good": "int different(bool ready) {\n  if (ready) return 1;\n  return 2;\n}\nString whitespace(bool ready) {\n  if (ready) return 'a b';\n  return 'ab';\n}\nint work(bool ready) {\n  if (ready) { print('work'); return 1; }\n  return 1;\n}\nint otherwise(bool ready) {\n  if (ready) return 1; else return 2;\n}\nint intervening(bool ready) {\n  if (ready) return 1;\n  print('work');\n  return 1;\n}\nvoid bare(bool ready) {\n  if (ready) return;\n  print('work');\n}\nvoid barePair(bool ready) {\n  if (ready) return;\n  return;\n}\nString binding(Object value, String name) {\n  if (value case String name) return name;\n  return name;\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-if",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags bare returns at the end of a function or its final if/block branches.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 12,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 20,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 29,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 35,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 41,
+        "message": "This trailing return is unnecessary; let the function finish naturally."
+      }
+    ],
+    "docs": "Flags bare returns at the end of a function or its final if/block branches.\n\nFalling through already exits the function. Only paths through final block\nstatements and if branches are followed; loops, switch, try/finally, and\nvalue-returning statements are deliberately excluded. Nested functions have\ntheir own boundary, so their returns cannot escape into an enclosing body.\nIdentical if/else branches are left to no-equal-then-else.",
+    "domains": [],
+    "examples": {
+      "bad": "void direct() {\n  print('work');\n  return;\n}\nvoid branch(bool ready) {\n  if (ready) {\n    return;\n  }\n}\nvoid branches(bool ready) {\n  if (ready) {\n    return;\n  } else {\n    print('work');\n    return;\n  }\n}\nclass Example {\n  void method() {\n    return;\n  }\n  set value(int value) {\n    print(value);\n    return;\n  }\n}\nvoid closures() {\n  final callback = () {\n    return;\n  };\n  callback();\n}\nvoid local() {\n  void nested() {\n    return;\n  }\n  nested();\n}\nclass Constructed {\n  Constructed() {\n    return;\n  }\n}",
+      "crossFile": null,
+      "good": "void guard(bool ready) {\n  if (ready) return;\n  print('work');\n}\nint value() { return 1; }\nvoid loop(bool ready) {\n  while (ready) { return; }\n}\nvoid counted() {\n  for (var i = 0; i < 3; i++) { return; }\n}\nvoid handling() {\n  try { return; } finally { print('cleanup'); }\n}\nvoid selection(int value) {\n  switch (value) {\n    case 1: return;\n    default: print('other');\n  }\n}\nvoid nested(bool ready) {\n  if (ready) {\n    if (ready) return;\n    print('work');\n  }\n}\nvoid identical(bool ready) {\n  if (ready) { return; } else { return; }\n}\nvoid identicalWork(bool ready) {\n  if (ready) { print('work'); return; }\n  else { print('work'); return; }\n}"
+    },
+    "group": "style",
+    "name": "avoid-unnecessary-return",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

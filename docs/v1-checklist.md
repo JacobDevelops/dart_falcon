@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 75 | 132 | 24 | 231 |
+| DCM-inspired | 71 | 132 | 24 | 227 |
 | Cross-file additions | 4 | 4 | 4 | 12 |
 | Additional rules | 8 | 7 | 3 | 18 |
-| **Total** | **87** | **143** | **31** | **261** |
+| **Total** | **83** | **143** | **31** | **257** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (231)
+## Planned DCM-inspired rules (227)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -207,10 +207,6 @@ not re-added.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-unnecessary-if` | style | LT | paid | Redundant if that can be simplified. | must-have |
-| `avoid-unnecessary-conditionals` | style | LT | paid | Redundant conditional expression. | must-have |
-| `avoid-unnecessary-return` | style | S | paid | Redundant trailing return. | must-have |
-| `avoid-redundant-else` | style | S | paid | `else` after a returning if. | must-have |
 | `avoid-unnecessary-block` | style | S | paid | Redundant block statement. | nice-to-have |
 | `avoid-unnecessary-call` | style | FT | paid | Redundant `.call()`. | nice-to-have |
 | `avoid-unnecessary-continue` | style | S | paid | Redundant trailing continue. | nice-to-have |

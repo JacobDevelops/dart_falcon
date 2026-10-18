@@ -793,6 +793,27 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("unnecessary_string_escapes"),
     ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_if::AvoidUnnecessaryIf>(
+        "avoid-unnecessary-if",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_unnecessary_return::AvoidUnnecessaryReturn>(
+        "avoid-unnecessary-return",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::avoid_redundant_else::AvoidRedundantElse>(
+        "avoid-redundant-else",
+        RuleGroup::Style,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
     RuleMeta::resolved::<lint::style::unnecessary_string_interpolations::UnnecessaryStringInterpolations>(
         "unnecessary-string-interpolations",
         RuleGroup::Style,
@@ -2295,6 +2316,10 @@ pub const RULE_ALIASES: &[(&str, &str)] = &[
     ("no_magic_number", "no-magic-number"),
     ("avoid_empty_blocks", "no-empty-block"),
     ("no_empty_block", "no-empty-block"),
+    (
+        "avoid-unnecessary-conditionals",
+        "avoid-bool-literals-in-conditional-expressions",
+    ),
 ];
 
 /// Resolve a possibly-legacy rule id to its canonical id. Returns the input

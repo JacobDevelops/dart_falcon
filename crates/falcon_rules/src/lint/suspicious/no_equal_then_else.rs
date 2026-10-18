@@ -31,7 +31,10 @@ impl Rule for NoEqualThenElse {
     }
 }
 
-fn normalize<'a>(ctx: &'a AnalyzeContext<'_>, span: Span) -> impl Iterator<Item = u8> + 'a {
+pub(crate) fn normalize<'a>(
+    ctx: &'a AnalyzeContext<'_>,
+    span: Span,
+) -> impl Iterator<Item = u8> + 'a {
     use falcon_syntax::TokenKind;
 
     let mut line_comment = false;
