@@ -31,3 +31,5 @@ class CupertinoTextField extends Widget {
   CupertinoTextField.borderless({Object? controller, Function? onChanged, Function? onSubmitted});
 }
 class EditableText extends Widget { EditableText({Object? controller, Function? onChanged, Function? onSubmitted}); }
+class FormState extends State<Widget> {}
+class Form extends Widget { Form({Key? key, Widget? child}); }

@@ -1,10 +1,13 @@
-//! Require GlobalKey fields to be passed to a widget.
+//! Keep GlobalKeys stable and pass owned State fields to widgets.
 //!
-//! Checks owned GlobalKey-subtype instance fields in concrete Flutter State
-//! classes. Abstract State bases and injected fields are skipped. Passing a
-//! field anywhere in a call argument counts conservatively, since helpers may
-//! attach it to a widget. Shadowed locals and currentState/currentContext receiver
-//! reads do not count as passing the key.
+//! Reports nonconstant GlobalKey-subtype constructors directly in widget `key`
+//! arguments, including outside State classes. Value-stable GlobalObjectKeys,
+//! constant keys and cached field/top-level initializers are exempt. Closures
+//! inside those initializers are still checked. Stored keys are checked only for
+//! concrete Flutter State classes: abstract bases and injected fields are skipped.
+//! Passing a field anywhere in a call argument counts conservatively, since
+//! helpers may attach it to a widget. Shadowed locals and currentState/currentContext
+//! receiver reads do not count as passing the key.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
@@ -102,6 +105,8 @@ impl Rule for AlwaysPassGlobalKey {
             fields,
             arguments: Vec::new(),
             state_receivers: Vec::new(),
+            diagnostics: Vec::new(),
+            const_contexts: crate::lint::const_eval::ConstContexts::of(program),
         }))
     }
 }
@@ -111,24 +116,81 @@ struct Collector<'a> {
     fields: Vec<KeyField<'a>>,
     arguments: Vec<(DeclarationIdentity, Span)>,
     state_receivers: Vec<Span>,
+    diagnostics: Vec<Diagnostic>,
+    const_contexts: crate::lint::const_eval::ConstContexts,
+}
+
+fn cached_initializer(expression: Expr<'_>) -> bool {
+    for ancestor in expression.syntax().ancestors().skip(1) {
+        if FuncExpr::cast(ancestor).is_some() || LocalVarDecl::cast(ancestor).is_some() {
+            return false;
+        }
+        if FieldDecl::cast(ancestor).is_some()
+            || matches!(
+                TopLevelDecl::cast(ancestor),
+                Some(TopLevelDecl::Variable(_))
+            )
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
-    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
-        self.fields
-            .iter()
-            .filter(|field| !field.passed)
-            .map(|field| {
-                self.ctx.diagnostic(
-                    "always-pass-global-key",
-                    "Pass this GlobalKey field to a widget.",
-                    field.span,
-                )
-            })
-            .collect()
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics.extend(
+            self.fields
+                .iter()
+                .filter(|field| !field.passed)
+                .map(|field| {
+                    self.ctx.diagnostic(
+                        "always-pass-global-key",
+                        "Pass this GlobalKey field to a widget.",
+                        field.span,
+                    )
+                }),
+        );
+        self.diagnostics
     }
 
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if matches!(node, Expr::Call(_) | Expr::New(_))
+            && let Some((widget, _, args)) =
+                crate::lint::flutter::scoped_constructor_invocation(node, state)
+            && state.signatures.is_subtype_of(
+                &ResolvedType::interface_identity(widget),
+                &DeclarationIdentity::flutter("Widget"),
+                &state.model,
+            ) == Truth::Yes
+            && let Some(key) = args
+                .named()
+                .find(|argument| argument.name().name() == "key")
+            && !cached_initializer(node)
+            && !self.const_contexts.contains(&key.value().span())
+            && !matches!(key.value().unparenthesized(), Expr::New(node) if node.is_const())
+            && let Some((identity, _, _)) =
+                crate::lint::flutter::scoped_constructor_invocation(key.value(), state)
+            && {
+                let ty = ResolvedType::interface_identity(identity);
+                state.signatures.is_subtype_of(
+                    &ty,
+                    &DeclarationIdentity::flutter("GlobalKey"),
+                    &state.model,
+                ) == Truth::Yes
+                    && state.signatures.is_subtype_of(
+                        &ty,
+                        &DeclarationIdentity::flutter("GlobalObjectKey"),
+                        &state.model,
+                    ) != Truth::Yes
+            }
+        {
+            self.diagnostics.push(self.ctx.diagnostic(
+                "always-pass-global-key",
+                "Store this GlobalKey outside the widget's key argument.",
+                key.value().span(),
+            ));
+        }
         if self.fields.is_empty() {
             return;
         }
