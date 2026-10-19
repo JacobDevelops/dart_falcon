@@ -1,4 +1,5 @@
-//! Warns when credential-like variables or fields receive nonempty string or numeric literals.
+//! Warns when credential-like variables, fields, or parameter defaults use
+//! nonempty string or numeric literals.
 //!
 //! Names such as `password`, `apiKey`, `clientSecret`, and `accessToken` are
 //! checked case-insensitively, including snake_case and private spellings.
@@ -79,6 +80,13 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_var_declarator(&mut self, node: VarDeclarator<'a>) -> StructuralTraversal {
         if let Some(value) = node.initializer() {
+            self.check(node.name(), value);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
+        if let Some(value) = node.default_value() {
             self.check(node.name(), value);
         }
         StructuralTraversal::Continue
