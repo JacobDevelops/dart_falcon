@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart' as f;
 class SingleChildScrollView { SingleChildScrollView({dynamic child}); }
 void example() {
-  SingleChildScrollView(child: f.Column());
+  SingleChildScrollView(child: f.Column(children: [f.Text('a'), f.Text('b')]));
 }

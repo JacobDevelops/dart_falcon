@@ -1,5 +1,7 @@
 //! Suggests considering ListView for a SingleChildScrollView containing a plain
-//! Flutter Column. This is not a layout-neutral replacement: preserve the
+//! Flutter Column with at least two unconditional children in a list literal.
+//! Spreads, control-flow elements and dynamic lists do not establish that minimum.
+//! This is not a layout-neutral replacement: preserve the
 //! Column's child alignment and scroll view's padding explicitly. ListView
 //! stretches children across the cross axis and adds MediaQuery padding by default.
 //! For the default Column alignment, wrap each list child in an Align with
@@ -69,6 +71,19 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         && child_args
                             .named()
                             .all(|arg| arg.name().name() == "children")
+                        && child_args
+                            .named()
+                            .find(|arg| arg.name().name() == "children")
+                            .is_some_and(|arg| {
+                                let Expr::List(children) = arg.value().unparenthesized() else {
+                                    return false;
+                                };
+                                children
+                                    .elements()
+                                    .filter(|element| matches!(element, CollectionElement::Expr(_)))
+                                    .nth(1)
+                                    .is_some()
+                            })
                 })
         };
         if matches {
