@@ -11,3 +11,11 @@ void shadowed(dynamic Uri) {
   Uri(queryParameters: {'token': 'not a URL'});
   Uri.https('example.com', '/', {'password': 'not a URL'});
 }
+
+void interpolationPunctuation(String host, String path, String value) {
+  final fragment = 'https://${host.replaceAll('#', '')}/#reset?token=$value';
+  final pathOnly = 'https://${host.replaceAll('#', '')}/password=$value';
+  final safeQuery = 'https://$host/${path.replaceAll('#', '')}?page=$value';
+  final valuePunctuation = 'https://example.com/?page=${value.replaceAll('', '&token=')}';
+  final dynamicKey = 'https://example.com/?api_${value}=secret';
+}

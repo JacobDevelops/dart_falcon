@@ -6,3 +6,9 @@ final fifth = new Uri(queryParameters: {'refresh_token': 'secret'}); /* expect: 
 final sixth = Uri.http('example.com', '/', {'PASSWORD': 'secret'}); /* expect: avoid-sensitive-query-params */
 final seventh = 'https://example.com/?token=$token'; /* expect: avoid-sensitive-query-params */
 String token = 'secret';
+
+void interpolationPunctuation(String host, String path, String key) {
+  final hostQuery = 'https://${host.replaceAll('#', '')}/v1?api_key=$key'; /* expect: avoid-sensitive-query-params */
+  final pathQuery = 'https://example.com/${path.replaceAll('#', '')}?password=$key'; /* expect: avoid-sensitive-query-params */
+  final laterQuery = 'https://example.com/?page=${path.replaceAll('', '#')}&token=$key'; /* expect: avoid-sensitive-query-params */
+}

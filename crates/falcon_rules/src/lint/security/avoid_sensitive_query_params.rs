@@ -30,17 +30,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
             Expr::StringLit(literal) => {
-                for (segment, _) in literal.segments() {
-                    let text = segment.content.split('#').next().unwrap_or("");
-                    if (text.starts_with("https://") || text.starts_with("http://"))
-                        && let Some((_, query)) = text.split_once('?')
-                        && query
-                            .split('&')
-                            .any(|pair| pair.split_once('=').is_some_and(|(key, _)| sensitive(key)))
-                    {
-                        self.report(node.span());
-                        break;
-                    }
+                if has_sensitive_query(literal) {
+                    self.report(node.span());
                 }
             }
             Expr::Call(call) => {
@@ -117,6 +108,53 @@ impl<'a> Collector<'a> {
             span,
         ));
     }
+}
+
+fn has_sensitive_query(literal: StringLitNode<'_>) -> bool {
+    for (segment, span) in literal.segments() {
+        let text = segment.content;
+        if !text.starts_with("https://") && !text.starts_with("http://") {
+            continue;
+        }
+        let offset = span.start + segment.content_offset;
+        let mut interpolations = literal
+            .interpolations()
+            .map(|node| node.syntax().span())
+            .filter(|interpolation| interpolation.start >= offset && interpolation.end <= span.end)
+            .peekable();
+        let mut query = false;
+        let mut key_start = None;
+        let mut index = 0;
+        while index < text.len() {
+            if let Some(interpolation) = interpolations.peek()
+                && interpolation.start == offset + index
+            {
+                // An interpolation's source punctuation is not URL text, and a
+                // key containing a dynamic part cannot be identified statically.
+                index = interpolation.end - offset;
+                key_start = None;
+                interpolations.next();
+                continue;
+            }
+            match text.as_bytes()[index] {
+                b'#' => break,
+                b'?' if !query => {
+                    query = true;
+                    key_start = Some(index + 1);
+                }
+                b'&' if query => key_start = Some(index + 1),
+                b'=' if query => {
+                    if key_start.is_some_and(|start| sensitive(&text[start..index])) {
+                        return true;
+                    }
+                    key_start = None;
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+    }
+    false
 }
 
 fn sensitive(key: &str) -> bool {
