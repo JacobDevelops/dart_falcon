@@ -1,8 +1,8 @@
 library dart.math;
 
 abstract class Random {
-  factory Random([int? seed]);
-  factory Random.secure();
+  external factory Random([int? seed]);
+  external factory Random.secure();
   int nextInt(int max);
   double nextDouble();
   bool nextBool();
