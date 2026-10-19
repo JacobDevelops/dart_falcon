@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 401);
+    assert_eq!(RULE_METADATA.len(), 416);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         215
@@ -319,6 +319,14 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
             "avoid-commented-out-code",
             "Raw non-documentation comment tokens.",
         ),
+        (
+            "avoid-empty-test-groups",
+            "Test filename and framework import eligibility before semantic collection.",
+        ),
+        (
+            "avoid-top-level-members-in-tests",
+            "Test filename eligibility before structural collection.",
+        ),
         ("avoid-relative-lib-imports", "Import URI path segments."),
         (
             "avoid-web-libraries-in-flutter",
@@ -353,6 +361,22 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         (
             "no-leading-underscores-for-library-prefixes",
             "Import directive prefixes.",
+        ),
+        (
+            "prefer-correct-test-file-name",
+            "Package test directory and filename eligibility before structural collection.",
+        ),
+        (
+            "prefer-expect-later",
+            "Test filename and framework import eligibility before semantic collection.",
+        ),
+        (
+            "prefer-test-matchers",
+            "Test filename and framework import eligibility before semantic collection.",
+        ),
+        (
+            "prefer-unique-test-names",
+            "Test filename and framework import eligibility before semantic collection.",
         ),
         (
             "prefer-relative-imports",

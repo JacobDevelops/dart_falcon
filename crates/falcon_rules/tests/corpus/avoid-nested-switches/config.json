@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "avoid-nested-switches": {
+          "level": "warn",
+          "options": {
+            "max_nesting": 1
+          }
+        }
+      }
+    }
+  }
+}

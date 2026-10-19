@@ -1,0 +1,12 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "widget-tree-depth": {
+          "level": "warn",
+          "options": { "max_nesting": 3 }
+        }
+      }
+    }
+  }
+}

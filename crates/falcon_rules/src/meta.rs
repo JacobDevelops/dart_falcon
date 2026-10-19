@@ -307,6 +307,51 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     RuleMeta::resolved::<lint::correctness::avoid_unmodified_loop_condition::AvoidUnmodifiedLoopCondition>(
         "avoid-unmodified-loop-condition", RuleGroup::Correctness, NONE, true, RuleSource::Falcon,
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_empty_test_groups::AvoidEmptyTestGroups>(
+        "avoid-empty-test-groups", RuleGroup::Correctness, Some(Domain::Test), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::prefer_expect_later::PreferExpectLater>(
+        "prefer-expect-later", RuleGroup::Correctness, Some(Domain::Test), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::suspicious::prefer_unique_test_names::PreferUniqueTestNames>(
+        "prefer-unique-test-names", RuleGroup::Suspicious, Some(Domain::Test), false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::suspicious::avoid_top_level_members_in_tests::AvoidTopLevelMembersInTests>(
+        "avoid-top-level-members-in-tests", RuleGroup::Suspicious, Some(Domain::Test), false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::style::prefer_correct_test_file_name::PreferCorrectTestFileName>(
+        "prefer-correct-test-file-name", RuleGroup::Style, Some(Domain::Test), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_test_matchers::PreferTestMatchers>(
+        "prefer-test-matchers", RuleGroup::Style, Some(Domain::Test), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::complexity::widget_tree_depth::WidgetTreeDepth>(
+        "widget-tree-depth", RuleGroup::Complexity, FLUTTER, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::avoid_long_records::AvoidLongRecords>(
+        "avoid-long-records", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::complexity::avoid_complex_arithmetic_expressions::AvoidComplexArithmeticExpressions>(
+        "avoid-complex-arithmetic-expressions", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::avoid_if_with_many_branches::AvoidIfWithManyBranches>(
+        "avoid-if-with-many-branches", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::avoid_nested_switches::AvoidNestedSwitches>(
+        "avoid-nested-switches", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::avoid_nested_switch_expressions::AvoidNestedSwitchExpressions>(
+        "avoid-nested-switch-expressions", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::avoid_nested_try_statements::AvoidNestedTryStatements>(
+        "avoid-nested-try-statements", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::max_statements::MaxStatements>(
+        "max-statements", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::complexity::cognitive_complexity::CognitiveComplexity>(
+        "cognitive-complexity", RuleGroup::Complexity, NONE, false, RuleSource::Falcon,
+    ),
     RuleMeta::file::<lint::complexity::max_switch_cases::MaxSwitchCases>(
         "max-switch-cases",
         RuleGroup::Complexity,

@@ -2,6 +2,7 @@
 library dart.async;
 abstract class Future<T> {
   external factory Future.value([FutureOr<T>? value]);
+  external factory Future.error(Object error, [StackTrace? stackTrace]);
 }
 abstract class FutureOr<T> {}
 // Callback signature excerpt pinned to Dart SDK 3.13.5:

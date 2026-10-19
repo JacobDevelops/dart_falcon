@@ -1,0 +1,16 @@
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "avoid-empty-test-groups": {
+          "level": "warn",
+          "options": {
+            "include_methods": [
+              "testCase"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

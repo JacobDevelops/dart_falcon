@@ -267,6 +267,52 @@
   },
   {
     "crossFile": false,
+    "description": "Reports arithmetic expressions containing too many terms.",
+    "diagnostics": [
+      {
+        "column": 44,
+        "file": null,
+        "line": 1,
+        "message": "Expression has 4 arithmetic terms (max 3). Extract intermediate values."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 2,
+        "message": "Expression has 4 arithmetic terms (max 3). Extract intermediate values."
+      },
+      {
+        "column": 59,
+        "file": null,
+        "line": 4,
+        "message": "Expression has 4 arithmetic terms (max 3). Extract intermediate values."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 5,
+        "message": "Expression has 4 arithmetic terms (max 3). Extract intermediate values."
+      }
+    ],
+    "docs": "Reports arithmetic expressions containing too many terms.\n\n`max_terms` (integer, default: 6) limits connected +, -, *, /, ~/, and %\noperands. Parentheses do not reset the count; calls are opaque operands.",
+    "domains": [],
+    "examples": {
+      "bad": "int compute(int a, int b, int c, int d) => a + b * (c - d);\nint calls(int a) => a + helper(a * a * a * a);\nint helper(int x) => x;\ndouble doubles(double a, double b, double c, double d) => a / b + c * d;\nnum numbers(num a, num b, num c, num d) => a + b * (c % d);",
+      "crossFile": null,
+      "good": "int compute(int a, int b, int c) => a + b * c;\nint helper(int x) => x;\nint calls(int a) => helper(a + a) + helper(a * a);\n\nString concatenate(String a, String b, String c, String d) => a + b + c + d;\nString literals() => 'a' + 'b' + 'c' + 'd';\n\nclass Vector {\n  Vector operator +(Vector other) => this;\n  Vector operator -(Vector other) => this;\n  Vector operator *(Vector other) => this;\n}\n\nVector overloaded(Vector a, Vector b, Vector c, Vector d) => a + b * (c - d);\ndynamic unknown(dynamic a, dynamic b, dynamic c, dynamic d) => a + b + c + d;"
+    },
+    "group": "complexity",
+    "name": "avoid-complex-arithmetic-expressions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags boolean expressions with more logical operands than the configured threshold.",
     "diagnostics": [
       {
@@ -441,6 +487,34 @@
   },
   {
     "crossFile": false,
+    "description": "Reports long if/else-if chains; replace them with a switch or extracted helpers.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "If chain has 3 branches (max 2). Replace it with a switch or extracted helpers."
+      }
+    ],
+    "docs": "Reports long if/else-if chains; replace them with a switch or extracted helpers.\n\n`max_branches` (integer, default: 3) counts every if and the final else.",
+    "domains": [],
+    "examples": {
+      "bad": "void handle(int x) {\n  if (x == 0) {\n    print(0);\n  } else if (x == 1) { print(1); } else { print(2); }\n}",
+      "crossFile": null,
+      "good": "void handle(int x) {\n  if (x == 0) { print(0); } else { print(1); }\n  if (x == 2) { if (x > 0) { print(2); } }\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-if-with-many-branches",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a doubly-negated boolean expression such as `!!x`.",
     "diagnostics": [
       {
@@ -549,6 +623,40 @@
       "label": "Pyramid Lint",
       "upstreamId": "avoid_inverted_boolean_expressions",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports record values and record types with too many fields.",
+    "diagnostics": [
+      {
+        "column": 15,
+        "file": null,
+        "line": 1,
+        "message": "Record has 3 fields (max 2). Replace it with a named class."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 2,
+        "message": "Record has 3 fields (max 2). Replace it with a named class."
+      }
+    ],
+    "docs": "Reports record values and record types with too many fields.\n\n`max_fields` (integer, default: 6) limits positional and named fields together.",
+    "domains": [],
+    "examples": {
+      "bad": "final value = (1, 2, 3);\ntypedef LargeRecord = (int, int, {int third});",
+      "crossFile": null,
+      "good": "final value = (1, 2);\n(int, {int second}) value2 = (1, second: 2);\nfinal nested = ((1, 2), (3, 4));"
+    },
+    "group": "complexity",
+    "name": "avoid-long-records",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -713,6 +821,90 @@
       "label": "Pyramid Lint",
       "upstreamId": "avoid_nested_if",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports deeply nested switch expressions.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 2,
+        "message": "Nesting exceeds 1 levels. Extract the nested construct into a helper."
+      }
+    ],
+    "docs": "Reports deeply nested switch expressions.\n\n`max_nesting` (integer, default: 1) limits nesting of this construct.\nLocal functions and closures restart the nesting count.",
+    "domains": [],
+    "examples": {
+      "bad": "int handle(int x) => switch (x) {\n  0 => switch (x + 1) { 1 => 2, _ => 3 },\n  _ => 4,\n};",
+      "crossFile": null,
+      "good": "int handle(int x) => switch (x) { 0 => 1, _ => 2 };\nint independent(int x) => switch (x) { 1 => 2, _ => 3 };"
+    },
+    "group": "complexity",
+    "name": "avoid-nested-switch-expressions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports deeply nested switch statements.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 3,
+        "message": "Nesting exceeds 1 levels. Extract the nested construct into a helper."
+      }
+    ],
+    "docs": "Reports deeply nested switch statements.\n\n`max_nesting` (integer, default: 1) limits nesting of this construct.\nLocal functions and closures restart the nesting count.",
+    "domains": [],
+    "examples": {
+      "bad": "void handle(int x) {\n  switch (x) { case 0:\n    switch (x + 1) {\n      case 1: break;\n    }\n  }\n}",
+      "crossFile": null,
+      "good": "void handle(int x) {\n  switch (x) { case 0: break; }\n  switch (x) { case 1: break; }\n  switch (x) { case 2:\n    void local() { switch (x) { case 3: break; } }\n    local();\n  }\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-nested-switches",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports deeply nested try statements.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 3,
+        "message": "Nesting exceeds 1 levels. Extract the nested construct into a helper."
+      }
+    ],
+    "docs": "Reports deeply nested try statements.\n\n`max_nesting` (integer, default: 2) limits nesting of this construct.\nLocal functions and closures restart the nesting count.",
+    "domains": [],
+    "examples": {
+      "bad": "void handle() {\n  try {\n    try { print(1); } catch (_) {}\n  } catch (_) {}\n}",
+      "crossFile": null,
+      "good": "void handle() {\n  try { print(1); } catch (_) {}\n  try { void local() { try { print(2); } catch (_) {} } local(); } catch (_) {}\n}"
+    },
+    "group": "complexity",
+    "name": "avoid-nested-try-statements",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -1189,6 +1381,40 @@
   },
   {
     "crossFile": false,
+    "description": "Reports function bodies with excessive nesting-weighted control flow.",
+    "diagnostics": [
+      {
+        "column": 29,
+        "file": null,
+        "line": 1,
+        "message": "Function has cognitive complexity 3 (max 2). Reduce nesting or extract helpers."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 4,
+        "message": "Function has cognitive complexity 3 (max 2). Reduce nesting or extract helpers."
+      }
+    ],
+    "docs": "Reports function bodies with excessive nesting-weighted control flow.\n\n`max_complexity` (integer, default: 15) limits the score. Ifs, loops,\nswitches, ternaries, and catches cost one plus their nesting depth. Else-if\nand else cost one without extra nesting. Each connected logical operator\nsequence costs one, with another point when && changes to || or vice versa.\nTry/finally and plain blocks do not add complexity. Nested callable bodies\nare measured independently.",
+    "domains": [],
+    "examples": {
+      "bad": "void handle(bool a, bool b) {\n  if (a) { while (b) { print(1); } }\n}\nvoid alternatives(int x) {\n  if (x == 1) {} else if (x == 2) {} else {}\n}",
+      "crossFile": null,
+      "good": "void handle(bool a, bool b) { if (a) { print(1); } if (b) { print(2); } }\nvoid outer(bool a) { void inner() { if (a) {} } if (a) {} }\nvoid plain() { try { print(1); } finally { print(2); } }"
+    },
+    "group": "complexity",
+    "name": "cognitive-complexity",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a function whose cyclomatic complexity exceeds the configured threshold.",
     "diagnostics": [
       {
@@ -1493,6 +1719,34 @@
       "label": "Pyramid Lint",
       "upstreamId": "max_parameters_for_function",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports function bodies with too many statements.",
+    "diagnostics": [
+      {
+        "column": 15,
+        "file": null,
+        "line": 1,
+        "message": "Function contains 3 statements (max 2). Extract smaller functions."
+      }
+    ],
+    "docs": "Reports function bodies with too many statements.\n\n`max_statements` (integer, default: 20) limits executable and declaration\nstatements, excluding blocks, labels, empty statements, and local function\ndeclarations. Nested callable bodies are measured independently.",
+    "domains": [],
+    "examples": {
+      "bad": "void handle() {\n  print(1);\n  if (true) { print(2); }\n}",
+      "crossFile": null,
+      "good": "void handle() { print(1); print(2); }\nvoid outer() {\n  void local() { print(1); print(2); }\n  local();\n}\nint arrow() => 1;"
+    },
+    "group": "complexity",
+    "name": "max-statements",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -2935,6 +3189,96 @@
   },
   {
     "crossFile": false,
+    "description": "Limits the depth of an inline Flutter widget construction tree.",
+    "diagnostics": [
+      {
+        "column": 22,
+        "file": null,
+        "line": 10,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 11,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 12,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 13,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 14,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 15,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 16,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 17,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 18,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 19,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 25,
+        "message": "Widget tree has a depth of 4 (max 3). Extract a subtree into a widget."
+      }
+    ],
+    "docs": "Limits the depth of an inline Flutter widget construction tree.\n\nOnly resolved constructors of Flutter `Widget` subtypes add a level.\nCanonical Flutter `SizedBox` constructors are transparent and do not count.\nLists, parentheses, casts, null assertions and conditional branches add no levels.\nHelper calls and closures start independent trees: their bodies/arguments are\nnot evidence of the widget returned by the call. References to extracted\nwidgets likewise do not expand a tree. Each tree is reported once at its root.\n\n`max_nesting` (integer, default: 8) is the maximum permitted widget depth;\nthe root is level one. This follows the widgets-nesting-level metric's default.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart' as f;\n\nclass Panel extends f.Widget {\n  const Panel({required this.child});\n  const Panel.named({required this.child});\n  final f.Widget child;\n}\ntypedef PanelAlias = Panel;\n\nf.Widget direct() => f.Center(child: f.Center(child: f.Center(child: f.Text('deep'))));\nf.Widget explicitNew() => new f.Center(child: new f.Center(child: new f.Center(child: new f.Text('deep'))));\nf.Widget constant() => const f.Center(child: f.Center(child: f.Center(child: f.Text('deep'))));\nf.Widget children() => f.Column(children: [f.Center(child: f.Center(child: f.Text('deep'))), f.Text('sibling')]);\nf.Widget conditional(bool flag) => f.Center(child: flag ? f.Center(child: f.Center(child: f.Text('deep'))) : f.Text('shallow'));\nf.Widget custom() => Panel.named(child: PanelAlias(child: f.Center(child: f.Text('deep'))));\nf.Widget parentheses() => f.Center(child: ((f.Center(child: (f.Center(child: f.Text('deep')))))));\nf.Widget collectionIf(bool flag) => f.Column(children: [if (flag) f.Center(child: f.Center(child: f.Text('deep')))]);\nf.Widget collectionSpread() => f.Column(children: [...[f.Center(child: f.Center(child: f.Text('deep')))]]);\nf.Widget sizedBoxIsTransparent() => f.Center(child: f.SizedBox(child: f.Center(child: f.Center(child: f.Text('deep')))));\n\nclass SizedBox extends f.Widget {\n  const SizedBox({required this.child});\n  final f.Widget child;\n}\nf.Widget unrelatedSizedBoxCounts() => SizedBox(child: SizedBox(child: SizedBox(child: f.Text('deep'))));",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart' as f;\n\nf.Widget leaf() => f.Text('one');\nf.Widget atLimit() => f.Center(child: f.Center(child: f.Text('three')));\nf.Widget parentheses() => (((((f.Text('one'))))));\nf.Widget siblings() => f.Column(children: [f.Text('a'), f.Text('b'), f.Text('c'), f.Text('d'), f.Text('e')]);\nf.Widget conditional(bool flag) => f.Center(child: flag ? f.Center(child: f.Text('three')) : f.Text('two'));\nf.Widget collectionFor(List<String> names) => f.Column(children: [for (final name in names) f.Text(name)]);\nf.Widget extracted(f.Widget subtree) => f.Center(child: subtree);\nf.Widget identity(f.Widget widget) => widget;\nf.Widget helperBoundary() => f.Center(child: identity(f.Center(child: f.Center(child: f.Text('three')))));\n\nclass Deferred extends f.Widget {\n  const Deferred(this.builder);\n  final f.Widget Function() builder;\n}\nf.Widget callbackBoundary() => Deferred(() => f.Center(child: f.Center(child: f.Text('three'))));\n\nvoid shadowed() {\n  final Center = (Object value) => value;\n  Center(Center(Center(Center('not widget construction'))));\n}\n\nclass Wrapper {\n  Wrapper(Object value);\n}\nObject unrelatedConstructors() => Wrapper(Wrapper(Wrapper(Wrapper(f.Text('one')))));\n\nf.Widget ignoredSizedBoxes() => f.SizedBox(child: f.SizedBox(child: f.SizedBox(child: f.SizedBox(child: f.Text('one')))));\nf.Widget sizedBoxWithinTree() => f.Center(child: f.SizedBox(child: f.Center(child: f.Text('three'))));"
+    },
+    "group": "complexity",
+    "name": "widget-tree-depth",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags concrete Equatable subclasses that do not declare an instance props property.",
     "diagnostics": [
       {
@@ -4069,6 +4413,60 @@
     "group": "correctness",
     "name": "avoid-empty-setstate",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports inline framework groups without any test registrations.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Add a test to this group or remove the empty group."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 4,
+        "message": "Add a test to this group or remove the empty group."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Add a test to this group or remove the empty group."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Add a test to this group or remove the empty group."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Add a test to this group or remove the empty group."
+      }
+    ],
+    "docs": "Reports inline framework groups without any test registrations.\n\n`include_methods` (array of strings, default: []) adds custom test registration helpers.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvoid main() {\n  group('empty', () {});\n  group('setup only', () { setUp(() {}); });\n  group('nested empty', () {\n    group('also empty', () {});\n  });\n  group('statements', () { final value = 1; final other = value + 1; });\n  group('lifecycle callback calls do not register tests', () { setUp(() { print('setup'); }); });\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_test/flutter_test.dart' as t;\nvoid callback() {}\nvoid main() {\n  t.group('one', () { t.test('works', () {}); });\n  t.group('nested', () { t.group('inner', () { t.test('works', () {}); }); });\n  t.group('widget', () { t.testWidgets('works', (tester) {}); });\n  t.group('external callback', callback);\n  t.group('skipped tests still registered', () { t.test('skipped', () {}, skip: true); });\n  void group(String description, dynamic body) {}\n  group('local function', () {});\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-empty-test-groups",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -9364,6 +9762,66 @@
       "label": "Dart lints",
       "upstreamId": "null_closures",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/null_closures"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires expectLater when a canonical expect call receives an unawaited Future.",
+    "diagnostics": [
+      {
+        "column": 14,
+        "file": null,
+        "line": 5,
+        "message": "Use expectLater and await its result when expecting a Future."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 6,
+        "message": "Use expectLater and await its result when expecting a Future."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 7,
+        "message": "Use expectLater and await its result when expecting a Future."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 8,
+        "message": "Use expectLater and await its result when expecting a Future."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 10,
+        "message": "Use expectLater and await its result when expecting a Future."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 11,
+        "message": "Use expectLater and await its result when expecting a Future."
+      }
+    ],
+    "docs": "Requires expectLater when a canonical expect call receives an unawaited Future.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart' as t;\nFuture<int> number() async => 1;\nvoid main() {\n  t.test('unawaited future actuals', () {\n    t.expect(Future.value(1), 1);\n    t.expect(Future.value(1), t.completes);\n    t.expect(Future.error('bad'), t.throwsA(t.equals('bad')));\n    t.expect(number(), t.equals(1));\n    final pending = Future.value(1);\n    t.expect(pending, t.equals(1));\n    t.expect(Future.value(1), t.predicate((value) => true));\n  });\n}",
+      "crossFile": null,
+      "good": "import 'package:test/test.dart' as t;\nvoid main() {\n  t.test('good', () async {\n    await t.expectLater(Future.value(1), t.completes);\n    await t.expectLater(Stream.value(1), t.emits(1));\n    t.expect(1, t.equals(1));\n    t.expect(true, t.isTrue);\n    t.expect(null, t.isNull);\n    final completes = 1;\n    t.expect(1, completes);\n    void expect(dynamic value, dynamic matcher) {}\n    expect(Future.value(1), t.completes);\n  });\n}"
+    },
+    "group": "correctness",
+    "name": "prefer-expect-later",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -23319,6 +23777,82 @@
   },
   {
     "crossFile": false,
+    "description": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.",
+    "diagnostics": [],
+    "docs": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.\n\nFiles without main are test support libraries and do not need the suffix.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "// A similarly named local API without a test-framework import is not a test.\nvoid test(String name, dynamic body) {}\nvoid group(String name, dynamic body) {}\nvoid expect(dynamic actual, dynamic expected) {}\nvoid main() { group('empty', () {}); test('same', () {}); test('same', () {}); expect(Future.value(1), 1); }",
+      "crossFile": [
+        {
+          "content": "void main() {}",
+          "path": "path_cases/lib/main.dart"
+        },
+        {
+          "content": "name: filename_rule_fixture\nenvironment:\n  sdk: ^3.9.0",
+          "path": "path_cases/pubspec.yaml"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/bad.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/bad_integration.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/bad_widget.dart"
+        },
+        {
+          "content": "class Helper { void main() {} }",
+          "path": "path_cases/test/classes.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/fixtures/app/lib/main.dart"
+        },
+        {
+          "content": "name: nested_path_fixture\nenvironment:\n  sdk: ^3.9.0",
+          "path": "path_cases/test/fixtures/app/pubspec.yaml"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/fixtures/app/test/bad.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/good_test.dart"
+        },
+        {
+          "content": "void helper() {}",
+          "path": "path_cases/test/helper.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/unit/bad_service.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "path_cases/test/unit/bad_util.dart"
+        }
+      ],
+      "good": "import 'package:test/test.dart';\nvoid main() { test('case', () {}); group('suite', () {}); }"
+    },
+    "group": "style",
+    "name": "prefer-correct-test-file-name",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags type declarations whose name is not well-formed UpperCamelCase.",
     "diagnostics": [
       {
@@ -25851,6 +26385,60 @@
     },
     "group": "style",
     "name": "prefer-switch-expression",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Recommends Matcher expectations and direct type, equality, or ordering matchers.",
+    "diagnostics": [
+      {
+        "column": 18,
+        "file": null,
+        "line": 4,
+        "message": "Use isTrue instead of the literal true matcher."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 5,
+        "message": "Use isFalse instead of the literal false matcher."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 6,
+        "message": "Use isNull instead of the literal null matcher."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 7,
+        "message": "Match the actual value directly with equals, isNot, or an ordering matcher instead of comparing it before expect."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 8,
+        "message": "Use isFalse instead of the literal false matcher."
+      }
+    ],
+    "docs": "Recommends Matcher expectations and direct type, equality, or ordering matchers.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvoid main() {\n  test('manual expectations', () async {\n    expect(true, true);\n    expect(false, false);\n    expect(null, null);\n    expect(1 == 1, true);\n    await expectLater(false, false);\n  });\n}",
+      "crossFile": null,
+      "good": "import 'package:test/test.dart' as t;\nvoid main() {\n  t.test('dedicated matchers', () {\n    t.expect(true, t.isTrue);\n    t.expect(false, t.isFalse);\n    t.expect(null, t.isNull);\n    t.expect(1, t.equals(1));\n    t.expect([1], t.isNotNull);\n    void expect(dynamic actual, dynamic matcher) {}\n    expect(true, true);\n  });\n}"
+    },
+    "group": "style",
+    "name": "prefer-test-matchers",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -30975,6 +31563,84 @@
   },
   {
     "crossFile": false,
+    "description": "Requires public declarations in test files, except main, to be private.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 2,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 6,
+        "file": null,
+        "line": 5,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 6,
+        "file": null,
+        "line": 8,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 9,
+        "message": "Make this top-level test declaration private."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 10,
+        "message": "Make this top-level test declaration private."
+      }
+    ],
+    "docs": "Requires public declarations in test files, except main, to be private.\n\nPrivate test helpers and fixtures cannot accidentally become another file's\nAPI and can be identified as unused without cross-library consumers.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvar count = 0;\nconst value = 1;\nfinal values = <int>[];\nvoid helper() {}\nclass Helper {}\nmixin Behavior {}\nenum Choice { first }\nextension Description on int { String describe() => '$this'; }\ntypedef Callback = void Function();\nvoid main() { test('case', () {}); }",
+      "crossFile": null,
+      "good": "import 'package:test/test.dart';\nvar _count = 0;\nconst _value = 1;\nfinal _values = <int>[];\nvoid _helper() {}\nclass _Helper { int publicMember = 1; }\nmixin _Behavior {}\nenum _Choice { first }\nextension _Description on int { String describe() => '$this'; }\nextension on String { int get lengthTwice => length * 2; }\ntypedef _Callback = void Function();\nvoid main() { var local = 0; test('case', () { local++; }); }"
+    },
+    "group": "suspicious",
+    "name": "avoid-top-level-members-in-tests",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags implicit formal parameters, catch variables, and type parameters that shadow a type in their enclosing scope.",
     "diagnostics": [
       {
@@ -32055,6 +32721,60 @@
       "label": "Dart lints",
       "upstreamId": "overridden_fields",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/overridden_fields"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reports duplicate test descriptions within a group and constant names in loops.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "Use a unique test description within this group."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 5,
+        "message": "Use a unique test description within this group."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "Use a unique test description within this group."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 9,
+        "message": "Use a unique test description within this group."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 12,
+        "message": "Use a unique test description within this group."
+      }
+    ],
+    "docs": "Reports duplicate test descriptions within a group and constant names in loops.\n\n`include_methods` (array of strings, default: []) adds custom test registration helpers.",
+    "domains": [
+      "test"
+    ],
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvoid main() {\n  test('same', () {});\n  test('same', () {});\n  test(\"same\", () {});\n  group('inner', () {\n    test('duplicate', () {});\n    test('duplicate', () {});\n    test('duplicate', () {});\n  });\n  const description = 'same';\n  test(description, () {});\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_test/flutter_test.dart' as t;\nvoid main() {\n  t.test('one', () {});\n  t.test('two', () {});\n  t.group('first', () { t.test('same', () {}); });\n  t.group('second', () { t.test('same', () {}); });\n  t.testWidgets('widget', (tester) {});\n  for (var i = 0; i < 2; i++) { t.test('case $i', () {}); }\n  void test(String name, dynamic callback) {}\n  test('one', () {});\n}"
+    },
+    "group": "suspicious",
+    "name": "prefer-unique-test-names",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

@@ -1,0 +1,1 @@
+{"linter": {"rules": {"suspicious": {"avoid-top-level-members-in-tests": "warn"}}}}

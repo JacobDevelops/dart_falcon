@@ -1,0 +1,16 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "prefer-unique-test-names": {
+          "level": "warn",
+          "options": {
+            "include_methods": [
+              "testCase"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

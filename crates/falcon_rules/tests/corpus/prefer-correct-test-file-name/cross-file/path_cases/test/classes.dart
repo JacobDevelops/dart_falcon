@@ -1,0 +1,1 @@
+class Helper { void main() {} }

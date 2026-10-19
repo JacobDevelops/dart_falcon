@@ -54,14 +54,21 @@
       "use-key-in-widget-constructors",
       "use-once-constructors-once-provider",
       "use-setstate-synchronously",
-      "use-spacer-as-expanded-child"
+      "use-spacer-as-expanded-child",
+      "widget-tree-depth"
     ]
   },
   {
     "name": "test",
     "rules": [
       "avoid-duplicate-test-assertions",
-      "missing-test-assertion"
+      "avoid-empty-test-groups",
+      "avoid-top-level-members-in-tests",
+      "missing-test-assertion",
+      "prefer-correct-test-file-name",
+      "prefer-expect-later",
+      "prefer-test-matchers",
+      "prefer-unique-test-names"
     ]
   },
   {

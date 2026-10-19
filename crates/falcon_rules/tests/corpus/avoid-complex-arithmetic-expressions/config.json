@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "avoid-complex-arithmetic-expressions": {
+          "level": "warn",
+          "options": {
+            "max_terms": 3
+          }
+        }
+      }
+    }
+  }
+}
