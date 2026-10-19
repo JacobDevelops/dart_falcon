@@ -8,4 +8,5 @@ void examples(Widget child, dynamic image, dynamic color, double size, String la
   new SingleChildScrollView(child: Column(children: [child])); /* expect: prefer-using-list-view */
   f.SingleChildScrollView(child: f.Column()); /* expect: prefer-using-list-view */
   V(child: Column()); /* expect: prefer-using-list-view */
+  SingleChildScrollView(child: Column(children: [Text('a'), Text('much longer')])); /* expect: prefer-using-list-view, msg: "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding." */
 }

@@ -1,6 +1,11 @@
-//! Flags SingleChildScrollView directly containing a Flutter Column with no
-//! arguments other than children. Column-specific layout settings and keys are
-//! retained instead of suggesting a ListView that cannot directly preserve them.
+//! Suggests considering ListView for a SingleChildScrollView containing a plain
+//! Flutter Column. This is not a layout-neutral replacement: preserve the
+//! Column's child alignment and scroll view's padding explicitly. ListView
+//! stretches children across the cross axis and adds MediaQuery padding by default.
+//! For the default Column alignment, wrap each list child in an Align with
+//! Alignment.topCenter; use the original scroll padding, or EdgeInsets.zero
+//! when none was supplied. Review constraints and child lifecycle separately.
+//! No automatic fix is offered.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
@@ -69,7 +74,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if matches {
             self.diagnostics.push(self.ctx.diagnostic(
                 "prefer-using-list-view",
-                "Use ListView instead of a SingleChildScrollView containing a Column.",
+                "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding.",
                 crate::lint::flutter::constructor_span(node),
             ));
         }

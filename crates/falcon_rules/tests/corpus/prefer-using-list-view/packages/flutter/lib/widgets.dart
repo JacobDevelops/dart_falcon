@@ -1,4 +1,5 @@
 class Widget { const Widget(); }
+class Text extends Widget { const Text(String data); }
 class Border { const Border(); Border.all({dynamic color, double width = 1, dynamic style, double strokeAlign = -1}); const Border.fromBorderSide(dynamic side); }
 class BorderSide { const BorderSide({dynamic color, double width = 1}); }
 class Image extends Widget { const Image({dynamic image, String? semanticLabel, bool excludeFromSemantics = false, dynamic opacity}); Image.asset(String name, {String? semanticLabel, bool excludeFromSemantics = false}); Image.network(String name, {String? semanticLabel, bool excludeFromSemantics = false}); Image.file(dynamic file, {String? semanticLabel, bool excludeFromSemantics = false}); Image.memory(dynamic bytes, {String? semanticLabel, bool excludeFromSemantics = false}); }
