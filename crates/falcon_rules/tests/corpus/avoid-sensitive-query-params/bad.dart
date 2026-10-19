@@ -12,3 +12,11 @@ void interpolationPunctuation(String host, String path, String key) {
   final pathQuery = 'https://example.com/${path.replaceAll('#', '')}?password=$key'; /* expect: avoid-sensitive-query-params */
   final laterQuery = 'https://example.com/?page=${path.replaceAll('', '#')}&token=$key'; /* expect: avoid-sensitive-query-params */
 }
+
+void literalQueries(String token) {
+  final direct = Uri(scheme: 'https', host: 'example.com', query: 'access_token=$token'); /* expect: avoid-sensitive-query-params */
+  final explicitNew = new Uri(scheme: 'https', host: 'example.com', query: ('page=1&api_key=$token')); /* expect: avoid-sensitive-query-params */
+  final interpolation = Uri(query: 'page=${token.replaceAll('', '#')}&password=$token'); /* expect: avoid-sensitive-query-params */
+  final hashInValue = Uri(query: 'next=/home#top&access_token=$token'); /* expect: avoid-sensitive-query-params */
+  final adjacentKey = Uri(query: 'page=1&' 'access_token=$token'); /* expect: avoid-sensitive-query-params */
+}

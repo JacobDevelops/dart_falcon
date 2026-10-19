@@ -30,7 +30,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         match node {
             Expr::StringLit(literal) => {
-                if has_sensitive_query(literal) {
+                if has_sensitive_query(literal, false) {
                     self.report(node.span());
                 }
             }
@@ -75,6 +75,11 @@ impl<'a> Collector<'a> {
         for arg in args.named() {
             if arg.name().name() == "queryParameters" {
                 self.check_map(arg.value());
+            } else if arg.name().name() == "query"
+                && let Expr::StringLit(query) = arg.value().unparenthesized()
+                && has_sensitive_query(query, true)
+            {
+                self.report(arg.value().span());
             }
         }
         if positional_query && let Some(query) = args.positional().nth(2) {
@@ -110,10 +115,11 @@ impl<'a> Collector<'a> {
     }
 }
 
-fn has_sensitive_query(literal: StringLitNode<'_>) -> bool {
+fn has_sensitive_query(literal: StringLitNode<'_>, query_only: bool) -> bool {
+    let mut at_key_start = query_only;
     for (segment, span) in literal.segments() {
         let text = segment.content;
-        if !text.starts_with("https://") && !text.starts_with("http://") {
+        if !query_only && !text.starts_with("https://") && !text.starts_with("http://") {
             continue;
         }
         let offset = span.start + segment.content_offset;
@@ -122,8 +128,8 @@ fn has_sensitive_query(literal: StringLitNode<'_>) -> bool {
             .map(|node| node.syntax().span())
             .filter(|interpolation| interpolation.start >= offset && interpolation.end <= span.end)
             .peekable();
-        let mut query = false;
-        let mut key_start = None;
+        let mut query = query_only;
+        let mut key_start = (query_only && at_key_start).then_some(0);
         let mut index = 0;
         while index < text.len() {
             if let Some(interpolation) = interpolations.peek()
@@ -137,7 +143,7 @@ fn has_sensitive_query(literal: StringLitNode<'_>) -> bool {
                 continue;
             }
             match text.as_bytes()[index] {
-                b'#' => break,
+                b'#' if !query_only => break,
                 b'?' if !query => {
                     query = true;
                     key_start = Some(index + 1);
@@ -153,6 +159,7 @@ fn has_sensitive_query(literal: StringLitNode<'_>) -> bool {
             }
             index += 1;
         }
+        at_key_start = key_start == Some(text.len());
     }
     false
 }
