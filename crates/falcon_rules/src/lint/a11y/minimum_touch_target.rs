@@ -81,42 +81,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if ["GestureDetector", "InkWell", "InkResponse"]
             .iter()
             .any(|name| index.is_package_declaration(&child_identity, "flutter", name))
-            && !child_args.named().any(|arg| {
-                matches!(
-                    arg.name().name(),
-                    "onTap"
-                        | "onTapDown"
-                        | "onTapUp"
-                        | "onTapCancel"
-                        | "onDoubleTap"
-                        | "onDoubleTapDown"
-                        | "onDoubleTapCancel"
-                        | "onLongPress"
-                        | "onLongPressStart"
-                        | "onLongPressMoveUpdate"
-                        | "onLongPressUp"
-                        | "onLongPressEnd"
-                        | "onLongPressDown"
-                        | "onSecondaryTap"
-                        | "onSecondaryTapDown"
-                        | "onSecondaryTapUp"
-                        | "onTertiaryTapDown"
-                        | "onTertiaryTapUp"
-                        | "onPanStart"
-                        | "onPanUpdate"
-                        | "onPanEnd"
-                        | "onPanDown"
-                        | "onScaleStart"
-                        | "onScaleUpdate"
-                        | "onScaleEnd"
-                        | "onHorizontalDragStart"
-                        | "onHorizontalDragUpdate"
-                        | "onHorizontalDragEnd"
-                        | "onVerticalDragStart"
-                        | "onVerticalDragUpdate"
-                        | "onVerticalDragEnd"
-                ) && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
-            })
+            && !crate::lint::flutter::has_active_gesture_callback(child_args)
         {
             return;
         }

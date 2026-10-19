@@ -4,6 +4,45 @@ use falcon_analyze::{
 };
 use falcon_syntax::cst::{ArgList, DartType, Expr, Span};
 
+pub(crate) fn has_active_gesture_callback(args: ArgList<'_>) -> bool {
+    args.named().any(|arg| {
+        matches!(
+            arg.name().name(),
+            "onTap"
+                | "onTapDown"
+                | "onTapUp"
+                | "onTapCancel"
+                | "onDoubleTap"
+                | "onDoubleTapDown"
+                | "onDoubleTapCancel"
+                | "onLongPress"
+                | "onLongPressStart"
+                | "onLongPressMoveUpdate"
+                | "onLongPressUp"
+                | "onLongPressEnd"
+                | "onLongPressDown"
+                | "onSecondaryTap"
+                | "onSecondaryTapDown"
+                | "onSecondaryTapUp"
+                | "onTertiaryTapDown"
+                | "onTertiaryTapUp"
+                | "onPanStart"
+                | "onPanUpdate"
+                | "onPanEnd"
+                | "onPanDown"
+                | "onScaleStart"
+                | "onScaleUpdate"
+                | "onScaleEnd"
+                | "onHorizontalDragStart"
+                | "onHorizontalDragUpdate"
+                | "onHorizontalDragEnd"
+                | "onVerticalDragStart"
+                | "onVerticalDragUpdate"
+                | "onVerticalDragEnd"
+        ) && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
+    })
+}
+
 pub(crate) fn widget_construction<'a>(expr: Expr<'a>) -> Option<(&'a str, ArgList<'a>, Span)> {
     match expr.unparenthesized() {
         Expr::New(node) => {

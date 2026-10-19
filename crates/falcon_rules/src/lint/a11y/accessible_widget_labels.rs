@@ -74,42 +74,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        if !args.named().any(|arg| {
-            matches!(
-                arg.name().name(),
-                "onTap"
-                    | "onTapDown"
-                    | "onTapUp"
-                    | "onTapCancel"
-                    | "onDoubleTap"
-                    | "onDoubleTapDown"
-                    | "onDoubleTapCancel"
-                    | "onLongPress"
-                    | "onLongPressStart"
-                    | "onLongPressMoveUpdate"
-                    | "onLongPressUp"
-                    | "onLongPressEnd"
-                    | "onLongPressDown"
-                    | "onSecondaryTap"
-                    | "onSecondaryTapDown"
-                    | "onSecondaryTapUp"
-                    | "onTertiaryTapDown"
-                    | "onTertiaryTapUp"
-                    | "onPanStart"
-                    | "onPanUpdate"
-                    | "onPanEnd"
-                    | "onPanDown"
-                    | "onScaleStart"
-                    | "onScaleUpdate"
-                    | "onScaleEnd"
-                    | "onHorizontalDragStart"
-                    | "onHorizontalDragUpdate"
-                    | "onHorizontalDragEnd"
-                    | "onVerticalDragStart"
-                    | "onVerticalDragUpdate"
-                    | "onVerticalDragEnd"
-            ) && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
-        }) {
+        if !crate::lint::flutter::has_active_gesture_callback(args) {
             return;
         }
         if self
