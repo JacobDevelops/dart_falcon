@@ -45,6 +45,14 @@
                 "message": "Wildcard member ban."
               },
               {
+                "deny": ["CascadeBox.size"],
+                "message": "Avoid the enclosing field."
+              },
+              {
+                "deny": ["BannedCascadeOther.size"],
+                "message": "Avoid the receiver field."
+              },
+              {
                 "deny": [
                   "*",
                   null

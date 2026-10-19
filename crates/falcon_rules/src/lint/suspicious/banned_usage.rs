@@ -249,7 +249,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         })))
                     && state.type_parameters.lookup(identifier.name()).is_none() =>
             {
-                if Self::is_unnamed_extension_member(identifier) {
+                if Self::is_unnamed_extension_member(identifier)
+                    || identifier
+                        .syntax()
+                        .parent()
+                        .and_then(CascadeAssign::cast)
+                        .is_some_and(|assignment| {
+                            assignment.target().unparenthesized().span() == identifier.span()
+                        })
+                {
                     return;
                 }
                 if let Some(owner) = &state.constant_owner
