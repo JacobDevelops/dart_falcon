@@ -65,6 +65,12 @@
       "correctness": {
         "avoid-empty-test-groups": "warn",
         "prefer-expect-later": "warn",
+        "avoid-mounted-in-setstate": "warn",
+        "avoid-disposing-late-fields": "warn",
+        "avoid-missing-controller": "warn",
+        "always-pass-global-key": "warn",
+        "avoid-incorrect-image-opacity": "warn",
+        "prefer-define-hero-tag": "warn",
         "avoid-web-libraries-in-flutter": "warn",
         "no-logic-in-create-state": "warn",
         "avoid-relative-lib-imports": "warn",
@@ -167,6 +173,10 @@
         "avoid-mutable-equatable-subclass-fields": "warn"
       },
       "performance": {
+        "prefer-single-setstate": "warn",
+        "avoid-border-all": "warn",
+        "prefer-using-list-view": "warn",
+        "avoid-unnecessary-gesture-detector": "warn",
         "sized-box-for-whitespace": "warn",
         "unnecessary-to-list-in-spreads": "warn",
         "prefer-const-border-radius": "warn",
@@ -199,6 +209,9 @@
         "avoid-unnecessary-overrides-in-state": "warn",
         "prefer-correct-test-file-name": "warn",
         "prefer-test-matchers": "warn",
+        "avoid-wrapping-in-padding": "warn",
+        "prefer-sized-box-square": "warn",
+        "prefer-void-callback": "warn",
         "sort-child-properties-last": "warn",
         "use-full-hex-values-for-flutter-colors": "warn",
         "camel-case-extensions": "warn",
@@ -427,9 +440,13 @@
         "cascade-after-null-coalescing": "warn"
       },
       "security": {
+        "avoid-hardcoded-credentials": "warn",
         "avoid-weak-cryptographic-algorithms": "warn"
       },
       "a11y": {
+        "accessible-widget-labels": "warn",
+        "minimum-touch-target": "warn",
+        "avoid-missing-image-alt": "warn",
         "prefer-action-button-tooltip": "warn"
       }
     }

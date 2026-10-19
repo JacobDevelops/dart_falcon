@@ -1,6 +1,924 @@
 [
   {
     "crossFile": false,
+    "description": "Warn about unlabeled interactive gesture targets.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 11,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 12,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 13,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 14,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 15,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 19,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 20,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 27,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 31,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 32,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 33,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 34,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 35,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 36,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 37,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 38,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 39,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 40,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 41,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 42,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 43,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 45,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 46,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 47,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 48,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 49,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 50,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 51,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 52,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 53,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 54,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 55,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 56,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 57,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 58,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 59,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 60,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 64,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 65,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 66,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 67,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 68,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 69,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 70,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 71,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 72,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 73,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 74,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 75,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 76,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 77,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 78,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 79,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 80,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 81,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 82,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 83,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 84,
+        "message": "Provide an accessible label for this interactive widget."
+      }
+    ],
+    "docs": "Warn about unlabeled interactive gesture targets.\n\nChecks resolved Flutter GestureDetector, InkWell, and InkResponse constructors.\nDirect Text children, Icon semanticLabel, or Semantics/Tooltip ancestors with\nplain or rich labels supply labels. Inert/excluded gestures and unknown/custom\nchildren are skipped. Dynamic labels are accepted; null and empty literals are not.\nThis is a local heuristic, not compliance validation. Image labels and action\nbutton tooltips are covered by avoid-missing-image-alt and\nprefer-action-button-tooltip respectively.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions() {\n  GestureDetector(onTap: () {});\n  f.InkWell(onTap: () {}, child: Icon(null));\n  InkResponse(onTap: () {}, child: Text(' '));\n  GestureDetector(onTap: () {}, child: Icon(null));\n  InkWell(onTap: () {}, child: Text(''));\n  InkResponse(onTap: () {});\n  Tooltip(message: '', child: InkWell(onTap: () {}));\n  Tooltip(richMessage: null, child: InkWell(onTap: () {}));\n  Tooltip(richMessage: (null), child: InkResponse(onTap: () {}));\n  Semantics(attributedLabel: null, child: InkWell(onTap: () {}));\n  Semantics(attributedLabel: (null), child: InkResponse(onTap: () {}));\n}\n\nvoid shadowed(dynamic Tooltip, dynamic Semantics) {\n  Tooltip(richMessage: 'Delete', child: InkWell(onTap: () {}));\n  Semantics(attributedLabel: 'Delete', child: InkResponse(onTap: () {}));\n}\n\nvoid siblings(dynamic richMessage, dynamic attributedLabel) {\n  Tooltip(richMessage: richMessage, child: InkWell(onTap: () {}));\n  InkWell(onTap: () {});\n  Semantics(attributedLabel: attributedLabel, child: InkResponse(onTap: () {}));\n  InkResponse(onTap: () {});\n}\n\nvoid additionalGestures(dynamic callback) {\n  GestureDetector(onSecondaryTapCancel: callback);\n  GestureDetector(onTertiaryTapCancel: callback);\n  GestureDetector(onLongPressCancel: callback);\n  GestureDetector(onSecondaryLongPressDown: callback);\n  GestureDetector(onSecondaryLongPressCancel: callback);\n  GestureDetector(onSecondaryLongPress: callback);\n  GestureDetector(onSecondaryLongPressStart: callback);\n  GestureDetector(onSecondaryLongPressMoveUpdate: callback);\n  GestureDetector(onSecondaryLongPressUp: callback);\n  GestureDetector(onSecondaryLongPressEnd: callback);\n  GestureDetector(onTertiaryLongPressDown: callback);\n  GestureDetector(onTertiaryLongPressCancel: callback);\n  GestureDetector(onTertiaryLongPress: callback);\n  GestureDetector(onTertiaryLongPressStart: callback);\n  GestureDetector(onTertiaryLongPressMoveUpdate: callback);\n  GestureDetector(onTertiaryLongPressUp: callback);\n  GestureDetector(onTertiaryLongPressEnd: callback);\n  GestureDetector(onVerticalDragDown: callback);\n  GestureDetector(onVerticalDragCancel: callback);\n  GestureDetector(onHorizontalDragDown: callback);\n  GestureDetector(onHorizontalDragCancel: callback);\n  GestureDetector(onForcePressStart: callback);\n  GestureDetector(onForcePressPeak: callback);\n  GestureDetector(onForcePressUpdate: callback);\n  GestureDetector(onForcePressEnd: callback);\n  GestureDetector(onPanCancel: callback);\n  f.GestureDetector(onTapMove: (_) {}, onTap: callback);\n  GestureDetector(onSecondaryLongPress: () {});\n  InkWell(onSecondaryTapCancel: () {}, onSecondaryTapDown: callback);\n  InkResponse(onSecondaryTapCancel: (callback), onSecondaryTap: () {});\n}\n\nvoid inkEnablingCallbacks(dynamic callback) {\n  InkWell(onTap: callback);\n  InkWell(onTapDown: callback);\n  InkWell(onTapUp: callback);\n  InkWell(onDoubleTap: callback);\n  InkWell(onLongPress: callback);\n  InkWell(onLongPressUp: callback);\n  InkWell(onSecondaryTap: callback);\n  InkWell(onSecondaryTapDown: callback);\n  InkWell(onSecondaryTapUp: callback);\n  InkResponse(onTap: callback);\n  InkResponse(onTapDown: callback);\n  InkResponse(onTapUp: callback);\n  InkResponse(onDoubleTap: callback);\n  InkResponse(onLongPress: callback);\n  InkResponse(onLongPressUp: callback);\n  InkResponse(onSecondaryTap: callback);\n  InkResponse(onSecondaryTapDown: callback);\n  InkResponse(onSecondaryTapUp: callback);\n  GestureDetector(onTapCancel: callback);\n  InkWell(onTapCancel: callback, onTap: () {});\n  InkResponse(onTapCancel: () {}, onTapUp: callback);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(String label) {\n  IconButton(tooltip: 'Add');\n  f.IconButton.filled(tooltip: label);\n  FloatingActionButton(child: Text('Add'));\n  GestureDetector(onTap: () {}, child: Text('Open'));\n  InkWell(onTap: () {}, child: Icon(null, semanticLabel: 'Open'));\n  Semantics(label: 'Open', child: InkResponse(onTap: () {}));\n  Tooltip(message: 'Add', child: IconButton());\n  GestureDetector(excludeFromSemantics: true);\n  TextButton(child: Text('Save'));\n  GestureDetector();\n  InkWell(onTap: null);\n  InkResponse();\n  IconButton(icon: customLabel());\n  GestureDetector(onTap: () {}, child: customLabel());\n}\nvoid shadow(dynamic IconButton) { IconButton(); }\nWidget customLabel() => Text('Custom label');\n\nvoid alternatives(dynamic richMessage, dynamic attributedLabel) {\n  Tooltip(richMessage: TextSpan(text: 'Delete'), child: InkWell(onTap: () {}, child: Icon(null)));\n  Semantics(attributedLabel: AttributedString('Delete'), child: InkResponse(onTap: () {}, child: Icon(null)));\n  f.Tooltip(richMessage: (richMessage), child: f.GestureDetector(onTap: () {}, child: f.Icon(null)));\n  f.Semantics(attributedLabel: (attributedLabel), child: f.InkWell(onTap: () {}, child: f.Icon(null)));\n  Tooltip(message: 'Delete', richMessage: null, child: InkWell(onTap: () {}));\n  Semantics(label: 'Delete', attributedLabel: null, child: InkResponse(onTap: () {}));\n}\n\nvoid inactiveAdditionalGestures() {\n  GestureDetector(onTapMove: (null));\n  GestureDetector(onSecondaryTapCancel: null);\n  GestureDetector(onTertiaryTapCancel: null);\n  GestureDetector(onLongPressCancel: null);\n  GestureDetector(onSecondaryLongPressDown: null);\n  GestureDetector(onSecondaryLongPressCancel: null);\n  GestureDetector(onSecondaryLongPress: ((null)));\n  GestureDetector(onSecondaryLongPressStart: null);\n  GestureDetector(onSecondaryLongPressMoveUpdate: null);\n  GestureDetector(onSecondaryLongPressUp: null);\n  GestureDetector(onSecondaryLongPressEnd: null);\n  GestureDetector(onTertiaryLongPressDown: null);\n  GestureDetector(onTertiaryLongPressCancel: null);\n  GestureDetector(onTertiaryLongPress: null);\n  GestureDetector(onTertiaryLongPressStart: null);\n  GestureDetector(onTertiaryLongPressMoveUpdate: null);\n  GestureDetector(onTertiaryLongPressUp: null);\n  GestureDetector(onTertiaryLongPressEnd: null);\n  GestureDetector(onVerticalDragDown: null);\n  GestureDetector(onVerticalDragCancel: null);\n  GestureDetector(onHorizontalDragDown: null);\n  GestureDetector(onHorizontalDragCancel: null);\n  GestureDetector(onForcePressStart: null);\n  GestureDetector(onForcePressPeak: null);\n  GestureDetector(onForcePressUpdate: null);\n  GestureDetector(onForcePressEnd: null);\n  GestureDetector(onPanCancel: null);\n  InkWell(onSecondaryTapCancel: (null));\n  InkResponse(onSecondaryTapCancel: null);\n  InkWell(onHover: (_) {}, onFocusChange: (_) {}, onHighlightChanged: (_) {});\n  InkResponse(onHover: (_) {}, onFocusChange: (_) {}, onHighlightChanged: (_) {});\n  GestureDetector(onSecondaryLongPress: () {}, child: Text('Open'));\n  Tooltip(message: 'Open', child: GestureDetector(onTapMove: (_) {}, onTap: () {}));\n}\n\nvoid inertRuntimeCallbacks(dynamic callback) {\n  GestureDetector(onTapMove: callback);\n  f.GestureDetector(onTapMove: (_) {});\n  GestureDetector(onTapMove: callback, onTap: (null));\n  InkWell(onSecondaryTapCancel: () {});\n  InkResponse(onSecondaryTapCancel: (callback));\n  InkWell(onTapCancel: callback);\n  InkResponse(onTapCancel: () {});\n  InkWell(onTapCancel: callback, onSecondaryTapCancel: callback);\n  InkResponse(onTapCancel: callback, onSecondaryTapCancel: callback);\n  InkWell(onTapCancel: callback, onSecondaryTapCancel: callback,\n    onTap: null, onTapDown: null, onTapUp: null, onDoubleTap: null,\n    onLongPress: null, onLongPressUp: null,\n    onSecondaryTap: null, onSecondaryTapDown: (null), onSecondaryTapUp: null);\n  InkResponse(onTapCancel: callback, onSecondaryTapCancel: callback,\n    onTap: null, onTapDown: null, onTapUp: null, onDoubleTap: null,\n    onLongPress: null, onLongPressUp: null,\n    onSecondaryTap: null, onSecondaryTapDown: null, onSecondaryTapUp: (null));\n}"
+    },
+    "group": "a11y",
+    "name": "accessible-widget-labels",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide a semantic label for this image, or explicitly exclude decorative images from semantics."
+      }
+    ],
+    "docs": "Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage.\nExplicitly null labels are missing; empty labels and dynamic label expressions\nare accepted. Explicit true or dynamic excludeFromSemantics values are exempt;\nonly an absent flag or literal false proves an image needs a label.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Image(image: image);\n  Image.asset(\"a\");\n  new Image.network(\"a\", semanticLabel: null);\n  const Image(excludeFromSemantics: false);\n  f.Image.memory(image);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Image(semanticLabel: \"Photo\");\n  Image.asset(\"a\", semanticLabel: label);\n  Image.network(\"a\", excludeFromSemantics: true);\n  const Image(semanticLabel: \"Icon\");\n  I.memory(image, semanticLabel: \"Preview\");\n}"
+    },
+    "group": "a11y",
+    "name": "avoid-missing-image-alt",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warn about explicitly undersized Flutter touch targets.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Provide a touch target at least 44 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 21,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Provide a touch target at least 44 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 23,
+        "message": "Provide a touch target at least 44 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 24,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 26,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 30,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 31,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 32,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 33,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 34,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 35,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 36,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 37,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 38,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 39,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 40,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 41,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 42,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 43,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 45,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 46,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 47,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 48,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 49,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 50,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 51,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 52,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 53,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 54,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 55,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 56,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 57,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 58,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 59,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 63,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 64,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 65,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 66,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 67,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 68,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 69,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 70,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 71,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 72,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 73,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 74,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 75,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 76,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 77,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 78,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 79,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 80,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 81,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 82,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 83,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      }
+    ],
+    "docs": "Warn about explicitly undersized Flutter touch targets.\n\nSizedBox and Container are checked when their direct child is interactive.\nCupertinoButton needs 44 logical pixels; other supported targets need 48.\nGestures without an active callback and explicitly disabled buttons are skipped.\nDynamic dimensions, indirect constraints, and non-interactive children are not inferred.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets() {\n  SizedBox(width: 47, child: IconButton());\n  SizedBox(height: 24.0, child: FloatingActionButton());\n  f.Container(width: 0, child: GestureDetector(onTap: () {}));\n  new SizedBox(width: 32, height: 32, child: InkWell(onTap: () {}));\n  const SizedBox(height: (47.5), child: TextButton());\n  Container(width: -1, child: ElevatedButton());\n  SizedBox(width: 43, child: CupertinoButton(onPressed: () {}));\n}\n\nvoid callbacks(dynamic callback) {\n  SizedBox(width: 1, child: IconButton(onPressed: callback));\n  SizedBox(width: 1, child: IconButton.filled(onPressed: () {}));\n  SizedBox(width: 1, child: FloatingActionButton.small(onPressed: (callback)));\n  SizedBox(width: 1, child: TextButton(onPressed: null, onLongPress: () {}));\n  SizedBox(width: 1, child: ElevatedButton(onPressed: (null), onLongPress: callback));\n  SizedBox(width: 1, child: OutlinedButton(onPressed: () {}, onLongPress: null));\n  SizedBox(width: 1, child: RawMaterialButton(onPressed: callback));\n  SizedBox(width: 43, child: CupertinoButton(onPressed: (callback)));\n  SizedBox(width: 43, child: CupertinoButton(onPressed: null, onLongPress: () {}));\n  SizedBox(width: 1, child: TextButton(onLongPress: null));\n  SizedBox(width: 1, child: GestureDetector(onTap: (callback)));\n  SizedBox(width: 1, child: InkWell(onTap: null, onLongPress: () {}));\n}\n\nvoid additionalGestures(dynamic callback) {\n  SizedBox(width: 1, child: GestureDetector(onSecondaryTapCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryTapCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onLongPressCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressDown: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPress: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressStart: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressMoveUpdate: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressUp: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressEnd: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressDown: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPress: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressStart: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressMoveUpdate: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressUp: callback));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressEnd: callback));\n  SizedBox(width: 1, child: GestureDetector(onVerticalDragDown: callback));\n  SizedBox(width: 1, child: GestureDetector(onVerticalDragCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onHorizontalDragDown: callback));\n  SizedBox(width: 1, child: GestureDetector(onHorizontalDragCancel: callback));\n  SizedBox(width: 1, child: GestureDetector(onForcePressStart: callback));\n  SizedBox(width: 1, child: GestureDetector(onForcePressPeak: callback));\n  SizedBox(width: 1, child: GestureDetector(onForcePressUpdate: callback));\n  SizedBox(width: 1, child: GestureDetector(onForcePressEnd: callback));\n  SizedBox(width: 1, child: GestureDetector(onPanCancel: callback));\n  f.SizedBox(width: 1, child: f.GestureDetector(onTapMove: (_) {}, onTap: callback));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPress: () {}));\n  SizedBox(width: 1, child: InkWell(onSecondaryTapCancel: () {}, onSecondaryTapDown: callback));\n  SizedBox(width: 1, child: InkResponse(onSecondaryTapCancel: (callback), onSecondaryTap: () {}));\n}\n\nvoid inkEnablingCallbacks(dynamic callback) {\n  SizedBox(width: 1, child: InkWell(onTap: callback));\n  SizedBox(width: 1, child: InkWell(onTapDown: callback));\n  SizedBox(width: 1, child: InkWell(onTapUp: callback));\n  SizedBox(width: 1, child: InkWell(onDoubleTap: callback));\n  SizedBox(width: 1, child: InkWell(onLongPress: callback));\n  SizedBox(width: 1, child: InkWell(onLongPressUp: callback));\n  SizedBox(width: 1, child: InkWell(onSecondaryTap: callback));\n  SizedBox(width: 1, child: InkWell(onSecondaryTapDown: callback));\n  SizedBox(width: 1, child: InkWell(onSecondaryTapUp: callback));\n  SizedBox(width: 1, child: InkResponse(onTap: callback));\n  SizedBox(width: 1, child: InkResponse(onTapDown: callback));\n  SizedBox(width: 1, child: InkResponse(onTapUp: callback));\n  SizedBox(width: 1, child: InkResponse(onDoubleTap: callback));\n  SizedBox(width: 1, child: InkResponse(onLongPress: callback));\n  SizedBox(width: 1, child: InkResponse(onLongPressUp: callback));\n  SizedBox(width: 1, child: InkResponse(onSecondaryTap: callback));\n  SizedBox(width: 1, child: InkResponse(onSecondaryTapDown: callback));\n  SizedBox(width: 1, child: InkResponse(onSecondaryTapUp: callback));\n  SizedBox(width: 1, child: GestureDetector(onTapCancel: callback));\n  SizedBox(width: 1, child: InkWell(onTapCancel: callback, onTap: () {}));\n  SizedBox(width: 1, child: InkResponse(onTapCancel: () {}, onTapUp: callback));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets(double size) {\n  SizedBox(width: 48, height: 48, child: IconButton());\n  Container(width: 60, child: GestureDetector(onTap: () {}));\n  SizedBox(width: size, child: InkWell());\n  SizedBox(width: 16, child: Text('Decoration'));\n  SizedBox(child: FloatingActionButton());\n  IconButton();\n  SizedBox(width: 16);\n  SizedBox(width: 44, height: 44, child: CupertinoButton(onPressed: () {}));\n  SizedBox(width: 1, child: GestureDetector());\n  SizedBox(width: 1, child: InkWell(onTap: null));\n  SizedBox(width: 1, child: InkResponse());\n  SizedBox(width: 1, child: IconButton(onPressed: null));\n  f.Container(height: 1, child: f.IconButton.filled(onPressed: (null)));\n  SizedBox(width: 1, child: FloatingActionButton(onPressed: null));\n  SizedBox(width: 1, child: FloatingActionButton.small(onPressed: (null)));\n  SizedBox(width: 1, child: TextButton(onPressed: null));\n  SizedBox(width: 1, child: ElevatedButton(onPressed: (null), onLongPress: null));\n  SizedBox(width: 1, child: OutlinedButton(onPressed: null, onLongPress: (null)));\n  SizedBox(width: 1, child: RawMaterialButton(onPressed: null));\n  SizedBox(width: 1, child: CupertinoButton(onPressed: ((null))));\n}\nvoid shadow(dynamic SizedBox) { SizedBox(width: 1, child: IconButton()); }\n\nvoid inactiveAdditionalGestures() {\n  SizedBox(width: 1, child: GestureDetector(onTapMove: (null)));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryTapCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryTapCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onLongPressCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressDown: null));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPress: ((null))));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressStart: null));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressMoveUpdate: null));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressUp: null));\n  SizedBox(width: 1, child: GestureDetector(onSecondaryLongPressEnd: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressDown: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPress: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressStart: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressMoveUpdate: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressUp: null));\n  SizedBox(width: 1, child: GestureDetector(onTertiaryLongPressEnd: null));\n  SizedBox(width: 1, child: GestureDetector(onVerticalDragDown: null));\n  SizedBox(width: 1, child: GestureDetector(onVerticalDragCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onHorizontalDragDown: null));\n  SizedBox(width: 1, child: GestureDetector(onHorizontalDragCancel: null));\n  SizedBox(width: 1, child: GestureDetector(onForcePressStart: null));\n  SizedBox(width: 1, child: GestureDetector(onForcePressPeak: null));\n  SizedBox(width: 1, child: GestureDetector(onForcePressUpdate: null));\n  SizedBox(width: 1, child: GestureDetector(onForcePressEnd: null));\n  SizedBox(width: 1, child: GestureDetector(onPanCancel: null));\n  SizedBox(width: 1, child: InkWell(onSecondaryTapCancel: (null)));\n  SizedBox(width: 1, child: InkResponse(onSecondaryTapCancel: null));\n  SizedBox(width: 1, child: InkWell(onHover: (_) {}, onFocusChange: (_) {}, onHighlightChanged: (_) {}));\n  SizedBox(width: 1, child: InkResponse(onHover: (_) {}, onFocusChange: (_) {}, onHighlightChanged: (_) {}));\n  SizedBox(width: 48, child: GestureDetector(onSecondaryLongPress: () {}));\n  SizedBox(height: 48, child: GestureDetector(onTapMove: (_) {}, onTap: () {}));\n}\n\nvoid inertRuntimeCallbacks(dynamic callback) {\n  SizedBox(width: 1, child: GestureDetector(onTapMove: callback));\n  f.SizedBox(width: 1, child: f.GestureDetector(onTapMove: (_) {}));\n  SizedBox(width: 1, child: GestureDetector(onTapMove: callback, onTap: (null)));\n  SizedBox(width: 1, child: InkWell(onSecondaryTapCancel: () {}));\n  SizedBox(width: 1, child: InkResponse(onSecondaryTapCancel: (callback)));\n  SizedBox(width: 1, child: InkWell(onTapCancel: callback));\n  SizedBox(width: 1, child: InkResponse(onTapCancel: () {}));\n  SizedBox(width: 1, child: InkWell(onTapCancel: callback, onSecondaryTapCancel: callback));\n  SizedBox(width: 1, child: InkResponse(onTapCancel: callback, onSecondaryTapCancel: callback));\n  SizedBox(width: 1, child: InkWell(onTapCancel: callback, onSecondaryTapCancel: callback,\n    onTap: null, onTapDown: null, onTapUp: null, onDoubleTap: null,\n    onLongPress: null, onLongPressUp: null,\n    onSecondaryTap: null, onSecondaryTapDown: (null), onSecondaryTapUp: null));\n  SizedBox(width: 1, child: InkResponse(onTapCancel: callback, onSecondaryTapCancel: callback,\n    onTap: null, onTapDown: null, onTapUp: null, onDoubleTap: null,\n    onLongPress: null, onLongPressUp: null,\n    onSecondaryTap: null, onSecondaryTapDown: null, onSecondaryTapUp: (null)));\n}"
+    },
+    "group": "a11y",
+    "name": "minimum-touch-target",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires useful tooltips on Flutter floating action buttons and icon buttons.",
     "diagnostics": [
       {
@@ -3339,6 +4257,78 @@
   },
   {
     "crossFile": false,
+    "description": "Keep GlobalKeys stable and pass owned State fields to widgets.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 5,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 6,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 9,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 10,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "Pass this GlobalKey field to a widget."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Pass this GlobalKey field to a widget."
+      }
+    ],
+    "docs": "Keep GlobalKeys stable and pass owned State fields to widgets.\n\nReports nonconstant GlobalKey-subtype constructors directly in widget `key`\narguments, including outside State classes. Value-stable GlobalObjectKeys,\nconstant keys and cached field/top-level initializers are exempt. Closures\ninside those initializers are still checked. Stored keys are checked only for\nconcrete Flutter State classes: abstract bases and injected fields are skipped.\nPassing a field anywhere in a call argument counts conservatively, since\nhelpers may attach it to a widget. Shadowed locals and currentState/currentContext\nreceiver reads do not count as passing the key.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\ntypedef FormKey = GlobalKey;\nclass Missing extends State<Widget> {\n  final _first = GlobalKey();\n  final GlobalKey _second = GlobalKey();\n  final _third = f.GlobalKey();\n  final _fourth = LabeledGlobalKey('fourth');\n  final _fifth = FormKey();\n  final _shadowed = GlobalKey();\n  final _stateRead = GlobalKey();\n  final _contextRead = GlobalKey();\n  void inspect() {\n    observe(_stateRead.currentState);\n    observe(this._contextRead.currentContext);\n  }\n  Widget build() {\n    final _shadowed = GlobalKey();\n    return IconButton(key: _shadowed);\n  }\n}\nvoid observe(Object? value) {}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass Used extends State<Widget> {\n  final _direct = GlobalKey();\n  final _helper = GlobalKey();\n  final _conditional = GlobalKey();\n  final _inherited = GlobalKey();\n  final GlobalKey injected;\n  Used(this.injected);\n  Widget first() => IconButton(key: this._direct);\n  void second() => attach(_helper);\n  void third(bool choose) => attach(choose ? _conditional : null);\n}\nclass Child extends Used {\n  Child(GlobalKey key) : super(key);\n  void attachInherited() => attach(_inherited);\n}\nabstract class Base extends State<Widget> {\n  final inherited = GlobalKey();\n}\nclass Controller { final key = GlobalKey(); }\nclass Wrapper extends Widget { final key = GlobalKey(); }\nvoid attach(Object? key) {}\nvoid locals() { final local = GlobalKey(); }"
+    },
+    "group": "correctness",
+    "name": "always-pass-global-key",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires Flutter Listenable registrations in State to be removed.",
     "diagnostics": [
       {
@@ -3815,6 +4805,90 @@
     "group": "correctness",
     "name": "avoid-contradictory-expressions",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Avoid releasing late State fields that may be unset or initialized only by cleanup.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 14,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 16,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 17,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 18,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 19,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 20,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 21,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 22,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 23,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      }
+    ],
+    "docs": "Avoid releasing late State fields that may be unset or initialized only by cleanup.\n\nA direct `=` assignment, or a direct read of a lazily initialized field, in\nsynchronous initState is accepted in its initial straight-line prefix of\nexpression statements, local declarations and empty statements. Any other\nstatement ends that prefix, including assertions and pattern declarations.\nArrow bodies are supported. Reads cover bare fields, property receivers,\nmethod receivers and cascade receivers, not nested arguments or callbacks.\nConditional, nested, asynchronous and helper-based initialization is not proven;\nlazy field initializers alone still do not make cleanup safe.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends f.State<f.StatefulWidget> {\n  late Resource unset;\n  late final Resource lazy = Resource();\n  late Resource stream, subscription;\n  late Resource? optional;\n  late Resource first = Resource(), second = Resource();\n  void dispose() {\n    unset.dispose();\n    this.lazy.dispose();\n    stream.close();\n    subscription.cancel();\n    optional?.dispose();\n    optional!.close();\n    unset..dispose();\n    (this.lazy)..close();\n    first.dispose();\n    second.cancel();\n    super.dispose();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends State<StatefulWidget> {\n  Resource? optional;\n  final eager = Resource();\n  late Resource deferred;\n  static late Resource shared;\n  void cleanup() { deferred.dispose(); }\n  void dispose() {\n    optional?.dispose();\n    eager.dispose();\n    shared.dispose();\n    final deferred = Resource();\n    deferred.dispose();\n    void release(Resource deferred) { deferred.dispose(); }\n    super.dispose();\n  }\n}\nclass Other {\n  late Resource resource;\n  void dispose() { resource.dispose(); }\n}\nclass Holder extends State<StatefulWidget> {\n  late Resource resource;\n  void dispose() {\n    final other = Other();\n    other.resource.dispose();\n    super.dispose();\n  }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-disposing-late-fields",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -4618,6 +5692,60 @@
   },
   {
     "crossFile": false,
+    "description": "Flags Opacity directly wrapping a Flutter Image, including named constructors.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Apply opacity directly to the Image instead of wrapping it in Opacity."
+      }
+    ],
+    "docs": "Flags Opacity directly wrapping a Flutter Image, including named constructors.\nPrefer Image.opacity (or image color blending) to compositing the whole widget.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Opacity(opacity: .5, child: Image(image: image));\n  Opacity(opacity: .2, child: Image.asset(\"a\"));\n  const Opacity(opacity: .5, child: Image());\n  f.Opacity(opacity: .5, child: f.Image.network(\"a\"));\n  new Opacity(opacity: .5, child: I.asset(\"a\"));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef I = Image;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Opacity(opacity: .5, child: SizedBox());\n  Image(image: image, opacity: image);\n  Opacity(opacity: .5);\n  Opacity(opacity: .5, child: Container(child: Image()));\n  Opacity(opacity: .5, child: child);\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-incorrect-image-opacity",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoid inherited-widget subscriptions during initState.",
     "diagnostics": [
       {
@@ -4717,6 +5845,66 @@
     "group": "correctness",
     "name": "avoid-late-context",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require Flutter text fields to expose their updated value.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide a controller or a callback that receives the updated field value."
+      }
+    ],
+    "docs": "Require Flutter text fields to expose their updated value.\n\nTextField, TextFormField, CupertinoTextField, and EditableText need a non-null\ncontroller or a value callback supported by that API. Explicit readOnly:true\nand enabled:false fields are display-only and skipped. Dynamic expressions\nare accepted; unrelated classes and shadowed constructors are ignored.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid fields() {\n  TextField();\n  TextFormField();\n  f.CupertinoTextField.borderless();\n  new EditableText(controller: null);\n  TextField(controller: null, onChanged: null);\n  TextFormField(onSaved: null);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid fields(Object? controller, Function callback) {\n  TextField(controller: controller);\n  TextFormField(onChanged: callback);\n  f.CupertinoTextField.borderless(onSubmitted: callback);\n  EditableText(onChanged: callback);\n  TextFormField(onSaved: callback);\n  TextFormField(onFieldSubmitted: callback);\n  TextField(controller: TextEditingController());\n  TextField(readOnly: true);\n  TextFormField(enabled: false);\n  CupertinoTextField.borderless(readOnly: true);\n  EditableText(readOnly: true);\n}\nvoid shadow(dynamic TextField) { TextField(); }"
+    },
+    "group": "correctness",
+    "name": "avoid-missing-controller",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -4895,6 +6083,66 @@
     "group": "correctness",
     "name": "avoid-misused-hooks",
     "recommended": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Check mounted before invoking Flutter State.setState, never inside its callback.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 6,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 9,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 12,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 15,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 18,
+        "message": "Check mounted before calling setState, not inside its callback."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 23,
+        "message": "Check mounted before calling setState, not inside its callback."
+      }
+    ],
+    "docs": "Check mounted before invoking Flutter State.setState, never inside its callback.\nA check inside the callback cannot prevent setState's unmounted-State assertion.\nDeferred nested closures and local functions have independent mounted checks.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\nclass S extends f.State<f.StatefulWidget> {\n  int value = 0;\n  void update(f.BuildContext other) {\n    setState(() {\n      if (mounted) value++;\n    });\n    this.setState(() {\n      if (this.mounted) value++;\n    });\n    setState(() {\n      if (context.mounted) value++;\n    });\n    setState((() {\n      if (!other.mounted) return;\n      value++;\n    }));\n    setState(() => value = mounted ? 1 : 0);\n  }\n}\nclass Child extends S {\n  void inherited() {\n    setState(() { if (mounted) value++; });\n  }\n}",
+      "crossFile": null,
+      "good": "import 'dart:async';\nimport 'package:flutter/material.dart' as f;\nclass Flag { bool get mounted => true; }\nclass S extends f.State<f.StatefulWidget> {\n  int value = 0;\n  void subscribe(Stream<int> stream) {\n    setState(() {\n      stream.listen((event) {\n        if (!mounted) return;\n        value = event;\n      });\n      void later() {\n        if (!context.mounted) return;\n        value++;\n      }\n      value++;\n    });\n  }\n  void update(f.BuildContext other, Flag flag) {\n    if (mounted) setState(() { value++; });\n    if (other.mounted) this.setState(() { value++; });\n    if (!mounted) return;\n    setState(() { value++; });\n    setState(() {\n      bool mounted = true;\n      if (mounted) value++;\n      if (flag.mounted) value++;\n    });\n    void setState(void Function() callback) { callback(); }\n    setState(() { if (this.mounted) value++; });\n  }\n}\nclass Overridden extends S {\n  bool get mounted => true;\n  void updateFlag() { setState(() { if (mounted) value++; }); }\n}\nclass Fake {\n  bool mounted = true;\n  void setState(void Function() callback) { callback(); }\n  void update() { setState(() { if (mounted) return; }); }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-mounted-in-setstate",
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -9766,6 +11014,60 @@
   },
   {
     "crossFile": false,
+    "description": "Require an explicit heroTag on Flutter FloatingActionButton constructors.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide an explicit heroTag for this floating action button."
+      }
+    ],
+    "docs": "Require an explicit heroTag on Flutter FloatingActionButton constructors.\n\nThe default tag is shared, so multiple buttons can collide during a Hero\ntransition. Set a unique tag or explicitly pass null to disable the transition.\nIncludes unnamed, small, large, and extended constructors; package identities\nexclude local lookalikes and shadowed names. Matches the DCM rule of this id.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\ntypedef Action = FloatingActionButton;\nvoid actions() {\n  FloatingActionButton();\n  new FloatingActionButton.small();\n  const f.FloatingActionButton.large();\n  FloatingActionButton.extended(label: Text('Add'));\n  Action();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(Object tag) {\n  FloatingActionButton(heroTag: 'add');\n  const FloatingActionButton.small(heroTag: 1);\n  f.FloatingActionButton.large(heroTag: tag);\n  FloatingActionButton.extended(label: Text('Add'), heroTag: null);\n  FloatingActionButton(heroTag: (null));\n  Hero(tag: 'flight');\n}\nvoid shadow(dynamic FloatingActionButton) { FloatingActionButton(); }"
+    },
+    "group": "correctness",
+    "name": "prefer-define-hero-tag",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires expectLater when a canonical expect call receives an unawaited Future.",
     "diagnostics": [
       {
@@ -12583,6 +13885,60 @@
   },
   {
     "crossFile": false,
+    "description": "Avoids Flutter's non-const `Border.all` factory.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all."
+      }
+    ],
+    "docs": "Avoids Flutter's non-const `Border.all` factory. Use\n`Border.fromBorderSide(const BorderSide(...))` when the side is constant.\nOnly invocations whose arguments can all be constant qualify.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef B = Border;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Border.all();\n  Border.all(width: 2);\n  new Border.all();\n  f.Border.all(color: 0xff112233);\n  B.all(width: 3);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef B = Border;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  const Border();\n  const Border.fromBorderSide(BorderSide());\n  Border.fromBorderSide(BorderSide(width: 2));\n  f.Border();\n  const B();\n}"
+    },
+    "group": "performance",
+    "name": "avoid-border-all",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Avoids shrink-wrapped Flutter lists nested in rows, columns, or other lists.",
     "diagnostics": [
       {
@@ -12869,6 +14225,90 @@
     },
     "group": "performance",
     "name": "avoid-unnecessary-consumer-widgets",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags handler-free Flutter GestureDetectors and tap-only wrappers around enabled Flutter buttons.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Remove this GestureDetector or provide an event handler."
+      }
+    ],
+    "docs": "Flags handler-free Flutter GestureDetectors and tap-only wrappers around\nenabled Flutter buttons. Explicit hit-test behavior is retained. The button\ncase requires an inline onPressed callback, so nullable handlers stay unflagged.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef Detector = GestureDetector;\nvoid examples(Widget child) {\n  GestureDetector();\n  GestureDetector(child: child);\n  f.GestureDetector(child: TextButton());\n  Detector(onTap: null, child: child);\n  new GestureDetector(onLongPress: null);\n  GestureDetector(onTap: () {}, child: TextButton(onPressed: () {}));\n  GestureDetector(onTap: () {}, child: f.ElevatedButton(onPressed: () {}));\n  Detector(onTap: () {}, child: OutlinedButton(onPressed: () {}));\n  GestureDetector(onTap: () {}, child: IconButton(onPressed: () {}));\n  GestureDetector(behavior: null, child: child);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nvoid callback() {}\nvoid examples(Widget child, void Function()? handler) {\n  GestureDetector(onTap: callback, child: child);\n  GestureDetector(onLongPress: callback);\n  GestureDetector(onDoubleTap: callback, child: TextButton());\n  GestureDetector(onTap: handler);\n  GestureDetector(onTap: null, onLongPress: callback);\n  GestureDetector(behavior: HitTestBehavior.opaque, child: SizedBox.expand());\n  GestureDetector(behavior: HitTestBehavior.translucent, child: child);\n  GestureDetector(onLongPress: callback, child: TextButton(onPressed: () {}));\n  GestureDetector(onDoubleTap: callback, child: TextButton(onPressed: () {}));\n  GestureDetector(onTap: callback, child: TextButton(onPressed: null));\n  GestureDetector(onTap: callback, child: TextButton(onPressed: handler));\n  GestureDetector(onTap: callback, onLongPress: callback, child: TextButton(onPressed: () {}));\n  GestureDetector(behavior: HitTestBehavior.opaque, onTap: callback, child: TextButton(onPressed: () {}));\n}"
+    },
+    "group": "performance",
+    "name": "avoid-unnecessary-gesture-detector",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -13705,6 +15145,156 @@
   },
   {
     "crossFile": false,
+    "description": "Merge consecutive Flutter State.setState statements in the same block.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 7,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 10,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 17,
+        "message": "Merge this setState callback into the preceding setState call."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 24,
+        "message": "Merge this setState callback into the preceding setState call."
+      }
+    ],
+    "docs": "Merge consecutive Flutter State.setState statements in the same block.\nIntervening statements and control-flow boundaries are not collapsible runs.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\nclass S extends f.State<f.StatefulWidget> {\n  int value = 0;\n  void update() {\n    setState(() { value++; });\n    setState(() { value++; });\n    this.setState(() { value++; });\n    value++;\n    this.setState(() { value++; });\n    (setState(() { value++; }));\n    if (mounted) {\n      setState(() => value++);\n      setState(() => value++);\n    }\n    void nested() {\n      setState(() { value++; });\n      setState(() { value++; });\n    }\n  }\n}\nclass Child extends S {\n  void inherited() {\n    setState(() { value++; });\n    setState(() { value++; });\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nclass S extends State<StatefulWidget> {\n  int value = 0;\n  void update() {\n    setState(() { value++; value++; });\n    value++;\n    setState(() { value++; });\n    if (mounted) setState(() { value++; });\n    else setState(() { value--; });\n    { setState(() { value++; }); }\n    { setState(() { value++; }); }\n  }\n  void shadow() {\n    void setState(void Function() callback) { callback(); }\n    setState(() { value++; });\n    setState(() { value++; });\n  }\n}\nclass Fake {\n  void setState(void Function() callback) { callback(); }\n  void update() { setState(() {}); setState(() {}); }\n}\nclass Override extends S {\n  void setState(void Function() callback) { callback(); }\n  void update() { setState(() {}); setState(() {}); }\n}"
+    },
+    "group": "performance",
+    "name": "prefer-single-setstate",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Suggests considering ListView for a SingleChildScrollView containing a plain Flutter Column with at least two unconditional children in a list literal.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      }
+    ],
+    "docs": "Suggests considering ListView for a SingleChildScrollView containing a plain\nFlutter Column with at least two unconditional children in a list literal.\nSpreads, control-flow elements and dynamic lists do not establish that minimum.\nThis is not a layout-neutral replacement: preserve the\nColumn's child alignment and scroll view's padding explicitly. ListView\nstretches children across the cross axis and adds MediaQuery padding by default.\nFor the default Column alignment, wrap each list child in an Align with\nAlignment.topCenter; use the original scroll padding, or EdgeInsets.zero\nwhen none was supplied. Review constraints and child lifecycle separately.\nNo automatic fix is offered.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SingleChildScrollView(child: Column(children: [child, child]));\n  const SingleChildScrollView(child: Column(children: [Text('a'), Text('b')]));\n  new SingleChildScrollView(child: Column(children: [child, child]));\n  f.SingleChildScrollView(child: f.Column(children: [child, child]));\n  V(child: Column(children: [child, child]));\n  SingleChildScrollView(child: Column(children: [Text('a'), Text('much longer')]));\n  SingleChildScrollView(child: Column(children: ([child, child])));\n  SingleChildScrollView(child: Column(children: [child, ...<Widget>[], child]));\n  SingleChildScrollView(child: Column(children: [child, if (size > 0) child, child]));\n  SingleChildScrollView(child: Column(children: [child, for (final item in <Widget>[]) item, child]));\n  SingleChildScrollView(child: Column(children: <Widget>[child, child]));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  ListView(children: [child]);\n  SingleChildScrollView(child: Row());\n  SingleChildScrollView(child: child);\n  Column(children: [child]);\n  SingleChildScrollView();\n  SingleChildScrollView(child: Column());\n  const SingleChildScrollView(child: Column(children: []));\n  new SingleChildScrollView(child: Column(children: [child]));\n  f.SingleChildScrollView(child: f.Column(children: <Widget>[]));\n  V(child: Column(children: [child]));\n  SingleChildScrollView(child: Column(children: ([child])));\n  SingleChildScrollView(child: Column(children: <Widget>[child]));\n  SingleChildScrollView(child: Column(children: [...<Widget>[]]));\n  SingleChildScrollView(child: Column(children: [...<Widget>[child]]));\n  SingleChildScrollView(child: Column(children: [if (size > 0) child]));\n  SingleChildScrollView(child: Column(children: [if (size > 0) child else child]));\n  SingleChildScrollView(child: Column(children: [for (final item in <Widget>[]) item]));\n  SingleChildScrollView(child: Column(children: [child, ...<Widget>[]]));\n  SingleChildScrollView(child: Column(children: [child, if (size > 0) child]));\n  SingleChildScrollView(child: Column(children: image));\n  SingleChildScrollView(child: Column(children: image ? <Widget>[] : <Widget>[child]));\n  SingleChildScrollView(child: Column(children: [child, ...image]));\n  SingleChildScrollView(child: Column(children: [child, ...?image]));\n  SingleChildScrollView(child: Column(children: [child, ?image]));\n  SingleChildScrollView(child: Column(children: [for (final item in <Widget>[]) item, child]));\n}"
+    },
+    "group": "performance",
+    "name": "prefer-using-list-view",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags a `Container` used only to add fixed `width`/`height` whitespace.",
     "diagnostics": [
       {
@@ -13971,6 +15561,148 @@
       "label": "Dart lints",
       "upstreamId": "use_string_buffers",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/use_string_buffers"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Warns when credential-like variables, fields, or parameter defaults use nonempty string or numeric literals.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 1,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 3,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 6,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 7,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 12,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 13,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 14,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 15,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 16,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 20,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 21,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 22,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 23,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 24,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 28,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 29,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 33,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 34,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 35,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      }
+    ],
+    "docs": "Warns when credential-like variables, fields, or parameter defaults use\nnonempty string or numeric literals.\n\nNames such as `password`, `apiKey`, `clientSecret`, and `accessToken` are\nchecked case-insensitively, including snake_case and private spellings.\nString values matching their variable name are ignored as storage-key names.\nRead credentials from secure runtime configuration instead. This is a naming\nheuristic, not a general-purpose secrets scanner.",
+    "domains": [],
+    "examples": {
+      "bad": "const password = 'not-a-real-password';\nclass Settings {\n  final _apiKey = 'fixture-key';\n  String clientSecret = '';\n  void update() {\n    clientSecret = 'fixture-secret';\n    this.clientSecret = 'other-fixture-secret';\n  }\n}\nconst ACCESS_TOKEN = 'fixture-token';\n\nvoid connect({String password = 'fixture-password'}) {}\nvoid authenticate([String apiKey = 'fixture-key']) {}\nvoid configure({String client_secret = ('fixture-secret')}) {}\nvoid unlock({int passwd = 1234}) {}\nvoid authorize([double authToken = 1.5]) {}\n\nclass Connection {\n  final String password;\n  Connection({this.password = 'fixture-password'});\n  Connection.positional([this.password = 'fixture-password']);\n  Connection.named({String secret = 'fixture-secret'}) : password = secret;\n  void login({String accessToken = 'fixture-token'}) {}\n  void refresh([String privateKey = 'fixture-key']) {}\n}\n\nclass ChildConnection extends Connection {\n  ChildConnection({super.password = 'fixture-password'});\n  ChildConnection.positional([super.password = 'fixture-password']) : super.positional();\n}\n\nvoid callbacks() {\n  void local([String _PASSWORD = 'fixture-password']) {}\n  final named = ({String api_key = 'fixture-key'}) {};\n  final positional = ([String clientSecret = 'fixture-secret']) {};\n}",
+      "crossFile": null,
+      "good": "String readSecret() => '';\nfinal password = readSecret();\nconst apiKey = '';\nconst secretCount = 3;\nconst token = 'not-a-credential-name';\nconst accessToken = 'access_token';\nconst _authToken = 'AUTH-TOKEN';\nclass StorageKeys {\n  static const password = 'password';\n}\nvoid update(String supplied) {\n  final clientSecret = supplied;\n  final accessToken = 'prefix-$supplied';\n}\n\nconst configuredSecret = 'fixture-configured-value';\nvoid connect({\n  String password = '',\n  String? passwd = null,\n  String clientSecret = configuredSecret,\n  String apiKey = 'API-KEY',\n  String token = 'not-a-credential-name',\n  int secretCount = 3,\n}) {}\nvoid authenticate([String password = 'password']) {}\nvoid storageKey([String _access_token = 'accessToken']) {}\nvoid requiredCredentials(String password, {required String apiKey}) {}\n\nclass Connection {\n  final String password;\n  Connection({this.password = 'password'});\n  Connection.positional([this.password = configuredSecret]);\n  void login({String authToken = 'auth_token'}) {}\n  void refresh([String privateKey = configuredSecret]) {}\n}\n\nclass ChildConnection extends Connection {\n  ChildConnection({super.password = ''});\n  ChildConnection.positional([super.password = 'password']) : super.positional();\n}\n\nvoid callbacks() {\n  void local({String secret = 'secret'}) {}\n  final named = ({String apiKey = configuredSecret}) {};\n  final positional = ([String clientSecret = 'CLIENT-SECRET']) {};\n}"
+    },
+    "group": "security",
+    "name": "avoid-hardcoded-credentials",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -14733,14 +16465,26 @@
         "file": null,
         "line": 72,
         "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 61,
+        "file": null,
+        "line": 78,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 59,
+        "file": null,
+        "line": 79,
+        "message": "Reorder named arguments to follow the parameter declaration order."
       }
     ],
     "docs": "Named arguments follow their resolved parameter declaration order by default.\nUnknown signatures are skipped. `order: ascending` or `order: descending`\nexplicitly selects alphabetical ordering; `alphabetize: true` selects ascending.",
     "domains": [],
     "examples": {
-      "bad": "void target({int alpha = 0, int zebra = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n  Example.forward() : this(zebra: 2,  alpha: 1);\n}\nclass Child extends Example {\n  Child() : super(zebra: 2,  alpha: 1);\n}\nvoid calls() {\n  target(zebra: 2,  alpha: 1);\n  Example(zebra: 2,  alpha: 1);\n  new Example(zebra: 2,  alpha: 1);\n  const Example(zebra: 2,  alpha: 1);\n}\n\n@Example(zebra: 2,  alpha: 1)\nclass Annotated {}\n\nenum Choice {\n  value(zebra: 2,  alpha: 1);\n  const Choice({int alpha = 0, int zebra = 0});\n}\n\nclass Builder {\n  void configure({int alpha = 0, int zebra = 0}) {}\n}\nvoid cascades(Builder builder) {\n  builder..configure(zebra: 2,  alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward()\n      : this.named(alpha: 1,  zebra: 2);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object) {\n  declarationOrder(alpha: 1,  zebra: 2);\n  declarationOrder(middle: 3,  alpha: 1);\n  NonAlphabetical(alpha: 1,  zebra: 2);\n  new NonAlphabetical(alpha: 1,  zebra: 2);\n  object.configure(alpha: 1,  zebra: 2);\n  object..configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical(alpha: 1,  zebra: 2)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(alpha: 1,  zebra: 2);\n  Inherited.named()\n      : super.named(alpha: 1,  zebra: 2);\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical.named(alpha: 1,  zebra: 2)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(alpha: 1,  zebra: 2);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(alpha: 1,  zebra: 2);\n}",
+      "bad": "void target({int alpha = 0, int zebra = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n  Example.forward() : this(zebra: 2,  alpha: 1);\n}\nclass Child extends Example {\n  Child() : super(zebra: 2,  alpha: 1);\n}\nvoid calls() {\n  target(zebra: 2,  alpha: 1);\n  Example(zebra: 2,  alpha: 1);\n  new Example(zebra: 2,  alpha: 1);\n  const Example(zebra: 2,  alpha: 1);\n}\n\n@Example(zebra: 2,  alpha: 1)\nclass Annotated {}\n\nenum Choice {\n  value(zebra: 2,  alpha: 1);\n  const Choice({int alpha = 0, int zebra = 0});\n}\n\nclass Builder {\n  void configure({int alpha = 0, int zebra = 0}) {}\n}\nvoid cascades(Builder builder) {\n  builder..configure(zebra: 2,  alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward()\n      : this.named(alpha: 1,  zebra: 2);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object) {\n  declarationOrder(alpha: 1,  zebra: 2);\n  declarationOrder(middle: 3,  alpha: 1);\n  NonAlphabetical(alpha: 1,  zebra: 2);\n  new NonAlphabetical(alpha: 1,  zebra: 2);\n  object.configure(alpha: 1,  zebra: 2);\n  object..configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical(alpha: 1,  zebra: 2)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(alpha: 1,  zebra: 2);\n  Inherited.named()\n      : super.named(alpha: 1,  zebra: 2);\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical.named(alpha: 1,  zebra: 2)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(alpha: 1,  zebra: 2);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\nclass PrivatePrimary({final int _alpha = 0, final int _zebra = 0}) {}\nclass MixedPrimary({final int _zebra = 0, int alpha = 0, var _middle = 0}) {}\nvoid primaryCalls() {\n  PrivatePrimary(zebra: 2,  alpha: 1);\n  MixedPrimary(alpha: 1,  zebra: 2, middle: 3);\n}",
       "crossFile": null,
-      "good": "void target(int zebra, int alpha, {int beta = 0, int gamma = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n}\nvoid calls() {\n  target(2, 1, beta: 3, gamma: 4);\n  Example(alpha: 1, zebra: 2);\n  const Example(alpha: 1, zebra: 2);\n  final items = [2, 1];\n  final record = (zebra: 2, alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward() : this.named(zebra: 2, alpha: 1);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object, dynamic unknown) {\n  declarationOrder(zebra: 2, alpha: 1, middle: 3);\n  declarationOrder(zebra: 2, middle: 3);\n  NonAlphabetical(zebra: 2, alpha: 1);\n  new NonAlphabetical(zebra: 2, alpha: 1);\n  object.configure(zebra: 2, alpha: 1);\n  object..configure(zebra: 2, alpha: 1);\n  unknown.configure(zebra: 2, alpha: 1);\n  unknown.configure(alpha: 1, zebra: 2);\n  unresolved(zebra: 2, alpha: 1);\n  unresolved(alpha: 1, zebra: 2);\n}\n\n@NonAlphabetical(zebra: 2, alpha: 1)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(zebra: 2, alpha: 1);\n  Inherited.named() : super.named(zebra: 2, alpha: 1);\n  Inherited.forward() : this();\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(zebra: 2, alpha: 1);\n}\nvoid functionTypeUnknown(void Function({int alpha, int zebra}) callback) {\n  callback(zebra: 2, alpha: 1);\n}\n\n@NonAlphabetical.named(zebra: 2, alpha: 1)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(zebra: 2, alpha: 1);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(zebra: 2, alpha: 1);\n}"
+      "good": "void target(int zebra, int alpha, {int beta = 0, int gamma = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n}\nvoid calls() {\n  target(2, 1, beta: 3, gamma: 4);\n  Example(alpha: 1, zebra: 2);\n  const Example(alpha: 1, zebra: 2);\n  final items = [2, 1];\n  final record = (zebra: 2, alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward() : this.named(zebra: 2, alpha: 1);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object, dynamic unknown) {\n  declarationOrder(zebra: 2, alpha: 1, middle: 3);\n  declarationOrder(zebra: 2, middle: 3);\n  NonAlphabetical(zebra: 2, alpha: 1);\n  new NonAlphabetical(zebra: 2, alpha: 1);\n  object.configure(zebra: 2, alpha: 1);\n  object..configure(zebra: 2, alpha: 1);\n  unknown.configure(zebra: 2, alpha: 1);\n  unknown.configure(alpha: 1, zebra: 2);\n  unresolved(zebra: 2, alpha: 1);\n  unresolved(alpha: 1, zebra: 2);\n}\n\n@NonAlphabetical(zebra: 2, alpha: 1)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(zebra: 2, alpha: 1);\n  Inherited.named() : super.named(zebra: 2, alpha: 1);\n  Inherited.forward() : this();\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(zebra: 2, alpha: 1);\n}\nvoid functionTypeUnknown(void Function({int alpha, int zebra}) callback) {\n  callback(zebra: 2, alpha: 1);\n}\n\n@NonAlphabetical.named(zebra: 2, alpha: 1)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(zebra: 2, alpha: 1);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(zebra: 2, alpha: 1);\n}\n\nclass PrivatePrimary({final int _alpha = 0, final int _zebra = 0}) {}\nclass MixedPrimary({final int _zebra = 0, int alpha = 0, var _middle = 0}) {}\nvoid primaryCalls() {\n  PrivatePrimary(alpha: 1, zebra: 2);\n  MixedPrimary(zebra: 2, alpha: 1, middle: 3);\n  MixedPrimary(zebra: 2, middle: 3);\n}"
     },
     "group": "style",
     "name": "arguments-ordering",
@@ -17904,7 +19648,7 @@
         "message": "This empty super() call is implicit; remove the explicit initializer."
       }
     ],
-    "docs": "Omit implicit `super()` initializers and provably redundant member prefixes.\n\nMember checks require a final class or enum without library-local subclasses,\nmatching resolved read/write owners, and no shadowing local binding. Open\nclasses retain super dispatch because future subclasses can override members.\nConstructor checks remain available without resolution.",
+    "docs": "Omit implicit `super()` initializers and provably redundant member prefixes.\n\nMember checks require a final class or enum without library-local subclasses,\nmatching resolved read/write owners, and no shadowing lexical or library binding.\nOpen classes retain super dispatch because future subclasses can override members.\nConstructor checks remain available without resolution.",
     "domains": [],
     "examples": {
       "bad": "class Parent { Parent(); }\nclass Child extends Parent {\n  Child() :  super();\n}",
@@ -18143,6 +19887,72 @@
       "label": "Dart lints",
       "upstreamId": "avoid_void_async",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_void_async"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Flags Padding directly wrapping a Flutter Container that can own the padding.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      }
+    ],
+    "docs": "Flags Padding directly wrapping a Flutter Container that can own the padding.\nContainers with existing padding, margin, alignment, sizing, constraints,\ntransforms, color, decoration or foregroundDecoration are excluded: moving\npadding across those layout and paint stages can change the result. Non-null\nkeys on either widget are excluded because the keyed element's bounds change.\nThis is distinct from prefer-padding-over-container and prefer-container's\nthree-widget layout sequence.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: Container(child: child));\n  Padding(padding: 2, child: Container(key: null, child: child));\n  new Padding(padding: 3, child: Container());\n  f.Padding(padding: 4, child: f.Container(child: child));\n  P(padding: 5, child: Container(child: child));\n  Padding(key: null, padding: 1, child: Container(child: child));\n  Padding(key: (null), padding: 1, child: Container(key: (null), child: child));\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: SizedBox());\n  Padding(padding: 1, child: Container(padding: 2));\n  Padding(padding: 1, child: Container(width: 20));\n  Padding(padding: 1, child: Container(margin: 2));\n  Padding(padding: 1, child: Container(color: color));\n  Padding(padding: 2, child: Container(key: image, child: child));\n  Padding(key: image, padding: 1, child: Container(child: child));\n  Padding(key: image, padding: 1, child: Container(key: color, child: child));\n  Padding(key: null, padding: 1, child: Container(key: image, child: child));\n  Padding(key: image, padding: 1, child: Container(key: null, child: child));\n  f.Padding(key: image, padding: 1, child: f.Container(child: child));\n  P(key: image, padding: 1, child: Container(child: child));\n}"
+    },
+    "group": "style",
+    "name": "avoid-wrapping-in-padding",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -26255,6 +28065,60 @@
   },
   {
     "crossFile": false,
+    "description": "Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width and height are stable variable reads or numeric literals with identical token spelling.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Use SizedBox.square when width and height are the same."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Use SizedBox.square when width and height are the same."
+      }
+    ],
+    "docs": "Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width\nand height are stable variable reads or numeric literals with identical token\nspelling. Calls, getters, indexing, missing/null dimensions and existing named\nconstructors are excluded. No automatic fix is offered.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef S = SizedBox;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SizedBox(width: 10, height: 10);\n  const SizedBox(width: 20, height: 20);\n  new SizedBox(width: size, height: size);\n  f.SizedBox(width: 2.5, height: 2.5);\n  S(width: 4, height: 4, child: child);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef S = SizedBox;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SizedBox(width: 10, height: 20);\n  SizedBox(width: 10);\n  SizedBox(height: 10);\n  SizedBox(width: null, height: null);\n  SizedBox.square(dimension: 10);\n}"
+    },
+    "group": "style",
+    "name": "prefer-sized-box-square",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags an `addAll` cascade on a collection literal that a spread would express.",
     "diagnostics": [
       {
@@ -26685,6 +28549,48 @@
       "label": "Pyramid Lint",
       "upstreamId": "prefer_underscore_for_unused_callback_parameters",
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefers Flutter's `VoidCallback` alias over a nongeneric `void Function()` type.",
+    "diagnostics": [
+      {
+        "column": 13,
+        "file": null,
+        "line": 1,
+        "message": "This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable)."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 2,
+        "message": "This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable)."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 3,
+        "message": "This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable)."
+      }
+    ],
+    "docs": "Prefers Flutter's `VoidCallback` alias over a nongeneric `void Function()` type.\n\nImport `VoidCallback` from `package:flutter/foundation.dart` and use\n`VoidCallback?` for nullable callbacks. Functions with parameters, type\nparameters, or a non-void return type are not covered.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "void invoke(void Function() callback) => callback();\nvoid Function()? callback;\ntypedef Handler = void Function();",
+      "crossFile": null,
+      "good": "VoidCallback? callback;\nvoid takesArgument(void Function(int) callback) {}\nvoid returnsValue(int Function() callback) {}\nvoid generic(void Function<T>() callback) {}\ntypedef void Legacy();"
+    },
+    "group": "style",
+    "name": "prefer-void-callback",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {

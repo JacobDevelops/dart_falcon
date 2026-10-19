@@ -120,6 +120,15 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `a11y` group.",
               "properties": {
+                "accessible-widget-labels": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-missing-image-alt": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "minimum-touch-target": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-action-button-tooltip": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -281,6 +290,9 @@
                 "add-equatable-props": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "always-pass-global-key": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "always-remove-listener": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -297,6 +309,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-contradictory-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-disposing-late-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-duplicate-bloc-event-handlers": {
@@ -332,16 +347,25 @@
                 "avoid-hooks-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-incorrect-image-opacity": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-inherited-widget-in-initstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-missing-controller": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-missing-interpolation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-misused-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-mounted-in-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-equatable-subclass-fields": {
@@ -494,6 +518,9 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-define-hero-tag": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-expect-later": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -591,6 +618,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
+                "avoid-border-all": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-shrink-wrap-in-lists": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -601,6 +631,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-consumer-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-gesture-detector": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-hook-widgets": {
@@ -627,6 +660,12 @@
                 "prefer-foreach": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-single-setstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-using-list-view": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "sized-box-for-whitespace": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -651,6 +690,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `security` group.",
               "properties": {
+                "avoid-hardcoded-credentials": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-weak-cryptographic-algorithms": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -812,6 +854,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-void-async": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-wrapping-in-padding": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "binary-expression-operand-order": {
@@ -1108,6 +1153,9 @@
                 "prefer-single-quotes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-sized-box-square": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-spread-collections": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1127,6 +1175,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-underscore-for-unused-callback-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-void-callback": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "provide-deprecation-message": {
@@ -1628,6 +1679,15 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `a11y` group.",
               "properties": {
+                "accessible-widget-labels": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-missing-image-alt": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "minimum-touch-target": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-action-button-tooltip": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -1789,6 +1849,9 @@
                 "add-equatable-props": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "always-pass-global-key": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "always-remove-listener": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1805,6 +1868,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-contradictory-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-disposing-late-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-duplicate-bloc-event-handlers": {
@@ -1840,16 +1906,25 @@
                 "avoid-hooks-outside-build": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-incorrect-image-opacity": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-inherited-widget-in-initstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-missing-controller": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-missing-interpolation": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-misused-hooks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-mounted-in-setstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-mutable-equatable-subclass-fields": {
@@ -2002,6 +2077,9 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-define-hero-tag": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-expect-later": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2099,6 +2177,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
+                "avoid-border-all": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-shrink-wrap-in-lists": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2109,6 +2190,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-consumer-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-gesture-detector": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-hook-widgets": {
@@ -2135,6 +2219,12 @@
                 "prefer-foreach": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-single-setstate": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-using-list-view": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "sized-box-for-whitespace": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2159,6 +2249,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `security` group.",
               "properties": {
+                "avoid-hardcoded-credentials": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-weak-cryptographic-algorithms": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -2320,6 +2413,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-void-async": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-wrapping-in-padding": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "binary-expression-operand-order": {
@@ -2616,6 +2712,9 @@
                 "prefer-single-quotes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-sized-box-square": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-spread-collections": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2635,6 +2734,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-underscore-for-unused-callback-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-void-callback": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "provide-deprecation-message": {

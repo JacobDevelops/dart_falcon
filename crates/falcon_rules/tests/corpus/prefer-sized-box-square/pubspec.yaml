@@ -1,0 +1,4 @@
+name: flutter_rule_fixture
+dependencies:
+  flutter:
+    path: packages/flutter

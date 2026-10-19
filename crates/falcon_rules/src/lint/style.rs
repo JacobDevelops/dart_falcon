@@ -1,10 +1,13 @@
 //! Style lint rules.
 
+pub mod avoid_wrapping_in_padding;
 mod collection_checks;
 mod newline_spacing;
 mod ordering;
 pub mod prefer_correct_test_file_name;
+pub mod prefer_sized_box_square;
 pub mod prefer_test_matchers;
+pub mod prefer_void_callback;
 
 pub mod always_declare_return_types;
 pub mod always_put_control_body_on_new_line;
