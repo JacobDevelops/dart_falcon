@@ -2,8 +2,8 @@
 //!
 //! SizedBox and Container are checked when their direct child is interactive.
 //! CupertinoButton needs 44 logical pixels; other supported targets need 48.
-//! Gestures without an active callback are skipped. Dynamic dimensions, indirect
-//! constraints, and non-interactive children are not inferred.
+//! Gestures without an active callback and explicitly disabled buttons are skipped.
+//! Dynamic dimensions, indirect constraints, and non-interactive children are not inferred.
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -116,6 +116,28 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         | "onVerticalDragUpdate"
                         | "onVerticalDragEnd"
                 ) && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
+            })
+        {
+            return;
+        }
+        if [
+            "IconButton",
+            "FloatingActionButton",
+            "TextButton",
+            "ElevatedButton",
+            "OutlinedButton",
+            "RawMaterialButton",
+            "CupertinoButton",
+        ]
+        .iter()
+        .any(|name| index.is_package_declaration(&child_identity, "flutter", name))
+            && child_args.named().any(|arg| {
+                arg.name().name() == "onPressed"
+                    && matches!(arg.value().unparenthesized(), Expr::NullLit(_))
+            })
+            && !child_args.named().any(|arg| {
+                arg.name().name() == "onLongPress"
+                    && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
             })
         {
             return;

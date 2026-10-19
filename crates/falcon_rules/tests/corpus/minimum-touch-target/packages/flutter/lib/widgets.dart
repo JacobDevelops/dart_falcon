@@ -18,11 +18,11 @@ class Tooltip extends Widget { const Tooltip({String? message, Widget? child}); 
 class Semantics extends Widget { const Semantics({String? label, Widget? child}); }
 class SizedBox extends Widget { const SizedBox({double? width, double? height, Widget? child}); }
 class Container extends Widget { Container({double? width, double? height, Widget? child}); }
-class TextButton extends Widget { const TextButton({Widget? child, Function? onPressed}); }
-class ElevatedButton extends Widget { const ElevatedButton({Widget? child, Function? onPressed}); }
-class OutlinedButton extends Widget { const OutlinedButton({Widget? child, Function? onPressed}); }
-class RawMaterialButton extends Widget { const RawMaterialButton({Widget? child, Function? onPressed}); }
-class CupertinoButton extends Widget { const CupertinoButton({Widget? child, Function? onPressed}); }
+class TextButton extends Widget { const TextButton({Widget? child, Function? onPressed, Function? onLongPress}); }
+class ElevatedButton extends Widget { const ElevatedButton({Widget? child, Function? onPressed, Function? onLongPress}); }
+class OutlinedButton extends Widget { const OutlinedButton({Widget? child, Function? onPressed, Function? onLongPress}); }
+class RawMaterialButton extends Widget { const RawMaterialButton({Widget? child, Function? onPressed, Function? onLongPress}); }
+class CupertinoButton extends Widget { const CupertinoButton({Widget? child, Function? onPressed, Function? onLongPress}); }
 class TextEditingController {}
 class TextField extends Widget { TextField({Object? controller, Function? onChanged, Function? onSubmitted}); }
 class TextFormField extends Widget { TextFormField({Object? controller, Function? onChanged, Function? onSaved, Function? onFieldSubmitted}); }

@@ -10,3 +10,18 @@ void targets() {
   Container(width: -1, child: ElevatedButton()); /* expect: minimum-touch-target */
   SizedBox(width: 43, child: CupertinoButton(onPressed: () {})); /* expect: minimum-touch-target */
 }
+
+void callbacks(dynamic callback) {
+  SizedBox(width: 1, child: IconButton(onPressed: callback)); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: IconButton.filled(onPressed: () {})); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: FloatingActionButton.small(onPressed: (callback))); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: TextButton(onPressed: null, onLongPress: () {})); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: ElevatedButton(onPressed: (null), onLongPress: callback)); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: OutlinedButton(onPressed: () {}, onLongPress: null)); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: RawMaterialButton(onPressed: callback)); /* expect: minimum-touch-target */
+  SizedBox(width: 43, child: CupertinoButton(onPressed: (callback))); /* expect: minimum-touch-target */
+  SizedBox(width: 43, child: CupertinoButton(onPressed: null, onLongPress: () {})); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: TextButton(onLongPress: null)); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: GestureDetector(onTap: (callback))); /* expect: minimum-touch-target */
+  SizedBox(width: 1, child: InkWell(onTap: null, onLongPress: () {})); /* expect: minimum-touch-target */
+}
