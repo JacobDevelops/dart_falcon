@@ -2790,6 +2790,8 @@ const SDK_TYPES: Allowlist = &[
             "AsyncError",
         ],
     ),
+    ("dart:math", &["Random"]),
+    ("dart:convert", &["JsonDecoder"]),
     (
         "dart:io",
         &[
@@ -2875,7 +2877,7 @@ const SDK_TYPES: Allowlist = &[
 const SDK_MEMBERS: Allowlist = &[
     ("dart:core", &["print", "pragma", "deprecated", "override"]),
     ("dart:async", &["scheduleMicrotask"]),
-    ("dart:convert", &["jsonDecode"]),
+    ("dart:convert", &["jsonDecode", "json"]),
     ("dart:js_interop", &["JS", "staticInterop"]),
     ("dart:html", &["window"]),
 ];
