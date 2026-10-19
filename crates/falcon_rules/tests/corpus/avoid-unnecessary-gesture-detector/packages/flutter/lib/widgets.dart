@@ -10,7 +10,8 @@ class Column extends Widget { const Column({List<Widget> children = const []}); 
 class Row extends Widget { const Row({List<Widget> children = const []}); }
 class SingleChildScrollView extends Widget { const SingleChildScrollView({Widget? child, dynamic scrollDirection}); }
 class ListView extends Widget { ListView({List<Widget> children = const []}); }
-class GestureDetector extends Widget { GestureDetector({Widget? child, void Function()? onTap, void Function()? onLongPress, void Function()? onDoubleTap}); }
+enum HitTestBehavior { deferToChild, opaque, translucent }
+class GestureDetector extends Widget { GestureDetector({Widget? child, void Function()? onTap, void Function()? onLongPress, void Function()? onDoubleTap, HitTestBehavior? behavior}); }
 class TextButton extends Widget { TextButton({Widget? child, void Function()? onPressed}); }
 class ElevatedButton extends Widget { ElevatedButton({Widget? child, void Function()? onPressed}); }
 class OutlinedButton extends Widget { OutlinedButton({Widget? child, void Function()? onPressed}); }
