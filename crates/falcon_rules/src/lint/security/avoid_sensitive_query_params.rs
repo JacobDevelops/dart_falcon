@@ -150,7 +150,7 @@ fn has_sensitive_query(literal: StringLitNode<'_>, query_only: bool) -> bool {
                 }
                 b'&' if query => key_start = Some(index + 1),
                 b'=' if query => {
-                    if key_start.is_some_and(|start| sensitive(&text[start..index])) {
+                    if key_start.is_some_and(|start| sensitive_query_key(&text[start..index])) {
                         return true;
                     }
                     key_start = None;
@@ -162,6 +162,14 @@ fn has_sensitive_query(literal: StringLitNode<'_>, query_only: bool) -> bool {
         at_key_start = key_start == Some(text.len());
     }
     false
+}
+
+fn sensitive_query_key(key: &str) -> bool {
+    if key.contains('%') {
+        falcon_analyze::percent_decode(key).is_some_and(|decoded| sensitive(&decoded))
+    } else {
+        sensitive(key)
+    }
 }
 
 fn sensitive(key: &str) -> bool {

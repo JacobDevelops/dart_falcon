@@ -20,3 +20,8 @@ void literalQueries(String token) {
   final hashInValue = Uri(query: 'next=/home#top&access_token=$token'); /* expect: avoid-sensitive-query-params */
   final adjacentKey = Uri(query: 'page=1&' 'access_token=$token'); /* expect: avoid-sensitive-query-params */
 }
+
+final encodedUrl = 'https://example.com/?%61ccess_token=value'; /* expect: avoid-sensitive-query-params */
+final encodedQuery = Uri(query: '%61ccess_token=value'); /* expect: avoid-sensitive-query-params */
+final encodedSeparator = 'https://example.com/?access%5ftoken=value'; /* expect: avoid-sensitive-query-params */
+final encodedUppercase = new Uri(query: '%50ASSWORD=value'); /* expect: avoid-sensitive-query-params */
