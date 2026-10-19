@@ -37,3 +37,34 @@ void genericConstructors() {
   GenericClient<int>.allowed();
   var constructor = GenericClient<int>.allowed;
 }
+
+class InheritedBase {
+  void old() {}
+}
+class InheritedChild extends InheritedBase {
+  void run() => old();
+}
+enum ModernChoice { current }
+class ModernClient {
+  ModernClient.named();
+}
+void shorthand() {
+  ModernChoice choice = .current;
+  ModernClient client = .named();
+}
+extension on int {
+  int get legacy => this;
+  int read() => legacy;
+}
+
+class ModernBase {
+  ModernBase.named();
+}
+class ModernChild extends ModernBase {
+  ModernChild() : super.named();
+  ModernChild.redirect() : this();
+}
+class ModernFactory {
+  factory ModernFactory() = ModernFactory.named;
+  ModernFactory.named();
+}

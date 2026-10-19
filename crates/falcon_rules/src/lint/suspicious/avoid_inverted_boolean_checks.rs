@@ -1,5 +1,6 @@
-//! Prefer direct comparisons and De Morgan forms in control-flow conditions.
+//! Prefer direct equality comparisons and De Morgan forms in control-flow conditions.
 //! Unlike avoid-inverted-boolean-expressions, this does not diagnose `!!value`.
+//! Relational operators are excluded because NaN and custom operators lack reliable inverses.
 
 use super::avoid_assignments_as_conditions::is_in_condition;
 use falcon_analyze::{
@@ -38,8 +39,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && unary.op() == UnaryOp::Bang
             && is_in_condition(unary.syntax())
             && let Expr::Binary(binary) = unary.operand().unparenthesized()
-            && matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq | BinaryOp::Lt
-                | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq | BinaryOp::And | BinaryOp::Or)
+            && matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq | BinaryOp::And | BinaryOp::Or)
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-inverted-boolean-checks",

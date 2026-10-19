@@ -1,4 +1,6 @@
-//! Finds getters hiding fields whose values are supplied to the super constructor.
+//! Finds getters hiding fields supplied via the immediate super constructor's
+//! `this.` formals or declaring primary-constructor parameters.
+//! Initializer-list assignments and forwarding through intermediate classes are not tracked.
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
@@ -76,7 +78,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             for parameter in &parent_constructor.parameters {
                 let supplied = if parameter.is_named {
                     call.is_some_and(|call| call.args().named().any(|argument| argument.name().name() == parameter.name))
-                        || constructor.params.params().any(|formal| formal.initializing() == Some(InitializingFormal::Super) && formal.name().name() == parameter.name)
+                        || constructor.params.params().any(|formal| formal.initializing() == Some(InitializingFormal::Super) && matches!(formal.kind(), ParamKind::Named { .. }) && formal.name().name() == parameter.name)
                 } else {
                     let index = position;
                     position += 1;

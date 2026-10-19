@@ -2,4 +2,4 @@
 default: minor
 ---
 
-Detects writes through parameter objects, using lexical declaration identities.
+Detect writes through named function, method and constructor parameter objects, excluding closure parameters and parameters annotated `@mutated` from dart-code-metrics-annotations.

@@ -1,4 +1,6 @@
 //! Keeps base classes independent from their transitive subclasses.
+//! `ignored_annotations` replaces the default ["freezed", "Freezed", "unfreezed"].
+//! Annotation names match the final name segment exactly, including case.
 
 use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
@@ -27,7 +29,12 @@ impl Rule for AvoidReferencingSubclasses {
             "ignored_annotations",
         )
         .map(|names| names.map(str::to_owned).collect())
-        .unwrap_or_else(|| vec!["freezed".to_owned()]);
+        .unwrap_or_else(|| {
+            ["freezed", "Freezed", "unfreezed"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        });
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
@@ -60,7 +67,7 @@ impl Collector<'_> {
         if &identity != owner
             && self
                 .signatures
-                .supertype_matches(&identity, &|parent| parent == owner)
+                .member_supertype_matches(&identity, &|parent| parent == owner)
                 == Truth::Yes
         {
             self.diagnostics.push(self.ctx.diagnostic(

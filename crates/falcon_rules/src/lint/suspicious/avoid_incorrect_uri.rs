@@ -1,4 +1,4 @@
-//! Reject runtime-invalid Uri constructor arguments: conflicting path inputs and
+//! Reject runtime-invalid Uri constructor arguments: conflicting path or query inputs and
 //! query parameter values that are neither null, strings nor iterables of strings.
 //! Only resolved dart:core Uri constructors are checked; unknown values are skipped.
 
@@ -93,28 +93,38 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         match constructor {
             "new" => {
-                let path = args.named().find(|arg| arg.name().name() == "path");
-                let segments = args.named().find(|arg| arg.name().name() == "pathSegments");
-                if let (Some(path), Some(segments)) = (path, segments)
-                    && matches!(
-                        state.infer(path.value()),
-                        ResolvedType::Interface {
-                            nullable: false,
-                            ..
-                        }
-                    )
-                    && matches!(
-                        state.infer(segments.value()),
-                        ResolvedType::Interface {
-                            nullable: false,
-                            ..
-                        }
-                    )
-                {
-                    self.report(
-                        segments.span(),
+                for (first, second, message) in [
+                    (
+                        "path",
+                        "pathSegments",
                         "Do not provide both path and pathSegments to Uri.",
-                    );
+                    ),
+                    (
+                        "query",
+                        "queryParameters",
+                        "Do not provide both query and queryParameters to Uri.",
+                    ),
+                ] {
+                    let first = args.named().find(|arg| arg.name().name() == first);
+                    let second = args.named().find(|arg| arg.name().name() == second);
+                    if let (Some(first), Some(second)) = (first, second)
+                        && matches!(
+                            state.infer(first.value()),
+                            ResolvedType::Interface {
+                                nullable: false,
+                                ..
+                            }
+                        )
+                        && matches!(
+                            state.infer(second.value()),
+                            ResolvedType::Interface {
+                                nullable: false,
+                                ..
+                            }
+                        )
+                    {
+                        self.report(second.span(), message);
+                    }
                 }
                 if let Some(query) = args
                     .named()

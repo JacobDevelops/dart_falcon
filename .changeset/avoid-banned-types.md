@@ -2,4 +2,4 @@
 default: minor
 ---
 
-Ban resolved explicit type annotations, including nested generic arguments. This check stays inactive until configured with the relevant match lists and diagnostic messages.
+Add configurable bans on resolved explicit type annotations, including expanded aliases and nested generic arguments in new/const constructions. Constructed class names and unknown types are exempt. Matching stays inactive until configured with deny patterns and diagnostic messages.

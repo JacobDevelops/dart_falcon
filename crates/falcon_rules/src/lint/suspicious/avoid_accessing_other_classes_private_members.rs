@@ -59,6 +59,13 @@ impl Collector<'_> {
             Some(ResolvedType::Interface { identity, .. }) => Some(identity),
             _ => None,
         };
+        let receiver_type = match receiver {
+            ResolvedType::Interface { identity, .. } => Some(identity),
+            _ => None,
+        };
+        if enclosing_type.is_some() && receiver_type == enclosing_type {
+            return;
+        }
         if state.constant_owner.as_ref() != Some(&owner) && enclosing_type != Some(&owner) {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-accessing-other-classes-private-members",
@@ -82,7 +89,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             if matches!(object.unparenthesized(), Expr::This(_) | Expr::Super(_)) {
                 return;
             }
-            let mut receiver = state.infer_receiver(object);
+            let mut receiver =
+                state.infer_access_receiver(object, field.field().name(), field.is_null_safe());
             // A class literal denotes the static namespace, not an instance of Type.
             if let Expr::Ident(name) = object.unparenthesized()
                 && !state.environment.is_bound(name.name())
@@ -97,6 +105,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 };
             }
             self.check(field.field(), &receiver, state);
+        } else if let Expr::DotShorthand(shorthand) = node
+            && let Some(receiver) = state.expected()
+        {
+            self.check(shorthand.name(), receiver, state);
         }
     }
 

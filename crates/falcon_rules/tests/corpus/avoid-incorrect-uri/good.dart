@@ -15,6 +15,11 @@ void f(dynamic unknown, Iterable<String> values, String? path) {
   Uri(queryParameters: {'values': values});
   Uri(queryParameters: {'unknown': unknown});
   core.Uri(queryParameters: {'hello': 'world'});
+  Uri(query: 'key=value');
+  Uri(queryParameters: {'key': 'value'});
+  Uri(query: null, queryParameters: {'key': 'value'});
+  Uri(query: 'key=value', queryParameters: null);
+  Uri(query: path, queryParameters: {'key': 'value'});
 }
 
 void shadowed(dynamic Uri) {

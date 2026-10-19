@@ -2,4 +2,4 @@
 default: minor
 ---
 
-Ban resolved API references, not identifiers that merely share their spelling. This check stays inactive until configured with the relevant match lists and diagnostic messages.
+Add configurable bans on resolved API references, matching top-level names or `DeclaringType.member`. Covers calls, tear-offs, properties, cascades, context-typed dot shorthands, constructor invocations, initializers and redirecting factories. Lexical declarations take precedence over inherited members; unresolved targets are ignored. Matching stays inactive until configured with deny patterns and diagnostic messages.

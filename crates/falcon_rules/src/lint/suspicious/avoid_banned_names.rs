@@ -1,4 +1,5 @@
-//! Configurable forbidden declaration names. Overrides and references are exempt.
+//! Ban declaration names, exempting references, initializing/super formals, and
+//! `@override`-annotated members and their parameters.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -100,11 +101,31 @@ struct Collector<'a> {
 
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
+        if let Some(name) = node.constructor_name
+            && !node.annotations.into_iter().any(|annotation| {
+                annotation.name().any(|name| name.name() == "override")
+            })
+        {
+            report(self.ctx, &self.entries, "avoid-banned-names", name.name(), name.span(), &mut self.diagnostics);
+        }
+        StructuralTraversal::Continue
+    }
+
     fn visit_identifier(&mut self, node: Identifier<'a>) -> StructuralTraversal {
         let Some(parent) = node.syntax().parent() else {
             return StructuralTraversal::Continue;
         };
-        if !matches!(parent.kind(),
+        if FormalParam::cast(parent).is_some_and(|parameter| parameter.initializing().is_some()) {
+            return StructuralTraversal::Continue;
+        }
+        let additional_name = match parent.kind() {
+            NodeKind::CatchClause | NodeKind::ImportDirective => true,
+            NodeKind::ForInInit => ForInInit::cast(parent)
+                .is_some_and(|init| init.declares_variable() && init.name().span() == node.span()),
+            _ => false,
+        };
+        if !additional_name && (!matches!(parent.kind(),
             NodeKind::ClassDecl | NodeKind::MixinDecl | NodeKind::EnumDecl
             | NodeKind::ExtensionDecl | NodeKind::FunctionDecl | NodeKind::MethodDecl
             | NodeKind::GetterDecl | NodeKind::SetterDecl | NodeKind::VarDeclarator
@@ -112,10 +133,15 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             | NodeKind::LocalFuncDecl | NodeKind::VariablePattern
             | NodeKind::ClassTypeAliasDecl | NodeKind::MixinClassDecl
             | NodeKind::ExtensionTypeDecl | NodeKind::EnumVariant
-        ) || parent.children().find_map(Identifier::cast).is_none_or(|name| name.span() != node.span()) {
+        ) || parent.children().find_map(Identifier::cast).is_none_or(|name| name.span() != node.span())) {
             return StructuralTraversal::Continue;
         }
-        let declaration = if parent.kind() == NodeKind::VarDeclarator {
+        let declaration = if parent.kind() == NodeKind::FormalParam {
+            parent.ancestors().skip(1).find(|ancestor| matches!(ancestor.kind(),
+                NodeKind::MethodDecl | NodeKind::SetterDecl | NodeKind::FunctionDecl
+                | NodeKind::ConstructorDecl | NodeKind::LocalFuncDecl | NodeKind::FuncExpr
+            )).unwrap_or(parent)
+        } else if parent.kind() == NodeKind::VarDeclarator {
             parent.parent().unwrap_or(parent)
         } else {
             parent

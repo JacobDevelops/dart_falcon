@@ -51,11 +51,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.ancestors.clear();
         let mut parent = node.syntax().parent();
         while let Some(ancestor) = parent {
-            if let Some(construction) = NewExpr::cast(ancestor) {
-                let ty = construction.dart_type().span();
-                if ty.start <= node.span().start && node.span().end <= ty.end {
-                    return StructuralTraversal::Continue;
-                }
+            if let Some(construction) = NewExpr::cast(ancestor)
+                && construction.dart_type().span() == node.span()
+            {
+                return StructuralTraversal::Continue;
             }
             self.ancestors.push(ancestor);
             parent = ancestor.parent();

@@ -1,4 +1,4 @@
-//! Reject repeated path separators in import and export URIs.
+//! Reject repeated path separators in directive URIs (import, export and part).
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
@@ -24,7 +24,7 @@ impl Rule for AvoidDoubleSlashImports {
                     path.contains("//").then(|| {
                         ctx.diagnostic(
                             "avoid-double-slash-imports",
-                            "Avoid repeated '/' separators in import or export paths.",
+                            "Avoid repeated '/' separators in directive URIs (import, export or part).",
                             uri.span(),
                         )
                     })

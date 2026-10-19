@@ -22,3 +22,26 @@ void constructorsAndStatics() {
   print(p.Client.flag); /* expect: banned-usage */
   print(Choice.legacy); /* expect: banned-usage */
 }
+
+extension on String {
+  void shout() => legacy(); /* expect: banned-usage */
+}
+class Base {
+  void legacy() {}
+}
+class Sub extends Base {
+  void run() => legacy(); /* expect: banned-usage */
+}
+void shorthand() {
+  Choice choice = .legacy; /* expect: banned-usage */
+  Client named = .named(); /* expect: banned-usage */
+  Client unnamed = .new(); /* expect: banned-usage */
+}
+
+class ChildClient extends Client {
+  ChildClient() : super.named(); /* expect: banned-usage */
+}
+class ClientFactory {
+  factory ClientFactory() = ClientFactory.named; /* expect: banned-usage */
+  ClientFactory.named();
+}

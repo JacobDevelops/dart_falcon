@@ -50,6 +50,29 @@ impl Collector<'_> {
         );
     }
 
+    fn is_unnamed_extension_member(identifier: Identifier<'_>) -> bool {
+        let Some(extension) = identifier
+            .syntax()
+            .ancestors()
+            .skip(1)
+            .find_map(ExtensionDecl::cast)
+        else {
+            return false;
+        };
+        extension.name().is_none()
+            && extension.members().any(|member| {
+                let syntax = member.syntax();
+                syntax
+                    .children()
+                    .filter_map(Identifier::cast)
+                    .any(|name| name.name() == identifier.name())
+                    || syntax
+                        .children()
+                        .filter_map(VarDeclarator::cast)
+                        .any(|variable| variable.name().name() == identifier.name())
+            })
+    }
+
     fn member(
         &mut self,
         receiver: &ResolvedType,
@@ -80,6 +103,41 @@ impl Collector<'_> {
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
+    fn visit_constructor(&mut self, node: ConstructorDecl<'a>, state: &SemanticState<'a>) {
+        if let Some(redirect) = node.redirect()
+            && let Some((owner, name)) = falcon_analyze::resolve_new_constructor(
+                redirect.type_(),
+                redirect.constructor_name(),
+                &state.model,
+            )
+        {
+            let owner = state.model.unaliased(owner);
+            self.emit(&format!("{}.{name}", owner.name()), redirect.span());
+        }
+        for initializer in node.initializers() {
+            let (receiver, name, span) = match initializer {
+                ConstructorInitializer::SuperCall(call) => {
+                    (state.superclass.as_ref(), call.call_name(), call.span())
+                }
+                ConstructorInitializer::ThisCall(call) => {
+                    (state.enclosing_type.as_ref(), call.call_name(), call.span())
+                }
+                _ => continue,
+            };
+            if let Some(ResolvedType::Interface { identity, .. }) = receiver {
+                let owner = state.model.unaliased(identity.clone());
+                self.emit(
+                    &format!(
+                        "{}.{}",
+                        owner.name(),
+                        name.map_or("new", |name| name.name())
+                    ),
+                    span,
+                );
+            }
+        }
+    }
+
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         // The call owns a constructor diagnostic; its selector children do not.
         let mut parent = node.syntax().parent();
@@ -122,15 +180,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 if !state.environment.is_bound(identifier.name())
                     && state.type_parameters.lookup(identifier.name()).is_none() =>
             {
-                let mut parent = identifier.syntax().parent();
-                while let Some(ancestor) = parent {
-                    if let Some(extension) = ExtensionDecl::cast(ancestor) {
-                        if extension.name().is_none() {
-                            return;
-                        }
-                        break;
-                    }
-                    parent = ancestor.parent();
+                if Self::is_unnamed_extension_member(identifier) {
+                    return;
                 }
                 if let Some(owner) = &state.constant_owner
                     && (!state
@@ -143,27 +194,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         &format!("{}.{}", owner.name(), identifier.name()),
                         identifier.span(),
                     );
-                } else if let Some(receiver) = &state.enclosing_type
-                    && (state
-                        .signatures
-                        .resolved_readable_member_owner(receiver, identifier.name(), &state.model)
-                        .is_some()
-                        || state
-                            .signatures
-                            .resolved_writable_member_owner(
-                                receiver,
-                                identifier.name(),
-                                &state.model,
-                            )
-                            .is_some())
-                {
-                    self.member(receiver, identifier.name(), identifier.span(), state);
                 } else if let Some(identity) = state
                     .model
                     .resolve_value(identifier.name())
                     .or_else(|| state.model.resolve_name(identifier.name()))
                 {
                     self.emit(identity.name(), identifier.span());
+                } else if let Some(receiver) = &state.enclosing_type {
+                    self.member(receiver, identifier.name(), identifier.span(), state);
                 }
             }
             Expr::Field(field) => {
@@ -234,6 +272,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     field.is_null_safe(),
                 );
                 self.member(&receiver, field.field().name(), field.field().span(), state);
+            }
+            Expr::DotShorthand(shorthand) => {
+                if let Some(ResolvedType::Interface { identity, .. }) = state.expected() {
+                    let owner = state.model.unaliased(identity.clone());
+                    self.emit(
+                        &format!("{}.{}", owner.name(), shorthand.name().name()),
+                        shorthand.name().span(),
+                    );
+                }
             }
             Expr::New(construction) => {
                 if let Some((owner, name)) = falcon_analyze::resolve_new_constructor(

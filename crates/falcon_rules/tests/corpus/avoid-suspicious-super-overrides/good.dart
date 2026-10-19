@@ -36,3 +36,32 @@ class UnrelatedParameter extends UnrelatedParameterBase {
   @override
   String get issueType => 'child';
 }
+
+class MixedBase {
+  final int count;
+  final String issueType;
+  MixedBase(this.count, {this.issueType = 'default'});
+}
+class PositionalNameOnly extends MixedBase {
+  PositionalNameOnly(super.issueType);
+  @override
+  String get issueType => 'hidden';
+}
+
+class InitializedBase {
+  final String issueType;
+  InitializedBase(String issueType) : issueType = issueType;
+}
+class InitializedChild extends InitializedBase {
+  InitializedChild() : super('promotion');
+  @override
+  String get issueType => 'hidden';
+}
+class Intermediate extends Base {
+  Intermediate({required super.issueType});
+}
+class IndirectChild extends Intermediate {
+  IndirectChild() : super(issueType: 'promotion');
+  @override
+  String get issueType => 'hidden';
+}

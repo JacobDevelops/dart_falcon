@@ -26,3 +26,17 @@ void intentional(@mutated Box box, @mutated List<int> values) {
 class AnnotatedSetter {
   set item(@mutated Box value) { value.value++; }
 }
+
+class Builder { String name = ''; }
+class Options { final headers = <String, String>{}; }
+class Item { bool selected = true; }
+
+void closures(List<Item> items) {
+  final build = (Builder b) => b..name = 'x';
+  final intercept = (Options options) {
+    options.headers['Authorization'] = 'token';
+  };
+  items.forEach((i) => i.selected = false);
+  build(Builder());
+  intercept(Options());
+}

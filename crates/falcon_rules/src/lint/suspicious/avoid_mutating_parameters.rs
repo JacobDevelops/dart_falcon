@@ -1,5 +1,6 @@
-//! Detects writes through parameter objects, using lexical declaration identities.
-//! Parameter rebinding is covered separately by `parameter-assignments`.
+//! Detects writes through named function, method and constructor parameter objects.
+//! Closure parameters are exempt; parameter rebinding belongs to `parameter-assignments`.
+//! Parameters annotated `@mutated` (dart-code-metrics-annotations) are exempt.
 
 use std::collections::{HashMap, HashSet};
 
@@ -36,6 +37,16 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
+    fn parameters(&mut self, params: FormalParamList<'_>) {
+        for parameter in params.params() {
+            if parameter.initializing().is_none()
+                && !crate::lint::declarations::annotation(parameter.annotations(), "mutated")
+            {
+                self.parameters.insert(parameter.name().syntax().id());
+            }
+        }
+    }
+
     fn record(&mut self, object: Expr<'_>, span: Span) {
         let mut root = object.unparenthesized();
         loop {
@@ -65,11 +76,33 @@ impl Collector<'_> {
 
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
-    fn visit_formal_param(&mut self, parameter: FormalParam<'a>) -> StructuralTraversal {
-        if parameter.initializing().is_none()
-            && !crate::lint::declarations::annotation(parameter.annotations(), "mutated")
-        {
-            self.parameters.insert(parameter.name().syntax().id());
+    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
+        if let Some(params) = node.params() {
+            self.parameters(params);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
+        self.parameters(node.params());
+        StructuralTraversal::Continue
+    }
+
+    fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
+        self.parameters(node.params);
+        StructuralTraversal::Continue
+    }
+
+    fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
+        if let ClassMember::Operator(operator) = node {
+            self.parameters(operator.params());
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
+        if let Stmt::LocalFunc(function) = node {
+            self.parameters(function.params());
         }
         StructuralTraversal::Continue
     }

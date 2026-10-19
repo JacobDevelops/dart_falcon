@@ -13,6 +13,7 @@
                   "Client.old",
                   "Client.new",
                   "Client.named",
+                  "ClientFactory.named",
                   "Client.flag",
                   "Choice.legacy",
                   "T"

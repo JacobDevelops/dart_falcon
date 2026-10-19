@@ -8257,6 +8257,36 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         matches: &impl Fn(&DeclarationIdentity) -> bool,
     ) -> Truth {
+        self.ancestor_matches(
+            identity,
+            |identity| {
+                self.supertypes
+                    .get(identity)
+                    .map(|(_, supertypes)| supertypes.as_slice())
+            },
+            matches,
+        )
+    }
+
+    /// Whether `identity` or its transitive `extends`/`with` ancestors match.
+    pub fn member_supertype_matches(
+        &self,
+        identity: &DeclarationIdentity,
+        matches: &impl Fn(&DeclarationIdentity) -> bool,
+    ) -> Truth {
+        self.ancestor_matches(
+            identity,
+            |identity| self.member_supertypes.get(identity).map(Vec::as_slice),
+            matches,
+        )
+    }
+
+    fn ancestor_matches<'s>(
+        &'s self,
+        identity: &'s DeclarationIdentity,
+        edges: impl Fn(&DeclarationIdentity) -> Option<&'s [ResolvedType]>,
+        matches: &impl Fn(&DeclarationIdentity) -> bool,
+    ) -> Truth {
         let mut visited = HashSet::new();
         let mut stack = vec![identity];
         let mut complete = true;
@@ -8267,23 +8297,15 @@ impl SignatureIndex {
             if matches(identity) {
                 return Truth::Yes;
             }
-            match self.supertypes.get(identity) {
-                Some((_, supertypes))
-                    if !matches!(identity, DeclarationIdentity::Package { .. }) =>
-                {
+            match edges(identity) {
+                Some(supertypes) => {
+                    complete &= !matches!(identity, DeclarationIdentity::Package { .. });
                     for supertype in supertypes {
                         match supertype {
                             ResolvedType::Interface { identity, .. } => stack.push(identity),
                             _ => complete = false,
                         }
                     }
-                }
-                Some((_, supertypes)) => {
-                    complete = false;
-                    stack.extend(supertypes.iter().filter_map(|supertype| match supertype {
-                        ResolvedType::Interface { identity, .. } => Some(identity),
-                        _ => None,
-                    }));
                 }
                 None => complete &= *identity == DeclarationIdentity::OBJECT,
             }

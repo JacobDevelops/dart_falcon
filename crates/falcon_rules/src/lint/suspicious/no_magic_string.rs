@@ -1,8 +1,8 @@
 //! Extract inline string literals into named variables or constants.
-//! Exempts direct initializers, defaults, annotations, constant collections,
-//! indices, asserts, regex/URI/error constructors and common string operations.
-//! Options: `allow_only_once` (false) and `ignored_invocations`
-//! (default ["print", "debugPrint"]).
+//! Exempts direct literal initializers, defaults, annotations, constant collections,
+//! indices, asserts, and direct string arguments of regex/URI/error constructors,
+//! common string operations and `ignored_invocations` (default ["print", "debugPrint"]).
+//! `allow_only_once` (false) allows values occurring only once across all file literals.
 
 use std::collections::HashMap;
 
@@ -46,7 +46,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     allow_only_once: bool,
     ignored: Vec<&'a str>,
-    literals: Vec<(String, Span)>,
+    literals: Vec<(String, Span, bool)>,
 }
 
 impl Collector<'_> {
@@ -67,7 +67,7 @@ impl Collector<'_> {
                 NodeKind::VarDeclarator
                     if child == literal.syntax()
                         || Expr::cast(child).is_some_and(|expr| {
-                            matches!(expr.unparenthesized(), Expr::StringLit(_))
+                            expr.unparenthesized().syntax() == literal.syntax()
                         }) =>
                 {
                     return true;
@@ -95,7 +95,15 @@ impl Collector<'_> {
                     Expr::Set(set) if set.is_const() => return true,
                     Expr::Map(map) if map.is_const() => return true,
                     Expr::Index(index) if index.index().syntax() == child => return true,
-                    Expr::Call(call) => {
+                    Expr::Call(call)
+                        if call
+                            .args()
+                            .positional()
+                            .chain(call.args().named().map(|argument| argument.value()))
+                            .any(|argument| {
+                                argument.unparenthesized().syntax() == literal.syntax()
+                            }) =>
+                    {
                         let name = match call.callee().unparenthesized() {
                             Expr::Ident(name) => Some(name.name()),
                             Expr::Field(field) => Some(field.field().name()),
@@ -107,15 +115,22 @@ impl Collector<'_> {
                             return true;
                         }
                         if let Expr::Field(field) = call.callee().unparenthesized()
-                            && matches!(field.object().unparenthesized(), Expr::Ident(name) if name.name() == "Uri")
+                            && matches!(field.object().unparenthesized(), Expr::Ident(name) if exempt_invocation(name.name()))
                         {
                             return true;
                         }
                     }
                     Expr::New(new) => {
                         if new.is_const()
-                            || matches!(new.dart_type(), DartType::Named(name)
-                            if name.segments().last().is_some_and(|name| exempt_invocation(name.name())))
+                            || (new
+                                .args()
+                                .positional()
+                                .chain(new.args().named().map(|argument| argument.value()))
+                                .any(|argument| {
+                                    argument.unparenthesized().syntax() == literal.syntax()
+                                })
+                                && matches!(new.dart_type(), DartType::Named(name)
+                            if name.segments().last().is_some_and(|name| exempt_invocation(name.name()))))
                         {
                             return true;
                         }
@@ -158,13 +173,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         let mut counts = HashMap::new();
         if self.allow_only_once {
-            for (value, _) in &self.literals {
+            for (value, _, _) in &self.literals {
                 *counts.entry(value.as_str()).or_insert(0usize) += 1;
             }
         }
         self.literals.iter()
-            .filter(|(value, _)| !self.allow_only_once || counts.get(value.as_str()).copied().unwrap_or(0) > 1)
-            .map(|(_, span)| self.ctx.diagnostic("no-magic-string",
+            .filter(|(value, _, exempt)| !exempt && (!self.allow_only_once || counts.get(value.as_str()).copied().unwrap_or(0) > 1))
+            .map(|(_, span, _)| self.ctx.diagnostic("no-magic-string",
                 "Extract this magic string into a named variable or constant.", *span))
             .collect()
     }
@@ -172,11 +187,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::StringLit(literal) = node
             && literal.interpolations().next().is_none()
-            && !self.exempt(literal)
         {
             let value = uri_value(literal);
             if !value.is_empty() {
-                self.literals.push((value, literal.span()));
+                let exempt = self.exempt(literal);
+                if self.allow_only_once || !exempt {
+                    self.literals.push((value, literal.span(), exempt));
+                }
             }
         }
         StructuralTraversal::Continue

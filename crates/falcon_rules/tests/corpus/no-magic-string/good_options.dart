@@ -4,4 +4,6 @@ void f() {
   consume('');
   consume('');
   final value = 'initializer';
+  final greeting = 'named only';
+  final otherGreeting = 'named only';
 }

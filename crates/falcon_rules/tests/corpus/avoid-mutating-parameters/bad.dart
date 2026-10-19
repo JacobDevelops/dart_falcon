@@ -16,3 +16,24 @@ void mutate(Box box, List<int> values, Map<String, int> map) {
 class Holder {
   set item(Box value) { value.value = 1; /* expect: avoid-mutating-parameters */ }
 }
+
+class Mutator {
+  Mutator(Box box) {
+    box.value = 1; /* expect: avoid-mutating-parameters */
+  }
+
+  void update(Box box) {
+    box.value = 2; /* expect: avoid-mutating-parameters */
+  }
+
+  void operator []=(int index, Box box) {
+    box.value = index; /* expect: avoid-mutating-parameters */
+  }
+}
+
+void outer() {
+  void local(Box box) {
+    box.value = 3; /* expect: avoid-mutating-parameters */
+  }
+  local(Box());
+}

@@ -9,3 +9,14 @@ class Base {
 }
 class Child extends Base { static int value = 1; }
 class Grandchild extends Child {}
+
+const FREEZED = 0;
+@FREEZED
+class ExactCaseBase {
+  ExactCaseChild? child; /* expect: avoid-referencing-subclasses */
+}
+class ExactCaseChild extends ExactCaseBase {}
+mixin class MixinBase {
+  MixedSubclass? child; /* expect: avoid-referencing-subclasses */
+}
+class MixedSubclass with MixinBase {}

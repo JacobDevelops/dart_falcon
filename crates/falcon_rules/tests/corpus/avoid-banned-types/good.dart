@@ -22,3 +22,11 @@ void constructors() {
   new Legacy();
   const Legacy();
 }
+
+class Wrapper<T> {
+  const Wrapper();
+}
+void genericConstructions() {
+  final list = new List<Modern>.empty();
+  final wrapper = const Wrapper<Modern>();
+}

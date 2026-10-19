@@ -198,7 +198,7 @@ entries are ignored.
 
 | Rule | Matched value |
 |------|---------------|
-| `avoid-banned-names` | Declared identifier names, excluding overridden members. |
+| `avoid-banned-names` | Declared identifier names, excluding references, initializing/super formals, and `@override`-annotated members and their parameters. |
 | `avoid-banned-types` | Resolved type declaration names, including expanded type aliases. |
 | `avoid-banned-annotations` | Exact dotted source annotation names, including import prefixes and named constructors. |
 | `avoid-banned-exports` | Export URI strings, including conditional alternatives. |
@@ -214,8 +214,8 @@ not construction. Ban `Client.new` or `Client.named` to target its constructors.
 | `avoid-nested-assignments` | `ignore_null_aware_assignments` | `false` | Exempt nested `??=` assignments. |
 | `avoid-negated-conditions` | `ignore_null_checks` | `false` | Exempt negated null checks. |
 | `no-magic-string` | `allow_only_once` | `false` | Allow a string value that occurs only once in the file. |
-| `no-magic-string` | `ignored_invocations` | `["print", "debugPrint"]` | Invocation names whose string arguments are exempt. |
-| `avoid-referencing-subclasses` | `ignored_annotations` | `["freezed"]` | Exempt classes with one of these annotations. |
+| `no-magic-string` | `ignored_invocations` | `["print", "debugPrint"]` | Invocation names whose direct string arguments are exempt. |
+| `avoid-referencing-subclasses` | `ignored_annotations` | `["freezed", "Freezed", "unfreezed"]` | Replaces the defaults; exempt classes by exact, case-sensitive final annotation name segment. |
 
 ### Metric thresholds (group `complexity`)
 

@@ -1,4 +1,5 @@
 //! Prefer positive conditions when both branches can be swapped.
+//! Checks if statements, conditional expressions, and collection/map if/else elements.
 //! `ignore_null_checks` (default false) exempts comparisons with null.
 
 use falcon_analyze::{
@@ -66,6 +67,28 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && statement.else_branch().is_some()
             && !matches!(statement.else_branch(), Some(Stmt::If(_)))
             && let IfCondition::Expr(condition) = statement.condition()
+        {
+            self.check(condition);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_collection_element(&mut self, node: CollectionElement<'a>) -> StructuralTraversal {
+        if let CollectionElement::If(element) = node
+            && element.else_elem().is_some()
+            && !matches!(element.else_elem(), Some(CollectionElement::If(_)))
+            && let IfCondition::Expr(condition) = element.condition()
+        {
+            self.check(condition);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_map_element(&mut self, node: MapElement<'a>) -> StructuralTraversal {
+        if let MapElement::If(element) = node
+            && element.else_entry().is_some()
+            && !matches!(element.else_entry(), Some(MapElement::If(_)))
+            && let IfCondition::Expr(condition) = element.condition()
         {
             self.check(condition);
         }
