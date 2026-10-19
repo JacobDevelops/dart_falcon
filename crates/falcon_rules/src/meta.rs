@@ -2904,6 +2904,90 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     RuleMeta::resolved::<lint::style::avoid_unnecessary_overrides_in_state::AvoidUnnecessaryOverridesInState>(
         "avoid-unnecessary-overrides-in-state", RuleGroup::Style, FLUTTER, false, RuleSource::Falcon,
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_unused_after_null_check::AvoidUnusedAfterNullCheck>(
+        "avoid-unused-after-null-check",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unreachable_for_loop::AvoidUnreachableForLoop>(
+        "avoid-unreachable-for-loop",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_unconditional_break::AvoidUnconditionalBreak>(
+        "avoid-unconditional-break",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_recursive_calls::AvoidRecursiveCalls>(
+        "avoid-recursive-calls",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_nested_futures::AvoidNestedFutures>(
+        "avoid-nested-futures",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_nested_streams_and_futures::AvoidNestedStreamsAndFutures>(
+        "avoid-nested-streams-and-futures",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_missing_completer_stack_trace::AvoidMissingCompleterStackTrace>(
+        "avoid-missing-completer-stack-trace",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::prefer_correct_json_casts::PreferCorrectJsonCasts>(
+        "prefer-correct-json-casts",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_assigning_to_static_field::AvoidAssigningToStaticField>(
+        "avoid-assigning-to-static-field",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::match_getter_setter_field_names::MatchGetterSetterFieldNames>(
+        "match-getter-setter-field-names",
+        RuleGroup::Correctness,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::security::prefer_random_secure::PreferRandomSecure>(
+        "prefer-random-secure",
+        RuleGroup::Security,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::security::avoid_sensitive_query_params::AvoidSensitiveQueryParams>(
+        "avoid-sensitive-query-params",
+        RuleGroup::Security,
+        NONE,
+        false,
+        RuleSource::Falcon,
+    ),
 ];
 
 /// Legacy rule ids mapped to their canonical id. Covers the pre-1.0
@@ -2996,6 +3080,7 @@ pub const RULE_ALIASES: &[(&str, &str)] = &[
         "avoid-unnecessary-conditionals",
         "avoid-bool-literals-in-conditional-expressions",
     ),
+    ("avoid-self-compare", "no-self-comparisons"),
 ];
 
 /// Resolve a possibly-legacy rule id to its canonical id. Returns the input

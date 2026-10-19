@@ -115,3 +115,18 @@ abstract class Sink<T> {
   void add(T data);
   void close();
 }
+abstract class Uri {
+  external factory Uri({
+    String? scheme,
+    String? userInfo,
+    String? host,
+    int? port,
+    String? path,
+    Iterable<String>? pathSegments,
+    String? query,
+    Map<String, dynamic>? queryParameters,
+    String? fragment,
+  });
+  external factory Uri.http(String authority, [String path, Map<String, dynamic>? queryParameters]);
+  external factory Uri.https(String authority, [String path, Map<String, dynamic>? queryParameters]);
+}

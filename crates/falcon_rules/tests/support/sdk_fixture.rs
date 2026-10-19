@@ -67,6 +67,8 @@ pub fn sdk_project() -> tempfile::TempDir {
     fs::create_dir_all(sdk.join("core")).unwrap();
     fs::create_dir_all(sdk.join("collection")).unwrap();
     fs::create_dir_all(sdk.join("async")).unwrap();
+    fs::create_dir_all(sdk.join("math")).unwrap();
+    fs::create_dir_all(sdk.join("convert")).unwrap();
     fs::write(
         sdk.join("libraries.json"),
         include_str!("sdk/lib/libraries.json"),
@@ -77,6 +79,16 @@ pub fn sdk_project() -> tempfile::TempDir {
     fs::write(
         sdk.join("async/async.dart"),
         include_str!("sdk/lib/async/async.dart"),
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("math/math.dart"),
+        include_str!("sdk/lib/math/math.dart"),
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("convert/convert.dart"),
+        include_str!("sdk/lib/convert/convert.dart"),
     )
     .unwrap();
     fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
