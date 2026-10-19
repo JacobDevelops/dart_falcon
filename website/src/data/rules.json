@@ -44,16 +44,64 @@
         "file": null,
         "line": 11,
         "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 12,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 13,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 14,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 45,
+        "file": null,
+        "line": 15,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 19,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 47,
+        "file": null,
+        "line": 20,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Provide an accessible label for this interactive widget."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 27,
+        "message": "Provide an accessible label for this interactive widget."
       }
     ],
-    "docs": "Warn about unlabeled interactive gesture targets.\n\nChecks resolved Flutter GestureDetector, InkWell, and InkResponse constructors.\nDirect Text children, Icon semanticLabel, or labeled Semantics/Tooltip\nancestors supply labels. Inert/excluded gestures and unknown/custom children\nare skipped. Dynamic labels are accepted; null and empty literals are not.\nThis is a local heuristic, not compliance validation. Image labels and action\nbutton tooltips are covered by avoid-missing-image-alt and\nprefer-action-button-tooltip respectively.",
+    "docs": "Warn about unlabeled interactive gesture targets.\n\nChecks resolved Flutter GestureDetector, InkWell, and InkResponse constructors.\nDirect Text children, Icon semanticLabel, or Semantics/Tooltip ancestors with\nplain or rich labels supply labels. Inert/excluded gestures and unknown/custom\nchildren are skipped. Dynamic labels are accepted; null and empty literals are not.\nThis is a local heuristic, not compliance validation. Image labels and action\nbutton tooltips are covered by avoid-missing-image-alt and\nprefer-action-button-tooltip respectively.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions() {\n  GestureDetector(onTap: () {});\n  f.InkWell(onTap: () {}, child: Icon(null));\n  InkResponse(onTap: () {}, child: Text(' '));\n  GestureDetector(onTap: () {}, child: Icon(null));\n  InkWell(onTap: () {}, child: Text(''));\n  InkResponse(onTap: () {});\n  Tooltip(message: '', child: InkWell(onTap: () {}));\n}",
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions() {\n  GestureDetector(onTap: () {});\n  f.InkWell(onTap: () {}, child: Icon(null));\n  InkResponse(onTap: () {}, child: Text(' '));\n  GestureDetector(onTap: () {}, child: Icon(null));\n  InkWell(onTap: () {}, child: Text(''));\n  InkResponse(onTap: () {});\n  Tooltip(message: '', child: InkWell(onTap: () {}));\n  Tooltip(richMessage: null, child: InkWell(onTap: () {}));\n  Tooltip(richMessage: (null), child: InkResponse(onTap: () {}));\n  Semantics(attributedLabel: null, child: InkWell(onTap: () {}));\n  Semantics(attributedLabel: (null), child: InkResponse(onTap: () {}));\n}\n\nvoid shadowed(dynamic Tooltip, dynamic Semantics) {\n  Tooltip(richMessage: 'Delete', child: InkWell(onTap: () {}));\n  Semantics(attributedLabel: 'Delete', child: InkResponse(onTap: () {}));\n}\n\nvoid siblings(dynamic richMessage, dynamic attributedLabel) {\n  Tooltip(richMessage: richMessage, child: InkWell(onTap: () {}));\n  InkWell(onTap: () {});\n  Semantics(attributedLabel: attributedLabel, child: InkResponse(onTap: () {}));\n  InkResponse(onTap: () {});\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(String label) {\n  IconButton(tooltip: 'Add');\n  f.IconButton.filled(tooltip: label);\n  FloatingActionButton(child: Text('Add'));\n  GestureDetector(onTap: () {}, child: Text('Open'));\n  InkWell(onTap: () {}, child: Icon(null, semanticLabel: 'Open'));\n  Semantics(label: 'Open', child: InkResponse(onTap: () {}));\n  Tooltip(message: 'Add', child: IconButton());\n  GestureDetector(excludeFromSemantics: true);\n  TextButton(child: Text('Save'));\n  GestureDetector();\n  InkWell(onTap: null);\n  InkResponse();\n  IconButton(icon: customLabel());\n  GestureDetector(onTap: () {}, child: customLabel());\n}\nvoid shadow(dynamic IconButton) { IconButton(); }\nWidget customLabel() => Text('Custom label');"
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(String label) {\n  IconButton(tooltip: 'Add');\n  f.IconButton.filled(tooltip: label);\n  FloatingActionButton(child: Text('Add'));\n  GestureDetector(onTap: () {}, child: Text('Open'));\n  InkWell(onTap: () {}, child: Icon(null, semanticLabel: 'Open'));\n  Semantics(label: 'Open', child: InkResponse(onTap: () {}));\n  Tooltip(message: 'Add', child: IconButton());\n  GestureDetector(excludeFromSemantics: true);\n  TextButton(child: Text('Save'));\n  GestureDetector();\n  InkWell(onTap: null);\n  InkResponse();\n  IconButton(icon: customLabel());\n  GestureDetector(onTap: () {}, child: customLabel());\n}\nvoid shadow(dynamic IconButton) { IconButton(); }\nWidget customLabel() => Text('Custom label');\n\nvoid alternatives(dynamic richMessage, dynamic attributedLabel) {\n  Tooltip(richMessage: TextSpan(text: 'Delete'), child: InkWell(onTap: () {}, child: Icon(null)));\n  Semantics(attributedLabel: AttributedString('Delete'), child: InkResponse(onTap: () {}, child: Icon(null)));\n  f.Tooltip(richMessage: (richMessage), child: f.GestureDetector(onTap: () {}, child: f.Icon(null)));\n  f.Semantics(attributedLabel: (attributedLabel), child: f.InkWell(onTap: () {}, child: f.Icon(null)));\n  Tooltip(message: 'Delete', richMessage: null, child: InkWell(onTap: () {}));\n  Semantics(label: 'Delete', attributedLabel: null, child: InkResponse(onTap: () {}));\n}"
     },
     "group": "a11y",
     "name": "accessible-widget-labels",
@@ -3525,7 +3573,7 @@
   },
   {
     "crossFile": false,
-    "description": "Require GlobalKey fields to be passed to a widget.",
+    "description": "Keep GlobalKeys stable and pass owned State fields to widgets.",
     "diagnostics": [
       {
         "column": 9,
@@ -3576,7 +3624,7 @@
         "message": "Pass this GlobalKey field to a widget."
       }
     ],
-    "docs": "Require GlobalKey fields to be passed to a widget.\n\nChecks owned GlobalKey-subtype instance fields in concrete Flutter State\nclasses. Abstract State bases and injected fields are skipped. Passing a\nfield anywhere in a call argument counts conservatively, since helpers may\nattach it to a widget. Shadowed locals and currentState/currentContext receiver\nreads do not count as passing the key.",
+    "docs": "Keep GlobalKeys stable and pass owned State fields to widgets.\n\nReports nonconstant GlobalKey-subtype constructors directly in widget `key`\narguments, including outside State classes. Value-stable GlobalObjectKeys,\nconstant keys and cached field/top-level initializers are exempt. Closures\ninside those initializers are still checked. Stored keys are checked only for\nconcrete Flutter State classes: abstract bases and injected fields are skipped.\nPassing a field anywhere in a call argument counts conservatively, since\nhelpers may attach it to a widget. Shadowed locals and currentState/currentContext\nreceiver reads do not count as passing the key.",
     "domains": [
       "flutter"
     ],
@@ -4082,81 +4130,75 @@
   },
   {
     "crossFile": false,
-    "description": "Avoid releasing late State fields from dispose: they may be unset or lazily initialized solely to release them.",
+    "description": "Avoid releasing late State fields that may be unset or initialized only by cleanup.",
     "diagnostics": [
       {
         "column": 5,
         "file": null,
+        "line": 14,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 15,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
         "line": 16,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
       },
       {
         "column": 5,
         "file": null,
         "line": 17,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
       },
       {
         "column": 5,
         "file": null,
         "line": 18,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
       },
       {
         "column": 5,
         "file": null,
         "line": 19,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
-      },
-      {
-        "column": 5,
-        "file": null,
-        "line": 20,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
-      },
-      {
-        "column": 5,
-        "file": null,
-        "line": 21,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
       },
       {
         "column": 12,
         "file": null,
-        "line": 22,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+        "line": 20,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
       },
       {
         "column": 18,
         "file": null,
+        "line": 21,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 22,
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
+      },
+      {
+        "column": 5,
+        "file": null,
         "line": 23,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
-      },
-      {
-        "column": 5,
-        "file": null,
-        "line": 24,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
-      },
-      {
-        "column": 5,
-        "file": null,
-        "line": 25,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
-      },
-      {
-        "column": 5,
-        "file": null,
-        "line": 26,
-        "message": "Avoid releasing a late field in dispose; make the field nullable instead."
+        "message": "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable."
       }
     ],
-    "docs": "Avoid releasing late State fields from dispose: they may be unset or lazily\ninitialized solely to release them. Nullable fields permit conditional cleanup.",
+    "docs": "Avoid releasing late State fields that may be unset or initialized only by cleanup.\n\nA direct `=` assignment, or a direct read of a lazily initialized field, in\nsynchronous initState is accepted in its initial straight-line prefix of\nexpression statements, local declarations and empty statements. Any other\nstatement ends that prefix, including assertions and pattern declarations.\nArrow bodies are supported. Reads cover bare fields, property receivers,\nmethod receivers and cascade receivers, not nested arguments or callbacks.\nConditional, nested, asynchronous and helper-based initialization is not proven;\nlazy field initializers alone still do not make cleanup safe.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/material.dart' as f;\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends f.State<f.StatefulWidget> {\n  late Resource unset;\n  late final Resource lazy = Resource();\n  late Resource stream, subscription;\n  late Resource? optional;\n  late Resource first = Resource(), second = Resource();\n  late Resource initializedInInitState;\n  void initState() { initializedInInitState = Resource(); }\n  void dispose() {\n    unset.dispose();\n    this.lazy.dispose();\n    stream.close();\n    subscription.cancel();\n    optional?.dispose();\n    optional!.close();\n    unset..dispose();\n    (this.lazy)..close();\n    first.dispose();\n    second.cancel();\n    initializedInInitState.dispose();\n    super.dispose();\n  }\n}",
+      "bad": "import 'package:flutter/material.dart' as f;\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends f.State<f.StatefulWidget> {\n  late Resource unset;\n  late final Resource lazy = Resource();\n  late Resource stream, subscription;\n  late Resource? optional;\n  late Resource first = Resource(), second = Resource();\n  void dispose() {\n    unset.dispose();\n    this.lazy.dispose();\n    stream.close();\n    subscription.cancel();\n    optional?.dispose();\n    optional!.close();\n    unset..dispose();\n    (this.lazy)..close();\n    first.dispose();\n    second.cancel();\n    super.dispose();\n  }\n}",
       "crossFile": null,
       "good": "import 'package:flutter/material.dart';\nclass Resource {\n  void dispose() {}\n  void close() {}\n  void cancel() {}\n}\nclass S extends State<StatefulWidget> {\n  Resource? optional;\n  final eager = Resource();\n  late Resource deferred;\n  static late Resource shared;\n  void cleanup() { deferred.dispose(); }\n  void dispose() {\n    optional?.dispose();\n    eager.dispose();\n    shared.dispose();\n    final deferred = Resource();\n    deferred.dispose();\n    void release(Resource deferred) { deferred.dispose(); }\n    super.dispose();\n  }\n}\nclass Other {\n  late Resource resource;\n  void dispose() { resource.dispose(); }\n}\nclass Holder extends State<StatefulWidget> {\n  late Resource resource;\n  void dispose() {\n    final other = Other();\n    other.resource.dispose();\n    super.dispose();\n  }\n}"
     },
@@ -10288,6 +10330,60 @@
   },
   {
     "crossFile": false,
+    "description": "Require an explicit heroTag on Flutter FloatingActionButton constructors.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 8,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Provide an explicit heroTag for this floating action button."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Provide an explicit heroTag for this floating action button."
+      }
+    ],
+    "docs": "Require an explicit heroTag on Flutter FloatingActionButton constructors.\n\nThe default tag is shared, so multiple buttons can collide during a Hero\ntransition. Set a unique tag or explicitly pass null to disable the transition.\nIncludes unnamed, small, large, and extended constructors; package identities\nexclude local lookalikes and shadowed names. Matches the DCM rule of this id.",
+    "domains": [
+      "flutter"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\ntypedef Action = FloatingActionButton;\nvoid actions() {\n  FloatingActionButton();\n  new FloatingActionButton.small();\n  const f.FloatingActionButton.large();\n  FloatingActionButton.extended(label: Text('Add'));\n  Action();\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(Object tag) {\n  FloatingActionButton(heroTag: 'add');\n  const FloatingActionButton.small(heroTag: 1);\n  f.FloatingActionButton.large(heroTag: tag);\n  FloatingActionButton.extended(label: Text('Add'), heroTag: null);\n  FloatingActionButton(heroTag: (null));\n  Hero(tag: 'flight');\n}\nvoid shadow(dynamic FloatingActionButton) { FloatingActionButton(); }"
+    },
+    "group": "correctness",
+    "name": "prefer-define-hero-tag",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires expectLater when a canonical expect call receives an unawaited Future.",
     "diagnostics": [
       {
@@ -10338,60 +10434,6 @@
     },
     "group": "correctness",
     "name": "prefer-expect-later",
-    "recommended": false,
-    "source": {
-      "kind": "Falcon",
-      "label": "Falcon",
-      "upstreamId": null,
-      "upstreamUrl": null
-    }
-  },
-  {
-    "crossFile": false,
-    "description": "Require an explicit heroTag on Flutter FloatingActionButton constructors.",
-    "diagnostics": [
-      {
-        "column": 3,
-        "file": null,
-        "line": 6,
-        "message": "Provide an explicit heroTag for this floating action button."
-      },
-      {
-        "column": 7,
-        "file": null,
-        "line": 7,
-        "message": "Provide an explicit heroTag for this floating action button."
-      },
-      {
-        "column": 9,
-        "file": null,
-        "line": 8,
-        "message": "Provide an explicit heroTag for this floating action button."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 9,
-        "message": "Provide an explicit heroTag for this floating action button."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 10,
-        "message": "Provide an explicit heroTag for this floating action button."
-      }
-    ],
-    "docs": "Require an explicit heroTag on Flutter FloatingActionButton constructors.\n\nThe default tag is shared, so multiple buttons can collide during a Hero\ntransition. Set a unique tag or explicitly pass null to disable the transition.\nIncludes unnamed, small, large, and extended constructors; package identities\nexclude local lookalikes and shadowed names. Matches the DCM rule of this id.",
-    "domains": [
-      "flutter"
-    ],
-    "examples": {
-      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\ntypedef Action = FloatingActionButton;\nvoid actions() {\n  FloatingActionButton();\n  new FloatingActionButton.small();\n  const f.FloatingActionButton.large();\n  FloatingActionButton.extended(label: Text('Add'));\n  Action();\n}",
-      "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid actions(Object tag) {\n  FloatingActionButton(heroTag: 'add');\n  const FloatingActionButton.small(heroTag: 1);\n  f.FloatingActionButton.large(heroTag: tag);\n  FloatingActionButton.extended(label: Text('Add'), heroTag: null);\n  FloatingActionButton(heroTag: (null));\n  Hero(tag: 'flight');\n}\nvoid shadow(dynamic FloatingActionButton) { FloatingActionButton(); }"
-    },
-    "group": "correctness",
-    "name": "prefer-define-hero-tag",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -13509,7 +13551,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a resolved Flutter GestureDetector without any non-null event handlers.",
+    "description": "Flags handler-free Flutter GestureDetectors and tap-only wrappers around enabled Flutter buttons.",
     "diagnostics": [
       {
         "column": 3,
@@ -13540,16 +13582,46 @@
         "file": null,
         "line": 9,
         "message": "Remove this GestureDetector or provide an event handler."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Remove this GestureDetector or provide an event handler."
       }
     ],
-    "docs": "Flags a resolved Flutter GestureDetector without any non-null event handlers.\nSuch a detector adds no gestures; remove it or supply a handler. Any explicitly\nsupplied non-null on* callback, including a dynamic callback, is retained.",
+    "docs": "Flags handler-free Flutter GestureDetectors and tap-only wrappers around\nenabled Flutter buttons. Explicit hit-test behavior is retained. The button\ncase requires an inline onPressed callback, so nullable handlers stay unflagged.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef Detector = GestureDetector;\nvoid examples(Widget child) {\n  GestureDetector();\n  GestureDetector(child: child);\n  f.GestureDetector(child: TextButton());\n  Detector(onTap: null, child: child);\n  new GestureDetector(onLongPress: null);\n}",
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef Detector = GestureDetector;\nvoid examples(Widget child) {\n  GestureDetector();\n  GestureDetector(child: child);\n  f.GestureDetector(child: TextButton());\n  Detector(onTap: null, child: child);\n  new GestureDetector(onLongPress: null);\n  GestureDetector(onTap: () {}, child: TextButton(onPressed: () {}));\n  GestureDetector(onTap: () {}, child: f.ElevatedButton(onPressed: () {}));\n  Detector(onTap: () {}, child: OutlinedButton(onPressed: () {}));\n  GestureDetector(onTap: () {}, child: IconButton(onPressed: () {}));\n  GestureDetector(behavior: null, child: child);\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/widgets.dart';\nvoid callback() {}\nvoid examples(Widget child, void Function()? handler) {\n  GestureDetector(onTap: callback, child: child);\n  GestureDetector(onLongPress: callback);\n  GestureDetector(onDoubleTap: callback, child: TextButton());\n  GestureDetector(onTap: handler);\n  GestureDetector(onTap: null, onLongPress: callback);\n}"
+      "good": "import 'package:flutter/widgets.dart';\nvoid callback() {}\nvoid examples(Widget child, void Function()? handler) {\n  GestureDetector(onTap: callback, child: child);\n  GestureDetector(onLongPress: callback);\n  GestureDetector(onDoubleTap: callback, child: TextButton());\n  GestureDetector(onTap: handler);\n  GestureDetector(onTap: null, onLongPress: callback);\n  GestureDetector(behavior: HitTestBehavior.opaque, child: SizedBox.expand());\n  GestureDetector(behavior: HitTestBehavior.translucent, child: child);\n  GestureDetector(onLongPress: callback, child: TextButton(onPressed: () {}));\n  GestureDetector(onDoubleTap: callback, child: TextButton(onPressed: () {}));\n  GestureDetector(onTap: callback, child: TextButton(onPressed: null));\n  GestureDetector(onTap: callback, child: TextButton(onPressed: handler));\n  GestureDetector(onTap: callback, onLongPress: callback, child: TextButton(onPressed: () {}));\n  GestureDetector(behavior: HitTestBehavior.opaque, onTap: callback, child: TextButton(onPressed: () {}));\n}"
     },
     "group": "performance",
     "name": "avoid-unnecessary-gesture-detector",
@@ -14449,45 +14521,51 @@
   },
   {
     "crossFile": false,
-    "description": "Flags SingleChildScrollView directly containing a Flutter Column with no arguments other than children.",
+    "description": "Suggests considering ListView for a SingleChildScrollView containing a plain Flutter Column.",
     "diagnostics": [
       {
         "column": 3,
         "file": null,
         "line": 6,
-        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
       },
       {
         "column": 9,
         "file": null,
         "line": 7,
-        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
       },
       {
         "column": 7,
         "file": null,
         "line": 8,
-        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
       },
       {
         "column": 3,
         "file": null,
         "line": 9,
-        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
       },
       {
         "column": 3,
         "file": null,
         "line": 10,
-        "message": "Use ListView instead of a SingleChildScrollView containing a Column."
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
       }
     ],
-    "docs": "Flags SingleChildScrollView directly containing a Flutter Column with no\narguments other than children. Column-specific layout settings and keys are\nretained instead of suggesting a ListView that cannot directly preserve them.",
+    "docs": "Suggests considering ListView for a SingleChildScrollView containing a plain\nFlutter Column. This is not a layout-neutral replacement: preserve the\nColumn's child alignment and scroll view's padding explicitly. ListView\nstretches children across the cross axis and adds MediaQuery padding by default.\nFor the default Column alignment, wrap each list child in an Align with\nAlignment.topCenter; use the original scroll padding, or EdgeInsets.zero\nwhen none was supplied. Review constraints and child lifecycle separately.\nNo automatic fix is offered.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SingleChildScrollView(child: Column());\n  const SingleChildScrollView(child: Column(children: []));\n  new SingleChildScrollView(child: Column(children: [child]));\n  f.SingleChildScrollView(child: f.Column());\n  V(child: Column());\n}",
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SingleChildScrollView(child: Column());\n  const SingleChildScrollView(child: Column(children: []));\n  new SingleChildScrollView(child: Column(children: [child]));\n  f.SingleChildScrollView(child: f.Column());\n  V(child: Column());\n  SingleChildScrollView(child: Column(children: [Text('a'), Text('much longer')]));\n}",
       "crossFile": null,
       "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  ListView(children: [child]);\n  SingleChildScrollView(child: Row());\n  SingleChildScrollView(child: child);\n  Column(children: [child]);\n  SingleChildScrollView();\n}"
     },
@@ -15583,14 +15661,26 @@
         "file": null,
         "line": 72,
         "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 61,
+        "file": null,
+        "line": 78,
+        "message": "Reorder named arguments to follow the parameter declaration order."
+      },
+      {
+        "column": 59,
+        "file": null,
+        "line": 79,
+        "message": "Reorder named arguments to follow the parameter declaration order."
       }
     ],
     "docs": "Named arguments follow their resolved parameter declaration order by default.\nUnknown signatures are skipped. `order: ascending` or `order: descending`\nexplicitly selects alphabetical ordering; `alphabetize: true` selects ascending.",
     "domains": [],
     "examples": {
-      "bad": "void target({int alpha = 0, int zebra = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n  Example.forward() : this(zebra: 2,  alpha: 1);\n}\nclass Child extends Example {\n  Child() : super(zebra: 2,  alpha: 1);\n}\nvoid calls() {\n  target(zebra: 2,  alpha: 1);\n  Example(zebra: 2,  alpha: 1);\n  new Example(zebra: 2,  alpha: 1);\n  const Example(zebra: 2,  alpha: 1);\n}\n\n@Example(zebra: 2,  alpha: 1)\nclass Annotated {}\n\nenum Choice {\n  value(zebra: 2,  alpha: 1);\n  const Choice({int alpha = 0, int zebra = 0});\n}\n\nclass Builder {\n  void configure({int alpha = 0, int zebra = 0}) {}\n}\nvoid cascades(Builder builder) {\n  builder..configure(zebra: 2,  alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward()\n      : this.named(alpha: 1,  zebra: 2);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object) {\n  declarationOrder(alpha: 1,  zebra: 2);\n  declarationOrder(middle: 3,  alpha: 1);\n  NonAlphabetical(alpha: 1,  zebra: 2);\n  new NonAlphabetical(alpha: 1,  zebra: 2);\n  object.configure(alpha: 1,  zebra: 2);\n  object..configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical(alpha: 1,  zebra: 2)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(alpha: 1,  zebra: 2);\n  Inherited.named()\n      : super.named(alpha: 1,  zebra: 2);\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical.named(alpha: 1,  zebra: 2)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(alpha: 1,  zebra: 2);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(alpha: 1,  zebra: 2);\n}",
+      "bad": "void target({int alpha = 0, int zebra = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n  Example.forward() : this(zebra: 2,  alpha: 1);\n}\nclass Child extends Example {\n  Child() : super(zebra: 2,  alpha: 1);\n}\nvoid calls() {\n  target(zebra: 2,  alpha: 1);\n  Example(zebra: 2,  alpha: 1);\n  new Example(zebra: 2,  alpha: 1);\n  const Example(zebra: 2,  alpha: 1);\n}\n\n@Example(zebra: 2,  alpha: 1)\nclass Annotated {}\n\nenum Choice {\n  value(zebra: 2,  alpha: 1);\n  const Choice({int alpha = 0, int zebra = 0});\n}\n\nclass Builder {\n  void configure({int alpha = 0, int zebra = 0}) {}\n}\nvoid cascades(Builder builder) {\n  builder..configure(zebra: 2,  alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward()\n      : this.named(alpha: 1,  zebra: 2);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object) {\n  declarationOrder(alpha: 1,  zebra: 2);\n  declarationOrder(middle: 3,  alpha: 1);\n  NonAlphabetical(alpha: 1,  zebra: 2);\n  new NonAlphabetical(alpha: 1,  zebra: 2);\n  object.configure(alpha: 1,  zebra: 2);\n  object..configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical(alpha: 1,  zebra: 2)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(alpha: 1,  zebra: 2);\n  Inherited.named()\n      : super.named(alpha: 1,  zebra: 2);\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\n@NonAlphabetical.named(alpha: 1,  zebra: 2)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(alpha: 1,  zebra: 2);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(alpha: 1,  zebra: 2);\n}\n\nclass PrivatePrimary({final int _alpha = 0, final int _zebra = 0}) {}\nclass MixedPrimary({final int _zebra = 0, int alpha = 0, var _middle = 0}) {}\nvoid primaryCalls() {\n  PrivatePrimary(zebra: 2,  alpha: 1);\n  MixedPrimary(alpha: 1,  zebra: 2, middle: 3);\n}",
       "crossFile": null,
-      "good": "void target(int zebra, int alpha, {int beta = 0, int gamma = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n}\nvoid calls() {\n  target(2, 1, beta: 3, gamma: 4);\n  Example(alpha: 1, zebra: 2);\n  const Example(alpha: 1, zebra: 2);\n  final items = [2, 1];\n  final record = (zebra: 2, alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward() : this.named(zebra: 2, alpha: 1);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object, dynamic unknown) {\n  declarationOrder(zebra: 2, alpha: 1, middle: 3);\n  declarationOrder(zebra: 2, middle: 3);\n  NonAlphabetical(zebra: 2, alpha: 1);\n  new NonAlphabetical(zebra: 2, alpha: 1);\n  object.configure(zebra: 2, alpha: 1);\n  object..configure(zebra: 2, alpha: 1);\n  unknown.configure(zebra: 2, alpha: 1);\n  unknown.configure(alpha: 1, zebra: 2);\n  unresolved(zebra: 2, alpha: 1);\n  unresolved(alpha: 1, zebra: 2);\n}\n\n@NonAlphabetical(zebra: 2, alpha: 1)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(zebra: 2, alpha: 1);\n  Inherited.named() : super.named(zebra: 2, alpha: 1);\n  Inherited.forward() : this();\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(zebra: 2, alpha: 1);\n}\nvoid functionTypeUnknown(void Function({int alpha, int zebra}) callback) {\n  callback(zebra: 2, alpha: 1);\n}\n\n@NonAlphabetical.named(zebra: 2, alpha: 1)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(zebra: 2, alpha: 1);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(zebra: 2, alpha: 1);\n}"
+      "good": "void target(int zebra, int alpha, {int beta = 0, int gamma = 0}) {}\nclass Example {\n  const Example({int alpha = 0, int zebra = 0});\n}\nvoid calls() {\n  target(2, 1, beta: 3, gamma: 4);\n  Example(alpha: 1, zebra: 2);\n  const Example(alpha: 1, zebra: 2);\n  final items = [2, 1];\n  final record = (zebra: 2, alpha: 1);\n}\n\nvoid declarationOrder({int zebra = 0, int alpha = 0, int middle = 0}) {}\nclass NonAlphabetical {\n  const NonAlphabetical({int zebra = 0, int alpha = 0});\n  const NonAlphabetical.named({int zebra = 0, int alpha = 0});\n  NonAlphabetical.forward() : this.named(zebra: 2, alpha: 1);\n  void configure({int zebra = 0, int alpha = 0}) {}\n}\nvoid declarationCalls(NonAlphabetical object, dynamic unknown) {\n  declarationOrder(zebra: 2, alpha: 1, middle: 3);\n  declarationOrder(zebra: 2, middle: 3);\n  NonAlphabetical(zebra: 2, alpha: 1);\n  new NonAlphabetical(zebra: 2, alpha: 1);\n  object.configure(zebra: 2, alpha: 1);\n  object..configure(zebra: 2, alpha: 1);\n  unknown.configure(zebra: 2, alpha: 1);\n  unknown.configure(alpha: 1, zebra: 2);\n  unresolved(zebra: 2, alpha: 1);\n  unresolved(alpha: 1, zebra: 2);\n}\n\n@NonAlphabetical(zebra: 2, alpha: 1)\nclass DeclarationAnnotation {}\n\nclass Inherited extends NonAlphabetical {\n  Inherited() : super(zebra: 2, alpha: 1);\n  Inherited.named() : super.named(zebra: 2, alpha: 1);\n  Inherited.forward() : this();\n}\nvoid inheritedCall(Inherited object) {\n  object.configure(zebra: 2, alpha: 1);\n}\nvoid functionTypeUnknown(void Function({int alpha, int zebra}) callback) {\n  callback(zebra: 2, alpha: 1);\n}\n\n@NonAlphabetical.named(zebra: 2, alpha: 1)\nclass NamedDeclarationAnnotation {}\n\nenum NamedChoice {\n  value.named(zebra: 2, alpha: 1);\n  const NamedChoice.named({int zebra = 0, int alpha = 0});\n}\n\nclass Generic<T> {\n  void configure({T? zebra, T? alpha}) {}\n}\nvoid genericCall(Generic<int> object) {\n  object.configure(zebra: 2, alpha: 1);\n}\n\nclass PrivatePrimary({final int _alpha = 0, final int _zebra = 0}) {}\nclass MixedPrimary({final int _zebra = 0, int alpha = 0, var _middle = 0}) {}\nvoid primaryCalls() {\n  PrivatePrimary(alpha: 1, zebra: 2);\n  MixedPrimary(zebra: 2, alpha: 1, middle: 3);\n  MixedPrimary(zebra: 2, middle: 3);\n}"
     },
     "group": "style",
     "name": "arguments-ordering",
@@ -18754,7 +18844,7 @@
         "message": "This empty super() call is implicit; remove the explicit initializer."
       }
     ],
-    "docs": "Omit implicit `super()` initializers and provably redundant member prefixes.\n\nMember checks require a final class or enum without library-local subclasses,\nmatching resolved read/write owners, and no shadowing local binding. Open\nclasses retain super dispatch because future subclasses can override members.\nConstructor checks remain available without resolution.",
+    "docs": "Omit implicit `super()` initializers and provably redundant member prefixes.\n\nMember checks require a final class or enum without library-local subclasses,\nmatching resolved read/write owners, and no shadowing lexical or library binding.\nOpen classes retain super dispatch because future subclasses can override members.\nConstructor checks remain available without resolution.",
     "domains": [],
     "examples": {
       "bad": "class Parent { Parent(); }\nclass Child extends Parent {\n  Child() :  super();\n}",

@@ -518,10 +518,10 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "prefer-expect-later": {
+                "prefer-define-hero-tag": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "prefer-define-hero-tag": {
+                "prefer-expect-later": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-immutable-bloc-events": {
@@ -2077,10 +2077,10 @@
                 "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "prefer-expect-later": {
+                "prefer-define-hero-tag": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "prefer-define-hero-tag": {
+                "prefer-expect-later": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-immutable-bloc-events": {

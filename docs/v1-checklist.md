@@ -35,17 +35,17 @@ style | suspicious`.
 
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
-| DCM-inspired | 0 | 132 | 24 | 156 |
+| DCM-inspired | 0 | 118 | 24 | 142 |
 | Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 0 | 7 | 3 | 10 |
-| **Total** | **0** | **143** | **31** | **174** |
+| Additional rules | 0 | 4 | 3 | 7 |
+| **Total** | **0** | **126** | **31** | **157** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
-## Planned DCM-inspired rules (156)
+## Planned DCM-inspired rules (142)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -197,23 +197,6 @@ not re-added.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `avoid-hardcoded-credentials` | security | S | n/a | Warn when credential-like names are assigned literal values; heuristic, not a full secrets scanner. | nice-to-have |
-| `accessible-widget-labels` | a11y | LT | n/a | Warn on interactive widgets missing labels; heuristic, not compliance validation. Image labels are covered by `avoid-missing-image-alt`. | nice-to-have |
-| `minimum-touch-target` | a11y | LT | n/a | Warn on explicitly undersized interactive touch targets; heuristic, not compliance validation. | nice-to-have |
-| `avoid-mounted-in-setstate` | correctness | FT | paid | `mounted` check misuse around setState. | nice-to-have |
-| `prefer-single-setstate` | performance | FT | paid | Multiple setState calls collapsible. | nice-to-have |
-| `avoid-disposing-late-fields` | correctness | LT | paid | Disposing a late field that may be unset. | nice-to-have |
-| `avoid-missing-controller` | correctness | FT | paid | Widget expecting a controller left unset. | nice-to-have |
-| `always-pass-global-key` | correctness | LT | paid | GlobalKey should be passed, not created inline. | nice-to-have |
-| `avoid-border-all` | performance | S | paid | `Border.all` → const-friendly alternative. | nice-to-have |
-| `avoid-incorrect-image-opacity` | correctness | S | paid | Opacity widget wrapping Image (use color/opacity). | nice-to-have |
-| `avoid-missing-image-alt` | a11y | S | paid | Image without a semantic label (a11y). | nice-to-have |
-| `avoid-wrapping-in-padding` | style | LT | paid | Padding widget where Container padding suffices. | nice-to-have |
-| `prefer-sized-box-square` | style | S | paid | `SizedBox(w:x,h:x)` → `SizedBox.square`. | nice-to-have |
-| `prefer-using-list-view` | performance | LT | paid | Column + SingleChildScrollView → ListView. | nice-to-have |
-| `prefer-define-hero-tag` | correctness | LT | paid | Hero without a tag. | nice-to-have |
-| `prefer-void-callback` | style | S | paid | `void Function()` → `VoidCallback`. | nice-to-have |
-| `avoid-unnecessary-gesture-detector` | performance | LT | paid | GestureDetector wrapping an already-tappable widget. | nice-to-have |
 | `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. | post-1.0 |
 | `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). | post-1.0 |
 | `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. | post-1.0 |
