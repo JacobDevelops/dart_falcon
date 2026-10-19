@@ -281,3 +281,12 @@ avoid-nested-streams-and-futures/bad.dart
 avoid-nested-streams-and-futures/bad_2.dart
 avoid-nested-streams-and-futures/good.dart
 avoid-nested-streams-and-futures/good_2.dart
+avoid-banned-types/bad.dart
+avoid-banned-types/good.dart
+banned-usage/bad.dart
+banned-usage/good.dart
+banned-usage/support.dart
+avoid-incorrect-uri/bad.dart
+avoid-incorrect-uri/good.dart
+avoid-non-final-exception-class-fields/bad.dart
+avoid-non-final-exception-class-fields/good.dart

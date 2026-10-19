@@ -1,0 +1,80 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "banned-usage": {
+          "level": "warn",
+          "options": {
+            "rules": [
+              {
+                "deny": [
+                  "legacy",
+                  "GenericClient",
+                  "Client.old",
+                  "Client.new",
+                  "Client.named",
+                  "ClientFactory.named",
+                  "Client.flag",
+                  "Choice.legacy",
+                  "WriteChild.writable",
+                  "ReadBase.readable",
+                  "WriteExtension.value",
+                  "FieldClient.flag",
+                  "Sized.size",
+                  "FirstExtension.g",
+                  "BannedBox.size",
+                  "Counter.count",
+                  "T"
+                ],
+                "message": "Use the supported alternative."
+              },
+              {
+                "deny": ["DualBase.both"],
+                "message": "Avoid this getter."
+              },
+              {
+                "deny": ["DualChild.both"],
+                "message": "Avoid this setter."
+              },
+              {
+                "deny": ["MultiMatch.value"],
+                "message": "Exact member ban."
+              },
+              {
+                "deny": ["MultiMatch.*"],
+                "message": "Wildcard member ban."
+              },
+              {
+                "deny": ["CascadeBox.size"],
+                "message": "Avoid the enclosing field."
+              },
+              {
+                "deny": ["BannedCascadeOther.size"],
+                "message": "Avoid the receiver field."
+              },
+              {
+                "deny": [
+                  "*",
+                  null
+                ],
+                "message": "Invalid mixed lists are ignored."
+              },
+              {
+                "deny": [
+                  "["
+                ],
+                "message": "Invalid globs are ignored."
+              },
+              {
+                "deny": [
+                  "**"
+                ],
+                "message": " "
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

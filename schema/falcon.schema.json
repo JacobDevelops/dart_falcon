@@ -1373,13 +1373,34 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `suspicious` group.",
               "properties": {
+                "avoid-accessing-other-classes-private-members": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-assignments-as-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-annotations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-exports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-barrel-files": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-bitwise-operators-with-booleans": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-commented-out-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-double-slash-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-dynamic": {
@@ -1391,10 +1412,34 @@
                 "avoid-ignoring-return-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-incorrect-uri": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-inverted-boolean-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-multi-assignment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-mutating-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-negated-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-nested-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-non-final-exception-class-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-passing-async-when-sync-expected": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-print": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-referencing-subclasses": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-returning-null-for-void": {
@@ -1409,6 +1454,9 @@
                 "avoid-shadowing-type-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-suspicious-super-overrides": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-throw-in-catch-block": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1419,6 +1467,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "banned-usage": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "cascade-after-null-coalescing": {
@@ -1443,6 +1494,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-equal-then-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-magic-string": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-self-comparisons": {
@@ -2968,13 +3022,34 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `suspicious` group.",
               "properties": {
+                "avoid-accessing-other-classes-private-members": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-assignments-as-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-annotations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-exports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-banned-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-barrel-files": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-bitwise-operators-with-booleans": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-commented-out-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-double-slash-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-dynamic": {
@@ -2986,10 +3061,34 @@
                 "avoid-ignoring-return-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-incorrect-uri": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-inverted-boolean-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-multi-assignment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-mutating-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-negated-conditions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-nested-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-non-final-exception-class-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-passing-async-when-sync-expected": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-print": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-referencing-subclasses": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-returning-null-for-void": {
@@ -3004,6 +3103,9 @@
                 "avoid-shadowing-type-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-suspicious-super-overrides": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-throw-in-catch-block": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -3014,6 +3116,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "banned-usage": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "cascade-after-null-coalescing": {
@@ -3038,6 +3143,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-equal-then-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-magic-string": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-self-comparisons": {

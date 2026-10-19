@@ -202,7 +202,7 @@ impl Resolver<'_> {
 
 /// Decode each adjacent literal independently: one raw segment does not make
 /// its non-raw neighbours raw.
-pub(super) fn uri_value(uri: StringLitNode<'_>) -> String {
+pub(crate) fn uri_value(uri: StringLitNode<'_>) -> String {
     if !uri.is_adjacent() {
         if let Some(literal) = uri.delimiter()
             && literal.triple

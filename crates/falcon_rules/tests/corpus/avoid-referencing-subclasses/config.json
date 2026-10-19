@@ -1,0 +1,26 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-referencing-subclasses": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/good_options.dart", "**/bad_options.dart"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "avoid-referencing-subclasses": {
+              "level": "warn",
+              "options": {
+                "ignored_annotations": ["generated"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

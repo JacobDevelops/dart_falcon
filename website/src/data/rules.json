@@ -33187,6 +33187,100 @@
   },
   {
     "crossFile": false,
+    "description": "Enforces class-level encapsulation even inside one Dart library.",
+    "diagnostics": [
+      {
+        "column": 26,
+        "file": null,
+        "line": 9,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 10,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 11,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 12,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 13,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 14,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 15,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 18,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 22,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 23,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 26,
+        "message": "Avoid accessing another class's private member."
+      },
+      {
+        "column": 44,
+        "file": null,
+        "line": 30,
+        "message": "Avoid accessing another class's private member."
+      }
+    ],
+    "docs": "Enforces class-level encapsulation even inside one Dart library.",
+    "domains": [],
+    "examples": {
+      "bad": "class Secret {\n  int _value = 0;\n  static int _shared = 0;\n  void _reset() {}\n  static Secret _default() => Secret();\n}\nclass Other {\n  void inspect(Secret secret) {\n    final value = secret._value;\n    secret._value = value;\n    secret._reset();\n    final reset = secret._reset;\n    Secret._shared++;\n    secret.._value = 1;\n    secret.._reset();\n  }\n}\nint outside(Secret secret) => secret._value;\n\nclass NullableAccess {\n  void inspect(Secret? secret) {\n    secret?._value;\n    secret?._reset();\n  }\n  void shorthand() {\n    Secret secret = ._default();\n  }\n}\nclass Child extends Secret {\n  int inspectBase(Secret secret) => secret._value;\n}",
+      "crossFile": null,
+      "good": "class Secret {\n  int _value = 0;\n  static int _shared = 0;\n  int publicValue = 0;\n  void _reset() {}\n  static Secret _default() => Secret();\n  void nullable(Secret? other) {\n    other?._value;\n    other?._reset();\n  }\n  void shorthand() {\n    Secret other = ._default();\n  }\n  void inspect(Secret other) {\n    _value = other._value;\n    this._reset();\n    other.._value = 1;\n    Secret._shared++;\n    void nested() { other._reset(); }\n    nested();\n  }\n}\nclass Other {\n  int read(Secret secret) => secret.publicValue;\n  void unknown(dynamic value) { value._unresolved(); }\n}\nclass Child extends Secret {\n  @override\n  void _reset() { super._reset(); }\n  int readOwn() => this._value;\n  void resetOwn() { this.._value = 1; this.._reset(); }\n  bool same(Child other) => this._value == other._value;\n  void nullable(Child? other) { other?._value; }\n  void cascade(Child other) { other.._value = 1; }\n}\nextension NamedSecretAccess on Secret {\n  int readOther(Secret other) => other._value;\n}\nextension on Secret {\n  int readOtherUnnamed(Secret other) => other._value;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-accessing-other-classes-private-members",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags assignments evaluated inside control-flow conditions.",
     "diagnostics": [
       {
@@ -33319,6 +33413,296 @@
     },
     "group": "suspicious",
     "name": "avoid-assignments-as-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Ban configured dotted annotation names, without the leading `@`.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 7,
+        "message": "Use the supported alternative."
+      }
+    ],
+    "docs": "Ban configured dotted annotation names, without the leading `@`.",
+    "domains": [],
+    "examples": {
+      "bad": "const legacy = 1;\nclass Marker {\n  const Marker.old();\n}\n@legacy\nclass Example {}\n@Marker.old()\nvoid example() {}",
+      "crossFile": null,
+      "good": "const modern = 1;\nclass Marker {\n  const Marker();\n}\n@modern\nclass Example {}\n@Marker()\nvoid example() {}\nconst text = '@legacy';"
+    },
+    "group": "suspicious",
+    "name": "avoid-banned-annotations",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Ban decoded export URIs, including all conditional alternatives.",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 1,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 2,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 3,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 5,
+        "message": "Use the supported alternative."
+      }
+    ],
+    "docs": "Ban decoded export URIs, including all conditional alternatives.",
+    "domains": [],
+    "examples": {
+      "bad": "export 'package:legacy/api.dart';\nexport 'modern.dart' if (dart.library.io) 'package:legacy/io.dart';\nexport 'package:legacy/hidden.dart' hide Hidden;\nexport 'package:leg\\x61cy/api.dart';\nexport 'modern.dart' if (dart.library.io) 'package:leg\\u0061cy/io.dart';",
+      "crossFile": null,
+      "good": "import 'package:legacy/api.dart';\nexport 'package:modern/api.dart';\nexport 'modern.dart' if (dart.library.io) 'modern_io.dart';\nexport 'package:mod\\x65rn/api.dart';\nexport r'package:leg\\x61cy/api.dart';"
+    },
+    "group": "suspicious",
+    "name": "avoid-banned-exports",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Ban declaration names, exempting references, initializing/super formals, and `@override`-annotated members and their parameters.",
+    "diagnostics": [
+      {
+        "column": 23,
+        "file": null,
+        "line": 1,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 10,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 14,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 19,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 19,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 24,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 26,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 29,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 30,
+        "message": "Use the supported alternative."
+      }
+    ],
+    "docs": "Ban declaration names, exempting references, initializing/super formals, and\n`@override`-annotated members and their parameters.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:math' as legacy;\n\nvoid example() {\n  var legacyValue = 1;\n  print(legacyValue);\n}\n\nclass legacyClass {\n  int legacyField = 0;\n  void legacyMethod() {}\n}\n\nvoid loopsAndCatches(List<int> items) {\n  for (final legacyItem in items) {\n    print(legacyItem);\n  }\n  try {\n    throw 0;\n  } catch (legacyError, legacyStack) {\n    print(legacyError);\n  }\n}\nclass Model {\n  final int legacyField;\n  Model(this.legacyField);\n  Model.legacyNamed(this.legacyField);\n}\nclass Base {\n  Base({int? legacyKey});\n  void method({int? legacyArg}) {}\n}\nclass Child extends Base {\n  Child({super.legacyKey});\n  @override\n  void method({int? legacyArg}) {}\n}",
+      "crossFile": null,
+      "good": "import 'dart:math' as modern;\nimport 'support.dart';\n\n// legacyValue in comments and strings is not an identifier.\nvoid example() {\n  var modernValue = 'legacyValue';\n  print(modernValue);\n  var LegacyValue = 1;\n}\n\nclass Derived {\n  @override\n  String toString() => 'Derived';\n}\n\nclass Model {\n  final int modernField;\n  Model(this.modernField);\n  Model.modernNamed(this.modernField);\n}\nclass Child extends Base {\n  Child({super.modernKey});\n  @override\n  void method({int? legacyArg}) {}\n}\nvoid loopsAndCatches(List<int> items, int modernItem) {\n  for (final currentItem in items) {}\n  for (modernItem in items) {}\n  try {\n    throw 0;\n  } catch (modernError, modernStack) {}\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-banned-names",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Ban resolved explicit type annotations, including nested generic arguments.",
+    "diagnostics": [
+      {
+        "column": 17,
+        "file": null,
+        "line": 2,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 3,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 6,
+        "file": null,
+        "line": 4,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 11,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 12,
+        "message": "Use the supported alternative."
+      }
+    ],
+    "docs": "Ban resolved explicit type annotations, including nested generic arguments.\nAliases are expanded; import prefixes and nullability do not change matching.\nUnknown types are not reported. Match against the declaration's simple name.",
+    "domains": [],
+    "examples": {
+      "bad": "class Legacy {}\ntypedef Alias = Legacy;\nLegacy? value;\nList<Legacy> values = [];\nAlias? alias;\n\nclass Wrapper<T> {\n  const Wrapper();\n}\nvoid genericConstructions() {\n  final list = new List<Legacy>.empty();\n  final wrapper = const Wrapper<Legacy>();\n}",
+      "crossFile": null,
+      "good": "class Modern {}\nModern? value;\nList<Modern> values = [];\n// Unknown types cannot establish a forbidden declaration identity.\nUnknown? unknown;\n\nclass Legacy {\n  const Legacy();\n}\nclass Box<Legacy> {\n  Legacy? value;\n}\nvoid generic<Legacy>(Legacy value) {\n  Legacy? local;\n}\nvoid outer() {\n  void nested<Legacy>(Legacy value) {}\n}\ntypedef Callback = void Function<Legacy>(Legacy);\nvoid constructors() {\n  Legacy();\n  new Legacy();\n  const Legacy();\n}\n\nclass Wrapper<T> {\n  const Wrapper();\n}\nvoid genericConstructions() {\n  final list = new List<Modern>.empty();\n  final wrapper = const Wrapper<Modern>();\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-banned-types",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Discourage files containing only re-exports, without declarations or parts.",
+    "diagnostics": [
+      {
+        "column": 1,
+        "file": null,
+        "line": 1,
+        "message": "Avoid barrel files containing only re-exports; import declarations directly."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 2,
+        "message": "Avoid barrel files containing only re-exports; import declarations directly."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 3,
+        "message": "Avoid barrel files containing only re-exports; import declarations directly."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 4,
+        "message": "Avoid barrel files containing only re-exports; import declarations directly."
+      },
+      {
+        "column": 1,
+        "file": null,
+        "line": 5,
+        "message": "Avoid barrel files containing only re-exports; import declarations directly."
+      }
+    ],
+    "docs": "Discourage files containing only re-exports, without declarations or parts.",
+    "domains": [],
+    "examples": {
+      "bad": "export 'one.dart';\nexport 'two.dart';\nexport 'three.dart' show Three;\nexport 'four.dart' hide Four;\nexport 'five.dart' if (dart.library.io) 'io.dart';",
+      "crossFile": null,
+      "good": "export 'one.dart';\nclass Model {}\nvoid work() {}\nfinal value = 1;\ntypedef Callback = void Function();\nenum State { ready }"
+    },
+    "group": "suspicious",
+    "name": "avoid-barrel-files",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -33465,6 +33849,76 @@
     },
     "group": "suspicious",
     "name": "avoid-commented-out-code",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Reject repeated path separators in directive URIs (import, export and part).",
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": null,
+        "line": 1,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 2,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 3,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 5,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 6,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 7,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      },
+      {
+        "column": 6,
+        "file": null,
+        "line": 8,
+        "message": "Avoid repeated '/' separators in directive URIs (import, export or part)."
+      }
+    ],
+    "docs": "Reject repeated path separators in directive URIs (import, export and part).",
+    "domains": [],
+    "examples": {
+      "bad": "import 'package:app//model.dart';\nimport 'src//one.dart';\nimport './src///two.dart';\nexport 'src//three.dart';\nimport 'base.dart' if (dart.library.io) 'src//io.dart';\nimport r'src//raw.dart';\nimport 'src\\x2f/escaped.dart';\npart 'src//x.dart';",
+      "crossFile": null,
+      "good": "import 'package:app/model.dart';\nimport 'src/one.dart';\nexport '../two.dart';\nimport 'base.dart' if (dart.library.io) 'io.dart';\nimport 'https://example.com/library.dart';\nimport r'src/raw.dart';"
+    },
+    "group": "suspicious",
+    "name": "avoid-double-slash-imports",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -33781,6 +34235,550 @@
   },
   {
     "crossFile": false,
+    "description": "Reject runtime-invalid Uri constructor arguments: conflicting path or query inputs and query parameter values that are neither null, strings nor iterables of strings.",
+    "diagnostics": [
+      {
+        "column": 34,
+        "file": null,
+        "line": 5,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 6,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 7,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 8,
+        "message": "Do not provide both path and pathSegments to Uri."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 9,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 10,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 49,
+        "file": null,
+        "line": 11,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 35,
+        "file": null,
+        "line": 12,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 13,
+        "message": "Do not provide both query and queryParameters to Uri."
+      },
+      {
+        "column": 52,
+        "file": null,
+        "line": 17,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 19,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 20,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 48,
+        "file": null,
+        "line": 21,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 23,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      }
+    ],
+    "docs": "Reject runtime-invalid Uri constructor arguments: conflicting path or query inputs and\nquery parameter values that are neither null, strings nor iterables of strings.\nOnly resolved dart:core Uri constructors are checked; unknown values are skipped.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'dart:core';\nimport 'dart:core' as core;\n\nvoid f(int count) {\n  Uri(queryParameters: {'count': 1});\n  Uri.http('example.com', '/', {'flag': false});\n  Uri.https('example.com', '/', {'count': 1.5});\n  Uri(path: '', pathSegments: ['']);\n  new Uri(queryParameters: {'count': count});\n  core.Uri(queryParameters: {'count': 3});\n  core.Uri.https('example.com', '/', {'values': ['valid', 2]});\n  Uri(queryParameters: {'values': [null]});\n  Uri(query: 'key=value', queryParameters: {'key': 'value'});\n}\n\nvoid collections(bool includeCount, List<int> counts) {\n  Uri(queryParameters: {if (includeCount) 'count': 1});\n  Uri(queryParameters: {\n    if (includeCount) 'count': 1\n    else 'other': false,\n    for (final count in counts) 'count$count': 2,\n    for (final count in counts)\n      if (includeCount) 'nested$count': 1,\n  });\n}",
+      "crossFile": null,
+      "good": "import 'dart:core';\nimport 'dart:core' as core;\n\nvoid f(dynamic unknown, Iterable<String> values, String? path) {\n  Uri(fragment: '', queryParameters: {'hello': 'world'});\n  Uri.https('example.com', '/', {'hello': 'world'});\n  Uri.http('example.com', '/', {'hello': ['world', 'again']});\n  Uri(path: '');\n  Uri(pathSegments: ['']);\n  Uri(path: null, pathSegments: ['']);\n  Uri(path: path, pathSegments: ['']);\n  Uri(queryParameters: {'empty': null});\n  Uri(queryParameters: {'empty': <String>[]});\n  Uri(queryParameters: {'values': <String>{'first', 'second'}});\n  Uri(queryParameters: {'values': values});\n  Uri(queryParameters: {'unknown': unknown});\n  core.Uri(queryParameters: {'hello': 'world'});\n  Uri(query: 'key=value');\n  Uri(queryParameters: {'key': 'value'});\n  Uri(query: null, queryParameters: {'key': 'value'});\n  Uri(query: 'key=value', queryParameters: null);\n  Uri(query: path, queryParameters: {'key': 'value'});\n  core.Uri(query: '', queryParameters: <String, String>{});\n  Uri(query: (r''), queryParameters: {'key': 'value'});\n}\n\nvoid shadowed(dynamic Uri) {\n  Uri(queryParameters: {'count': 1});\n  Uri.https('', '', {'count': 1});\n}\n\nclass CustomUri {\n  CustomUri({dynamic queryParameters});\n}\nvoid other() {\n  CustomUri(queryParameters: {'count': 1});\n}\n\nvoid collections(bool includeCount, List<String> values) {\n  Uri(queryParameters: {\n    if (includeCount) 'count': '1' else 'other': null,\n    for (final value in values) value: value,\n    for (final value in values)\n      if (includeCount) 'nested$value': <String>['valid'],\n  });\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-incorrect-uri",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer direct equality comparisons and De Morgan forms in control-flow conditions.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Express this check directly instead of negating a comparison or logical expression."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "Express this check directly instead of negating a comparison or logical expression."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Express this check directly instead of negating a comparison or logical expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 5,
+        "message": "Express this check directly instead of negating a comparison or logical expression."
+      }
+    ],
+    "docs": "Prefer direct equality comparisons and De Morgan forms in control-flow conditions.\nUnlike avoid-inverted-boolean-expressions, this does not diagnose `!!value`.\nRelational operators are excluded because NaN and custom operators lack reliable inverses.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(int x, int y, bool a, bool b) {\n  if (!(x == y)) {}\n  if (!(x != y)) {}\n  if (!(a && b)) {}\n  while (!(a || b)) {}\n}",
+      "crossFile": null,
+      "good": "void f(int x, int y, bool a, bool b) {\n  if (x != y) {}\n  if (x == y) {}\n  if (!a) {}\n  final c = !!a;\n  final d = !a || !b;\n  final e = !(x + y).isEven;\n  final inverted = !(a || b);\n  final comparison = !(x == y);\n  final callback = () => !(x > y);\n}\n\nvoid relational(double x, int y, GreaterOnly custom) {\n  if (!(x > 0)) {}\n  if (!(x >= 0)) {}\n  if (!(x < 0)) {}\n  if (!(x <= 0)) {}\n  final d = !((x <= y)) ? 1 : 2;\n  if (!(custom > 0)) {}\n}\n\nclass GreaterOnly {\n  bool operator >(int other) => true;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-inverted-boolean-checks",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Split chained assignments into separate statements.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "Split chained assignments into separate statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Split chained assignments into separate statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 4,
+        "message": "Split chained assignments into separate statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Split chained assignments into separate statements."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Split chained assignments into separate statements."
+      },
+      {
+        "column": 6,
+        "file": null,
+        "line": 7,
+        "message": "Split chained assignments into separate statements."
+      }
+    ],
+    "docs": "Split chained assignments into separate statements.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(dynamic a, dynamic b, dynamic c, dynamic d) {\n  a = b = 1;\n  a = (b = 2);\n  a = b = c = 3;\n  a.value = b.value = 4;\n  a += b = 5;\n  d..value = b = 6;\n}",
+      "crossFile": null,
+      "good": "void f(dynamic a, dynamic b) {\n  a = 1;\n  b = 1;\n  a += 2;\n  b ??= 3;\n  a = b + 1;\n  a..value = 1..other = 2;\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-multi-assignment",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Detects writes through named function, method and constructor parameter objects.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 4,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 5,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 6,
+        "file": null,
+        "line": 10,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 11,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 12,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 13,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 17,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 22,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 26,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 30,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 36,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 42,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 43,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 45,
+        "message": "Avoid mutating an object supplied as a parameter."
+      }
+    ],
+    "docs": "Detects writes through named function, method and constructor parameter objects.\nClosure parameters are exempt; parameter rebinding belongs to `parameter-assignments`.\nParameters annotated `@mutated` (dart-code-metrics-annotations) are exempt.",
+    "domains": [],
+    "examples": {
+      "bad": "class Box { int value = 0; Box? child; }\nvoid mutate(Box box, List<int> values, Map<String, int> map) {\n  box.value = 1;\n  box.value += 1;\n  ++box.value;\n  box.value--;\n  values[0] = 2;\n  map['key'] ??= 3;\n  box.child!.value = 2;\n  box..value = 4;\n  values..[0] = 5;\n  void nested() { box.value = 6;  }\n  final closure = () { values[0]++;  };\n  nested(); closure();\n}\nclass Holder {\n  set item(Box value) { value.value = 1;  }\n}\n\nclass Mutator {\n  Mutator(Box box) {\n    box.value = 1;\n  }\n\n  void update(Box box) {\n    box.value = 2;\n  }\n\n  void operator []=(int index, Box box) {\n    box.value = index;\n  }\n}\n\nvoid outer() {\n  void local(Box box) {\n    box.value = 3;\n  }\n  local(Box());\n}\n\nvoid castReceivers(Object value, Box? box) {\n  (value as List<int>)[0] = 1;\n  (value as Box).value = 2;\n  box!.value = 3;\n  (box! as Box).value++;\n}",
+      "crossFile": null,
+      "good": "class Box { int value = 0; }\nvoid noMutation(Box box, List<int> values) {\n  final local = Box();\n  local.value = 1;\n  final copy = [...values];\n  copy[0] = 2;\n  final read = box.value;\n  box = Box(); // Rebinding belongs to parameter-assignments.\n  {\n    final box = Box();\n    box.value = read;\n  }\n  void nested() { final box = Box(); box.value++; }\n  final callback = () { final values = [0]; values[0]++; };\n  nested(); callback();\n}\nclass Owner {\n  Box box;\n  Owner(this.box) { box.value = 1; }\n}\nconst mutated = 0;\nvoid intentional(@mutated Box box, @mutated List<int> values) {\n  box.value = 1;\n  values[0]++;\n}\nclass AnnotatedSetter {\n  set item(@mutated Box value) { value.value++; }\n}\n\nclass Builder { String name = ''; }\nclass Options { final headers = <String, String>{}; }\nclass Item { bool selected = true; }\n\nvoid closures(List<Item> items) {\n  final build = (Builder b) => b..name = 'x';\n  final intercept = (Options options) {\n    options.headers['Authorization'] = 'token';\n  };\n  items.forEach((i) => i.selected = false);\n  build(Builder());\n  intercept(Options());\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-mutating-parameters",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer positive conditions when both branches can be swapped.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 5,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 6,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 7,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 8,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 9,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 10,
+        "message": "Prefer a positive condition and swap the branches."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 11,
+        "message": "Prefer a positive condition and swap the branches."
+      }
+    ],
+    "docs": "Prefer positive conditions when both branches can be swapped.\nChecks if statements, conditional expressions, and collection/map if/else elements.\n`ignore_null_checks` (default false) exempts comparisons with null.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(bool flag, dynamic value) {\n  if (!flag) {} else {}\n  if (value != 1) {} else {}\n  if (value is! String) {} else {}\n  final a = !flag ? 1 : 2;\n  final b = value != null ? 1 : 2;\n  final c = value is! int ? 1 : 2;\n  final list = [if (!flag) 1 else 2];\n  final set = {if (value != 1) 1 else 2};\n  final map = {if (value is! int) 1: 2 else 3: 4};\n  final chained = [if (!flag) 1 else if (value != 1) 2 else 3];\n}",
+      "crossFile": null,
+      "good": "void f(bool flag, dynamic value) {\n  if (flag) {} else {}\n  if (!flag) return;\n  if (value == 1) {} else {}\n  if (value is String) {} else {}\n  final a = flag ? 1 : 2;\n  if (!flag) {} else if (value == 1) {}\n  final list = [if (flag) 1 else 2];\n  final set = {if (!flag) 1};\n  final map = {if (flag) 1: 2 else 3: 4};\n  final mapWithoutElse = {if (value != 1) 1: 2};\n  final chained = [if (!flag) 1 else if (value == 1) 2];\n  final chainedMap = {if (!flag) 1: 2 else if (value == 1) 3: 4};\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-negated-conditions",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require assignments to be standalone statements, arrow bodies or loop operations.",
+    "diagnostics": [
+      {
+        "column": 9,
+        "file": null,
+        "line": 2,
+        "message": "Move this assignment out of the surrounding expression."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 3,
+        "message": "Move this assignment out of the surrounding expression."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 4,
+        "message": "Move this assignment out of the surrounding expression."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 5,
+        "message": "Move this assignment out of the surrounding expression."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 6,
+        "message": "Move this assignment out of the surrounding expression."
+      }
+    ],
+    "docs": "Require assignments to be standalone statements, arrow bodies or loop operations.\n`ignore_null_aware_assignments` (default false) exempts `??=`.\nConditions and chained assignments are handled by their dedicated rules.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(dynamic x, dynamic y, dynamic z) {\n  print(x = 1);\n  final value = (x = 2);\n  returnValue(x += 3);\n  final message = '${x = 4}';\n  print(z ??= 6);\n}",
+      "crossFile": null,
+      "good": "void f(dynamic x) {\n  x = 1;\n  x += 2;\n  (x = 3);\n  for (x = 0; x < 5; x = x + 1) {}\n  final closure = () { x = 4; };\n  x ??= 6;\n  final arrow = () => x = 7;\n  final lazy = () => x ??= 8;\n  x = (x = 9);\n  if ((x = true)) {}\n  while ((x = readLine()) != null) {}\n  final owner = Owner();\n  owner..value = x = 10;\n  consume(x = x = 11);\n}\n\nclass Owner {\n  dynamic value;\n  set name(String input) => value = input;\n  dynamic get cached => value ??= Owner();\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-nested-assignments",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Exception and Error payloads should not change after construction.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 2,
+        "message": "Make exception instance fields final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "Make exception instance fields final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Make exception instance fields final."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "Make exception instance fields final."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 9,
+        "message": "Make exception instance fields final."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "Make exception instance fields final."
+      }
+    ],
+    "docs": "Exception and Error payloads should not change after construction.",
+    "domains": [],
+    "examples": {
+      "bad": "class Failure implements Exception {\n  String message;\n  int code = 0;\n  int count = 0;\n  late Object detail;\n  Failure(this.message);\n}\nclass SpecificFailure extends Failure {\n  String context = '';\n  SpecificFailure() : super('failure');\n}\nclass FailureError extends Error {\n  int code = 0;\n}",
+      "crossFile": null,
+      "good": "class Failure implements Exception {\n  final String message;\n  late final Object detail;\n  static int total = 0;\n  static const category = 'failure';\n  Failure(this.message);\n  String get description => message;\n}\nclass SpecificFailure extends Failure {\n  final String context;\n  SpecificFailure(this.context) : super('failure');\n}\nclass FailureError extends Error { final int code = 1; }\nclass NotAnException { int mutable = 0; }"
+    },
+    "group": "suspicious",
+    "name": "avoid-non-final-exception-class-fields",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags an `async` closure passed to a proven synchronous callback parameter.",
     "diagnostics": [
       {
@@ -33901,6 +34899,82 @@
       "label": "Dart lints",
       "upstreamId": "avoid_print",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_print"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Keeps base classes independent from their transitive subclasses.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 2,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 3,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 4,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 5,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 6,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 7,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 39,
+        "file": null,
+        "line": 8,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Avoid referencing a subclass from its base class."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "Avoid referencing a subclass from its base class."
+      }
+    ],
+    "docs": "Keeps base classes independent from their transitive subclasses.\n`ignored_annotations` replaces the default [\"freezed\", \"Freezed\", \"unfreezed\"].\nAnnotation names match the final name segment exactly, including case.",
+    "domains": [],
+    "examples": {
+      "bad": "class Base {\n  Child? field;\n  Child make() => throw 0;\n  void accept(Child value) {}\n  List<Grandchild> children = [];\n  Object create() => Child();\n  int staticValue() => Child.value;\n  bool test(Object value) => value is Child;\n}\nclass Child extends Base { static int value = 1; }\nclass Grandchild extends Child {}\n\nconst FREEZED = 0;\n@FREEZED\nclass ExactCaseBase {\n  ExactCaseChild? child;\n}\nclass ExactCaseChild extends ExactCaseBase {}\nmixin class MixinBase {\n  MixedSubclass? child;\n}\nclass MixedSubclass with MixinBase {}",
+      "crossFile": null,
+      "good": "class Base {\n  Base? parent;\n  Unrelated? value;\n  Object factory(Object Child) => Child;\n  T generic<T>(T value) => value;\n  void shadow() {\n    final Child = () => Object();\n    Child();\n  }\n  Child genericShadow<Child>(Child value) => value;\n}\nclass Child extends Base {}\nclass Unrelated {}\nconst freezed = 0;\n@freezed\nclass GeneratedBase { GeneratedChild? child; }\nclass GeneratedChild extends GeneratedBase {}\nclass GenericBase<GenericChild> { GenericChild? value; }\nclass GenericChild extends GenericBase<int> {}\n\nabstract class Repo { factory Repo() = RepoImpl; }\nclass RepoImpl implements Repo {}\nclass ConstraintBase { ConstrainedMixin? value; }\nmixin ConstrainedMixin on ConstraintBase {}\nclass InterfaceBase { ViaInterface? value; }\nclass InterfaceOnly implements InterfaceBase {}\nclass ViaInterface extends InterfaceOnly {}\n\nclass Freezed { const Freezed({String? unionKey}); }\nconst unfreezed = 0;\n@Freezed(unionKey: 'type')\nclass ConfiguredUnion { ConfiguredCase? value; }\nclass ConfiguredCase extends ConfiguredUnion {}\n@unfreezed\nclass MutableUnion { MutableCase? value; }\nclass MutableCase extends MutableUnion {}"
+    },
+    "group": "suspicious",
+    "name": "avoid-referencing-subclasses",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -34217,6 +35291,52 @@
       "label": "Dart lints",
       "upstreamId": "avoid_shadowing_type_parameters",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_shadowing_type_parameters"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Finds getters hiding fields supplied via the immediate super constructor's `this.` formals or declaring primary-constructor parameters.",
+    "diagnostics": [
+      {
+        "column": 14,
+        "file": null,
+        "line": 9,
+        "message": "This getter hides a field already supplied to the super constructor; remove it or reference the super field."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 14,
+        "message": "This getter hides a field already supplied to the super constructor; remove it or reference the super field."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 19,
+        "message": "This getter hides a field already supplied to the super constructor; remove it or reference the super field."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 24,
+        "message": "This getter hides a field already supplied to the super constructor; remove it or reference the super field."
+      }
+    ],
+    "docs": "Finds getters hiding fields supplied via the immediate super constructor's\n`this.` formals or declaring primary-constructor parameters.\nInitializer-list assignments and forwarding through intermediate classes are not tracked.",
+    "domains": [],
+    "examples": {
+      "bad": "class Base {\n  final String issueType;\n  const Base({required this.issueType});\n  const Base.named(this.issueType);\n}\nclass Child extends Base {\n  Child() : super(issueType: 'promotion');\n  @override\n  String get issueType => 'hidden';\n}\nclass Positional extends Base {\n  Positional() : super.named('promotion');\n  @override\n  String get issueType => 'hidden';\n}\nclass Forwarded extends Base {\n  Forwarded({required super.issueType});\n  @override\n  String get issueType => 'hidden';\n}\nclass PositionalForwarded extends Base {\n  PositionalForwarded(super.issueType) : super.named();\n  @override\n  String get issueType => 'hidden';\n}",
+      "crossFile": null,
+      "good": "class Base {\n  final String issueType;\n  const Base({required this.issueType});\n}\nclass NoOverride extends Base {\n  NoOverride() : super(issueType: 'promotion');\n}\nclass UsesSuper extends Base {\n  UsesSuper() : super(issueType: 'promotion');\n  @override\n  String get issueType => '${super.issueType}: detail';\n}\nclass DefaultBase {\n  final String issueType;\n  DefaultBase({this.issueType = 'default'});\n}\nclass NoPassedValue extends DefaultBase {\n  @override\n  String get issueType => 'different';\n}\nclass GetterBase {\n  GetterBase({required String issueType});\n  String get issueType => 'base';\n}\nclass OverridesGetter extends GetterBase {\n  OverridesGetter() : super(issueType: 'promotion');\n  @override\n  String get issueType => 'child';\n}\nclass UnrelatedParameterBase {\n  final String issueType = 'stored';\n  UnrelatedParameterBase({required String issueType});\n}\nclass UnrelatedParameter extends UnrelatedParameterBase {\n  UnrelatedParameter() : super(issueType: 'not stored');\n  @override\n  String get issueType => 'child';\n}\n\nclass MixedBase {\n  final int count;\n  final String issueType;\n  MixedBase(this.count, {this.issueType = 'default'});\n}\nclass PositionalNameOnly extends MixedBase {\n  PositionalNameOnly(super.issueType);\n  @override\n  String get issueType => 'hidden';\n}\n\nclass InitializedBase {\n  final String issueType;\n  InitializedBase(String issueType) : issueType = issueType;\n}\nclass InitializedChild extends InitializedBase {\n  InitializedChild() : super('promotion');\n  @override\n  String get issueType => 'hidden';\n}\nclass Intermediate extends Base {\n  Intermediate({required super.issueType});\n}\nclass IndirectChild extends Intermediate {\n  IndirectChild() : super(issueType: 'promotion');\n  @override\n  String get issueType => 'hidden';\n}"
+    },
+    "group": "suspicious",
+    "name": "avoid-suspicious-super-overrides",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -34606,6 +35726,160 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "avoid-unrelated-type-assertions",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Ban resolved API references, not identifiers that merely share their spelling.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 7,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 9,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 10,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 18,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 21,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 22,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 23,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 27,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 33,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 36,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 37,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 38,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 42,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 45,
+        "message": "Use the supported alternative."
+      }
+    ],
+    "docs": "Ban resolved API references, not identifiers that merely share their spelling.\nMatch top-level declaration names or `DeclaringType.member`; prefixes are ignored.\nCalls, tear-offs, property reads/writes, constructors and cascades are included.\nUnnamed constructors consistently use `Class.new`, including aliases and prefixes.\nDynamic and unresolved targets are skipped.",
+    "domains": [],
+    "examples": {
+      "bad": "import 'support.dart';\nimport 'support.dart' as p;\n\nvoid legacy() {}\nvoid example(Client client) {\n  legacy();\n  var callback = legacy;\n  client.old();\n  var method = client.old;\n  client..old();\n}\n\nvoid constructorsAndStatics() {\n  Client();\n  new Client();\n  const Client();\n  p.Client();\n  var factory = Client.new;\n  Alias.named();\n  new Alias.named();\n  print(Client.flag);\n  print(p.Client.flag);\n  print(Choice.legacy);\n}\n\nextension on String {\n  void shout() => legacy();\n}\nclass Base {\n  void legacy() {}\n}\nclass Sub extends Base {\n  void run() => legacy();\n}\nvoid shorthand() {\n  Choice choice = .legacy;\n  Client named = .named();\n  Client unnamed = .new();\n}\n\nclass ChildClient extends Client {\n  ChildClient() : super.named();\n}\nclass ClientFactory {\n  factory ClientFactory() = ClientFactory.named;\n  ClientFactory.named();\n}",
+      "crossFile": null,
+      "good": "void legacy() {}\nclass Other {\n  void old() {}\n}\nvoid example(Other client) {\n  void legacy() {}\n  legacy();\n  client.old();\n}\nvoid dynamicReceiver(dynamic client) {\n  client.old();\n}\n\nclass StaticOwner {\n  static void legacy() {}\n  void run() => legacy();\n}\nextension ExtensionOwner on int {\n  void legacy() {}\n  void run() => legacy();\n}\nenum OtherChoice {\n  legacy;\n  void run() => print(legacy);\n}\nclass T {}\nvoid generic<T>() => print(T);\n\nextension on String {\n  void legacy() {}\n  void run() => legacy();\n}\nclass GenericClient<T> {\n  const GenericClient.allowed();\n}\nvoid genericConstructors() {\n  GenericClient<int>.allowed();\n  var constructor = GenericClient<int>.allowed;\n}\n\nclass InheritedBase {\n  void old() {}\n}\nclass InheritedChild extends InheritedBase {\n  void run() => old();\n}\nenum ModernChoice { current }\nclass ModernClient {\n  ModernClient.named();\n}\nvoid shorthand() {\n  ModernChoice choice = .current;\n  ModernClient client = .named();\n}\nextension on int {\n  int get legacy => this;\n  int read() => legacy;\n}\n\nclass ModernBase {\n  ModernBase.named();\n}\nclass ModernChild extends ModernBase {\n  ModernChild() : super.named();\n  ModernChild.redirect() : this();\n}\nclass ModernFactory {\n  factory ModernFactory() = ModernFactory.named;\n  ModernFactory.named();\n}"
+    },
+    "group": "suspicious",
+    "name": "banned-usage",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
@@ -35298,6 +36572,94 @@
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
       "upstreamId": "no-equal-then-else",
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Extract inline string literals into named variables or constants.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": null,
+        "line": 2,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 3,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 5,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 6,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 7,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 10,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 11,
+        "message": "Extract this magic string into a named variable or constant."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 12,
+        "message": "Extract this magic string into a named variable or constant."
+      }
+    ],
+    "docs": "Extract inline string literals into named variables or constants.\nExempts direct literal initializers, defaults, annotations, constant collections,\nindices, asserts, and direct string arguments of regex/URI/error constructors,\ncommon string operations and `ignored_invocations` (default [\"print\", \"debugPrint\"]).\n`allow_only_once` (false) allows values occurring only once across expression/pattern literals.\nLiteral patterns are exempt from diagnostics but still count; directive strings do not count.",
+    "domains": [],
+    "examples": {
+      "bad": "void f(dynamic value) {\n  consume('message');\n  final instance = Model('inline');\n  if (value == 'ready') {}\n  returnValue('result');\n  value.message = 'updated';\n  consume(r'raw');\n  if ('admin'.contains(value)) {}\n  'a-b'.split('-');\n  value.contains(User(name: 'admin'));\n  print(User(name: 'nested'));\n  final s = '${lookup(\"magic-key\")}';\n}",
+      "crossFile": null,
+      "good": "import 'dart:core';\nexport 'dart:core';\n\nconst title = 'Title';\nclass Model { final label = 'Label'; }\nvoid f(dynamic value, [String fallback = 'Fallback']) {\n  final message = 'message';\n  print('log');\n  debugPrint('debug');\n  assert(value != null, 'required');\n  RegExp('pattern');\n  Uri.https('example.com');\n  StateError('error');\n  ArgumentError.value(value, 'count', 'must be positive');\n  RangeError.range(value, 0, 9, 'index');\n  value.split(',');\n  const map = {'key': 'value'};\n  value['key'];\n  consume('');\n  value..['cascade-key'] = 1;\n  value..['cascade-read'].toString();\n  consume({'serialized-key': value});\n  value.contains('direct');\n  value.contains(('parenthesized'));\n  print(message: 'named');\n  final parenthesized = ('initializer');\n  final interpolated = '${value}';\n}\n\nenum Env {\n  dev('https://dev.example.com');\n  const Env(this.url);\n  final String url;\n}\n\nvoid patterns(dynamic value) {\n  if (value case 'ready') {}\n  switch (value) {\n    case 'a':\n      break;\n    default:\n      break;\n  }\n  final matched = switch (value) { 'b' => true, _ => false };\n  if (value case {'user': var name}) {}\n}\n\nclass Marker { const Marker(String label); }\n@Marker('annotation')\nvoid annotated() {}"
+    },
+    "group": "suspicious",
+    "name": "no-magic-string",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
       "upstreamUrl": null
     }
   },
