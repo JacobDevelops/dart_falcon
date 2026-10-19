@@ -1,7 +1,8 @@
 //! Flags Padding directly wrapping a Flutter Container that can own the padding.
 //! Containers with existing padding, margin, alignment, sizing, constraints,
 //! transforms, color, decoration or foregroundDecoration are excluded: moving
-//! padding across those layout and paint stages can change the result.
+//! padding across those layout and paint stages can change the result. Non-null
+//! keys on either widget are excluded because the keyed element's bounds change.
 //! This is distinct from prefer-padding-over-container and prefer-container's
 //! three-widget layout sequence.
 
@@ -45,7 +46,12 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(index) = self.ctx.identities else {
             return;
         };
-        if !index.is_package_declaration(&identity, "flutter", "Padding") {
+        if !index.is_package_declaration(&identity, "flutter", "Padding")
+            || args.named().any(|arg| {
+                arg.name().name() == "key"
+                    && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
+            })
+        {
             return;
         }
         let matches = {
@@ -58,19 +64,21 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     constructor == "new"
                         && index.is_package_declaration(&child, "flutter", "Container")
                         && !child_args.named().any(|arg| {
-                            [
-                                "padding",
-                                "margin",
-                                "alignment",
-                                "width",
-                                "height",
-                                "constraints",
-                                "transform",
-                                "color",
-                                "decoration",
-                                "foregroundDecoration",
-                            ]
-                            .contains(&arg.name().name())
+                            (arg.name().name() == "key"
+                                && !matches!(arg.value().unparenthesized(), Expr::NullLit(_)))
+                                || [
+                                    "padding",
+                                    "margin",
+                                    "alignment",
+                                    "width",
+                                    "height",
+                                    "constraints",
+                                    "transform",
+                                    "color",
+                                    "decoration",
+                                    "foregroundDecoration",
+                                ]
+                                .contains(&arg.name().name())
                         })
                 })
         };
