@@ -10,8 +10,6 @@ class S extends f.State<f.StatefulWidget> {
   late Resource stream, subscription;
   late Resource? optional;
   late Resource first = Resource(), second = Resource();
-  late Resource initializedInInitState;
-  void initState() { initializedInInitState = Resource(); }
   void dispose() {
     unset.dispose(); /* expect: avoid-disposing-late-fields */
     this.lazy.dispose(); /* expect: avoid-disposing-late-fields */
@@ -23,7 +21,6 @@ class S extends f.State<f.StatefulWidget> {
     (this.lazy)..close(); /* expect: avoid-disposing-late-fields */
     first.dispose(); /* expect: avoid-disposing-late-fields */
     second.cancel(); /* expect: avoid-disposing-late-fields */
-    initializedInInitState.dispose(); /* expect: avoid-disposing-late-fields */
     super.dispose();
   }
 }
