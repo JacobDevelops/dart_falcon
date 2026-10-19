@@ -37,3 +37,10 @@ void outer() {
   }
   local(Box());
 }
+
+void castReceivers(Object value, Box? box) {
+  (value as List<int>)[0] = 1; /* expect: avoid-mutating-parameters */
+  (value as Box).value = 2; /* expect: avoid-mutating-parameters */
+  box!.value = 3; /* expect: avoid-mutating-parameters */
+  (box! as Box).value++; /* expect: avoid-mutating-parameters */
+}

@@ -1,3 +1,6 @@
+import 'dart:core';
+export 'dart:core';
+
 const title = 'Title';
 class Model { final label = 'Label'; }
 void f(dynamic value, [String fallback = 'Fallback']) {
@@ -29,3 +32,18 @@ enum Env {
   const Env(this.url);
   final String url;
 }
+
+void patterns(dynamic value) {
+  if (value case 'ready') {}
+  switch (value) {
+    case 'a':
+      break;
+    default:
+      break;
+  }
+  final matched = switch (value) { 'b' => true, _ => false };
+}
+
+class Marker { const Marker(String label); }
+@Marker('annotation')
+void annotated() {}

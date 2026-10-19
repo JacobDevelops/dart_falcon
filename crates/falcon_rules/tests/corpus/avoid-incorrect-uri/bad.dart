@@ -11,5 +11,15 @@ void f(int count) {
   core.Uri.https('example.com', '/', {'values': ['valid', 2]}); /* expect: avoid-incorrect-uri */
   Uri(queryParameters: {'values': [null]}); /* expect: avoid-incorrect-uri */
   Uri(query: 'key=value', queryParameters: {'key': 'value'}); /* expect: avoid-incorrect-uri */
-  core.Uri(query: '', queryParameters: <String, String>{}); /* expect: avoid-incorrect-uri */
+}
+
+void collections(bool includeCount, List<int> counts) {
+  Uri(queryParameters: {if (includeCount) 'count': 1}); /* expect: avoid-incorrect-uri */
+  Uri(queryParameters: {
+    if (includeCount) 'count': 1 /* expect: avoid-incorrect-uri */
+    else 'other': false, /* expect: avoid-incorrect-uri */
+    for (final count in counts) 'count$count': 2, /* expect: avoid-incorrect-uri */
+    for (final count in counts)
+      if (includeCount) 'nested$count': 1, /* expect: avoid-incorrect-uri */
+  });
 }

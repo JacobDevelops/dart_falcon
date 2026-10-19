@@ -54,6 +54,7 @@ impl Collector<'_> {
                 Expr::Field(field) => field.object().unparenthesized(),
                 Expr::Index(index) => index.object().unparenthesized(),
                 Expr::NullAssert(assertion) => assertion.operand().unparenthesized(),
+                Expr::As(cast) => cast.expr().unparenthesized(),
                 Expr::Ident(name) => {
                     if let Some(declaration) = self.references.get(&name.span().start) {
                         self.writes.push((*declaration, span));

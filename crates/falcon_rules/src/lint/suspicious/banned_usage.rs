@@ -38,6 +38,46 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Access {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+impl Access {
+    fn assignment(operator: AssignOp) -> Self {
+        if operator == AssignOp::Eq {
+            Self::Write
+        } else {
+            Self::ReadWrite
+        }
+    }
+
+    fn expression(node: Expr<'_>) -> Self {
+        let parent = node
+            .syntax()
+            .ancestors()
+            .skip(1)
+            .filter_map(Expr::cast)
+            .find(|parent| !matches!(parent, Expr::Paren(_)));
+        match parent {
+            Some(Expr::Assign(assignment))
+                if assignment.target().unparenthesized().span() == node.span() =>
+            {
+                Self::assignment(assignment.op())
+            }
+            Some(Expr::PostfixIncDec(_)) => Self::ReadWrite,
+            Some(Expr::Unary(unary))
+                if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+            {
+                Self::ReadWrite
+            }
+            _ => Self::Read,
+        }
+    }
+}
+
 impl Collector<'_> {
     fn emit(&mut self, name: &str, span: Span) {
         report(
@@ -78,25 +118,47 @@ impl Collector<'_> {
         receiver: &ResolvedType,
         name: &str,
         span: Span,
+        access: Access,
         state: &SemanticState<'_>,
     ) {
-        let owner = state
-            .signatures
-            .resolved_readable_member_owner(receiver, name, &state.model)
-            .or_else(|| {
+        let writable = (access != Access::Read)
+            .then(|| {
                 state
                     .signatures
                     .resolved_writable_member_owner(receiver, name, &state.model)
+                    .or_else(|| {
+                        state.signatures.resolved_extension_access_owner(
+                            receiver,
+                            name,
+                            true,
+                            &state.model,
+                        )
+                    })
             })
-            .or_else(|| {
-                state.signatures.resolved_extension_access_owner(
-                    receiver,
-                    name,
-                    false,
-                    &state.model,
-                )
-            });
-        if let Some(owner) = owner {
+            .flatten();
+        let diagnostic_count = self.diagnostics.len();
+        if let Some(owner) = writable.as_ref() {
+            self.emit(&format!("{}.{name}", owner.name()), span);
+            if self.diagnostics.len() > diagnostic_count {
+                return;
+            }
+        }
+        let readable = (access != Access::Write)
+            .then(|| {
+                state
+                    .signatures
+                    .resolved_readable_member_owner(receiver, name, &state.model)
+                    .or_else(|| {
+                        state.signatures.resolved_extension_access_owner(
+                            receiver,
+                            name,
+                            false,
+                            &state.model,
+                        )
+                    })
+            })
+            .flatten();
+        if let Some(owner) = readable.filter(|owner| Some(owner) != writable.as_ref()) {
             self.emit(&format!("{}.{name}", owner.name()), span);
         }
     }
@@ -177,7 +239,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
             }
             Expr::Ident(identifier)
-                if !state.environment.is_bound(identifier.name())
+                if (!state.environment.is_bound(identifier.name())
+                    || (state.environment.is_bound_in_root_scope(identifier.name())
+                        && state.constant_owner.as_ref().is_some_and(|owner| {
+                            !state
+                                .signatures
+                                .declared_member_facts(owner, identifier.name())
+                                .is_empty()
+                        })))
                     && state.type_parameters.lookup(identifier.name()).is_none() =>
             {
                 if Self::is_unnamed_extension_member(identifier) {
@@ -190,10 +259,28 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         .is_empty()
                         || state.signatures.is_enum_value(owner, identifier.name()))
                 {
-                    self.emit(
-                        &format!("{}.{}", owner.name(), identifier.name()),
-                        identifier.span(),
-                    );
+                    if let Some(receiver) = &state.enclosing_type
+                        && matches!(receiver, ResolvedType::Interface { identity, .. } if identity == owner)
+                        && !state.signatures.is_enum_value(owner, identifier.name())
+                        && !state
+                            .signatures
+                            .declared_member_facts(owner, identifier.name())
+                            .iter()
+                            .any(|fact| fact.is_static)
+                    {
+                        self.member(
+                            receiver,
+                            identifier.name(),
+                            identifier.span(),
+                            Access::expression(node),
+                            state,
+                        );
+                    } else {
+                        self.emit(
+                            &format!("{}.{}", owner.name(), identifier.name()),
+                            identifier.span(),
+                        );
+                    }
                 } else if let Some(identity) = state
                     .model
                     .resolve_value(identifier.name())
@@ -201,7 +288,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 {
                     self.emit(identity.name(), identifier.span());
                 } else if let Some(receiver) = &state.enclosing_type {
-                    self.member(receiver, identifier.name(), identifier.span(), state);
+                    self.member(
+                        receiver,
+                        identifier.name(),
+                        identifier.span(),
+                        Access::expression(node),
+                        state,
+                    );
                 }
             }
             Expr::Field(field) => {
@@ -271,7 +364,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     field.field().name(),
                     field.is_null_safe(),
                 );
-                self.member(&receiver, field.field().name(), field.field().span(), state);
+                self.member(
+                    &receiver,
+                    field.field().name(),
+                    field.field().span(),
+                    Access::expression(node),
+                    state,
+                );
             }
             Expr::DotShorthand(shorthand) => {
                 if let Some(ResolvedType::Interface { identity, .. }) = state.expected() {
@@ -304,12 +403,20 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         state: &SemanticState<'a>,
     ) {
         match operation {
-            CascadeOp::Call(call) => {
-                self.member(receiver, call.name().name(), call.name().span(), state)
-            }
-            CascadeOp::Field(field) => {
-                self.member(receiver, field.name().name(), field.name().span(), state)
-            }
+            CascadeOp::Call(call) => self.member(
+                receiver,
+                call.name().name(),
+                call.name().span(),
+                Access::Read,
+                state,
+            ),
+            CascadeOp::Field(field) => self.member(
+                receiver,
+                field.name().name(),
+                field.name().span(),
+                Access::Read,
+                state,
+            ),
             _ => {}
         }
     }
@@ -324,7 +431,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if !assignment.indexed
             && let Expr::Ident(name) = assignment.target.unparenthesized()
         {
-            self.member(receiver, name.name(), name.span(), state);
+            self.member(
+                receiver,
+                name.name(),
+                name.span(),
+                Access::assignment(assignment.operator),
+                state,
+            );
         }
     }
 

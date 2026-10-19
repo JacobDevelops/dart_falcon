@@ -2,7 +2,8 @@
 //! Exempts direct literal initializers, defaults, annotations, constant collections,
 //! indices, asserts, and direct string arguments of regex/URI/error constructors,
 //! common string operations and `ignored_invocations` (default ["print", "debugPrint"]).
-//! `allow_only_once` (false) allows values occurring only once across all file literals.
+//! `allow_only_once` (false) allows values occurring only once across expression/pattern literals.
+//! Literal patterns are exempt from diagnostics but still count; directive strings do not count.
 
 use std::collections::HashMap;
 
@@ -58,12 +59,8 @@ impl Collector<'_> {
                 | NodeKind::FormalParam
                 | NodeKind::AssertStmt
                 | NodeKind::AssertInitializer
-                | NodeKind::ImportDirective
-                | NodeKind::ExportDirective
-                | NodeKind::PartDirective
-                | NodeKind::PartOfDirective
-                | NodeKind::LibraryDirective
-                | NodeKind::EnumVariant => return true,
+                | NodeKind::EnumVariant
+                | NodeKind::LiteralPattern => return true,
                 NodeKind::VarDeclarator
                     if child == literal.syntax()
                         || Expr::cast(child).is_some_and(|expr| {
@@ -184,10 +181,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .collect()
     }
 
-    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
-        if let Expr::StringLit(literal) = node
-            && literal.interpolations().next().is_none()
+    fn visit_string_lit(&mut self, literal: StringLitNode<'a>) -> StructuralTraversal {
+        if literal.syntax().parent().is_some_and(|parent| matches!(parent.kind(),
+            NodeKind::ImportDirective | NodeKind::ExportDirective | NodeKind::PartDirective
+                | NodeKind::PartOfDirective | NodeKind::ConfigurableUri))
         {
+            return StructuralTraversal::Continue;
+        }
+        if literal.interpolations().next().is_none() {
             let value = uri_value(literal);
             if !value.is_empty() {
                 let exempt = self.exempt(literal);

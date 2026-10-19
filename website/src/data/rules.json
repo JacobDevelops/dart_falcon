@@ -33476,14 +33476,26 @@
         "file": null,
         "line": 3,
         "message": "Use the supported alternative."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 4,
+        "message": "Use the supported alternative."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 5,
+        "message": "Use the supported alternative."
       }
     ],
     "docs": "Ban decoded export URIs, including all conditional alternatives.",
     "domains": [],
     "examples": {
-      "bad": "export 'package:legacy/api.dart';\nexport 'modern.dart' if (dart.library.io) 'package:legacy/io.dart';\nexport 'package:legacy/hidden.dart' hide Hidden;",
+      "bad": "export 'package:legacy/api.dart';\nexport 'modern.dart' if (dart.library.io) 'package:legacy/io.dart';\nexport 'package:legacy/hidden.dart' hide Hidden;\nexport 'package:leg\\x61cy/api.dart';\nexport 'modern.dart' if (dart.library.io) 'package:leg\\u0061cy/io.dart';",
       "crossFile": null,
-      "good": "import 'package:legacy/api.dart';\nexport 'package:modern/api.dart';\nexport 'modern.dart' if (dart.library.io) 'modern_io.dart';"
+      "good": "import 'package:legacy/api.dart';\nexport 'package:modern/api.dart';\nexport 'modern.dart' if (dart.library.io) 'modern_io.dart';\nexport 'package:mod\\x65rn/api.dart';\nexport r'package:leg\\x61cy/api.dart';"
     },
     "group": "suspicious",
     "name": "avoid-banned-exports",
@@ -34280,18 +34292,42 @@
         "message": "Do not provide both query and queryParameters to Uri."
       },
       {
-        "column": 23,
+        "column": 52,
         "file": null,
-        "line": 14,
-        "message": "Do not provide both query and queryParameters to Uri."
+        "line": 17,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 32,
+        "file": null,
+        "line": 19,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 20,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 48,
+        "file": null,
+        "line": 21,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 23,
+        "message": "Uri query parameter values must be null, strings or iterables of strings."
       }
     ],
     "docs": "Reject runtime-invalid Uri constructor arguments: conflicting path or query inputs and\nquery parameter values that are neither null, strings nor iterables of strings.\nOnly resolved dart:core Uri constructors are checked; unknown values are skipped.",
     "domains": [],
     "examples": {
-      "bad": "import 'dart:core';\nimport 'dart:core' as core;\n\nvoid f(int count) {\n  Uri(queryParameters: {'count': 1});\n  Uri.http('example.com', '/', {'flag': false});\n  Uri.https('example.com', '/', {'count': 1.5});\n  Uri(path: '', pathSegments: ['']);\n  new Uri(queryParameters: {'count': count});\n  core.Uri(queryParameters: {'count': 3});\n  core.Uri.https('example.com', '/', {'values': ['valid', 2]});\n  Uri(queryParameters: {'values': [null]});\n  Uri(query: 'key=value', queryParameters: {'key': 'value'});\n  core.Uri(query: '', queryParameters: <String, String>{});\n}",
+      "bad": "import 'dart:core';\nimport 'dart:core' as core;\n\nvoid f(int count) {\n  Uri(queryParameters: {'count': 1});\n  Uri.http('example.com', '/', {'flag': false});\n  Uri.https('example.com', '/', {'count': 1.5});\n  Uri(path: '', pathSegments: ['']);\n  new Uri(queryParameters: {'count': count});\n  core.Uri(queryParameters: {'count': 3});\n  core.Uri.https('example.com', '/', {'values': ['valid', 2]});\n  Uri(queryParameters: {'values': [null]});\n  Uri(query: 'key=value', queryParameters: {'key': 'value'});\n}\n\nvoid collections(bool includeCount, List<int> counts) {\n  Uri(queryParameters: {if (includeCount) 'count': 1});\n  Uri(queryParameters: {\n    if (includeCount) 'count': 1\n    else 'other': false,\n    for (final count in counts) 'count$count': 2,\n    for (final count in counts)\n      if (includeCount) 'nested$count': 1,\n  });\n}",
       "crossFile": null,
-      "good": "import 'dart:core';\nimport 'dart:core' as core;\n\nvoid f(dynamic unknown, Iterable<String> values, String? path) {\n  Uri(fragment: '', queryParameters: {'hello': 'world'});\n  Uri.https('example.com', '/', {'hello': 'world'});\n  Uri.http('example.com', '/', {'hello': ['world', 'again']});\n  Uri(path: '');\n  Uri(pathSegments: ['']);\n  Uri(path: null, pathSegments: ['']);\n  Uri(path: path, pathSegments: ['']);\n  Uri(queryParameters: {'empty': null});\n  Uri(queryParameters: {'empty': <String>[]});\n  Uri(queryParameters: {'values': <String>{'first', 'second'}});\n  Uri(queryParameters: {'values': values});\n  Uri(queryParameters: {'unknown': unknown});\n  core.Uri(queryParameters: {'hello': 'world'});\n  Uri(query: 'key=value');\n  Uri(queryParameters: {'key': 'value'});\n  Uri(query: null, queryParameters: {'key': 'value'});\n  Uri(query: 'key=value', queryParameters: null);\n  Uri(query: path, queryParameters: {'key': 'value'});\n}\n\nvoid shadowed(dynamic Uri) {\n  Uri(queryParameters: {'count': 1});\n  Uri.https('', '', {'count': 1});\n}\n\nclass CustomUri {\n  CustomUri({dynamic queryParameters});\n}\nvoid other() {\n  CustomUri(queryParameters: {'count': 1});\n}"
+      "good": "import 'dart:core';\nimport 'dart:core' as core;\n\nvoid f(dynamic unknown, Iterable<String> values, String? path) {\n  Uri(fragment: '', queryParameters: {'hello': 'world'});\n  Uri.https('example.com', '/', {'hello': 'world'});\n  Uri.http('example.com', '/', {'hello': ['world', 'again']});\n  Uri(path: '');\n  Uri(pathSegments: ['']);\n  Uri(path: null, pathSegments: ['']);\n  Uri(path: path, pathSegments: ['']);\n  Uri(queryParameters: {'empty': null});\n  Uri(queryParameters: {'empty': <String>[]});\n  Uri(queryParameters: {'values': <String>{'first', 'second'}});\n  Uri(queryParameters: {'values': values});\n  Uri(queryParameters: {'unknown': unknown});\n  core.Uri(queryParameters: {'hello': 'world'});\n  Uri(query: 'key=value');\n  Uri(queryParameters: {'key': 'value'});\n  Uri(query: null, queryParameters: {'key': 'value'});\n  Uri(query: 'key=value', queryParameters: null);\n  Uri(query: path, queryParameters: {'key': 'value'});\n  core.Uri(query: '', queryParameters: <String, String>{});\n  Uri(query: (r''), queryParameters: {'key': 'value'});\n}\n\nvoid shadowed(dynamic Uri) {\n  Uri(queryParameters: {'count': 1});\n  Uri.https('', '', {'count': 1});\n}\n\nclass CustomUri {\n  CustomUri({dynamic queryParameters});\n}\nvoid other() {\n  CustomUri(queryParameters: {'count': 1});\n}\n\nvoid collections(bool includeCount, List<String> values) {\n  Uri(queryParameters: {\n    if (includeCount) 'count': '1' else 'other': null,\n    for (final value in values) value: value,\n    for (final value in values)\n      if (includeCount) 'nested$value': <String>['valid'],\n  });\n}"
     },
     "group": "suspicious",
     "name": "avoid-incorrect-uri",
@@ -34506,12 +34542,36 @@
         "file": null,
         "line": 36,
         "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 42,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 43,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "Avoid mutating an object supplied as a parameter."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 45,
+        "message": "Avoid mutating an object supplied as a parameter."
       }
     ],
     "docs": "Detects writes through named function, method and constructor parameter objects.\nClosure parameters are exempt; parameter rebinding belongs to `parameter-assignments`.\nParameters annotated `@mutated` (dart-code-metrics-annotations) are exempt.",
     "domains": [],
     "examples": {
-      "bad": "class Box { int value = 0; Box? child; }\nvoid mutate(Box box, List<int> values, Map<String, int> map) {\n  box.value = 1;\n  box.value += 1;\n  ++box.value;\n  box.value--;\n  values[0] = 2;\n  map['key'] ??= 3;\n  box.child!.value = 2;\n  box..value = 4;\n  values..[0] = 5;\n  void nested() { box.value = 6;  }\n  final closure = () { values[0]++;  };\n  nested(); closure();\n}\nclass Holder {\n  set item(Box value) { value.value = 1;  }\n}\n\nclass Mutator {\n  Mutator(Box box) {\n    box.value = 1;\n  }\n\n  void update(Box box) {\n    box.value = 2;\n  }\n\n  void operator []=(int index, Box box) {\n    box.value = index;\n  }\n}\n\nvoid outer() {\n  void local(Box box) {\n    box.value = 3;\n  }\n  local(Box());\n}",
+      "bad": "class Box { int value = 0; Box? child; }\nvoid mutate(Box box, List<int> values, Map<String, int> map) {\n  box.value = 1;\n  box.value += 1;\n  ++box.value;\n  box.value--;\n  values[0] = 2;\n  map['key'] ??= 3;\n  box.child!.value = 2;\n  box..value = 4;\n  values..[0] = 5;\n  void nested() { box.value = 6;  }\n  final closure = () { values[0]++;  };\n  nested(); closure();\n}\nclass Holder {\n  set item(Box value) { value.value = 1;  }\n}\n\nclass Mutator {\n  Mutator(Box box) {\n    box.value = 1;\n  }\n\n  void update(Box box) {\n    box.value = 2;\n  }\n\n  void operator []=(int index, Box box) {\n    box.value = index;\n  }\n}\n\nvoid outer() {\n  void local(Box box) {\n    box.value = 3;\n  }\n  local(Box());\n}\n\nvoid castReceivers(Object value, Box? box) {\n  (value as List<int>)[0] = 1;\n  (value as Box).value = 2;\n  box!.value = 3;\n  (box! as Box).value++;\n}",
       "crossFile": null,
       "good": "class Box { int value = 0; }\nvoid noMutation(Box box, List<int> values) {\n  final local = Box();\n  local.value = 1;\n  final copy = [...values];\n  copy[0] = 2;\n  final read = box.value;\n  box = Box(); // Rebinding belongs to parameter-assignments.\n  {\n    final box = Box();\n    box.value = read;\n  }\n  void nested() { final box = Box(); box.value++; }\n  final callback = () { final values = [0]; values[0]++; };\n  nested(); callback();\n}\nclass Owner {\n  Box box;\n  Owner(this.box) { box.value = 1; }\n}\nconst mutated = 0;\nvoid intentional(@mutated Box box, @mutated List<int> values) {\n  box.value = 1;\n  values[0]++;\n}\nclass AnnotatedSetter {\n  set item(@mutated Box value) { value.value++; }\n}\n\nclass Builder { String name = ''; }\nclass Options { final headers = <String, String>{}; }\nclass Item { bool selected = true; }\n\nvoid closures(List<Item> items) {\n  final build = (Builder b) => b..name = 'x';\n  final intercept = (Options options) {\n    options.headers['Authorization'] = 'token';\n  };\n  items.forEach((i) => i.selected = false);\n  build(Builder());\n  intercept(Options());\n}"
     },
@@ -36586,12 +36646,12 @@
         "message": "Extract this magic string into a named variable or constant."
       }
     ],
-    "docs": "Extract inline string literals into named variables or constants.\nExempts direct literal initializers, defaults, annotations, constant collections,\nindices, asserts, and direct string arguments of regex/URI/error constructors,\ncommon string operations and `ignored_invocations` (default [\"print\", \"debugPrint\"]).\n`allow_only_once` (false) allows values occurring only once across all file literals.",
+    "docs": "Extract inline string literals into named variables or constants.\nExempts direct literal initializers, defaults, annotations, constant collections,\nindices, asserts, and direct string arguments of regex/URI/error constructors,\ncommon string operations and `ignored_invocations` (default [\"print\", \"debugPrint\"]).\n`allow_only_once` (false) allows values occurring only once across expression/pattern literals.\nLiteral patterns are exempt from diagnostics but still count; directive strings do not count.",
     "domains": [],
     "examples": {
       "bad": "void f(dynamic value) {\n  consume('message');\n  final instance = Model('inline');\n  if (value == 'ready') {}\n  returnValue('result');\n  value.message = 'updated';\n  consume(r'raw');\n  if ('admin'.contains(value)) {}\n  'a-b'.split('-');\n  value.contains(User(name: 'admin'));\n  print(User(name: 'nested'));\n  final s = '${lookup(\"magic-key\")}';\n}",
       "crossFile": null,
-      "good": "const title = 'Title';\nclass Model { final label = 'Label'; }\nvoid f(dynamic value, [String fallback = 'Fallback']) {\n  final message = 'message';\n  print('log');\n  debugPrint('debug');\n  assert(value != null, 'required');\n  RegExp('pattern');\n  Uri.https('example.com');\n  StateError('error');\n  ArgumentError.value(value, 'count', 'must be positive');\n  RangeError.range(value, 0, 9, 'index');\n  value.split(',');\n  const map = {'key': 'value'};\n  value['key'];\n  consume('');\n  value..['cascade-key'] = 1;\n  value..['cascade-read'].toString();\n  consume({'serialized-key': value});\n  value.contains('direct');\n  value.contains(('parenthesized'));\n  print(message: 'named');\n  final parenthesized = ('initializer');\n  final interpolated = '${value}';\n}\n\nenum Env {\n  dev('https://dev.example.com');\n  const Env(this.url);\n  final String url;\n}"
+      "good": "import 'dart:core';\nexport 'dart:core';\n\nconst title = 'Title';\nclass Model { final label = 'Label'; }\nvoid f(dynamic value, [String fallback = 'Fallback']) {\n  final message = 'message';\n  print('log');\n  debugPrint('debug');\n  assert(value != null, 'required');\n  RegExp('pattern');\n  Uri.https('example.com');\n  StateError('error');\n  ArgumentError.value(value, 'count', 'must be positive');\n  RangeError.range(value, 0, 9, 'index');\n  value.split(',');\n  const map = {'key': 'value'};\n  value['key'];\n  consume('');\n  value..['cascade-key'] = 1;\n  value..['cascade-read'].toString();\n  consume({'serialized-key': value});\n  value.contains('direct');\n  value.contains(('parenthesized'));\n  print(message: 'named');\n  final parenthesized = ('initializer');\n  final interpolated = '${value}';\n}\n\nenum Env {\n  dev('https://dev.example.com');\n  const Env(this.url);\n  final String url;\n}\n\nvoid patterns(dynamic value) {\n  if (value case 'ready') {}\n  switch (value) {\n    case 'a':\n      break;\n    default:\n      break;\n  }\n  final matched = switch (value) { 'b' => true, _ => false };\n}\n\nclass Marker { const Marker(String label); }\n@Marker('annotation')\nvoid annotated() {}"
     },
     "group": "suspicious",
     "name": "no-magic-string",

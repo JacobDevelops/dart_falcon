@@ -1,5 +1,6 @@
 //! Ban decoded export URIs, including all conditional alternatives.
 
+use crate::lint::style::conditional_uri_does_not_exist::uri_value;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 
@@ -27,7 +28,7 @@ impl Rule for AvoidBannedExports {
                         ctx,
                         &entries,
                         "avoid-banned-exports",
-                        &uri.value(),
+                        &uri_value(uri),
                         uri.span(),
                         &mut diagnostics,
                     );

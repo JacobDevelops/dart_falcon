@@ -39,15 +39,25 @@ impl Collector<'_> {
     fn query<'a>(&mut self, value: Expr<'a>, state: &SemanticState<'a>) {
         if let Expr::Map(map) = value.unparenthesized() {
             for element in map.elements() {
-                if let MapElement::Entry(entry) = element
-                    && invalid_query_value(entry.value(), state)
-                {
-                    self.report(
-                        entry.value().span(),
-                        "Uri query parameter values must be null, strings or iterables of strings.",
-                    );
+                self.query_element(element, state);
+            }
+        }
+    }
+
+    fn query_element<'a>(&mut self, element: MapElement<'a>, state: &SemanticState<'a>) {
+        match element {
+            MapElement::Entry(entry) if invalid_query_value(entry.value(), state) => self.report(
+                entry.value().span(),
+                "Uri query parameter values must be null, strings or iterables of strings.",
+            ),
+            MapElement::If(element) => {
+                self.query_element(element.then_entry(), state);
+                if let Some(otherwise) = element.else_entry() {
+                    self.query_element(otherwise, state);
                 }
             }
+            MapElement::For(element) => self.query_element(element.entry(), state),
+            MapElement::Entry(_) | MapElement::Spread(_) => {}
         }
     }
 }
@@ -108,6 +118,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     let first = args.named().find(|arg| arg.name().name() == first);
                     let second = args.named().find(|arg| arg.name().name() == second);
                     if let (Some(first), Some(second)) = (first, second)
+                        && !(first.name().name() == "query"
+                            && matches!(first.value().unparenthesized(), Expr::StringLit(literal)
+                                if literal.interpolations().next().is_none() && literal.value().is_empty()))
                         && matches!(
                             state.infer(first.value()),
                             ResolvedType::Interface {
