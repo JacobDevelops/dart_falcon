@@ -42,6 +42,7 @@ void patterns(dynamic value) {
       break;
   }
   final matched = switch (value) { 'b' => true, _ => false };
+  if (value case {'user': var name}) {}
 }
 
 class Marker { const Marker(String label); }

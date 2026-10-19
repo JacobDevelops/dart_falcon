@@ -60,7 +60,8 @@ impl Collector<'_> {
                 | NodeKind::AssertStmt
                 | NodeKind::AssertInitializer
                 | NodeKind::EnumVariant
-                | NodeKind::LiteralPattern => return true,
+                | NodeKind::LiteralPattern
+                | NodeKind::MapPatternEntry => return true,
                 NodeKind::VarDeclarator
                     if child == literal.syntax()
                         || Expr::cast(child).is_some_and(|expr| {
