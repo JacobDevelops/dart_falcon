@@ -68,13 +68,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
             return;
         }
-        if !["GestureDetector", "InkWell", "InkResponse"]
-            .iter()
-            .any(|name| index.is_package_declaration(&identity, "flutter", name))
-        {
+        let Some(widget_name) = ["GestureDetector", "InkWell", "InkResponse"]
+            .into_iter()
+            .find(|name| index.is_package_declaration(&identity, "flutter", name))
+        else {
             return;
-        }
-        if !crate::lint::flutter::has_active_gesture_callback(args) {
+        };
+        if !crate::lint::flutter::has_active_gesture_callback(args, widget_name) {
             return;
         }
         if self

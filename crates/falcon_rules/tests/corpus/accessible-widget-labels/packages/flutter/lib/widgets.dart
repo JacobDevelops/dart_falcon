@@ -11,9 +11,44 @@ class FloatingActionButton extends Widget {
   const FloatingActionButton({Key? key, Widget? child, String? tooltip, Function? onPressed});
   const FloatingActionButton.small({Key? key, Widget? child, String? tooltip, Function? onPressed});
 }
-class GestureDetector extends Widget { const GestureDetector({Key? key, Widget? child, Function? onTap, bool excludeFromSemantics = false}); }
-class InkWell extends Widget { const InkWell({Key? key, Widget? child, Function? onTap, bool excludeFromSemantics = false}); }
-class InkResponse extends Widget { const InkResponse({Key? key, Widget? child, Function? onTap, bool excludeFromSemantics = false}); }
+class GestureDetector extends Widget {
+  const GestureDetector({
+    Key? key, Widget? child, bool excludeFromSemantics = false,
+    Function? onTap, Function? onTapDown, Function? onTapUp, Function? onTapMove, Function? onTapCancel,
+    Function? onSecondaryTap, Function? onSecondaryTapDown, Function? onSecondaryTapUp, Function? onSecondaryTapCancel,
+    Function? onTertiaryTapDown, Function? onTertiaryTapUp, Function? onTertiaryTapCancel,
+    Function? onDoubleTap, Function? onDoubleTapDown, Function? onDoubleTapCancel,
+    Function? onLongPress, Function? onLongPressDown, Function? onLongPressCancel, Function? onLongPressStart,
+    Function? onLongPressMoveUpdate, Function? onLongPressUp, Function? onLongPressEnd,
+    Function? onSecondaryLongPress, Function? onSecondaryLongPressDown, Function? onSecondaryLongPressCancel,
+    Function? onSecondaryLongPressStart, Function? onSecondaryLongPressMoveUpdate, Function? onSecondaryLongPressUp, Function? onSecondaryLongPressEnd,
+    Function? onTertiaryLongPress, Function? onTertiaryLongPressDown, Function? onTertiaryLongPressCancel,
+    Function? onTertiaryLongPressStart, Function? onTertiaryLongPressMoveUpdate, Function? onTertiaryLongPressUp, Function? onTertiaryLongPressEnd,
+    Function? onVerticalDragDown, Function? onVerticalDragStart, Function? onVerticalDragUpdate, Function? onVerticalDragEnd, Function? onVerticalDragCancel,
+    Function? onHorizontalDragDown, Function? onHorizontalDragStart, Function? onHorizontalDragUpdate, Function? onHorizontalDragEnd, Function? onHorizontalDragCancel,
+    Function? onForcePressStart, Function? onForcePressPeak, Function? onForcePressUpdate, Function? onForcePressEnd,
+    Function? onPanDown, Function? onPanStart, Function? onPanUpdate, Function? onPanEnd, Function? onPanCancel,
+    Function? onScaleStart, Function? onScaleUpdate, Function? onScaleEnd,
+  });
+}
+class InkWell extends Widget {
+  const InkWell({
+    Key? key, Widget? child, bool excludeFromSemantics = false,
+    Function? onTap, Function? onTapDown, Function? onTapUp, Function? onTapCancel, Function? onDoubleTap,
+    Function? onLongPress, Function? onLongPressUp,
+    Function? onSecondaryTap, Function? onSecondaryTapDown, Function? onSecondaryTapUp, Function? onSecondaryTapCancel,
+    Function? onHighlightChanged, Function? onHover, Function? onFocusChange,
+  });
+}
+class InkResponse extends Widget {
+  const InkResponse({
+    Key? key, Widget? child, bool excludeFromSemantics = false,
+    Function? onTap, Function? onTapDown, Function? onTapUp, Function? onTapCancel, Function? onDoubleTap,
+    Function? onLongPress, Function? onLongPressUp,
+    Function? onSecondaryTap, Function? onSecondaryTapDown, Function? onSecondaryTapUp, Function? onSecondaryTapCancel,
+    Function? onHighlightChanged, Function? onHover, Function? onFocusChange,
+  });
+}
 class Tooltip extends Widget { const Tooltip({String? message, InlineSpan? richMessage, Widget? child}); }
 class Semantics extends Widget { const Semantics({String? label, AttributedString? attributedLabel, Widget? child}); }
 class SizedBox extends Widget { const SizedBox({double? width, double? height, Widget? child}); }

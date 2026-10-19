@@ -4,7 +4,29 @@ use falcon_analyze::{
 };
 use falcon_syntax::cst::{ArgList, DartType, Expr, Span};
 
-pub(crate) fn has_active_gesture_callback(args: ArgList<'_>) -> bool {
+/// Match callbacks that enable Flutter's recognizers, not every declared callback.
+pub(crate) fn has_active_gesture_callback(args: ArgList<'_>, widget_name: &str) -> bool {
+    if matches!(widget_name, "InkWell" | "InkResponse") {
+        // Ink cancellation handlers only run when another callback enables the widget.
+        return args.named().any(|arg| {
+            matches!(
+                arg.name().name(),
+                "onTap"
+                    | "onTapDown"
+                    | "onTapUp"
+                    | "onDoubleTap"
+                    | "onLongPress"
+                    | "onLongPressUp"
+                    | "onSecondaryTap"
+                    | "onSecondaryTapDown"
+                    | "onSecondaryTapUp"
+            ) && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
+        });
+    }
+    if widget_name != "GestureDetector" {
+        return false;
+    }
+    // onTapMove is declared but is not wired to GestureDetector's tap recognizer.
     args.named().any(|arg| {
         matches!(
             arg.name().name(),
@@ -21,24 +43,50 @@ pub(crate) fn has_active_gesture_callback(args: ArgList<'_>) -> bool {
                 | "onLongPressUp"
                 | "onLongPressEnd"
                 | "onLongPressDown"
+                | "onLongPressCancel"
+                | "onSecondaryLongPressDown"
+                | "onSecondaryLongPressCancel"
+                | "onSecondaryLongPress"
+                | "onSecondaryLongPressStart"
+                | "onSecondaryLongPressMoveUpdate"
+                | "onSecondaryLongPressUp"
+                | "onSecondaryLongPressEnd"
+                | "onTertiaryLongPressDown"
+                | "onTertiaryLongPressCancel"
+                | "onTertiaryLongPress"
+                | "onTertiaryLongPressStart"
+                | "onTertiaryLongPressMoveUpdate"
+                | "onTertiaryLongPressUp"
+                | "onTertiaryLongPressEnd"
                 | "onSecondaryTap"
                 | "onSecondaryTapDown"
                 | "onSecondaryTapUp"
+                | "onSecondaryTapCancel"
                 | "onTertiaryTapDown"
                 | "onTertiaryTapUp"
+                | "onTertiaryTapCancel"
                 | "onPanStart"
                 | "onPanUpdate"
                 | "onPanEnd"
                 | "onPanDown"
+                | "onPanCancel"
                 | "onScaleStart"
                 | "onScaleUpdate"
                 | "onScaleEnd"
+                | "onForcePressStart"
+                | "onForcePressPeak"
+                | "onForcePressUpdate"
+                | "onForcePressEnd"
                 | "onHorizontalDragStart"
                 | "onHorizontalDragUpdate"
                 | "onHorizontalDragEnd"
+                | "onHorizontalDragDown"
+                | "onHorizontalDragCancel"
                 | "onVerticalDragStart"
                 | "onVerticalDragUpdate"
                 | "onVerticalDragEnd"
+                | "onVerticalDragDown"
+                | "onVerticalDragCancel"
         ) && !matches!(arg.value().unparenthesized(), Expr::NullLit(_))
     })
 }
