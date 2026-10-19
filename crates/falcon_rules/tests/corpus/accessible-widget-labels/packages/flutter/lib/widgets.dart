@@ -14,8 +14,8 @@ class FloatingActionButton extends Widget {
 class GestureDetector extends Widget { const GestureDetector({Key? key, Widget? child, Function? onTap, bool excludeFromSemantics = false}); }
 class InkWell extends Widget { const InkWell({Key? key, Widget? child, Function? onTap, bool excludeFromSemantics = false}); }
 class InkResponse extends Widget { const InkResponse({Key? key, Widget? child, Function? onTap, bool excludeFromSemantics = false}); }
-class Tooltip extends Widget { const Tooltip({String? message, Widget? child}); }
-class Semantics extends Widget { const Semantics({String? label, Widget? child}); }
+class Tooltip extends Widget { const Tooltip({String? message, InlineSpan? richMessage, Widget? child}); }
+class Semantics extends Widget { const Semantics({String? label, AttributedString? attributedLabel, Widget? child}); }
 class SizedBox extends Widget { const SizedBox({double? width, double? height, Widget? child}); }
 class Container extends Widget { Container({double? width, double? height, Widget? child}); }
 class TextButton extends Widget { const TextButton({Widget? child, Function? onPressed}); }
@@ -31,3 +31,6 @@ class CupertinoTextField extends Widget {
   CupertinoTextField.borderless({Object? controller, Function? onChanged, Function? onSubmitted});
 }
 class EditableText extends Widget { EditableText({Object? controller, Function? onChanged, Function? onSubmitted}); }
+class InlineSpan { const InlineSpan(); }
+class TextSpan extends InlineSpan { const TextSpan({String? text}); }
+class AttributedString { AttributedString(String string); }

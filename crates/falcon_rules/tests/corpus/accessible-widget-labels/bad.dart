@@ -9,4 +9,20 @@ void actions() {
   InkWell(onTap: () {}, child: Text('')); /* expect: accessible-widget-labels */
   InkResponse(onTap: () {}); /* expect: accessible-widget-labels */
   Tooltip(message: '', child: InkWell(onTap: () {})); /* expect: accessible-widget-labels */
+  Tooltip(richMessage: null, child: InkWell(onTap: () {})); /* expect: accessible-widget-labels */
+  Tooltip(richMessage: (null), child: InkResponse(onTap: () {})); /* expect: accessible-widget-labels */
+  Semantics(attributedLabel: null, child: InkWell(onTap: () {})); /* expect: accessible-widget-labels */
+  Semantics(attributedLabel: (null), child: InkResponse(onTap: () {})); /* expect: accessible-widget-labels */
+}
+
+void shadowed(dynamic Tooltip, dynamic Semantics) {
+  Tooltip(richMessage: 'Delete', child: InkWell(onTap: () {})); /* expect: accessible-widget-labels */
+  Semantics(attributedLabel: 'Delete', child: InkResponse(onTap: () {})); /* expect: accessible-widget-labels */
+}
+
+void siblings(dynamic richMessage, dynamic attributedLabel) {
+  Tooltip(richMessage: richMessage, child: InkWell(onTap: () {}));
+  InkWell(onTap: () {}); /* expect: accessible-widget-labels */
+  Semantics(attributedLabel: attributedLabel, child: InkResponse(onTap: () {}));
+  InkResponse(onTap: () {}); /* expect: accessible-widget-labels */
 }

@@ -19,3 +19,12 @@ void actions(String label) {
 }
 void shadow(dynamic IconButton) { IconButton(); }
 Widget customLabel() => Text('Custom label');
+
+void alternatives(dynamic richMessage, dynamic attributedLabel) {
+  Tooltip(richMessage: TextSpan(text: 'Delete'), child: InkWell(onTap: () {}, child: Icon(null)));
+  Semantics(attributedLabel: AttributedString('Delete'), child: InkResponse(onTap: () {}, child: Icon(null)));
+  f.Tooltip(richMessage: (richMessage), child: f.GestureDetector(onTap: () {}, child: f.Icon(null)));
+  f.Semantics(attributedLabel: (attributedLabel), child: f.InkWell(onTap: () {}, child: f.Icon(null)));
+  Tooltip(message: 'Delete', richMessage: null, child: InkWell(onTap: () {}));
+  Semantics(label: 'Delete', attributedLabel: null, child: InkResponse(onTap: () {}));
+}

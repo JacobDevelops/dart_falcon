@@ -1,9 +1,9 @@
 //! Warn about unlabeled interactive gesture targets.
 //!
 //! Checks resolved Flutter GestureDetector, InkWell, and InkResponse constructors.
-//! Direct Text children, Icon semanticLabel, or labeled Semantics/Tooltip
-//! ancestors supply labels. Inert/excluded gestures and unknown/custom children
-//! are skipped. Dynamic labels are accepted; null and empty literals are not.
+//! Direct Text children, Icon semanticLabel, or Semantics/Tooltip ancestors with
+//! plain or rich labels supply labels. Inert/excluded gestures and unknown/custom
+//! children are skipped. Dynamic labels are accepted; null and empty literals are not.
 //! This is a local heuristic, not compliance validation. Image labels and action
 //! button tooltips are covered by avoid-missing-image-alt and
 //! prefer-action-button-tooltip respectively.
@@ -58,7 +58,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .any(|name| index.is_package_declaration(&identity, "flutter", name))
         {
             let labeled = args.named().any(|arg| {
-                matches!(arg.name().name(), "label" | "message") && useful_label(arg.value())
+                matches!(
+                    arg.name().name(),
+                    "label" | "attributedLabel" | "message" | "richMessage"
+                ) && useful_label(arg.value())
             });
             if labeled && let Some(child) = args.named().find(|arg| arg.name().name() == "child") {
                 self.labeled.push(child.value().span());
