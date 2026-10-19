@@ -23777,9 +23777,9 @@
   },
   {
     "crossFile": false,
-    "description": "Requires entry-point files under a test directory to use the _test.dart suffix.",
+    "description": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.",
     "diagnostics": [],
-    "docs": "Requires entry-point files under a test directory to use the _test.dart suffix.\n\nFiles without main are test support libraries and do not need the suffix.",
+    "docs": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.\n\nFiles without main are test support libraries and do not need the suffix.",
     "domains": [
       "test"
     ],

@@ -1,4 +1,4 @@
-//! Requires entry-point files under a test directory to use the _test.dart suffix.
+//! Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.
 //!
 //! Files without main are test support libraries and do not need the suffix.
 
@@ -17,7 +17,7 @@ impl Rule for PreferCorrectTestFileName {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let in_test = crate::lint::declarations::in_test_directory(ctx.file_path);
+        let in_test = in_test_runner_directory(ctx.file_path);
         let correct_name = crate::lint::declarations::has_test_file_suffix(ctx.file_path);
         if !in_test || correct_name {
             return RulePreparation::Diagnostics(Vec::new());
@@ -27,6 +27,25 @@ impl Rule for PreferCorrectTestFileName {
             diags: Vec::new(),
         }))
     }
+}
+
+fn in_test_runner_directory(path: &std::path::Path) -> bool {
+    let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {
+        return false;
+    };
+    let Some(root) = pubspec.parent() else {
+        return false;
+    };
+    falcon_analyze::canonical_or_lexical(path)
+        .strip_prefix(root)
+        .is_ok_and(|relative| {
+            relative.components().next().is_some_and(|first| {
+                matches!(
+                    first.as_os_str().to_str(),
+                    Some("test" | "integration_test")
+                )
+            })
+        })
 }
 
 struct Collector<'a> {
@@ -66,12 +85,28 @@ mod tests {
             ("test/widget.dart", "void main() {}", 1),
             ("test/unit/service.dart", "void main() {}", 1),
             ("test/unit/service_test.dart", "void main() {}", 0),
+            ("integration_test/app.dart", "void main() {}", 1),
+            ("integration_test/app_test.dart", "void main() {}", 0),
+            ("test_driver/app.dart", "void main() {}", 0),
+            ("testing/helper.dart", "void main() {}", 0),
             ("lib/main.dart", "void main() {}", 0),
+            ("lib/test/main.dart", "void main() {}", 0),
             ("tests/main.dart", "void main() {}", 0),
             ("test/helper.dart", "void helper() {}", 0),
             ("test/helper.dart", "class Helper { void main() {} }", 0),
             ("test/fixtures/app/lib/main.dart", "void main() {}", 0),
             ("test/fixtures/app/test/main.dart", "void main() {}", 1),
+            (
+                "test/fixtures/app/integration_test/main.dart",
+                "void main() {}",
+                1,
+            ),
+            (
+                "test/fixtures/app/test_driver/app.dart",
+                "void main() {}",
+                0,
+            ),
+            ("test/fixtures/app/testing/helper.dart", "void main() {}", 0),
         ] {
             let result = falcon_dart_parser::parse(source);
             let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
