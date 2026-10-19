@@ -212,16 +212,88 @@
         "file": null,
         "line": 11,
         "message": "Provide a touch target at least 44 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 21,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Provide a touch target at least 44 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 23,
+        "message": "Provide a touch target at least 44 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 24,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 26,
+        "message": "Provide a touch target at least 48 logical pixels wide and high."
       }
     ],
-    "docs": "Warn about explicitly undersized Flutter touch targets.\n\nSizedBox and Container are checked when their direct child is interactive.\nCupertinoButton needs 44 logical pixels; other supported targets need 48.\nGestures without an active callback are skipped. Dynamic dimensions, indirect\nconstraints, and non-interactive children are not inferred.",
+    "docs": "Warn about explicitly undersized Flutter touch targets.\n\nSizedBox and Container are checked when their direct child is interactive.\nCupertinoButton needs 44 logical pixels; other supported targets need 48.\nGestures without an active callback and explicitly disabled buttons are skipped.\nDynamic dimensions, indirect constraints, and non-interactive children are not inferred.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets() {\n  SizedBox(width: 47, child: IconButton());\n  SizedBox(height: 24.0, child: FloatingActionButton());\n  f.Container(width: 0, child: GestureDetector(onTap: () {}));\n  new SizedBox(width: 32, height: 32, child: InkWell(onTap: () {}));\n  const SizedBox(height: (47.5), child: TextButton());\n  Container(width: -1, child: ElevatedButton());\n  SizedBox(width: 43, child: CupertinoButton(onPressed: () {}));\n}",
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets() {\n  SizedBox(width: 47, child: IconButton());\n  SizedBox(height: 24.0, child: FloatingActionButton());\n  f.Container(width: 0, child: GestureDetector(onTap: () {}));\n  new SizedBox(width: 32, height: 32, child: InkWell(onTap: () {}));\n  const SizedBox(height: (47.5), child: TextButton());\n  Container(width: -1, child: ElevatedButton());\n  SizedBox(width: 43, child: CupertinoButton(onPressed: () {}));\n}\n\nvoid callbacks(dynamic callback) {\n  SizedBox(width: 1, child: IconButton(onPressed: callback));\n  SizedBox(width: 1, child: IconButton.filled(onPressed: () {}));\n  SizedBox(width: 1, child: FloatingActionButton.small(onPressed: (callback)));\n  SizedBox(width: 1, child: TextButton(onPressed: null, onLongPress: () {}));\n  SizedBox(width: 1, child: ElevatedButton(onPressed: (null), onLongPress: callback));\n  SizedBox(width: 1, child: OutlinedButton(onPressed: () {}, onLongPress: null));\n  SizedBox(width: 1, child: RawMaterialButton(onPressed: callback));\n  SizedBox(width: 43, child: CupertinoButton(onPressed: (callback)));\n  SizedBox(width: 43, child: CupertinoButton(onPressed: null, onLongPress: () {}));\n  SizedBox(width: 1, child: TextButton(onLongPress: null));\n  SizedBox(width: 1, child: GestureDetector(onTap: (callback)));\n  SizedBox(width: 1, child: InkWell(onTap: null, onLongPress: () {}));\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets(double size) {\n  SizedBox(width: 48, height: 48, child: IconButton());\n  Container(width: 60, child: GestureDetector(onTap: () {}));\n  SizedBox(width: size, child: InkWell());\n  SizedBox(width: 16, child: Text('Decoration'));\n  SizedBox(child: FloatingActionButton());\n  IconButton();\n  SizedBox(width: 16);\n  SizedBox(width: 44, height: 44, child: CupertinoButton(onPressed: () {}));\n  SizedBox(width: 1, child: GestureDetector());\n  SizedBox(width: 1, child: InkWell(onTap: null));\n  SizedBox(width: 1, child: InkResponse());\n}\nvoid shadow(dynamic SizedBox) { SizedBox(width: 1, child: IconButton()); }"
+      "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nvoid targets(double size) {\n  SizedBox(width: 48, height: 48, child: IconButton());\n  Container(width: 60, child: GestureDetector(onTap: () {}));\n  SizedBox(width: size, child: InkWell());\n  SizedBox(width: 16, child: Text('Decoration'));\n  SizedBox(child: FloatingActionButton());\n  IconButton();\n  SizedBox(width: 16);\n  SizedBox(width: 44, height: 44, child: CupertinoButton(onPressed: () {}));\n  SizedBox(width: 1, child: GestureDetector());\n  SizedBox(width: 1, child: InkWell(onTap: null));\n  SizedBox(width: 1, child: InkResponse());\n  SizedBox(width: 1, child: IconButton(onPressed: null));\n  f.Container(height: 1, child: f.IconButton.filled(onPressed: (null)));\n  SizedBox(width: 1, child: FloatingActionButton(onPressed: null));\n  SizedBox(width: 1, child: FloatingActionButton.small(onPressed: (null)));\n  SizedBox(width: 1, child: TextButton(onPressed: null));\n  SizedBox(width: 1, child: ElevatedButton(onPressed: (null), onLongPress: null));\n  SizedBox(width: 1, child: OutlinedButton(onPressed: null, onLongPress: (null)));\n  SizedBox(width: 1, child: RawMaterialButton(onPressed: null));\n  SizedBox(width: 1, child: CupertinoButton(onPressed: ((null))));\n}\nvoid shadow(dynamic SizedBox) { SizedBox(width: 1, child: IconButton()); }"
     },
     "group": "a11y",
     "name": "minimum-touch-target",
@@ -14521,7 +14593,7 @@
   },
   {
     "crossFile": false,
-    "description": "Suggests considering ListView for a SingleChildScrollView containing a plain Flutter Column.",
+    "description": "Suggests considering ListView for a SingleChildScrollView containing a plain Flutter Column with at least two unconditional children in a list literal.",
     "diagnostics": [
       {
         "column": 3,
@@ -14558,16 +14630,46 @@
         "file": null,
         "line": 11,
         "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding."
       }
     ],
-    "docs": "Suggests considering ListView for a SingleChildScrollView containing a plain\nFlutter Column. This is not a layout-neutral replacement: preserve the\nColumn's child alignment and scroll view's padding explicitly. ListView\nstretches children across the cross axis and adds MediaQuery padding by default.\nFor the default Column alignment, wrap each list child in an Align with\nAlignment.topCenter; use the original scroll padding, or EdgeInsets.zero\nwhen none was supplied. Review constraints and child lifecycle separately.\nNo automatic fix is offered.",
+    "docs": "Suggests considering ListView for a SingleChildScrollView containing a plain\nFlutter Column with at least two unconditional children in a list literal.\nSpreads, control-flow elements and dynamic lists do not establish that minimum.\nThis is not a layout-neutral replacement: preserve the\nColumn's child alignment and scroll view's padding explicitly. ListView\nstretches children across the cross axis and adds MediaQuery padding by default.\nFor the default Column alignment, wrap each list child in an Align with\nAlignment.topCenter; use the original scroll padding, or EdgeInsets.zero\nwhen none was supplied. Review constraints and child lifecycle separately.\nNo automatic fix is offered.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SingleChildScrollView(child: Column());\n  const SingleChildScrollView(child: Column(children: []));\n  new SingleChildScrollView(child: Column(children: [child]));\n  f.SingleChildScrollView(child: f.Column());\n  V(child: Column());\n  SingleChildScrollView(child: Column(children: [Text('a'), Text('much longer')]));\n}",
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  SingleChildScrollView(child: Column(children: [child, child]));\n  const SingleChildScrollView(child: Column(children: [Text('a'), Text('b')]));\n  new SingleChildScrollView(child: Column(children: [child, child]));\n  f.SingleChildScrollView(child: f.Column(children: [child, child]));\n  V(child: Column(children: [child, child]));\n  SingleChildScrollView(child: Column(children: [Text('a'), Text('much longer')]));\n  SingleChildScrollView(child: Column(children: ([child, child])));\n  SingleChildScrollView(child: Column(children: [child, ...<Widget>[], child]));\n  SingleChildScrollView(child: Column(children: [child, if (size > 0) child, child]));\n  SingleChildScrollView(child: Column(children: [child, for (final item in <Widget>[]) item, child]));\n  SingleChildScrollView(child: Column(children: <Widget>[child, child]));\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  ListView(children: [child]);\n  SingleChildScrollView(child: Row());\n  SingleChildScrollView(child: child);\n  Column(children: [child]);\n  SingleChildScrollView();\n}"
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef V = SingleChildScrollView;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  ListView(children: [child]);\n  SingleChildScrollView(child: Row());\n  SingleChildScrollView(child: child);\n  Column(children: [child]);\n  SingleChildScrollView();\n  SingleChildScrollView(child: Column());\n  const SingleChildScrollView(child: Column(children: []));\n  new SingleChildScrollView(child: Column(children: [child]));\n  f.SingleChildScrollView(child: f.Column(children: <Widget>[]));\n  V(child: Column(children: [child]));\n  SingleChildScrollView(child: Column(children: ([child])));\n  SingleChildScrollView(child: Column(children: <Widget>[child]));\n  SingleChildScrollView(child: Column(children: [...<Widget>[]]));\n  SingleChildScrollView(child: Column(children: [...<Widget>[child]]));\n  SingleChildScrollView(child: Column(children: [if (size > 0) child]));\n  SingleChildScrollView(child: Column(children: [if (size > 0) child else child]));\n  SingleChildScrollView(child: Column(children: [for (final item in <Widget>[]) item]));\n  SingleChildScrollView(child: Column(children: [child, ...<Widget>[]]));\n  SingleChildScrollView(child: Column(children: [child, if (size > 0) child]));\n  SingleChildScrollView(child: Column(children: image));\n  SingleChildScrollView(child: Column(children: image ? <Widget>[] : <Widget>[child]));\n  SingleChildScrollView(child: Column(children: [child, ...image]));\n  SingleChildScrollView(child: Column(children: [child, ...?image]));\n  SingleChildScrollView(child: Column(children: [child, ?image]));\n  SingleChildScrollView(child: Column(children: [for (final item in <Widget>[]) item, child]));\n}"
     },
     "group": "performance",
     "name": "prefer-using-list-view",
@@ -14851,7 +14953,7 @@
   },
   {
     "crossFile": false,
-    "description": "Warns when credential-like variables or fields receive nonempty string or numeric literals.",
+    "description": "Warns when credential-like variables, fields, or parameter defaults use nonempty string or numeric literals.",
     "diagnostics": [
       {
         "column": 7,
@@ -14882,14 +14984,104 @@
         "file": null,
         "line": 10,
         "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 12,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 13,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 14,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 15,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 16,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 20,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 21,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 22,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 23,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 24,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 28,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 29,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 33,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 34,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 35,
+        "message": "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration."
       }
     ],
-    "docs": "Warns when credential-like variables or fields receive nonempty string or numeric literals.\n\nNames such as `password`, `apiKey`, `clientSecret`, and `accessToken` are\nchecked case-insensitively, including snake_case and private spellings.\nString values matching their variable name are ignored as storage-key names.\nRead credentials from secure runtime configuration instead. This is a naming\nheuristic, not a general-purpose secrets scanner.",
+    "docs": "Warns when credential-like variables, fields, or parameter defaults use\nnonempty string or numeric literals.\n\nNames such as `password`, `apiKey`, `clientSecret`, and `accessToken` are\nchecked case-insensitively, including snake_case and private spellings.\nString values matching their variable name are ignored as storage-key names.\nRead credentials from secure runtime configuration instead. This is a naming\nheuristic, not a general-purpose secrets scanner.",
     "domains": [],
     "examples": {
-      "bad": "const password = 'not-a-real-password';\nclass Settings {\n  final _apiKey = 'fixture-key';\n  String clientSecret = '';\n  void update() {\n    clientSecret = 'fixture-secret';\n    this.clientSecret = 'other-fixture-secret';\n  }\n}\nconst ACCESS_TOKEN = 'fixture-token';",
+      "bad": "const password = 'not-a-real-password';\nclass Settings {\n  final _apiKey = 'fixture-key';\n  String clientSecret = '';\n  void update() {\n    clientSecret = 'fixture-secret';\n    this.clientSecret = 'other-fixture-secret';\n  }\n}\nconst ACCESS_TOKEN = 'fixture-token';\n\nvoid connect({String password = 'fixture-password'}) {}\nvoid authenticate([String apiKey = 'fixture-key']) {}\nvoid configure({String client_secret = ('fixture-secret')}) {}\nvoid unlock({int passwd = 1234}) {}\nvoid authorize([double authToken = 1.5]) {}\n\nclass Connection {\n  final String password;\n  Connection({this.password = 'fixture-password'});\n  Connection.positional([this.password = 'fixture-password']);\n  Connection.named({String secret = 'fixture-secret'}) : password = secret;\n  void login({String accessToken = 'fixture-token'}) {}\n  void refresh([String privateKey = 'fixture-key']) {}\n}\n\nclass ChildConnection extends Connection {\n  ChildConnection({super.password = 'fixture-password'});\n  ChildConnection.positional([super.password = 'fixture-password']) : super.positional();\n}\n\nvoid callbacks() {\n  void local([String _PASSWORD = 'fixture-password']) {}\n  final named = ({String api_key = 'fixture-key'}) {};\n  final positional = ([String clientSecret = 'fixture-secret']) {};\n}",
       "crossFile": null,
-      "good": "String readSecret() => '';\nfinal password = readSecret();\nconst apiKey = '';\nconst secretCount = 3;\nconst token = 'not-a-credential-name';\nconst accessToken = 'access_token';\nconst _authToken = 'AUTH-TOKEN';\nclass StorageKeys {\n  static const password = 'password';\n}\nvoid update(String supplied) {\n  final clientSecret = supplied;\n  final accessToken = 'prefix-$supplied';\n}"
+      "good": "String readSecret() => '';\nfinal password = readSecret();\nconst apiKey = '';\nconst secretCount = 3;\nconst token = 'not-a-credential-name';\nconst accessToken = 'access_token';\nconst _authToken = 'AUTH-TOKEN';\nclass StorageKeys {\n  static const password = 'password';\n}\nvoid update(String supplied) {\n  final clientSecret = supplied;\n  final accessToken = 'prefix-$supplied';\n}\n\nconst configuredSecret = 'fixture-configured-value';\nvoid connect({\n  String password = '',\n  String? passwd = null,\n  String clientSecret = configuredSecret,\n  String apiKey = 'API-KEY',\n  String token = 'not-a-credential-name',\n  int secretCount = 3,\n}) {}\nvoid authenticate([String password = 'password']) {}\nvoid storageKey([String _access_token = 'accessToken']) {}\nvoid requiredCredentials(String password, {required String apiKey}) {}\n\nclass Connection {\n  final String password;\n  Connection({this.password = 'password'});\n  Connection.positional([this.password = configuredSecret]);\n  void login({String authToken = 'auth_token'}) {}\n  void refresh([String privateKey = configuredSecret]) {}\n}\n\nclass ChildConnection extends Connection {\n  ChildConnection({super.password = ''});\n  ChildConnection.positional([super.password = 'password']) : super.positional();\n}\n\nvoid callbacks() {\n  void local({String secret = 'secret'}) {}\n  final named = ({String apiKey = configuredSecret}) {};\n  final positional = ([String clientSecret = 'CLIENT-SECRET']) {};\n}"
     },
     "group": "security",
     "name": "avoid-hardcoded-credentials",
@@ -19118,16 +19310,28 @@
         "file": null,
         "line": 10,
         "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Move this padding into the child Container instead of wrapping it in Padding."
       }
     ],
-    "docs": "Flags Padding directly wrapping a Flutter Container that can own the padding.\nContainers with existing padding, margin, alignment, sizing, constraints,\ntransforms, color, decoration or foregroundDecoration are excluded: moving\npadding across those layout and paint stages can change the result.\nThis is distinct from prefer-padding-over-container and prefer-container's\nthree-widget layout sequence.",
+    "docs": "Flags Padding directly wrapping a Flutter Container that can own the padding.\nContainers with existing padding, margin, alignment, sizing, constraints,\ntransforms, color, decoration or foregroundDecoration are excluded: moving\npadding across those layout and paint stages can change the result. Non-null\nkeys on either widget are excluded because the keyed element's bounds change.\nThis is distinct from prefer-padding-over-container and prefer-container's\nthree-widget layout sequence.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: Container(child: child));\n  Padding(padding: 2, child: Container(key: image, child: child));\n  new Padding(padding: 3, child: Container());\n  f.Padding(padding: 4, child: f.Container(child: child));\n  P(padding: 5, child: Container(child: child));\n}",
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: Container(child: child));\n  Padding(padding: 2, child: Container(key: null, child: child));\n  new Padding(padding: 3, child: Container());\n  f.Padding(padding: 4, child: f.Container(child: child));\n  P(padding: 5, child: Container(child: child));\n  Padding(key: null, padding: 1, child: Container(child: child));\n  Padding(key: (null), padding: 1, child: Container(key: (null), child: child));\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: SizedBox());\n  Padding(padding: 1, child: Container(padding: 2));\n  Padding(padding: 1, child: Container(width: 20));\n  Padding(padding: 1, child: Container(margin: 2));\n  Padding(padding: 1, child: Container(color: color));\n}"
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\ntypedef P = Padding;\nvoid callback() {}\nvoid examples(Widget child, dynamic image, dynamic color, double size, String label) {\n  Padding(padding: 1, child: SizedBox());\n  Padding(padding: 1, child: Container(padding: 2));\n  Padding(padding: 1, child: Container(width: 20));\n  Padding(padding: 1, child: Container(margin: 2));\n  Padding(padding: 1, child: Container(color: color));\n  Padding(padding: 2, child: Container(key: image, child: child));\n  Padding(key: image, padding: 1, child: Container(child: child));\n  Padding(key: image, padding: 1, child: Container(key: color, child: child));\n  Padding(key: null, padding: 1, child: Container(key: image, child: child));\n  Padding(key: image, padding: 1, child: Container(key: null, child: child));\n  f.Padding(key: image, padding: 1, child: f.Container(child: child));\n  P(key: image, padding: 1, child: Container(child: child));\n}"
     },
     "group": "style",
     "name": "avoid-wrapping-in-padding",
