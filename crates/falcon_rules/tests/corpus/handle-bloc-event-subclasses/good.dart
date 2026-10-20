@@ -89,3 +89,19 @@ class HelperBloc extends Bloc<Event, int> {
     on<Stop>((event, emit) {});
   }
 }
+
+mixin HandlerRegistration on Bloc<Event, int> {
+  void _registerHandlers() {
+    on<Start>((event, emit) {});
+    on<Stop>((event, emit) {});
+  }
+}
+
+class MixinHelperBloc extends Bloc<Event, int> with HandlerRegistration {
+  MixinHelperBloc() : super(0) {
+    _registerHandlers();
+  }
+  MixinHelperBloc.explicitThis() : super(0) {
+    this._registerHandlers();
+  }
+}

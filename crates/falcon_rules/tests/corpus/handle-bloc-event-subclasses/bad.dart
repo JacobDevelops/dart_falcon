@@ -44,6 +44,14 @@ class UnrelatedHelperBloc extends Bloc<Event, int> {
   UnrelatedHelperBloc.staticCall() : super(0) { /* expect: handle-bloc-event-subclasses */
     _staticHelper();
   }
+  UnrelatedHelperBloc.addEvent() : super(0) { /* expect: handle-bloc-event-subclasses */
+    on<Start>((event, emit) {});
+    add(Start());
+  }
+  UnrelatedHelperBloc.explicitAddEvent() : super(0) { /* expect: handle-bloc-event-subclasses */
+    on<Start>((event, emit) {});
+    this.add(Start());
+  }
   void _registerHandlers() {
     on<Start>((event, emit) {});
     on<Stop>((event, emit) {});

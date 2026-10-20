@@ -6,7 +6,8 @@
 //! Handler coverage compares full event instantiations and accepts unknown subtyping.
 //! Inferred registrations conservatively count as coverage. Factories, redirects,
 //! abstract event classes, generic event roots and overridden `on` APIs are ignored.
-//! Calls to own instance helpers conservatively count as unresolved coverage.
+//! Calls to instance helpers on `this`, including inherited helpers, count as
+//! unresolved coverage.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
@@ -164,26 +165,23 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if !own_member(call.callee(), "on", &self.types, state) {
-            let name = match call.callee().unparenthesized() {
-                Expr::Ident(identifier) if !state.environment.is_bound(identifier.name()) => {
-                    identifier.name()
-                }
+            let helper = match call.callee().unparenthesized() {
+                Expr::Ident(identifier) => state
+                    .implicit_invocation_receiver(identifier.name())
+                    .is_some(),
                 Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::This(_)) => {
-                    field.field().name()
+                    state
+                        .signatures
+                        .resolved_member(
+                            &state.infer(field.object()),
+                            field.field().name(),
+                            &state.model,
+                        )
+                        .is_some()
                 }
-                _ => return,
+                _ => false,
             };
-            if call
-                .syntax()
-                .ancestors()
-                .find_map(ClassDecl::cast)
-                .is_some_and(|class| {
-                    class.members().any(|member| {
-                        matches!(member, ClassMember::Method(method)
-                            if !method.is_static() && method.name().name() == name)
-                    })
-                })
-            {
+            if helper {
                 self.register(call.syntax(), None, state);
             }
             return;
