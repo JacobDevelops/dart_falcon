@@ -24,7 +24,7 @@ cargo +nightly install --git https://github.com/JacobDevelops/dart_falcon dart_f
 
 ```toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.4.2", matching = "falcon-" }
+"github:JacobDevelops/dart_falcon" = { version = "0.4.3", matching = "falcon-" }
 ```
 
 Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
@@ -135,13 +135,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install falcon
         run: |
-          curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.2/falcon-0.4.2-x86_64-linux.tar.gz | tar -xz
+          curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.3/falcon-0.4.3-x86_64-linux.tar.gz | tar -xz
           sudo mv falcon /usr/local/bin/
       - name: Lint
         run: falcon check .
 ```
 
-> Pin both the release tag and archive version in CI, for example `/releases/download/v0.4.2/falcon-0.4.2-x86_64-linux.tar.gz`. A `/releases/latest/download/` URL is not pinned. falcon is [pre-1.0](../ROADMAP.md), so behavior can change between releases.
+> Pin both the release tag and archive version in CI, for example `/releases/download/v0.4.3/falcon-0.4.3-x86_64-linux.tar.gz`. A `/releases/latest/download/` URL is not pinned. falcon is [pre-1.0](../ROADMAP.md), so behavior can change between releases.
 
 ## Next steps
 
