@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-AU
+
+reviews:
+  profile: chill
+  request_changes_workflow: true
+  review_status: true
+  review_progress: true
+  commit_status: true
+  in_progress_fortune: true
+  sequence_diagrams: false
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    # CodeRabbit can't filter by head branch; knope titles every `release` branch PR this way.
+    ignore_title_keywords:
+      - "chore: prepare release"
+  path_filters:
+    - "!**/Cargo.lock"
+    - "!website/bun.lock"
+    - "!schema/falcon.schema.json"
+    - "!website/src/data/*.json"
+    - "!website/src/content/**"
+    - "!website/src/routeTree.gen.ts"
+    - "!website/public/fonts/**"
+    - "!CHANGELOG.md"
+    - "!packages/falcon/CHANGELOG.md"
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: |
+        falcon is a Rust linter and LSP for Dart. Flag panics reachable from user input (unwrap/expect/indexing on parsed source or config), avoidable clones and allocations on per-file or per-node hot paths, and nondeterministic output ordering. No lint suppressions (`#[allow]`) without a reason, no commented-out code, and comments only for a non-obvious why.
+    - path: "crates/falcon_dart_parser/**"
+      instructions: |
+        Parser and lexer changes must keep the CST lossless (every token and trivia retained). Check every recursive path goes through the depth guard, every loop makes progress on each iteration, and speculation never reparses the same input repeatedly (exponential or quadratic lookahead). Error recovery must not swallow the rest of the file. Each fix needs a regression test from its repro.
+    - path: "crates/falcon_syntax/**"
+      instructions: |
+        Arena CST storage and typed views. Typed accessors must not panic on malformed trees produced by error recovery, and new node kinds must be reachable by the default visitor walk.
+    - path: "crates/falcon_analyze/**"
+      instructions: |
+        Shared analysis used by every rule. Watch for work repeated per rule or per file that could be computed once, serial phases that block parallel analysis, unbounded recursion or caches, and IO errors swallowed with `.ok()`. Identity and type resolution must distinguish project code from SDK and package code.
+    - path: "crates/falcon_rules/src/**"
+      instructions: |
+        Lint rules. False positives are worse than false negatives: question any new diagnostic that could fire on valid code the rule doesn't target. Rules ported from official Dart lints must match `dart analyze` 3.13.5 behaviour, including ranges and UTF-16 columns. Rule ids are kebab-case and registered in `RULE_METADATA` (meta.rs) with the right group, domain and whether the rule needs resolution. New or changed messages are full sentences ending in a full stop, with code in backticks. Rules shouldn't import helpers from other rule files.
+    - path: "crates/falcon_rules/tests/corpus/**"
+      instructions: |
+        Golden fixtures that intentionally contain lint violations. Don't suggest fixing the Dart code. Check that `expect:` markers sit on the lines that should report, that `good` fixtures contain nothing the rule should flag, and that `bad` fixtures cover the rule's edge cases.
+    - path: "crates/{falcon_cli,falcon_config}/**"
+      instructions: |
+        CLI and config are user contracts. Flag exit-code changes, output format changes (text and JSON) and config loading changes that would break existing users. Config keys are kebab-case and Biome-shaped; schema changes need `cargo xtask schema`. User-facing behaviour changes need a changeset.
+    - path: "crates/falcon_lsp/**"
+      instructions: |
+        The language server must never crash or block the editor. Flag panics, blocking work on the request thread, ignored cancellation, and diagnostics that differ from the CLI for the same input.
+    - path: "xtask/**"
+      instructions: |
+        Developer tooling (codegen, docgen, schema, validate-rules, bench-compare). Generated outputs must be deterministic, failures must fail loudly instead of printing and continuing, and child processes must be cleaned up on error and interrupt.
+    - path: "website/**"
+      instructions: |
+        TanStack Start + React docs site on Cloudflare Workers. `website/src/data/*.json` and `website/src/content/` are generated, so changes belong in docs/ or xtask. No `any` or `as any`. Rule and benchmark data must stay server-only, not in the client bundle. Every page needs a unique title, description and canonical URL. Performance and competitor claims must be traceable to `benchmarks.json` or a cited public source.
+    - path: ".github/workflows/**"
+      instructions: |
+        Least-privilege `permissions`, no secrets persisted to disk or exposed to dependency build scripts, `--locked` cargo invocations, and release jobs that can't publish from an unreviewed ref.
+    - path: "packages/falcon/**"
+      instructions: |
+        Dart pub.dev launcher that downloads the release binary. Verify downloads against checksums before executing, and keep the version in sync with the workspace version.
+    - path: "docs/**"
+      instructions: |
+        User docs, synced into the website. Commands, flags and config keys must match the current CLI and schema. Version pins are rewritten by `cargo xtask version`; don't hand-edit them to a different version.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: "Conventional commit prefix (feat, fix, docs, chore, refactor, perf, test, ci) followed by a lowercase summary of the concrete change."
+    custom_checks:
+      - name: "Changeset for user-facing changes"
+        mode: warning
+        instructions: |
+          Pass if the PR adds a `.changeset/*.md` file, or if it changes no user-facing behaviour. User-facing means new or changed lint rules, diagnostic fixes, CLI or LSP behaviour, config handling, or installation and packaging. Changes limited to tests, internal refactors, xtask, CI, the website, or docs pass without a changeset. A changeset for a rule must name the rule id.
+  tools:
+    clippy:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+    yamllint:
+      enabled: true
+    biome:
+      enabled: false
+    eslint:
+      enabled: false
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
+      - files: ".agents/skills/falcon-rule-workflow/SKILL.md"
+        applyTo: "crates/falcon_rules/**"
+      - files: ".agents/skills/falcon-syntax-workflow/SKILL.md"
+        applyTo: "crates/falcon_dart_parser/**,crates/falcon_syntax/**"
