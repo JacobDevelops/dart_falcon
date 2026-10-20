@@ -17,3 +17,11 @@ Stream<int> fromValue(int value) => async.Stream.fromIterable([value]); /* expec
 Future<int> first(Future<int> value) {
   return Future.any([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single Future directly instead of wrapping it in Future.wait/any." */
 }
+Future<int> assigned(Future<int> value) {
+  final result = Future.any([value]); /* expect: avoid-unnecessary-collections */
+  return result;
+}
+void awaitedArrow(Future<int> value) async => Future.any([value]); /* expect: avoid-unnecessary-collections */
+void consumedSwitch(Future<int> value) => switch (Future.any([value])) { /* expect: avoid-unnecessary-collections */
+  final result => result.ignore(),
+};

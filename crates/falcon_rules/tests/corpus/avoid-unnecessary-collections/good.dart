@@ -28,3 +28,9 @@ void shadow(dynamic Future, dynamic Stream) {
   Future.any([1]);
   Stream.fromIterable([1]);
 }
+void discarded(Future<int> value) {
+  Future.any([value]);
+  (Future.any([value]));
+  Future.any([value])..ignore();
+}
+void discardedArrow(Future<int> value) => Future.any([value]);

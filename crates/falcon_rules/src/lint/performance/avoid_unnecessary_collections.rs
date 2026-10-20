@@ -3,8 +3,8 @@
 //! Only plain singleton lists/sets and semantically resolved SDK receivers are
 //! checked. Collection control flow, spreads, maps, dynamic/custom APIs and named
 //! arguments are excluded. Future.wait is checked only for a discarded awaited
-//! result, because replacing it changes List<T> to T. Singleton Future.any
-//! wrappers can use the single Future directly, without requiring an await.
+//! result, because replacing it changes List<T> to T. Future.any is excluded when
+//! its result is discarded, to preserve its error listener.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, expression_segments};
@@ -80,6 +80,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     .is_sdk("dart:async", "Future")
                     || !matches!(method, "wait" | "any")
                     || (method == "wait" && !discarded_await(node))
+                    || (method == "any" && discarded_future(node, state))
                 {
                     return;
                 }
@@ -142,6 +143,36 @@ fn discarded_await(expression: Expr<'_>) -> bool {
                 return false;
             }
             _ => return false,
+        }
+    }
+    false
+}
+
+fn discarded_future(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
+    let mut node = expression.syntax();
+    while let Some(parent) = node.parent() {
+        match Expr::cast(parent) {
+            Some(Expr::Paren(_) | Expr::Cascade(_)) => node = parent,
+            Some(Expr::Await(_)) => return false,
+            _ => {
+                if matches!(Stmt::cast(parent), Some(Stmt::Expr(_))) {
+                    return true;
+                }
+                if !matches!(state.expected(), Some(falcon_analyze::ResolvedType::Void))
+                    || !matches!(FunctionBody::cast(parent), Some(FunctionBody::Arrow(_)))
+                {
+                    return false;
+                }
+                let Some(owner) = parent.parent() else {
+                    return false;
+                };
+                let marker = FunctionDecl::cast(owner)
+                    .map(|function| function.async_marker())
+                    .or_else(|| LocalFuncDecl::cast(owner).map(|function| function.async_marker()))
+                    .or_else(|| FuncExpr::cast(owner).map(|function| function.async_marker()))
+                    .or_else(|| MethodDecl::cast(owner).map(|method| method.async_marker()));
+                return marker == Some(AsyncMarker::Sync);
+            }
         }
     }
     false

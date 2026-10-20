@@ -16209,14 +16209,32 @@
         "file": null,
         "line": 18,
         "message": "Use the single Future directly instead of wrapping it in Future.wait/any."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 21,
+        "message": "Use the single Future directly instead of wrapping it in Future.wait/any."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 24,
+        "message": "Use the single Future directly instead of wrapping it in Future.wait/any."
+      },
+      {
+        "column": 62,
+        "file": null,
+        "line": 25,
+        "message": "Use the single Future directly instead of wrapping it in Future.wait/any."
       }
     ],
-    "docs": "Avoid singleton collection literals where SDK APIs accept a single value.\n\nOnly plain singleton lists/sets and semantically resolved SDK receivers are\nchecked. Collection control flow, spreads, maps, dynamic/custom APIs and named\narguments are excluded. Future.wait is checked only for a discarded awaited\nresult, because replacing it changes List<T> to T. Singleton Future.any\nwrappers can use the single Future directly, without requiring an await.",
+    "docs": "Avoid singleton collection literals where SDK APIs accept a single value.\n\nOnly plain singleton lists/sets and semantically resolved SDK receivers are\nchecked. Collection control flow, spreads, maps, dynamic/custom APIs and named\narguments are excluded. Future.wait is checked only for a discarded awaited\nresult, because replacing it changes List<T> to T. Future.any is excluded when\nits result is discarded, to preserve its error listener.",
     "domains": [],
     "examples": {
-      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nvoid append(List<int> list, Set<int> set) {\n  list.addAll([1]);\n  list.addAll({2});\n  set.addAll([3]);\n  set.addAll({4});\n  set.containsAll({5});\n}\nFuture<void> futures(Future<int> value) async {\n  await Future.wait([value]);\n  await async.Future.any([value]);\n}\nStream<int> fromFuture(Future<int> value) => Stream.fromFutures([value]);\nStream<int> fromValue(int value) => async.Stream.fromIterable([value]);\nFuture<int> first(Future<int> value) {\n  return Future.any([value]);\n}",
+      "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nvoid append(List<int> list, Set<int> set) {\n  list.addAll([1]);\n  list.addAll({2});\n  set.addAll([3]);\n  set.addAll({4});\n  set.containsAll({5});\n}\nFuture<void> futures(Future<int> value) async {\n  await Future.wait([value]);\n  await async.Future.any([value]);\n}\nStream<int> fromFuture(Future<int> value) => Stream.fromFutures([value]);\nStream<int> fromValue(int value) => async.Stream.fromIterable([value]);\nFuture<int> first(Future<int> value) {\n  return Future.any([value]);\n}\nFuture<int> assigned(Future<int> value) {\n  final result = Future.any([value]);\n  return result;\n}\nvoid awaitedArrow(Future<int> value) async => Future.any([value]);\nvoid consumedSwitch(Future<int> value) => switch (Future.any([value])) {\n  final result => result.ignore(),\n};",
       "crossFile": null,
-      "good": "import 'dart:async';\nclass Custom {\n  void addAll(Object value) {}\n  bool containsAll(Object value) => true;\n}\nvoid append(List<int> list, Set<int> set, Map<int, int> map,\n    Iterable<int> source, dynamic unknown, bool condition) {\n  list.addAll([]);\n  list.addAll([1, 2]);\n  list.addAll([...source]);\n  list.addAll([if (condition) 1]);\n  list.addAll([for (final value in source) value]);\n  set.containsAll(source);\n  map.addAll({1: 2});\n  unknown.addAll([1]);\n  Custom().addAll([1]);\n  Custom().containsAll({1});\n}\nFuture<List<int>> used(Future<int> value) async {\n  return await Future.wait([value]);\n}\nFuture<void> options(Future<int> value) async {\n  await Future.wait([value], eagerError: true);\n  await Future.wait([value], cleanUp: (value) {});\n}\nStream<int> multiple(Future<int> first, Future<int> second) => Stream.fromFutures([first, second]);\nvoid shadow(dynamic Future, dynamic Stream) {\n  Future.any([1]);\n  Stream.fromIterable([1]);\n}"
+      "good": "import 'dart:async';\nclass Custom {\n  void addAll(Object value) {}\n  bool containsAll(Object value) => true;\n}\nvoid append(List<int> list, Set<int> set, Map<int, int> map,\n    Iterable<int> source, dynamic unknown, bool condition) {\n  list.addAll([]);\n  list.addAll([1, 2]);\n  list.addAll([...source]);\n  list.addAll([if (condition) 1]);\n  list.addAll([for (final value in source) value]);\n  set.containsAll(source);\n  map.addAll({1: 2});\n  unknown.addAll([1]);\n  Custom().addAll([1]);\n  Custom().containsAll({1});\n}\nFuture<List<int>> used(Future<int> value) async {\n  return await Future.wait([value]);\n}\nFuture<void> options(Future<int> value) async {\n  await Future.wait([value], eagerError: true);\n  await Future.wait([value], cleanUp: (value) {});\n}\nStream<int> multiple(Future<int> first, Future<int> second) => Stream.fromFutures([first, second]);\nvoid shadow(dynamic Future, dynamic Stream) {\n  Future.any([1]);\n  Stream.fromIterable([1]);\n}\nvoid discarded(Future<int> value) {\n  Future.any([value]);\n  (Future.any([value]));\n  Future.any([value])..ignore();\n}\nvoid discardedArrow(Future<int> value) => Future.any([value]);"
     },
     "group": "performance",
     "name": "avoid-unnecessary-collections",
