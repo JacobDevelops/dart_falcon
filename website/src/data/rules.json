@@ -4420,12 +4420,92 @@
   {
     "crossFile": false,
     "description": "Disallow relative imports in libraries under a package's `lib/` directory.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 1,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 2,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 3,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 4,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 5,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 6,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 8,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/src/bad_nested.dart",
+        "line": 1,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/src/bad_nested.dart",
+        "line": 2,
+        "message": "Use 'package:' imports for files in the 'lib' directory."
+      }
+    ],
     "docs": "Disallow relative imports in libraries under a package's `lib/` directory.\n\nThe rule runs\nonly for files inside the enclosing package's `lib/` directory (the nearest\n`pubspec.yaml` decides the package; files outside any package are skipped,\nlike the analyzer's `isInLibDir`). Every `import` whose URI parses with an\nempty scheme is reported, so `import 'src/a.dart';` must be spelled\n`import 'package:<name>/src/a.dart';`. `package:` and `dart:` imports,\nexports, and conditional alternatives are not checked; relative imports that\nreach into `lib/` from outside it belong to `avoid_relative_lib_imports`.\nIncompatible with `prefer-relative-imports`.",
     "domains": [],
     "examples": {
       "bad": "// No expectations on purpose: this file has no enclosing pubspec.yaml, so it\n// is not in a package's lib/ directory and the rule stays silent, like the\n// analyzer's `isInLibDir`. project/lib/bad_imports.dart and\n// project/lib/src/bad_nested.dart cover the reporting cases.\nimport 'src/a.dart';\nimport '../b.dart' as b;\n\nvoid main() {}",
-      "crossFile": null,
+      "crossFile": [
+        {
+          "content": "import '../lib/b.dart';\n\nvoid main() {}",
+          "path": "bin/tool.dart"
+        },
+        {
+          "content": "import 'src/a.dart';\nimport 'b.dart' as b;\nimport 'src/c.dart' show C;\nimport 'src/d.dart' deferred as d;\nimport \"./e.dart\" hide E;\nimport 'src/f.dart'\n    if (dart.library.io) 'package:app/src/f_io.dart';\nimport r'src/g.dart';\n\nvoid main() {}",
+          "path": "lib/bad_imports.dart"
+        },
+        {
+          "content": "import 'dart:async';\nimport 'package:app/src/a.dart';\nimport 'package:collection/collection.dart';\nimport 'package:app/src/f.dart'\n    if (dart.library.io) 'src/f_io.dart'\n    if (dart.library.js_interop) 'src/f_web.dart';\n\n// Exports are out of scope.\nexport 'src/a.dart';",
+          "path": "lib/good_imports.dart"
+        },
+        {
+          "content": "import '../a.dart';\nimport 'sibling.dart';",
+          "path": "lib/src/bad_nested.dart"
+        },
+        {
+          "content": "name: app",
+          "path": "pubspec.yaml"
+        },
+        {
+          "content": "// Outside lib/: relative imports are the concern of avoid_relative_lib_imports.\nimport '../lib/src/a.dart';\nimport 'helpers.dart';\n\nvoid main() {}",
+          "path": "test/outside_lib_test.dart"
+        }
+      ],
       "good": "import 'dart:async';\nimport 'package:app/src/a.dart';\nimport 'package:other/other.dart' as other;\nimport 'package:app/b.dart' show B;\nimport 'package:app/c.dart' deferred as c;\n\nexport 'src/exported.dart';\n\nvoid main() {}"
     },
     "group": "correctness",
@@ -6855,40 +6935,10 @@
     "description": "Require enum-keyed map literals to include every declared enum value.",
     "diagnostics": [
       {
-        "column": 20,
-        "file": null,
-        "line": 5,
-        "message": "Include every Color value in this map; missing: green, blue."
-      },
-      {
         "column": 17,
-        "file": null,
-        "line": 6,
-        "message": "Include every Color value in this map; missing: blue."
-      },
-      {
-        "column": 20,
-        "file": null,
-        "line": 7,
-        "message": "Include every Color value in this map; missing: red, green."
-      },
-      {
-        "column": 33,
-        "file": null,
-        "line": 8,
-        "message": "Include every Color value in this map; missing: red, blue."
-      },
-      {
-        "column": 21,
-        "file": null,
-        "line": 9,
+        "file": "main.dart",
+        "line": 3,
         "message": "Include every Color value in this map; missing: green, blue."
-      },
-      {
-        "column": 15,
-        "file": null,
-        "line": 13,
-        "message": "Include every Color value in this map; missing: green."
       }
     ],
     "docs": "Require enum-keyed map literals to include every declared enum value.\n\nKey types and constant identities come from resolution, including contextual\ntypes, imported enums, aliases and dot shorthands. Build-independent constant\nbranches and statically known spreads contribute keys; unknown coverage disables the check.",
@@ -11402,12 +11452,34 @@
   {
     "crossFile": false,
     "description": "Disallow importing another package's private `src/` libraries.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": "lib/bad_main.dart",
+        "line": 1,
+        "message": "Don't import implementation files from another package ('other')."
+      },
+      {
+        "column": 26,
+        "file": "lib/bad_main.dart",
+        "line": 4,
+        "message": "Don't import implementation files from another package ('io_impl')."
+      }
+    ],
     "docs": "Disallow importing another package's private `src/` libraries.\n\nThe rule follows the analyzer's package-URI semantics: it runs only for a\nlibrary under the enclosing package's `lib/` directory, compares package\nidentities from `pubspec.yaml`, and checks every default and configurable\nimport URI. Export directives are not imports and are intentionally ignored.",
     "domains": [],
     "examples": {
       "bad": "// No expectations on purpose: with no enclosing pubspec.yaml the rule cannot\n// name the source package, so it reports nothing. project/lib/bad_main.dart\n// covers the reporting case.\nimport 'package:foo/src/internal.dart';import 'package:bar/src/helper.dart';import 'package:baz/src/util/log.dart';import 'package:collection/src/list.dart';import 'package:http/src/client.dart';\nvoid main() {}",
-      "crossFile": null,
+      "crossFile": [
+        {
+          "content": "import 'package:other/src/internal.dart';\nimport 'package:current_package/src/own.dart';\nimport 'package:public/api.dart'\n    if (dart.library.io) 'package:io_impl/src/io.dart'\n    if (dart.library.html) 'package:web_impl/public.dart';\n\nexport 'package:other/src/exported.dart';\n\nvoid main() {}",
+          "path": "lib/bad_main.dart"
+        },
+        {
+          "content": "name: current_package",
+          "path": "pubspec.yaml"
+        }
+      ],
       "good": "import 'package:foo/foo.dart';\nimport 'package:bar/widgets.dart';\nimport 'dart:async';\nimport 'src/local_helper.dart';\nimport 'package:baz/baz.dart';\n\nvoid main() {}"
     },
     "group": "correctness",
@@ -13366,12 +13438,76 @@
   {
     "crossFile": false,
     "description": "Prefer relative imports for libraries of the same package under `lib/`.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 1,
+        "message": "Use relative imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 2,
+        "message": "Use relative imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 3,
+        "message": "Use relative imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 4,
+        "message": "Use relative imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 5,
+        "message": "Use relative imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad_imports.dart",
+        "line": 6,
+        "message": "Use relative imports for files in the 'lib' directory."
+      },
+      {
+        "column": 8,
+        "file": "lib/src/bad_nested.dart",
+        "line": 1,
+        "message": "Use relative imports for files in the 'lib' directory."
+      }
+    ],
     "docs": "Prefer relative imports for libraries of the same package under `lib/`.\n\nThe rule runs only\nfor files inside the enclosing package's `lib/` directory (the nearest\n`pubspec.yaml` names the package; files outside any package, or in a package\nwithout a `name`, are skipped). An `import` whose URI is a `package:` URI\nnaming the file's own package, such as `import 'package:my_pkg/src/a.dart';`\ninside `my_pkg/lib/`, is reported and should be written relative\n(`import 'src/a.dart';`). Imports of other packages, `dart:` libraries,\nexports, and conditional alternatives are not checked. Incompatible with\n`always-use-package-imports`.",
     "domains": [],
     "examples": {
       "bad": "// No expectations on purpose: this file has no enclosing pubspec.yaml, so the\n// rule cannot tell which package it belongs to and stays silent.\n// project/lib/bad_imports.dart and project/lib/src/bad_nested.dart cover the\n// reporting cases.\nimport 'package:app/src/a.dart';\n\nvoid main() {}",
-      "crossFile": null,
+      "crossFile": [
+        {
+          "content": "import 'package:app/src/a.dart';\nimport 'package:app/b.dart' as b;\nimport 'package:app/src/c.dart' show C;\nimport 'package:app/src/d.dart' deferred as d;\nimport \"package:app/e.dart\" hide E;\nimport 'package:app/src/f.dart'\n    if (dart.library.io) 'src/f_io.dart';\n\nvoid main() {}",
+          "path": "lib/bad_imports.dart"
+        },
+        {
+          "content": "import 'dart:async';\nimport 'src/a.dart';\nimport 'package:application/application.dart';\nimport 'package:other/src/internal.dart';\nimport 'src/f.dart' if (dart.library.io) 'package:app/src/f_io.dart';\n\n// Exports are out of scope.\nexport 'package:app/src/a.dart';",
+          "path": "lib/good_imports.dart"
+        },
+        {
+          "content": "import 'package:app/a.dart';",
+          "path": "lib/src/bad_nested.dart"
+        },
+        {
+          "content": "name: app",
+          "path": "pubspec.yaml"
+        },
+        {
+          "content": "// Outside lib/: package imports of the own package are the norm in tests.\nimport 'package:app/src/a.dart';\n\nvoid main() {}",
+          "path": "test/outside_lib_test.dart"
+        }
+      ],
       "good": "import 'dart:async';\nimport 'src/a.dart';\nimport '../b.dart' as b;\nimport 'package:other/other.dart';\nimport 'package:collection/collection.dart' show IterableExtension;\n\nvoid main() {}"
     },
     "group": "correctness",
@@ -14379,19 +14515,37 @@
         "file": "bad/service.dart",
         "line": 43,
         "message": "Parameter 'v' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 24,
+        "file": "bad/service.dart",
+        "line": 54,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 34,
+        "file": "bad/service.dart",
+        "line": 57,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 27,
+        "file": "bad/service.dart",
+        "line": 60,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
       }
     ],
-    "docs": "Report nullable parameters of private declarations that never receive null.\n\nFlags a nullable parameter (`T?`) of a private (`_`-prefixed) function or\nmethod when no call site anywhere in the project passes it null, and its body\nnever assigns null to it either. Because the declaration is private, every\none of its call sites is visible in the analyzed set, which is what makes the\nconclusion sound; the `?` then widens the type for a value that is always\nnon-null, so callers and the body carry null handling that can never trigger.\nAn argument counts as non-null only when proven so — a literal, a `new` or\narithmetic expression, or a call whose declared return type the cross-file\nindex resolves as non-nullable. Anything uncertain (an ambiguous name shared\nby multiple declarations, a tear-off reference, an argument that might be\nnull) suppresses the report. This is a cross-file rule: it runs in the\ncross-file pass over the whole analyzed file set and is configured under the\ntop-level `cross-file` section rather than `linter`.",
+    "docs": "Report nullable parameters of private declarations that never receive null.\n\nFlags a nullable parameter (`T?`) of a private (`_`-prefixed) function or\nmethod when every call site passes a proven non-null value, and its body\nonly assigns proven non-null values to it. Because the declaration is private, every\none of its call sites is visible in the analyzed set, which is what makes the\nconclusion sound; the `?` then widens the type for a value that is always\nnon-null, so callers and the body carry null handling that can never trigger.\nAn argument or write counts as non-null only when proven so, including type\nparameter bounds and the element types of for-in writes. Calls use the\ndeclared return types resolved by the cross-file index. Anything uncertain\n(an ambiguous name, a tear-off reference, an argument that might be\nnull) suppresses the report. This is a cross-file rule: it runs in the\ncross-file pass over the whole analyzed file set and is configured under the\ntop-level `cross-file` section rather than `linter`.",
     "domains": [],
     "examples": {
       "bad": null,
       "crossFile": [
         {
-          "content": "import 'service.dart';\n\nvoid driver() {\n  final s = Service();\n  s._never(1);\n  s._never(2);\n  s._sometimes(1);\n  s._sometimes(null); // makes _sometimes genuinely nullable → not flagged\n  s._assigns('x');\n  s._ambiguous(3);\n  _topNever('hello');\n  Other()._ambiguous(4);\n  _viaProvenNonNull(nonNull());\n  _viaNullableReturn(maybeNull());\n}",
+          "content": "import 'service.dart';\n\nvoid driver() {\n  final s = Service();\n  s._never(1);\n  s._never(2);\n  s._sometimes(1);\n  s._sometimes(null); // makes _sometimes genuinely nullable → not flagged\n  s._assigns('x');\n  s._ambiguous(3);\n  _topNever('hello');\n  Other()._ambiguous(4);\n  _viaProvenNonNull(nonNull());\n  _viaNullableReturn(maybeNull());\n}\n\nvoid nonnullLoopCalls() {\n  _nonnullLoop(1);\n  _nonnullCollectionLoop(1);\n  _nonnullMapLoop(1);\n}",
           "path": "bad/caller.dart"
         },
         {
-          "content": "// Private declarations whose nullable params are (or aren't) genuinely nullable.\nclass Service {\n  // Never passed null at any call site → the `?` is unnecessary.\n  void _never(int? a) {\n    print(a);\n  }\n\n  // Passed null from caller.dart → correctly nullable, not flagged.\n  void _sometimes(int? b) {\n    print(b);\n  }\n\n  // Body assigns null → nullability is used, not flagged.\n  void _assigns(String? c) {\n    c = null;\n    print(c);\n  }\n\n  // Ambiguous name (also declared in Other) → skipped entirely.\n  void _ambiguous(int? d) {\n    print(d);\n  }\n}\n\nclass Other {\n  void _ambiguous(int? d) {\n    print(d);\n  }\n}\n\n// Private top-level function never passed null → flagged.\nvoid _topNever(String? s) {\n  print(s);\n}\n\n// Return-typed helpers whose declared return type drives the null-flow analysis\n// at the call sites in caller.dart.\nint nonNull() => 1;\nint? maybeNull() => null;\n\n// Only ever passed a value the project index proves non-nullable (`nonNull()`\n// returns a non-null `int`) → the `?` is unnecessary, so flagged.\nvoid _viaProvenNonNull(int? v) {\n  print(v);\n}\n\n// Only ever passed a value whose declared return type is nullable\n// (`maybeNull()` returns `int?`) → genuinely nullable, so NOT flagged. Literal-\n// only matching would have wrongly flagged this before the resolver landed.\nvoid _viaNullableReturn(int? v) {\n  print(v);\n}",
+          "content": "// Private declarations whose nullable params are (or aren't) genuinely nullable.\nclass Service {\n  // Never passed null at any call site → the `?` is unnecessary.\n  void _never(int? a) {\n    print(a);\n  }\n\n  // Passed null from caller.dart → correctly nullable, not flagged.\n  void _sometimes(int? b) {\n    print(b);\n  }\n\n  // Body assigns null → nullability is used, not flagged.\n  void _assigns(String? c) {\n    c = null;\n    print(c);\n  }\n\n  // Ambiguous name (also declared in Other) → skipped entirely.\n  void _ambiguous(int? d) {\n    print(d);\n  }\n}\n\nclass Other {\n  void _ambiguous(int? d) {\n    print(d);\n  }\n}\n\n// Private top-level function never passed null → flagged.\nvoid _topNever(String? s) {\n  print(s);\n}\n\n// Return-typed helpers whose declared return type drives the null-flow analysis\n// at the call sites in caller.dart.\nint nonNull() => 1;\nint? maybeNull() => null;\n\n// Only ever passed a value the project index proves non-nullable (`nonNull()`\n// returns a non-null `int`) → the `?` is unnecessary, so flagged.\nvoid _viaProvenNonNull(int? v) {\n  print(v);\n}\n\n// Only ever passed a value whose declared return type is nullable\n// (`maybeNull()` returns `int?`) → genuinely nullable, so NOT flagged. Literal-\n// only matching would have wrongly flagged this before the resolver landed.\nvoid _viaNullableReturn(int? v) {\n  print(v);\n}\n\nvoid _nonnullLoop(int? value) {\n  for (value in <int>[1, 2]) {}\n}\nvoid _nonnullCollectionLoop(int? value) {\n  final values = [for (value in <int>[1, 2]) value];\n}\nvoid _nonnullMapLoop(int? value) {\n  final values = {for (value in <int>[1, 2]) 1: value};\n}",
           "path": "bad/service.dart"
         },
         {
@@ -14401,6 +14555,14 @@
         {
           "content": "class Service {\n  void acceptsNull(int? value) {\n    print(value);\n  }\n}",
           "path": "good/service.dart"
+        },
+        {
+          "content": "part of 'service.dart';\n\nvoid use(Service service) {\n  service.exercise();\n  _writeCall(1);\n  _writeVariable(1);\n  _writeConditional(1);\n  _nullableArgument(maybeNull());\n}\n\nvoid additionalCalls() {\n  _writePattern(1);\n  _writeLoop(1);\n  _writeCollectionLoop(1);\n  _optionalDefault();\n  _namedDefault();\n  int? value = maybeNull();\n  if (value == null) return;\n  _orderedArguments((value = null) == null ? 1 : 2, value);\n  _writeExpression(1);\n  _writeMapLoop(1);\n}\n\nvoid genericCalls<T>(T value, Iterable<T> values) {\n  _genericArgument(value);\n  _genericWrite(1, value);\n  _genericLoop(1, values);\n  _unknownLoop(1, values);\n}",
+          "path": "good-escapes/caller.dart"
+        },
+        {
+          "content": "part 'caller.dart';\n\nvoid accept(void Function(int?) callback) { callback(null); }\n\nclass Service {\n  void _qualified(int? value) {}\n  void _bare(int? value) {}\n  void _cascade(int? value) {}\n  void _cascadeField(int? value) {}\n\n  void exercise() {\n    _qualified(1);\n    _bare(1);\n    _cascade(1);\n    _cascadeField(1);\n    accept(this._qualified);\n    accept(_bare);\n    this.._cascade.call(null);\n    this.._cascadeField;\n  }\n}\n\nint? maybeNull() => null;\n\nvoid _writeCall(int? value) { value = maybeNull(); }\nvoid _writeVariable(int? value) { int? other = maybeNull(); value = other; }\nvoid _writeConditional(int? value) { value = value == 1 ? 1 : null; }\nvoid _nullableArgument(int? value) {}\n\nvoid _writePattern(int? value) { [value] = <int?>[null]; }\nvoid _writeLoop(int? value) { for (value in <int?>[null]) {} }\nvoid _writeCollectionLoop(int? value) {\n  final values = [for (value in <int?>[null]) value];\n}\nconst int? none = null;\nvoid _optionalDefault([int? value = none]) {}\nvoid _namedDefault({int? value = none}) {}\nvoid _orderedArguments(int first, int? second) {}\n\nclass Factory {\n  static Factory _make(int? value) => Factory();\n  static void exercise() {\n    Factory instance = ._make(null);\n    _make(1);\n  }\n}\n\nvoid _writeExpression(int? value) {\n  final result = ([value] = <int?>[null]);\n}\nvoid _writeMapLoop(int? value) {\n  final values = {for (value in <int?>[null]) 1: 1};\n}\n\nvoid _genericArgument(Object? value) {}\nvoid _genericWrite<T>(Object? value, T other) { value = other; }\nvoid _genericLoop<T>(Object? value, Iterable<T> values) {\n  for (value in values) {}\n}\nvoid _unknownLoop(int? value, dynamic values) {\n  for (value in values) {}\n}",
+          "path": "good-escapes/service.dart"
         }
       ],
       "good": null
@@ -15034,7 +15196,7 @@
   },
   {
     "crossFile": false,
-    "description": "",
+    "description": "Flags BuildContext use after an asynchronous gap without a mounted guard.",
     "diagnostics": [
       {
         "column": 3,
@@ -15241,7 +15403,7 @@
         "message": "Do not use a BuildContext across an async gap without a matching mounted check."
       }
     ],
-    "docs": "Mounted guards compare getter declarations, not receiver objects; function\nbodies are boundaries, except callbacks of the SDK's protected async APIs.",
+    "docs": "Flags BuildContext use after an asynchronous gap without a mounted guard.\n\nMounted guards compare getter declarations, not receiver objects; function\nbodies are boundaries, except callbacks of the SDK's protected async APIs.",
     "domains": [
       "flutter"
     ],
@@ -21132,12 +21294,96 @@
   {
     "crossFile": false,
     "description": "Requires overriding methods to keep the positional parameter names of the member they inherit.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": "lib/bad_semantics.dart",
+        "line": 23,
+        "message": "Rename parameter 'renamed' to match the overridden declaration's 'value'."
+      },
+      {
+        "column": 25,
+        "file": "lib/bad_semantics.dart",
+        "line": 39,
+        "message": "Rename parameter 'renamed' to match the overridden declaration's 'value'."
+      },
+      {
+        "column": 19,
+        "file": "lib/inherited-and-wildcards.dart",
+        "line": 7,
+        "message": "Rename parameter 'renamed' to match the overridden declaration's 'value'."
+      },
+      {
+        "column": 35,
+        "file": "lib/inherited-and-wildcards.dart",
+        "line": 10,
+        "message": "Rename parameter 'call' to match the overridden declaration's 'invocation'."
+      },
+      {
+        "column": 30,
+        "file": "lib/inherited-and-wildcards.dart",
+        "line": 17,
+        "message": "Rename parameter 'renamed' to match the overridden declaration's 'b'."
+      },
+      {
+        "column": 23,
+        "file": "lib/inherited-and-wildcards.dart",
+        "line": 21,
+        "message": "Rename parameter '_a' to match the overridden declaration's 'a'."
+      },
+      {
+        "column": 19,
+        "file": "lib/main.dart",
+        "line": 5,
+        "message": "Rename parameter 'renamed' to match the overridden declaration's 'value'."
+      },
+      {
+        "column": 37,
+        "file": "lib/main.dart",
+        "line": 5,
+        "message": "Rename parameter 'other' to match the overridden declaration's 'label'."
+      },
+      {
+        "column": 19,
+        "file": "lib/wildcards-legacy.dart",
+        "line": 7,
+        "message": "Rename parameter '_' to match the overridden declaration's 'value'."
+      }
+    ],
     "docs": "Requires overriding methods to keep the positional parameter names of the\nmember they inherit.\n\nThe rule only runs for libraries under the package's `lib/` directory and skips\nstatic and documented methods. For a class, enum, or mixin class the\ncompared member is the concrete one inherited through the superclass chain\nand mixin applications (abstract and `implements`-only members do not\ncount); for a mixin it is the member of its `on` types' interfaces (or\n`Object`). Owners with private names, extension types, getters, and setters\nare never checked. Positional parameters are compared pairwise up to the\nshorter list.\n\nA `_` name on either side is skipped when the library's language version\nenables wildcard variables (3.7+).",
     "domains": [],
     "examples": {
       "bad": "// Positive cases live in project/lib: the official lint only runs in a\n// package's lib/ directory.\nabstract class Base { void method(int value) {} }\nclass Child extends Base {\n  void method(int renamed) {}\n}",
-      "crossFile": null,
+      "crossFile": [
+        {
+          "content": "abstract class AbstractBase {\n  void abstractOnly(int value);\n}\n\nclass ConcreteBase {\n  void concrete(int value, int other) {}\n  bool operator ==(Object other) => false;\n}\n\nabstract class FromAbstract extends AbstractBase {\n  // Only an abstract member is inherited: no concrete parent.\n  @override\n  void abstractOnly(int renamed);\n}\n\nclass FromInterface implements ConcreteBase {\n  @override\n  void concrete(int renamed, int other) {}\n}\n\nclass Shorter extends ConcreteBase {\n  @override\n  void concrete(int renamed) {}\n}\n\nclass Documented extends ConcreteBase {\n  /// Documented overrides are exempt.\n  @override\n  void concrete(int a, int b) {}\n}\n\nclass _Private extends ConcreteBase {\n  @override\n  void concrete(int a, int b) {}\n}\n\nmixin OnBase on AbstractBase {\n  @override\n  void abstractOnly(int renamed) {}\n}",
+          "path": "lib/bad_semantics.dart"
+        },
+        {
+          "content": "class Base {\n  void method(int value, [String? label]) {}\n  set item(Object value) {}\n  static void staticMethod(int original) {}\n  void _private(int original) {}\n}",
+          "path": "lib/base.dart"
+        },
+        {
+          "content": "class Base {\n  void method(int unrelated) {}\n}",
+          "path": "lib/duplicate.dart"
+        },
+        {
+          "content": "// SDK-free ports of official mixinApplication and wildcard tests.\nmixin ParentMixin {\n  void method(int value) {}\n}\nabstract class Application = Object with ParentMixin;\nclass Child extends Application {\n  void method(int renamed) {}\n}\nclass ObjectOverride {\n  dynamic noSuchMethod(Invocation call) => null;\n}\nclass Base {\n  void positional(int a, int b, int c) {}\n  void wildcard(int _) {}\n}\nclass Wildcards extends Base {\n  void positional(int _, int renamed, int _) {}\n  void wildcard(int value) {}\n}\nclass NonWildcards extends Base {\n  void positional(int _a, int b, int c) {}\n  /// Official documented overrides are exempt.\n  void wildcard(int renamed) {}\n}",
+          "path": "lib/inherited-and-wildcards.dart"
+        },
+        {
+          "content": "import 'base.dart' show Base;\nimport 'duplicate.dart' as duplicate;\n\nclass Child extends Base {\n  void method(int renamed, [String? other]) {}\n  set item(Object renamed) {}\n  void staticMethod(int renamed) {}\n  void _private(int renamed) {}\n}\n\nclass Unrelated extends duplicate.Base {\n  void method(int unrelated) {}\n}",
+          "path": "lib/main.dart"
+        },
+        {
+          "content": "// @dart = 3.6\n// Official wildcard_featureDisabledFails: underscore is a real parameter.\nclass LegacyBase {\n  void method(int value) {}\n}\nclass LegacyChild extends LegacyBase {\n  void method(int _) {}\n}",
+          "path": "lib/wildcards-legacy.dart"
+        },
+        {
+          "content": "name: renaming",
+          "path": "pubspec.yaml"
+        }
+      ],
       "good": "class Base { void method(int value) {} }\nclass Child extends Base { void method(int value) {} }"
     },
     "group": "style",
@@ -28835,7 +29081,44 @@
   {
     "crossFile": false,
     "description": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 6,
+        "file": "path_cases/test/bad.dart",
+        "line": 1,
+        "message": "Use the _test.dart suffix for a test entry-point file."
+      },
+      {
+        "column": 6,
+        "file": "path_cases/test/bad_integration.dart",
+        "line": 1,
+        "message": "Use the _test.dart suffix for a test entry-point file."
+      },
+      {
+        "column": 6,
+        "file": "path_cases/test/bad_widget.dart",
+        "line": 1,
+        "message": "Use the _test.dart suffix for a test entry-point file."
+      },
+      {
+        "column": 6,
+        "file": "path_cases/test/fixtures/app/test/bad.dart",
+        "line": 1,
+        "message": "Use the _test.dart suffix for a test entry-point file."
+      },
+      {
+        "column": 6,
+        "file": "path_cases/test/unit/bad_service.dart",
+        "line": 1,
+        "message": "Use the _test.dart suffix for a test entry-point file."
+      },
+      {
+        "column": 6,
+        "file": "path_cases/test/unit/bad_util.dart",
+        "line": 1,
+        "message": "Use the _test.dart suffix for a test entry-point file."
+      }
+    ],
     "docs": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.\n\nFiles without main are test support libraries and do not need the suffix.",
     "domains": [
       "test"
@@ -32481,12 +32764,350 @@
   {
     "crossFile": false,
     "description": "Documents public declarations and members in package libraries.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 3,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 3,
+        "file": "lib/bad.dart",
+        "line": 4,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 5,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad.dart",
+        "line": 6,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 11,
+        "file": "lib/bad.dart",
+        "line": 7,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 8,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 6,
+        "file": "lib/bad.dart",
+        "line": 10,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 5,
+        "file": "lib/bad.dart",
+        "line": 11,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 9,
+        "file": "lib/bad.dart",
+        "line": 12,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 6,
+        "file": "lib/bad.dart",
+        "line": 13,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 3,
+        "file": "lib/bad.dart",
+        "line": 14,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 3,
+        "file": "lib/bad.dart",
+        "line": 15,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 17,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad.dart",
+        "line": 18,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 11,
+        "file": "lib/bad.dart",
+        "line": 20,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 11,
+        "file": "lib/bad.dart",
+        "line": 21,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 16,
+        "file": "lib/bad.dart",
+        "line": 23,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 15,
+        "file": "lib/bad.dart",
+        "line": 24,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 9,
+        "file": "lib/bad.dart",
+        "line": 26,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 5,
+        "file": "lib/bad.dart",
+        "line": 27,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad.dart",
+        "line": 31,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 40,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 11,
+        "file": "lib/bad.dart",
+        "line": 44,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 8,
+        "file": "lib/bad.dart",
+        "line": 51,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 53,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 11,
+        "file": "lib/bad.dart",
+        "line": 55,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 57,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 15,
+        "file": "lib/bad.dart",
+        "line": 59,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 6,
+        "file": "lib/bad.dart",
+        "line": 63,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 66,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad.dart",
+        "line": 70,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 11,
+        "file": "lib/bad.dart",
+        "line": 71,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 5,
+        "file": "lib/bad.dart",
+        "line": 74,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 9,
+        "file": "lib/bad.dart",
+        "line": 75,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 15,
+        "file": "lib/bad_combined_inherited.dart",
+        "line": 15,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 20,
+        "file": "lib/bad_combined_inherited.dart",
+        "line": 30,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/bad_main_class.dart",
+        "line": 1,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 5,
+        "file": "lib/bad_main_variable.dart",
+        "line": 1,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 18,
+        "file": "lib/bad_operator.dart",
+        "line": 5,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 26,
+        "file": "lib/bad_operator.dart",
+        "line": 13,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 28,
+        "file": "lib/operators.dart",
+        "line": 22,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/primary.dart",
+        "line": 3,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 13,
+        "file": "lib/primary.dart",
+        "line": 3,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/primary.dart",
+        "line": 4,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 7,
+        "file": "lib/primary.dart",
+        "line": 8,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 3,
+        "file": "lib/primary.dart",
+        "line": 15,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 14,
+        "file": "lib/primary.dart",
+        "line": 19,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 31,
+        "file": "lib/primary.dart",
+        "line": 21,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 31,
+        "file": "lib/primary.dart",
+        "line": 23,
+        "message": "Missing documentation for a public member."
+      },
+      {
+        "column": 13,
+        "file": "lib/primary.dart",
+        "line": 30,
+        "message": "Missing documentation for a public member."
+      }
+    ],
     "docs": "Documents public declarations and members in package libraries.\n\nPrivate declarations, top-level functions named `main`, and overriding members are\nexempt; like the analyzer, `package:meta`'s `@internal` exempts a top-level\ndeclaration with its members, but not a member on its own. Ordinary constructors\nof enums and of sealed, `abstract final` and `abstract interface` classes are exempt.\nA doc comment\nbefore, between or after the metadata documents the declaration, including\nthe analyzer's empty `/**/` documentation. `@override` alone does not exempt\na member. Fields and getters override inherited getters, methods and fields\n(not setters);\nsetters override inherited setters and are checked only when their paired\ngetter is reported. Extension-type\nrepresentation fields are not field declarations visited by the upstream\nrule.\nA class primary constructor is checked separately from its type; header\nconstructors are reported at their name without closed-type exemptions,\nand implementations at `this`. Header parameters are not field declarations.\nAn override exemption requires a combined inherited member, not merely a\nsame-named declaration among incompatible inherited interface signatures.",
     "domains": [],
     "examples": {
       "bad": "// Positive cases live in project/lib: this file is outside a package library.\nvoid outside() {}",
-      "crossFile": null,
+      "crossFile": [
+        {
+          "content": "import 'package:meta/meta.dart';\n\nclass Api {\n  Api();\n  int field = 0;\n  void method() {}\n  int get value => 0;\n  set value(int v) {}\n}\nvoid function() {}\nint variable = 0;\ntypedef Alias = int;\nenum Choice {\n  one,\n  two\n}\nmixin Features {\n  void method() {}\n}\nextension Named on int {\n  int get doubled => this * 2;\n}\nextension type Wrapper(int value) {\n  static void utility() {}\n}\nint get setting => 0;\nset setting(int value) {}\n/// Members do not inherit their own `@internal`.\nclass Internals {\n  @internal\n  void hidden() {}\n}\n/// Declares only a setter.\nabstract class SetterBase {\n  /// Sink.\n  set sink(int value);\n}\n/// A field does not override an inherited setter.\nclass SetterField extends SetterBase {\n  int sink = 0;\n}\n/// A getter does not override an inherited setter.\nclass SetterGetter extends SetterBase {\n  int get sink => 0;\n  set sink(int value) {}\n}\n\n/// An annotation alone does not make a member an override.\nclass NonOverrides {\n  @override\n  void absent() {}\n  @override\n  int field = 0;\n  @override\n  int get value => 0;\n  @override\n  set value(int next) {}\n  @override\n  static void utility() {}\n}\n\n@override\nvoid annotatedFunction() {}\n\n/* Ordinary block comments are not documentation. */\nclass PlainComment {}\n\n/// Setter diagnostics retain declaration order even when their getter comes later.\nclass SetterBeforeGetter {\n  set later(int value) {}\n  int get later => 0;\n}\n\nset laterTopLevel(int value) {}\nint get laterTopLevel => 0;",
+          "path": "lib/bad.dart"
+        },
+        {
+          "content": "/// First conversion interface.\nabstract interface class First<E> {\n  /// Converts the elements.\n  First<T> cast<T>();\n}\n\n/// Second conversion interface.\nabstract interface class Second<E> {\n  /// Converts the elements.\n  Second<T> cast<T>();\n}\n\n/// Its own valid override cannot combine incomparable inherited signatures.\nabstract class Combined<E> implements First<E>, Second<E> {\n  Combined<T> cast<T>();\n}\n\n/// One inherited signature still exempts an undocumented override.\nabstract class Single<E> implements First<E> {\n  Single<T> cast<T>();\n}\n\n/// Supplies a concrete conversion implementation.\nmixin FirstMixin<E> implements First<E> {\n  First<T> cast<T>() => throw 0;\n}\n\n/// A mixin and an interface can also have incomparable return types.\nclass CombinedMixin<E> with FirstMixin<E> implements Second<E> {\n  CombinedMixin<T> cast<T>() => throw 0;\n}",
+          "path": "lib/bad_combined_inherited.dart"
+        },
+        {
+          "content": "class main {}",
+          "path": "lib/bad_main_class.dart"
+        },
+        {
+          "content": "int main = 0;",
+          "path": "lib/bad_main_variable.dart"
+        },
+        {
+          "content": "import 'operators.dart' as operators;\n\n/// Value.\nclass Value {\n  Value operator +(Value other) => this;\n  bool operator ==(Object other) => false;\n  int get hashCode => 0;\n}\n\n/// Annotation text and return-type identifiers are not the operator keyword.\nclass OperatorLocations {\n  @Deprecated('use operator - instead')\n  operators.Vec operator +(operators.Vec other) => operators.Vec();\n}",
+          "path": "lib/bad_operator.dart"
+        },
+        {
+          "content": "import 'package:meta/meta.dart';\n\n/// Documented class.\nclass Api {\n  /// Constructor.\n  Api();\n  /** Field. */\n  int field = 0;\n  /// Getter documents the setter too.\n  int get value => 0;\n  set value(int v) {}\n  set standalone(int v) {}\n  @override\n  String toString() => '';\n  void _private() {}\n}\nclass _Private { void publicMethod() {} }\nvoid main() {}\n@internal\nclass Hidden { void hidden() {} }\n/// Documented function.\nvoid documented() {}\n/// Alias.\ntypedef Alias = int;\n/// Mixin.\nmixin Features {\n  /// Method.\n  void method() {}\n}\n/// Extension.\nextension Named on int {\n  /// Getter.\n  int get doubled => this * 2;\n}\n/// Base.\nclass Base {\n  /// Method.\n  void inherited() {}\n  /// Getter.\n  int get value => 0;\n}\n/// Derived.\nclass Derived extends Base {\n  void inherited() {}\n  int get value => 1;\n}\n/// The getter documents its paired setter.\nint get setting => 0;\nset setting(int value) {}\nset standalone(int value) {}\n/// Overrides of SDK members are not new API.\nclass Version implements Comparable<Version> {\n  int compareTo(Version other) => 0;\n}\n/// Iterator members come from the SDK.\nclass MyIterator implements Iterator<int> {\n  int get current => 0;\n  bool moveNext() => false;\n}\n/// Constructors of sealed classes are not public API.\nsealed class Shape {\n  const Shape();\n}\n/// Nor are those of `abstract final` classes.\nabstract final class Registry {\n  Registry.create();\n}\n/// Nor are those of `abstract interface` classes.\nabstract interface class Port {\n  Port.open();\n}\n/// Doc comments may follow or interleave the metadata.\nclass Annotated {\n  @Deprecated('use other')\n  @pragma('vm:prefer-inline')\n  /// Documented after its metadata.\n  int after = 0;\n  @Deprecated('use other')\n  /// Documented between annotations.\n  @pragma('vm:prefer-inline')\n  int between = 0;\n  @Deprecated('use other')\n  /// Documented before a plain comment.\n  // Plain comment.\n  int plain = 0;\n}\n/// Declares a getter.\nabstract class GetterBase {\n  /// Value.\n  int get value;\n}\n/// A field overrides an inherited getter.\nclass GetterField extends GetterBase {\n  final int value = 0;\n}\n\n/**/\nclass EmptyDocumentation {\n  /**/\n  EmptyDocumentation();\n  /**/\n  int field = 0;\n  /**/\n  void method() {}\n  @Deprecated('old')\n  /**/\n  int get value => 0;\n  set value(int next) {}\n}\n\n/**/\nvoid emptyDocumentation() {}\n\n/// Later getter documentation also covers an earlier setter.\nclass DocumentedLaterGetter {\n  set later(int value) {}\n  /// The public value.\n  int get later => 0;\n}\n\nset documentedLaterTopLevel(int value) {}\n/// The public top-level value.\nint get documentedLaterTopLevel => 0;",
+          "path": "lib/good.dart"
+        },
+        {
+          "content": "/// A unary operator declaration.\nclass UnaryBase {\n  /// Negates this value.\n  UnaryBase operator -() => this;\n}\n\n/// Inherits the unary operator.\nclass UnaryChild extends UnaryBase {\n  @override\n  UnaryChild operator -() => this;\n}\n\n/// Declares only binary subtraction.\nclass BinaryBase {\n  /// Subtracts another value.\n  BinaryBase operator -(BinaryBase other) => this;\n}\n\n/// Unary negation does not override binary subtraction.\nclass UnaryFromBinary extends BinaryBase {\n  @override\n  UnaryFromBinary operator -() => this;\n}\n\n/// Operator return type used through a prefix containing `operator`.\nclass Vec {}",
+          "path": "lib/operators.dart"
+        },
+        {
+          "content": "// @dart = 3.13\n\nclass Named.named(int value);\nclass Unnamed();\n\n/// Documents the type, not its primary constructor.\n@deprecated\nclass Documented();\n\n/// Header fields are not separate field declarations checked by the rule.\nclass Fields._(final int value);\n\n/// A primary body implements the header declaration, not a second constructor.\nclass Implemented.named() {\n  this {}\n}\n\n/// Primary headers do not share ordinary constructors' closed-type exemption.\nsealed class Closed();\n/// Abstract final primary header.\nabstract final class Registry.named();\n/// Abstract interface primary header.\nabstract interface class Port.named();\nclass _Private();\n\n/// Representation fields and constructors are not separately documented.\nextension type Wrapper(int value) {}\n\n/// Documents the mixin class, not its primary constructor.\nmixin class PrimaryMixin();",
+          "path": "lib/primary.dart"
+        },
+        {
+          "content": "name: api_docs",
+          "path": "pubspec.yaml"
+        }
+      ],
       "good": "// Documentation lints do not apply outside a package lib directory.\nclass Outside { void method() {} }"
     },
     "group": "style",
@@ -36102,12 +36723,38 @@
   {
     "crossFile": false,
     "description": "Prefers `throwsA` matchers over `try { ...; fail(...); } catch (...) {}`.",
-    "diagnostics": [],
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": "lib/bad_frontend_fail.dart",
+        "line": 9,
+        "message": "Use the 'throwsA' matcher instead of using 'fail' when there is no exception thrown."
+      },
+      {
+        "column": 5,
+        "file": "lib/bad_frontend_fail.dart",
+        "line": 16,
+        "message": "Use the 'throwsA' matcher instead of using 'fail' when there is no exception thrown."
+      }
+    ],
     "docs": "Prefers `throwsA` matchers over `try { ...; fail(...); } catch (...) {}`.\n\nA `try` statement with a single `catch` clause, no `finally`, and a body\nthat ends in a call to the test framework's `fail` hand-rolls what\n`expect(() => ..., throwsA(...))` states directly, and with worse failure\nmessages. Like the official rule, only the top-level `fail` declared in\n`package:test_api/src/frontend/expect.dart` counts. Current `test_api`\nreleases no longer declare it there (`package:test`, `test_api`, and\n`flutter_test` re-export `package:matcher`'s `fail`), so only code using\nsuch an old `test_api` is reported; a local or member function named\n`fail` never is. The declaring library is identified through the package\nconfiguration, including when `test_api` is a dependency.\n\n```dart\ntry {\n  parse('');\n  fail('Expected a FormatException');  // BAD\n} on FormatException {}\n\nexpect(() => parse(''), throwsA(isA<FormatException>())); // GOOD\n```",
     "domains": [],
     "examples": {
       "bad": null,
-      "crossFile": null,
+      "crossFile": [
+        {
+          "content": "import 'src/frontend/expect.dart';\nimport 'src/frontend/expect.dart' as expectations;\n\nint parse(String input) => int.parse(input);\n\nvoid throwsOnEmptyInput() {\n  try {\n    parse('');\n    fail('Expected a FormatException');\n  } on FormatException {}\n}\n\nvoid catchAll() {\n  try {\n    parse('x');\n    expectations.fail('no throw');\n  } catch (e) {\n    print(e);\n  }\n}\n\nvoid twoCatchClauses() {\n  try {\n    parse('');\n    fail('no throw');\n  } on FormatException {\n    // expected\n  } on ArgumentError {\n    // also fine\n  }\n}\n\nvoid localFailShadows() {\n  void fail(String message) => print(message);\n  try {\n    parse('');\n    fail('no throw');\n  } catch (_) {}\n}",
+          "path": "lib/bad_frontend_fail.dart"
+        },
+        {
+          "content": "// The library the official rule matches `fail` against.\nNever fail(String message) => throw StateError(message);",
+          "path": "lib/src/frontend/expect.dart"
+        },
+        {
+          "content": "name: test_api\nenvironment:\n  sdk: ^3.9.0",
+          "path": "pubspec.yaml"
+        }
+      ],
       "good": "import 'package:test/test.dart';\n\nint parse(String input) => int.parse(input);\n\nvoid main() {\n  test('uses throwsA', () {\n    expect(() => parse(''), throwsA(isA<FormatException>()));\n  });\n\n  test('two catch clauses', () {\n    try {\n      parse('');\n      fail('no throw');\n    } on FormatException {\n      // expected\n    } on ArgumentError {\n      // also fine\n    }\n  });\n\n  test('has finally', () {\n    try {\n      parse('');\n      fail('no throw');\n    } catch (_) {\n    } finally {\n      print('done');\n    }\n  });\n\n  test('fail is not last', () {\n    try {\n      fail('no throw');\n      parse('');\n    } catch (_) {}\n  });\n\n  test('local fail shadows the matcher', () {\n    void fail(String message) => print(message);\n    try {\n      parse('');\n      fail('no throw');\n    } catch (_) {}\n  });\n\n  test('try/finally only', () {\n    try {\n      parse('');\n    } finally {\n      print('done');\n    }\n  });\n}"
     },
     "group": "style",

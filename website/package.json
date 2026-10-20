@@ -6,6 +6,8 @@
     "sync-docs": "bun run scripts/sync-docs.ts",
     "predev": "bun run sync-docs",
     "prebuild": "bun run sync-docs",
+    "pretypecheck": "bun run build",
+    "typecheck": "tsc --noEmit",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",

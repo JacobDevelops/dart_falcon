@@ -4,6 +4,9 @@ name: Publish
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   pub:
     name: Publish to pub.dev
@@ -17,13 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require matching version tag
-        run: |
-          set -euo pipefail
-          VERSION="$(awk '/^version:/{print $2; exit}' pubspec.yaml)"
-          if [ "$GITHUB_REF" != "refs/tags/v$VERSION" ]; then
-            echo "publishing requires the tag v$VERSION, got $GITHUB_REF" >&2
-            exit 1
-          fi
+        working-directory: .
+        run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = "v$(grep '^version:' packages/falcon/pubspec.yaml | cut -d ' ' -f 2)"
       - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
       - run: dart pub get
       - run: dart pub publish --force

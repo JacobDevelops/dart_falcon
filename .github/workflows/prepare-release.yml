@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT }}
+          persist-credentials: false
       - name: Configure Git
         run: |
           git config user.name 'github-actions[bot]'
@@ -43,5 +43,58 @@ jobs:
           snapshot: lint
       - run: makers ci_rustup_show
       - run: knope prepare-release
+      - name: Bundle release branch
+        run: git bundle create release.bundle main..release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-branch
+          path: release.bundle
+          if-no-files-found: error
+
+  submit-release:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-branch
+          path: ${{ runner.temp }}/release-branch
+      - name: Submit release branch and pull request
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          git -c core.hooksPath=/dev/null fetch "$RUNNER_TEMP/release-branch/release.bundle" release:release
+          test "$(git show -s --format=%P release)" = "$(git rev-parse HEAD)"
+          git diff --no-renames --name-only -z HEAD release > "$RUNNER_TEMP/release-paths"
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              .changeset/*.md)
+                if git cat-file -e "release:$path" 2>/dev/null; then
+                  echo "Release may only delete changesets: $path" >&2
+                  exit 1
+                fi ;;
+              Cargo.toml|Cargo.lock|falcon.json|schema/falcon.schema.json|website/src/data/cli.json|packages/falcon/CHANGELOG.md|packages/falcon/pubspec.yaml|packages/falcon/lib/src/version.dart|extensions/falcon-zed/Cargo.toml|extensions/falcon-zed/Cargo.lock|extensions/falcon-zed/extension.toml|extensions/falcon-vscode/package.json|extensions/falcon-vscode/package-lock.json) ;;
+              *)
+                if [[ "$path" != *.md || ( "$path" == */* && ( "$path" != docs/* || "${path#docs/}" == */* ) ) ]]; then
+                  echo "Unexpected release path: $path" >&2
+                  exit 1
+                fi ;;
+            esac
+          done < "$RUNNER_TEMP/release-paths"
+          git -c core.hooksPath=/dev/null -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --force --set-upstream origin release
+          title="$(git log -1 --format=%s release)"
+          {
+            printf 'Merging this PR publishes the GitHub release.\n\n'
+            git show release:CHANGELOG.md | awk '/^## / { section++; next } section == 1'
+          } > "$RUNNER_TEMP/release-changelog.md"
+          number="$(gh pr list --base main --head release --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file "$RUNNER_TEMP/release-changelog.md"
+          else
+            gh pr create --base main --head release --title "$title" --body-file "$RUNNER_TEMP/release-changelog.md"
+          fi

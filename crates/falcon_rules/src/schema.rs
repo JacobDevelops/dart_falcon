@@ -10,11 +10,12 @@ use serde_json::{Map, Value, json};
 
 use crate::meta::{Domain, RULE_METADATA, RuleGroup};
 
-/// Canonical published location of the schema — the value users point `$schema`
-/// at, and the schema's own `$id`. Served raw from the default branch so it
-/// tracks the rule set without a release cut.
-pub const SCHEMA_URL: &str =
-    "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json";
+/// Canonical published location of this release's configuration schema.
+pub const SCHEMA_URL: &str = concat!(
+    "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v",
+    env!("CARGO_PKG_VERSION"),
+    "/schema/falcon.schema.json"
+);
 
 /// The `rules` sub-schema for one section: `recommended` plus one object per
 /// group listing exactly that section's rules (file rules unless `cross_file`).

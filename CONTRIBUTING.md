@@ -58,6 +58,13 @@ dependencies outside timing, and writes the website's benchmark data. See
 [the benchmark methodology](docs/benchmarks.md) for scenarios, pinned projects,
 cache handling, limitations, and reproduction options.
 
+`cargo xtask perf-lock` checks the median release-binary runtime against a budget
+on the private mobile corpus; set `JFIT_PATH` or pass `--corpus <path>`.
+Use `--runs <n>` and `--budget-ms <ms>` to select the sample count and budget,
+or `--falcon-bin <path> --skip-build` to measure an already-built binary.
+The default release build honors `CARGO_TARGET_DIR`. `--json` emits the timing
+result for automation.
+
 ## The golden corpus
 
 Every rule is validated against fixtures under
@@ -80,7 +87,11 @@ notes, is in
 [`crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md`](./crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md).
 
 `cargo xtask validate-rules` runs the whole corpus; `cargo xtask validate-rules
---rule <rule-id>` runs one rule.
+--rule <rule-id>` runs one rule and fails if the filter matches nothing.
+Both corpus validation and documentation generation honor `CARGO_TARGET_DIR`.
+Run `cargo xtask docgen` to regenerate website data, or `cargo xtask docgen --check`
+to reject stale committed data without writing files. Generation also rejects
+empty rule descriptions and bad examples that produce no diagnostics.
 
 ## Adding a rule end-to-end
 
@@ -114,7 +125,8 @@ notes, is in
 4. **Register the rule** with one `RuleMeta` entry in
    `crates/falcon_rules/src/meta.rs`, using `RuleMeta::file::<T>` for syntax-only
    rules, `RuleMeta::resolved::<T>` for file rules requiring resolution, or
-   `RuleMeta::cross_file::<T>` for project-wide rules. Pass the canonical name,
+   `RuleMeta::cross_file::<T>` for project-wide rules (`RuleMeta::resolved_cross_file::<T>`
+   when they require resolution). Pass the canonical name,
    typed `RuleGroup`, optional `Domain`, `recommended` flag, and source. Sources are
    `RuleSource::DartCodeLinter("...")`, `RuleSource::PyramidLint("...")`,
    `RuleSource::Lints("...")`, or `RuleSource::Falcon` for original rules.
@@ -167,10 +179,10 @@ Fix installation on Linux.
 falcon versions its workspace crates together and publishes binaries through GitHub Releases, not crates.io.
 
 1. Configure the repository Actions secret `RELEASE_PAT` with a fine-grained personal access token scoped to this repository, granting **Contents: read and write** and **Pull requests: read and write**. Also grant **Workflows: read and write** so refreshing an existing release branch can carry workflow changes from `main`. The PAT lets bot pushes trigger PR checks.
-2. Merge user-facing PRs with their changesets. Every push to `main` with `.changeset/*.md` files refreshes the bot's `release` branch and release PR. Knope bumps `Cargo.toml`, writes `CHANGELOG.md`, and deletes the consumed changesets. The workflow then runs `cargo xtask version` to refresh `Cargo.lock` and pinned documentation versions before committing. An existing release PR gets its title and body updated. Pushes with no changesets skip preparation.
+2. Merge user-facing PRs with their changesets. Every push to `main` with `.changeset/*.md` files refreshes the bot's `release` branch and release PR; pushes without changesets skip preparation. The credential-free `knope prepare-release` job bumps `Cargo.toml`, writes `CHANGELOG.md`, consumes changesets, runs `cargo xtask version` to refresh lockfiles and pins, and commits. It passes the release branch as a Git bundle to a fresh submission job with no compiler or restored cache. Only the submission step receives `RELEASE_PAT`; it pushes with hooks disabled and transient credentials, then creates or updates the release PR.
 3. Review and merge the release PR. `.github/workflows/release.yml` builds the four platform binaries from the merge commit and publishes a GitHub Release tagged `vX.Y.Z`, using that version's changelog section as release notes.
 
-`makers version X.Y.Z` (it wraps `cargo xtask version X.Y.Z`) still exists for manual bumps. It updates `[workspace.package]` in `Cargo.toml`, refreshes `Cargo.lock`, and rewrites pinned release URLs, archive names and mise pins in root and `docs/` Markdown, plus `website/src/data/cli.json`. `CHANGELOG.md` is excluded so historical versions stay unchanged. A test fails if the current installation references drift; new pin shapes belong in `with_version_references` in `xtask/src/main.rs`.
+`makers version X.Y.Z` (it wraps `cargo xtask version X.Y.Z`) still exists for manual bumps. It updates `[workspace.package]` in `Cargo.toml`, refreshes `Cargo.lock`, and rewrites pinned release URLs, schema URLs, archive names and mise pins in root and `docs/` Markdown, plus `website/src/data/cli.json` and both editor extensions. `CHANGELOG.md` is excluded so historical versions stay unchanged. A test fails if the current installation references drift; new pin shapes belong in `with_version_references` in `xtask/src/version.rs`.
 
 For a manual release, update the version and changelog, commit and merge, then push the matching `vX.Y.Z` tag. Tag pushes and manual workflow dispatches with an existing tag remain supported, and fail if the tag and `Cargo.toml` version disagree. If an old version has no changelog section, GitHub generates its release notes.
 

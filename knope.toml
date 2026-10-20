@@ -36,13 +36,3 @@ command = "git add --all"
 [[workflows.steps]]
 type    = "Command"
 command = "git commit -m \"chore: prepare release $version\""
-
-[[workflows.steps]]
-type    = "Command"
-command = "git push --force --set-upstream origin release"
-
-[[workflows.steps]]
-type  = "CreatePullRequest"
-base  = "main"
-title = { template = "chore: prepare release $version" }
-body  = { template = "Merging this PR publishes the GitHub release.\n\n$changelog" }

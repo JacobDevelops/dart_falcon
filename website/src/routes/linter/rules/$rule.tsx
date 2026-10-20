@@ -217,7 +217,7 @@ function RuleDetail() {
             <h2 id="invalid">
               <span className="mark-bad" aria-hidden="true" /> Invalid
             </h2>
-            {rule.crossFile ? <InvalidCrossFile rule={rule} /> : <InvalidSingle rule={rule} />}
+            {(rule.examples.crossFile?.length ?? 0) > 0 ? <InvalidCrossFile rule={rule} /> : <InvalidSingle rule={rule} />}
           </section>
         ) : null}
 

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 # A newer push to a pull request supersedes its running CI. Each main push gets
 # its own group, since it is only diffed against the push before it and a
 # shared group would drop queued runs.
@@ -29,9 +32,10 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       dart: ${{ steps.filter.outputs.dart }}
+      website: ${{ steps.filter.outputs.website }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Rust tests also read the committed schema, cli.json and launcher version pins.
+      # Rust tests also read generated data and every committed version pin.
       - id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -40,6 +44,7 @@ jobs:
               - "**/*.rs"
               - "**/*.toml"
               - Cargo.lock
+              - extensions/falcon-zed/Cargo.lock
               - falcon.json
               - crates/**/!(*.md)
               - src/**/!(*.md)
@@ -47,12 +52,24 @@ jobs:
               - xtask/**/!(*.md)
               - schema/**
               - website/src/data/cli.json
+              - website/src/data/rules.json
+              - website/src/data/domains.json
+              - website/src/data/config-reference.json
               - packages/falcon/pubspec.yaml
               - packages/falcon/lib/src/version.dart
+              - extensions/falcon-vscode/package.json
+              - extensions/falcon-vscode/package-lock.json
+              - "*.md"
+              - docs/*.md
               - .github/actions/**
               - .github/workflows/ci.yml
             dart:
               - packages/falcon/**/!(*.md)
+              - .github/workflows/ci.yml
+            website:
+              - website/**
+              - docs/**
+              - mise.toml
               - .github/workflows/ci.yml
 
   check:
@@ -117,3 +134,22 @@ jobs:
       - run: dart pub get
       - run: dart analyze --fatal-infos
       - run: dart test
+
+  website:
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    name: Website (typecheck, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        with:
+          install_args: bun
+          cache: true
+      - run: bun install --frozen-lockfile
+      # pretypecheck builds first, generating the gitignored route tree.
+      - run: bun run typecheck
+

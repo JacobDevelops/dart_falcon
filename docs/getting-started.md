@@ -44,7 +44,7 @@ There is no `init` command; create the file yourself:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
+  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.3/schema/falcon.schema.json",
   "linter": {
     "rules": {
       "recommended": true,

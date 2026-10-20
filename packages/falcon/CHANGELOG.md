@@ -4,142 +4,143 @@
 
 ### Features
 
-- Warn about unlabeled interactive gesture targets. Flutter widget checks resolve package identities.
-- Require GlobalKey fields to be passed to a widget. Flutter widget checks resolve package identities.
-- Named arguments follow their resolved parameter declaration order by default.
-- Add class-level encapsulation checks for private members, including null-aware access, cascades and context-typed dot shorthands. Access through this/super or a receiver whose static class is the enclosing class is allowed, including inherited private members.
-- Flags instance methods writing resolved static fields, including compound assignments and increments.
-- Ban configured dotted annotation names, without the leading `@`. This check stays inactive until configured with the relevant match lists and diagnostic messages.
-- Ban decoded export URIs, including all conditional alternatives. This check stays inactive until configured with the relevant match lists and diagnostic messages.
-- Add configurable bans on declaration names, including loop variables, catch parameters, named constructors and import prefixes. References, initializing/super formals, and `@override`-annotated members and their parameters are exempt. Matching stays inactive until configured with deny patterns and diagnostic messages.
-- Add configurable bans on resolved explicit type annotations, including expanded aliases and nested generic arguments in new/const constructions. Constructed class names and unknown types are exempt. Matching stays inactive until configured with deny patterns and diagnostic messages.
-- Discourage files containing only re-exports, without declarations or parts.
-- Add optional rule: Keep package-confirmed Bloc instance fields private; inherited API overrides are allowed.
-- Add optional rule: Enforce the package-confirmed Bloc convention.
-- Avoids Flutter's non-const `Border.all` factory. Flutter widget checks resolve package identities.
-- Reports arithmetic expressions containing too many terms.
-- Add optional correctness rule: Flags assertions whose Boolean condition is statically constant.
-- Add optional correctness rule: Flags statically constant binary branch, loop, collection, and expression conditions.
-- Add optional correctness rule: Flags switch statements and expressions with a statically constant subject.
-- Avoid releasing late State fields from dispose: they may be unset or lazily initialized solely to release them. Flutter widget checks resolve package identities.
-- Reject repeated path separators in directive URIs (import, export and part).
-- Add optional correctness rule: Flags repeated field or index assignment targets within one cascade.
-- Add optional correctness rule: Flags export directives whose visible names are already covered by another export.
-- Add optional correctness rule: Flags factories in one type with the same implementation, ignoring factory names and alpha-renaming parameters by position.
-- Add optional correctness rule: Flags final/const variables with identical initializers in the same scope.
-- Add optional correctness rule: Flags repeated mixins in a with clause or a same-library superclass chain.
-- Add optional correctness rule: Flags imports of the same library that differ only in their name prefix.
-- Reports inline framework groups without any test registrations.
-- Warns when credential-like variables or fields receive nonempty string or numeric literals. Uses conservative credential-name heuristics.
-- Reports long if/else-if chains; replace them with a switch or extracted helpers.
-- Flags Opacity directly wrapping a Flutter Image, including named constructors. Flutter widget checks resolve package identities.
-- Reject runtime-invalid Uri constructor arguments: conflicting path/pathSegments or query/queryParameters inputs and query parameter values that are neither null, strings nor iterables of strings.
-- Add optional rule: Value providers borrow existing instances; newly constructed values need create.
-- Prefer direct equality comparisons and De Morgan forms in control-flow conditions. Relational operators are excluded because NaN and custom operators lack reliable inverses.
-- Reports record values and record types with too many fields.
-- Preserve error origins when calling SDK `Completer.completeError`.
-- Require Flutter text fields to expose their updated value. Flutter widget checks resolve package identities.
-- Add optional correctness rule: Require enum-keyed map literals to include every declared enum value.
-- Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage. Flutter widget checks resolve package identities.
-- Check mounted before invoking Flutter State.setState, never inside its callback. Flutter widget checks resolve package identities.
-- Split chained assignments into separate statements.
-- Detect writes through named function, method and constructor parameter objects, excluding closure parameters and parameters annotated `@mutated` from dart-code-metrics-annotations.
-- Prefer positive conditions when both branches can be swapped, including collection and map if/else elements.
-- Require assignments to be standalone statements, arrow bodies or loop operations.
-- Avoid `Future<Future<T>>`, `FutureOr<Future<T>>`, and other directly nested future wrappers.
-- Avoid directly nesting SDK streams and futures: `Stream<Future<T>>` and `Future<Stream<T>>` complicate consumption.
-- Reports deeply nested switch expressions.
-- Reports deeply nested switch statements.
-- Reports deeply nested try statements.
-- Exception and Error payloads should not change after construction, including fields declared by primary-constructor parameters.
-- Add optional rule: Rejects direct Bloc and Cubit arguments to other blocs.
-- Add optional rule: Rejects direct Bloc and Cubit arguments to Flutter widget constructors.
-- Add optional rule: Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.
-- Keeps notifier state behind Riverpod's observable state property.
-- Reports direct self-calls in functions and methods, including guarded recursion.
-- Rejects Riverpod widget references used during State.dispose.
-- Keeps base classes independent from transitive `extends`/`with` subclasses, excluding implementers and mixin constraints. Exempts `freezed`, `Freezed`, and `unfreezed` annotations by default; `ignored_annotations` replaces this exact-match list.
-- Accept `avoid-self-compare` as an alias for the existing `no-self-comparisons` rule; both names resolve to the same implementation.
-- Detect explicit secret-bearing URL query keys, not arbitrary occurrences of words such as `token` in paths, fragments, map values, or prose.
-- Finds getters hiding fields supplied via the immediate super constructor's `this.` formals or declaring parameters. Distinguishes named from positional super parameters; initializer-list assignments and intermediate forwarding are not tracked.
-- Requires public declarations in test files, except main, to be private.
-- Reports unconditional break, continue, return or throw in a for-loop body.
-- Add an optional rule that flags standalone nested blocks introducing no lexical declarations.
-- Add an optional rule that prefers direct invocation of functions and resolved callable instances.
-- Avoid singleton collection literals where SDK APIs accept a single value.
-- Add an optional rule that flags an unlabeled `continue` at the end of a loop body or its final branch.
-- Prefer synchronous declarations when an async Future only returns scalars.
-- Flags a resolved Flutter GestureDetector without any non-null event handlers. Flutter widget checks resolve package identities.
-- Add an optional rule that flags getters exposing only a private final field. Upcasting getters remain allowed by default; set `ignore_upcast: false` to report them.
-- Add an optional rule for length checks around `for-in` and `forEach`: empty collections already skip those bodies.
-- Add an optional rule that flags a single-use local used only to initialize the next local.
-- Add an optional rule that simplifies negated bool literals and equality comparisons with a logical negation on both sides.
-- Add an optional rule that flags redundant Flutter `State` overrides dropping inherited `@protected` annotations.
-- Add an optional rule that flags an eager local initializer immediately overwritten without a read.
-- Add an optional rule to omit implicit `super()` initializers and provably redundant member prefixes.
-- Reports iteration of a collection in a branch that requires it to be empty.
-- Add optional correctness rule: Warn when SDK Iterable.reduce can receive an empty collection.
-- Reports a null-checked local ignored by a branch that passes another local of the same resolved type to a call.
-- Flags Padding directly wrapping a Flutter Container that can own the padding. Flutter widget checks resolve package identities.
-- Reports function bodies with excessive nesting-weighted control flow.
-- Flags enum constants whose declared names violate the configured order.
-- Require Equatable semantics for configured class/file name patterns.
-- Add optional correctness rule: Flags value functions with a proven explicit null return on every path.
-- Add optional correctness rule: Warns when distinct return paths in a function produce the same scalar constant.
-- Add optional rule: Warns when a Bloc constructor leaves a concrete event subclass without a handler.
-- Requires field initializers to follow their containing type's field declaration order by default.
-- Flags literal string map keys that violate the configured order.
-- Detect likely copy-paste errors in trivial accessors when a different field matching the accessor name is declared.
-- Reports function bodies with too many statements.
-- Warn about explicitly undersized Flutter touch targets. Flutter widget checks resolve package identities.
-- Move final/const scalar literals into their only branch, or after an if.
-- Requires a blank line before a break that follows another statement.
-- Requires a blank line between successive switch statement case clauses.
-- Requires a blank line before constructors following another member.
-- Requires a blank line before a continue that follows another statement.
-- Requires a blank line before method declarations following another member.
-- Requires a blank line before a throw that follows another statement.
-- Requires named parameters to follow the explicitly configured alphabetical order.
-- Flags named object and record pattern fields that violate the configured order.
-- Prefer `Iterable.every` to `where(predicate).isEmpty`.
-- Add optional rule: Enforce the package-confirmed Bloc convention.
-- Add optional rule: Prefer context.read/watch over package:flutter_bloc's provider lookups.
-- Add optional rule: Enforce the package-confirmed Bloc convention.
-- Accept `prefer-boolean-prefixes` as an alias for the existing `boolean-prefixes` rule; both names resolve to the same implementation.
-- Require explanations for analyzer `ignore:` and `ignore_for_file:` comments.
-- Match callback field names to a configured regular expression.
-- Require configured error parameter names in catches and SDK error callbacks.
-- Match callback handler methods to a configured regular expression.
-- Decode JSON containers using their actual runtime generic types.
-- Requires snake_case file names ending in _notifier.dart for resolved Riverpod notifier classes.
-- Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including functions annotated with riverpod_annotation's riverpod or Riverpod.
-- Requires entry-point files under a test directory to use the _test.dart suffix.
-- Require an explicit heroTag on Flutter FloatingActionButton constructors. Flutter widget checks resolve package identities.
-- Prefer EquatableMixin to directly extending package:equatable's Equatable.
-- Requires expectLater when a canonical expect call receives an unawaited Future.
-- Prefer getters for synchronous, zero-argument methods that only read a field.
-- Requires stable value equality for fresh Riverpod family arguments, rejecting non-constant collections, closures, and newly constructed classes without a resolved equality override. Accepts constants, existing values, and records whose components are acceptable.
-- Match a file's sole class or enum name to its snake-case basename.
-- Add optional rule: Flatten directly nested package:flutter_bloc BlocProviders with MultiBlocProvider.
-- Add optional rule: Prefer a flat MultiProvider to directly nested provider widgets.
-- Prefer named parameters when a declaration exceeds `max_number` (default 1).
-- Add optional rule: Prefer context.read/watch when provider extensions are in scope.
-- Prefer the cryptographically secure `dart:math` random generator.
-- Await returned SDK Futures inside a try body protected by a catch clause.
-- Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers, excluding generated Dart files.
-- Requires a Provider suffix on resolved Riverpod top-level providers and static fields.
-- Merge consecutive Flutter State.setState statements in the same block. Flutter widget checks resolve package identities.
-- Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width and height are stable variable reads or numeric literals with identical token spelling. Flutter widget checks resolve package identities.
-- Recommends Matcher expectations and direct type, equality, or ordering matchers.
-- Prefer explicit types over `var` in ordinary variable declarations.
-- Reports duplicate test descriptions within a group and constant names in loops.
-- Prefer `useCallback` for synchronous memoized function literals.
-- Prefer memoizing freshly allocated collection values used as hook keys.
-- Flags SingleChildScrollView directly containing a Flutter Column with no arguments other than children. Flutter widget checks resolve package identities.
-- Prefers Flutter's `VoidCallback` alias over a nongeneric `void Function()` type. Flutter widget checks resolve package identities.
-- Flags named record type fields that violate the configured order.
-- Add an optional rule to reuse or extend existing record destructuring instead of rereading a field.
-- Add an optional rule to reuse a local for stable SDK arithmetic and `String.length`/`int` parity getters.
+- falcon can be installed with `dart pub global activate falcon`.
+- `accessible-widget-labels`: Warn about unlabeled interactive gesture targets. Flutter widget checks resolve package identities. Recognize Tooltip rich messages and Semantics attributed labels. Share the active gesture callback and literal-null policy with `minimum-touch-target`, including secondary and tertiary long presses, force presses, and drag cancellation. Match InkWell and InkResponse's separate enablement rules, so cancellation-only ink controls remain inactive. Unwired tap-movement callbacks, literal-null callbacks, and hover, focus, and highlight notifications don't enable gestures.
+- `always-pass-global-key`: Require GlobalKey fields to be passed to a widget. Flutter widget checks resolve package identities. Report nonconstant GlobalKey constructors used directly as widget key arguments, including prefixed constructors and type aliases. Preserve shadowed names, constant keys, value-stable GlobalObjectKeys and cached widgets in field or top-level initializers, while still checking callbacks and local variables.
+- `arguments-ordering`: Named arguments follow their resolved parameter declaration order by default.
+- `avoid-accessing-other-classes-private-members`: Add class-level encapsulation checks for private members, including null-aware access, cascades and context-typed dot shorthands. Access through this/super or a receiver whose static class is the enclosing class is allowed, including inherited private members.
+- `avoid-assigning-to-static-field`: Flags instance methods writing resolved static fields, including compound assignments and increments.
+- `avoid-banned-annotations`: Ban configured dotted annotation names, without the leading `@`. This check stays inactive until configured with the relevant match lists and diagnostic messages.
+- `avoid-banned-exports`: Ban decoded export URIs, including all conditional alternatives. This check stays inactive until configured with the relevant match lists and diagnostic messages.
+- `avoid-banned-names`: Add configurable bans on declaration names, including loop variables, catch parameters, named constructors and import prefixes. References, initializing/super formals, and `@override`-annotated members and their parameters are exempt. Matching stays inactive until configured with deny patterns and diagnostic messages.
+- `avoid-banned-types`: Add configurable bans on resolved explicit type annotations, including expanded aliases and nested generic arguments in new/const constructions. Constructed class names and unknown types are exempt. Matching stays inactive until configured with deny patterns and diagnostic messages.
+- `avoid-barrel-files`: Discourage files containing only re-exports, without declarations or parts.
+- `avoid-bloc-public-fields`: Add optional rule: Keep package-confirmed Bloc instance fields private; inherited API overrides are allowed.
+- `avoid-bloc-public-methods`: Add optional rule: Enforce the package-confirmed Bloc convention.
+- `avoid-border-all`: Avoids Flutter's non-const `Border.all` factory. Flutter widget checks resolve package identities.
+- `avoid-complex-arithmetic-expressions`: Reports arithmetic expressions containing too many terms.
+- `avoid-constant-assert-conditions`: Add optional correctness rule: Flags assertions whose Boolean condition is statically constant.
+- `avoid-constant-conditions`: Add optional correctness rule: Flags statically constant binary branch, loop, collection, and expression conditions.
+- `avoid-constant-switches`: Add optional correctness rule: Flags switch statements and expressions with a statically constant subject.
+- `avoid-disposing-late-fields`: Avoid releasing late State fields from dispose: they may be unset or lazily initialized solely to release them. Flutter widget checks resolve package identities. Allow release when synchronous initState initializes them through a direct assignment or directly reads a lazy initializer in its initial straight-line expression and declaration statements. Conditional, deferred and uninitialized fields still produce diagnostics, with guidance to initialize them unconditionally or make them nullable.
+- `avoid-double-slash-imports`: Reject repeated path separators in directive URIs (import, export and part).
+- `avoid-duplicate-cascades`: Add optional correctness rule: Flags repeated field or index assignment targets within one cascade.
+- `avoid-duplicate-exports`: Add optional correctness rule: Flags export directives whose visible names are already covered by another export.
+- `avoid-duplicate-factories`: Add optional correctness rule: Flags factories in one type with the same implementation, ignoring factory names and alpha-renaming parameters by position.
+- `avoid-duplicate-initializers`: Add optional correctness rule: Flags final/const variables with identical initializers in the same scope.
+- `avoid-duplicate-mixins`: Add optional correctness rule: Flags repeated mixins in a with clause or a same-library superclass chain.
+- `avoid-duplicate-named-imports`: Add optional correctness rule: Flags imports of the same library that differ only in their name prefix.
+- `avoid-empty-test-groups`: Reports inline framework groups without any test registrations.
+- `avoid-hardcoded-credentials`: Warns when credential-like variables or fields receive nonempty string or numeric literals. Uses conservative credential-name heuristics. Includes optional parameter defaults in functions, methods, constructors and closures, using the same credential-name, literal and storage-key checks.
+- `avoid-if-with-many-branches`: Reports long if/else-if chains; replace them with a switch or extracted helpers.
+- `avoid-incorrect-image-opacity`: Flags Opacity directly wrapping a Flutter Image, including named constructors. Flutter widget checks resolve package identities.
+- `avoid-incorrect-uri`: Reject runtime-invalid Uri constructor arguments: conflicting path/pathSegments or query/queryParameters inputs and query parameter values that are neither null, strings nor iterables of strings.
+- `avoid-instantiating-in-value-provider`: Add optional rule: Value providers borrow existing instances; newly constructed values need create.
+- `avoid-inverted-boolean-checks`: Prefer direct equality comparisons and De Morgan forms in control-flow conditions. Relational operators are excluded because NaN and custom operators lack reliable inverses.
+- `avoid-long-records`: Reports record values and record types with too many fields.
+- `avoid-missing-completer-stack-trace`: Preserve error origins when calling SDK `Completer.completeError`.
+- `avoid-missing-controller`: Require Flutter text fields to expose their updated value. Flutter widget checks resolve package identities.
+- `avoid-missing-enum-constant-in-map`: Add optional correctness rule: Require enum-keyed map literals to include every declared enum value.
+- `avoid-missing-image-alt`: Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage. Flutter widget checks resolve package identities.
+- `avoid-mounted-in-setstate`: Check mounted before invoking Flutter State.setState, never inside its callback. Flutter widget checks resolve package identities.
+- `avoid-multi-assignment`: Split chained assignments into separate statements.
+- `avoid-mutating-parameters`: Detect writes through named function, method and constructor parameter objects, excluding closure parameters and parameters annotated `@mutated` from dart-code-metrics-annotations.
+- `avoid-negated-conditions`: Prefer positive conditions when both branches can be swapped, including collection and map if/else elements.
+- `avoid-nested-assignments`: Require assignments to be standalone statements, arrow bodies or loop operations.
+- `avoid-nested-futures`: Avoid `Future<Future<T>>`, `FutureOr<Future<T>>`, and other directly nested future wrappers.
+- `avoid-nested-streams-and-futures`: Avoid directly nesting SDK streams and futures: `Stream<Future<T>>` and `Future<Stream<T>>` complicate consumption.
+- `avoid-nested-switch-expressions`: Reports deeply nested switch expressions.
+- `avoid-nested-switches`: Reports deeply nested switch statements.
+- `avoid-nested-try-statements`: Reports deeply nested try statements.
+- `avoid-non-final-exception-class-fields`: Exception and Error payloads should not change after construction, including fields declared by primary-constructor parameters.
+- `avoid-passing-bloc-to-bloc`: Add optional rule: Rejects direct Bloc and Cubit arguments to other blocs.
+- `avoid-passing-bloc-to-widget`: Add optional rule: Rejects direct Bloc and Cubit arguments to Flutter widget constructors.
+- `avoid-passing-build-context-to-blocs`: Add optional rule: Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.
+- `avoid-public-notifier-properties`: Keeps notifier state behind Riverpod's observable state property.
+- `avoid-recursive-calls`: Reports direct self-calls in functions and methods, including guarded recursion.
+- `avoid-ref-inside-state-dispose`: Rejects Riverpod widget references used during State.dispose.
+- `avoid-referencing-subclasses`: Keeps base classes independent from transitive `extends`/`with` subclasses, excluding implementers and mixin constraints. Exempts `freezed`, `Freezed`, and `unfreezed` annotations by default; `ignored_annotations` replaces this exact-match list.
+- `avoid-self-compare`: Accept `avoid-self-compare` as an alias for the existing `no-self-comparisons` rule; both names resolve to the same implementation.
+- `avoid-sensitive-query-params`: Detect explicit secret-bearing URL query keys, not arbitrary occurrences of words such as `token` in paths, fragments, map values, or prose. Detect percent-encoded sensitive keys in URL literals and SDK `Uri` literal queries while leaving `queryParameters` map keys unchanged. Ignore Dart interpolation source punctuation, so embedded `#` or `?` characters do not hide static secret-bearing keys and `&token=` inside an expression does not trigger a false warning. Include literal `query` arguments to SDK `Uri` constructors, including interpolated values, without flagging shadowed constructors or unrelated query calls.
+- `avoid-suspicious-super-overrides`: Finds getters hiding fields supplied via the immediate super constructor's `this.` formals or declaring parameters. Distinguishes named from positional super parameters; initializer-list assignments and intermediate forwarding are not tracked.
+- `avoid-top-level-members-in-tests`: Requires public declarations in test files, except main, to be private.
+- `avoid-unconditional-break`: Reports unconditional break, continue, return or throw in a for-loop body.
+- `avoid-unnecessary-block`: Add an optional rule that flags standalone nested blocks introducing no lexical declarations.
+- `avoid-unnecessary-call`: Add an optional rule that prefers direct invocation of functions and resolved callable instances.
+- `avoid-unnecessary-collections`: Avoid singleton collection literals where SDK APIs accept a single value.
+- `avoid-unnecessary-continue`: Add an optional rule that flags an unlabeled `continue` at the end of a loop body or its final branch.
+- `avoid-unnecessary-futures`: Prefer synchronous declarations when an async Future only returns scalars.
+- `avoid-unnecessary-gesture-detector`: Flags a resolved Flutter GestureDetector without any non-null event handlers. Flutter widget checks resolve package identities. Preserve GestureDetectors with explicit hit-test behavior, and detect tap-only wrappers around resolved Flutter TextButton, ElevatedButton, OutlinedButton and IconButton constructors with inline onPressed callbacks. Keep distinct gestures and nullable child handlers unflagged, and direct tap handling to the button callback.
+- `avoid-unnecessary-getter`: Add an optional rule that flags getters exposing only a private final field. Upcasting getters remain allowed by default; set `ignore_upcast: false` to report them.
+- `avoid-unnecessary-length-check`: Add an optional rule for length checks around `for-in` and `forEach`: empty collections already skip those bodies.
+- `avoid-unnecessary-local-variable`: Add an optional rule that flags a single-use local used only to initialize the next local.
+- `avoid-unnecessary-negations`: Add an optional rule that simplifies negated bool literals and equality comparisons with a logical negation on both sides.
+- `avoid-unnecessary-overrides-in-state`: Add an optional rule that flags redundant Flutter `State` overrides dropping inherited `@protected` annotations.
+- `avoid-unnecessary-reassignment`: Add an optional rule that flags an eager local initializer immediately overwritten without a read.
+- `avoid-unnecessary-super`: Add an optional rule to omit implicit `super()` initializers and provably redundant member prefixes. Avoid suggesting removal of `super` when a library-scope binding may shadow the inherited member.
+- `avoid-unreachable-for-loop`: Reports iteration of a collection in a branch that requires it to be empty.
+- `avoid-unsafe-reduce`: Add optional correctness rule: Warn when SDK Iterable.reduce can receive an empty collection.
+- `avoid-unused-after-null-check`: Reports a null-checked local ignored by a branch that passes another local of the same resolved type to a call.
+- `avoid-wrapping-in-padding`: Flags Padding directly wrapping a Flutter Container that can own the padding. Flutter widget checks resolve package identities. Exclude Padding wrappers and child Containers with non-null keys because moving the padding changes the keyed element's bounds. Literal-null keys still allow the diagnostic.
+- `cognitive-complexity`: Reports function bodies with excessive nesting-weighted control flow.
+- `enum-constants-ordering`: Flags enum constants whose declared names violate the configured order.
+- `extend-equatable`: Require Equatable semantics for configured class/file name patterns.
+- `function-always-returns-null`: Add optional correctness rule: Flags value functions with a proven explicit null return on every path.
+- `function-always-returns-same-value`: Add optional correctness rule: Warns when distinct return paths in a function produce the same scalar constant.
+- `handle-bloc-event-subclasses`: Add optional rule: Warns when a Bloc constructor leaves a concrete event subclass without a handler.
+- `initializers-ordering`: Requires field initializers to follow their containing type's field declaration order by default.
+- `map-keys-ordering`: Flags literal string map keys that violate the configured order.
+- `match-getter-setter-field-names`: Detect likely copy-paste errors in trivial accessors when a different field matching the accessor name is declared.
+- `max-statements`: Reports function bodies with too many statements.
+- `minimum-touch-target`: Warn about explicitly undersized Flutter touch targets. Flutter widget checks resolve package identities. Skip explicitly disabled Flutter buttons when `onPressed` is literal null and `onLongPress` is absent or literal null. Dynamic callbacks and active long presses still need a touch target. Share the active gesture callback and literal-null policy described under `accessible-widget-labels`, including InkWell and InkResponse's separate enablement rules.
+- `move-variable-closer-to-its-usage`: Move final/const scalar literals into their only branch, or after an if.
+- `newline-before-break`: Requires a blank line before a break that follows another statement.
+- `newline-before-case`: Requires a blank line between successive switch statement case clauses.
+- `newline-before-constructor`: Requires a blank line before constructors following another member.
+- `newline-before-continue`: Requires a blank line before a continue that follows another statement.
+- `newline-before-method`: Requires a blank line before method declarations following another member.
+- `newline-before-throw`: Requires a blank line before a throw that follows another statement.
+- `parameters-ordering`: Requires named parameters to follow the explicitly configured alphabetical order.
+- `pattern-fields-ordering`: Flags named object and record pattern fields that violate the configured order.
+- `prefer-any-or-every`: Prefer `Iterable.every` to `where(predicate).isEmpty`.
+- `prefer-bloc-event-suffix`: Add optional rule: Enforce the package-confirmed Bloc convention.
+- `prefer-bloc-extensions`: Add optional rule: Prefer context.read/watch over package:flutter_bloc's provider lookups.
+- `prefer-bloc-state-suffix`: Add optional rule: Enforce the package-confirmed Bloc convention.
+- `prefer-boolean-prefixes`: Accept `prefer-boolean-prefixes` as an alias for the existing `boolean-prefixes` rule; both names resolve to the same implementation.
+- `prefer-commenting-analyzer-ignores`: Require explanations for analyzer `ignore:` and `ignore_for_file:` comments.
+- `prefer-correct-callback-field-name`: Match callback field names to a configured regular expression.
+- `prefer-correct-error-name`: Require configured error parameter names in catches and SDK error callbacks.
+- `prefer-correct-handler-name`: Match callback handler methods to a configured regular expression.
+- `prefer-correct-json-casts`: Decode JSON containers using their actual runtime generic types. Recognize dart:convert json and JsonDecoder without loaded SDK sources, and flag JSON container casts with non-nullable Object elements or values.
+- `prefer-correct-notifier-file-name`: Requires snake_case file names ending in _notifier.dart for resolved Riverpod notifier classes.
+- `prefer-correct-provider-file-name`: Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including functions annotated with riverpod_annotation's riverpod or Riverpod.
+- `prefer-correct-test-file-name`: Requires entry-point files under package-root `test/` and `integration_test/` directories to use the _test.dart suffix. Flutter driver entrypoints and helpers under `test_driver/` or `testing/` do not require that suffix.
+- `prefer-define-hero-tag`: Require an explicit heroTag on Flutter FloatingActionButton constructors. Flutter widget checks resolve package identities.
+- `prefer-equatable-mixin`: Prefer EquatableMixin to directly extending package:equatable's Equatable.
+- `prefer-expect-later`: Requires expectLater when a canonical expect call receives an unawaited Future.
+- `prefer-getter-over-method`: Prefer getters for synchronous, zero-argument methods that only read a field.
+- `prefer-immutable-provider-arguments`: Requires stable value equality for fresh Riverpod family arguments, rejecting non-constant collections, closures, and newly constructed classes without a resolved equality override. Accepts constants, existing values, and records whose components are acceptable.
+- `prefer-match-file-name`: Match a file's sole class or enum name to its snake-case basename.
+- `prefer-multi-bloc-provider`: Add optional rule: Flatten directly nested package:flutter_bloc BlocProviders with MultiBlocProvider.
+- `prefer-multi-provider`: Add optional rule: Prefer a flat MultiProvider to directly nested provider widgets.
+- `prefer-named-parameters`: Prefer named parameters when a declaration exceeds `max_number` (default 1).
+- `prefer-provider-extensions`: Add optional rule: Prefer context.read/watch when provider extensions are in scope.
+- `prefer-random-secure`: Prefer the cryptographically secure `dart:math` random generator. Recognize dart:math Random without loaded SDK sources. Use valid external factory declarations for staged SDK Random constructors in fixtures.
+- `prefer-return-await`: Await returned SDK Futures inside a try body protected by a catch clause.
+- `prefer-riverpod-notifier-suffix`: Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers, excluding generated Dart files.
+- `prefer-riverpod-provider-suffix`: Requires a Provider suffix on resolved Riverpod top-level providers and static fields.
+- `prefer-single-setstate`: Merge consecutive Flutter State.setState statements in the same block. Flutter widget checks resolve package identities.
+- `prefer-sized-box-square`: Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width and height are stable variable reads or numeric literals with identical token spelling. Flutter widget checks resolve package identities.
+- `prefer-test-matchers`: Recommends Matcher expectations and direct type, equality, or ordering matchers.
+- `prefer-type-over-var`: Prefer explicit types over `var` in ordinary variable declarations.
+- `prefer-unique-test-names`: Reports duplicate test descriptions within a group and constant names in loops.
+- `prefer-use-callback`: Prefer `useCallback` for synchronous memoized function literals.
+- `prefer-use-memo`: Prefer memoizing freshly allocated collection values used as hook keys.
+- `prefer-using-list-view`: Flags SingleChildScrollView directly containing a Flutter Column with no arguments other than children. Flutter widget checks resolve package identities. Replacing a scrollable Column with ListView requires preserving child alignment and padding explicitly, including ListView's default MediaQuery padding. Keep this as advice without an automatic fix, rather than promising a layout-neutral replacement. Only suggest ListView when its children list contains at least two unconditional children. Skip absent, empty, single-child and dynamic lists, and do not count spread or control-flow elements toward that minimum.
+- `prefer-void-callback`: Prefers Flutter's `VoidCallback` alias over a nongeneric `void Function()` type. Flutter widget checks resolve package identities.
+- `record-fields-ordering`: Flags named record type fields that violate the configured order.
+- `use-existing-destructuring`: Add an optional rule to reuse or extend existing record destructuring instead of rereading a field.
+- `use-existing-variable`: Add an optional rule to reuse a local for stable SDK arithmetic and `String.length`/`int` parity getters.
 - Add the `bloc` rules `emit-new-bloc-state-instances`, `prefer-sealed-bloc-events`, `prefer-sealed-bloc-state`, `prefer-immutable-bloc-events`, `prefer-immutable-bloc-state`, `avoid-duplicate-bloc-event-handlers`, `check-is-not-closed-after-async-gap` and `avoid-emit-outside-bloc`. This completes the must-have rules in the 1.0 checklist.
 - Add `avoid-complex-conditions` and `avoid-complex-loop-conditions` (both take a `threshold` option), `avoid-collapsible-if`, `avoid-slow-collection-methods` and `move-variable-outside-iteration`.
 - Add `avoid-duplicate-map-keys`, `avoid-duplicate-collection-elements`, `avoid-duplicate-switch-case-conditions`, `avoid-missing-interpolation`, `avoid-contradictory-expressions` and `avoid-unmodified-loop-condition`. All but `avoid-duplicate-collection-elements` are recommended, since repeated list values are often intentional.
@@ -157,42 +158,22 @@
 - Add `avoid-collection-equality-checks`, `avoid-unrelated-type-casts`, `avoid-unsafe-collection-methods`, `avoid-uncaught-future-errors` and the first `security` rule, `avoid-weak-cryptographic-algorithms`. All but `avoid-unsafe-collection-methods` are recommended, since it flags every `.first` on a list that might be empty.
 - Add `avoid-unnecessary-if`, `avoid-unnecessary-return` and `avoid-redundant-else`. `avoid-unnecessary-conditionals` is accepted as an alias of `avoid-bool-literals-in-conditional-expressions`, which already covers it.
 - Add the Flutter widget rules `avoid-shrink-wrap-in-lists`, `prefer-align-over-container`, `prefer-center-over-align`, `prefer-padding-over-container`, `prefer-constrained-box-over-container`, `prefer-transform-over-container`, `prefer-container` (with a `min_sequence` option) and `prefer-for-loop-in-children`, plus the first `a11y` rule, `prefer-action-button-tooltip`.
-- Limits the depth of an inline Flutter widget construction tree.
+- `widget-tree-depth`: Limits the depth of an inline Flutter widget construction tree.
 
-#### Add configurable bans on resolved API references, matching top-level names or `DeclaringType.member`. Covers calls, tear-offs, properties, cascades, context-typed dot shorthands, constructor invocations, initializers and redirecting factories. Lexical declarations take precedence over inherited members; unresolved targets are ignored. Matching stays inactive until configured with deny patterns and diagnostic messages.
+#### `banned-usage`: Add configurable bans on resolved API references, matching top-level names or `DeclaringType.member`. Covers calls, tear-offs, properties, cascades, context-typed dot shorthands, constructor invocations, initializers and redirecting factories. Lexical declarations take precedence over inherited members; unresolved targets are ignored. Matching stays inactive until configured with deny patterns and diagnostic messages.
 
 Unqualified instance and static fields remain checked unless shadowed by a local declaration. Named extensions resolve their own members without consulting the on-type. Property reads and writes use their respective declaring owners, including extension setters. Compound updates prefer matching setter bans and fall back to getter bans, preserving all configured messages for the selected owner.
 
 Cascade assignment targets resolve only against the cascade receiver; assigned values retain normal lexical resolution.
 
-#### Extract inline string literals into named variables or constants. Invocation exemptions apply only to direct arguments, interpolation expressions are checked, and `allow_only_once` counts exempt literals too.
+#### `no-magic-string`: Extract inline string literals into named variables or constants. Invocation exemptions apply only to direct arguments, interpolation expressions are checked, and `allow_only_once` counts exempt literals too.
 
 Count string literal patterns for `allow_only_once` while keeping pattern literals and annotations exempt from diagnostics. Directive URIs and conditional-import configuration strings remain excluded from occurrence counts.
 
 ### Fixes
 
-- Recognize dart:math Random and dart:convert json and JsonDecoder without loaded SDK sources, and flag JSON container casts with non-nullable Object elements or values.
-- Detect percent-encoded sensitive keys in URL literals and SDK `Uri` literal queries while leaving `queryParameters` map keys unchanged.
-- Recognize Tooltip rich messages and Semantics attributed labels in `accessible-widget-labels`, so labeled gesture targets are not reported as unlabeled.
-- Recognize Flutter callbacks that enable active gestures in `accessible-widget-labels` and `minimum-touch-target`, including secondary and tertiary long presses, force presses, and drag cancellation. Match InkWell and InkResponse's separate enablement rules, so cancellation-only ink controls remain inactive. Unwired tap-movement callbacks, literal-null callbacks, and hover, focus, and highlight notifications don't enable gestures.
-- Fix the generated configuration schema's rule ordering for `prefer-define-hero-tag` and keep its metadata aligned with the docs. Remove the shipped rules from the v1 checklist and update its totals. Register the new GlobalKey and late-field semantic corpus fixtures for SDK-backed analysis. This changes configuration, test registration and documentation, not rule behavior.
-- Skip explicitly disabled Flutter buttons in `minimum-touch-target` when `onPressed` is literal null and `onLongPress` is absent or literal null. Dynamic callbacks and active long presses still need a touch target.
-- Preserve GestureDetectors with explicit hit-test behavior, and detect tap-only wrappers around resolved Flutter TextButton, ElevatedButton, OutlinedButton and IconButton constructors with inline onPressed callbacks. Keep distinct gestures and nullable child handlers unflagged, and direct tap handling to the button callback.
-- Detect hardcoded credential values in optional parameter defaults, including functions, methods, constructors and closures. Reuse the existing credential-name, literal and storage-key checks.
-- Report nonconstant GlobalKey constructors used directly as widget key arguments, including prefixed constructors and type aliases. Preserve shadowed names, constant keys, value-stable GlobalObjectKeys and cached widgets in field or top-level initializers, while still checking callbacks and local variables.
-- Fix string interpolation parsing. `'${await x}'` inside an async function was dropped from the syntax tree, so anything used only there looked unused (for example to `avoid-unused-parameters`). An escaped brace such as `${a\}b}` is now rejected with a parse error, matching Dart.
-- Exclude Padding wrappers and child Containers with non-null keys from avoid-wrapping-in-padding because moving the padding changes the keyed element's bounds. Literal-null keys still allow the diagnostic.
-- Allow late State fields to be released in dispose when synchronous initState initializes them through a direct assignment or directly reads a lazy initializer in its initial straight-line expression and declaration statements. Conditional, deferred and uninitialized fields still produce diagnostics, with guidance to initialize them unconditionally or make them nullable.
-- Clarify that replacing a scrollable Column with ListView requires preserving child alignment and padding explicitly, including ListView's default MediaQuery padding. Keep this as advice without an automatic fix, rather than promising a layout-neutral replacement.
-- Only suggest ListView for a scrollable Column when its children list contains at least two unconditional children. Skip absent, empty, single-child and dynamic lists, and do not count spread or control-flow elements toward that minimum. Preserve the existing alignment and padding advice without offering an automatic fix.
-- Avoid suggesting removal of `super` when a library-scope binding may shadow the inherited member.
-- Count blank lines above attached comments in `newline-before-return`, avoiding diagnostics on already separated return statements.
-- Limit `prefer-correct-test-file-name` to package-root `test/` and `integration_test/` directories so Flutter driver entrypoints and helpers under `test_driver/` or `testing/` don't require the `_test.dart` suffix.
-- falcon can be installed with `dart pub global activate falcon`.
-- Use valid external factory declarations for staged SDK Random constructors in `prefer-random-secure` fixtures.
-- Ignore Dart interpolation source punctuation when detecting sensitive URL query parameters, so embedded `#` or `?` characters do not hide static secret-bearing keys and `&token=` inside an expression does not trigger a false warning.
-- Share the active gesture callback check between `accessible-widget-labels` and `minimum-touch-target` so both rules keep the same callback and literal-null policy.
-- Detect sensitive keys in literal `query` arguments to SDK `Uri` constructors, including interpolated values, without flagging shadowed constructors or unrelated query calls.
+- Fix string interpolation parsing. `'${await x}'` inside an async function was dropped from the syntax tree, so anything used only there looked unused (for example to `avoid-unused-parameters`). An escaped brace such as `${a\\}b}` is now rejected with a parse error, matching Dart.
+- `newline-before-return`: Count blank lines above attached comments, avoiding diagnostics on already separated return statements.
 - Parse switch-expression guards with a parenthesized operand, like `when (a = b) => 1`, as guards. They were read as closures, which broke the arm and anything checking the guard.
 
 ## 0.4.2 (2026-10-17)

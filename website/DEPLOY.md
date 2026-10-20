@@ -16,13 +16,18 @@ Install [mise](https://mise.jdx.dev/getting-started.html) and activate it in you
 
 ```sh
 cd website
-bun run build          # produces dist/client + dist/server
+bun run typecheck      # builds docs/routes + dist, then checks TypeScript without emitting JS
+bun run build          # optional build-only: produces dist/client + dist/server
 bun run cf-dry-run     # build + `wrangler deploy --dry-run` — packages the worker offline, no login
 bun run preview        # optional: serve the built worker locally via workerd
 ```
 
 `cf-dry-run` is the safe smoke test: it bundles the worker and reads the assets
 directory without contacting Cloudflare.
+
+CI runs the frozen-lockfile install, typecheck, and build when website files,
+source docs, or the Bun tool selection change. Generated catalog drift is
+checked separately by `cargo xtask docgen --check` in the Rust validation job.
 
 ## One-time account setup — REQUIRES THE OWNER (Jacob)
 
