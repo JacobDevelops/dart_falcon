@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# A newer push to a pull request supersedes its running CI. Each main push gets
+# its own group, since it is only diffed against the push before it and a
+# shared group would drop queued runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 # Debuginfo is most of the codegen, link and cache size; panics still report file:line without it.
 env:
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -14,7 +21,43 @@ env:
 # main pushes write snapshots, so pull requests never seed what main restores.
 # MBX_GC_MAX_TOTAL_SIZE bounds each snapshot as main keeps adding to it.
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      dart: ${{ steps.filter.outputs.dart }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Rust tests also read the committed schema, cli.json and launcher version pins.
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            rust:
+              - "**/*.rs"
+              - "**/*.toml"
+              - Cargo.lock
+              - falcon.json
+              - crates/**/!(*.md)
+              - src/**/!(*.md)
+              - benches/**/!(*.md)
+              - xtask/**/!(*.md)
+              - schema/**
+              - website/src/data/cli.json
+              - packages/falcon/pubspec.yaml
+              - packages/falcon/lib/src/version.dart
+              - .github/actions/**
+              - .github/workflows/ci.yml
+            dart:
+              - packages/falcon/**/!(*.md)
+              - .github/workflows/ci.yml
+
   check:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     strategy:
@@ -61,6 +104,8 @@ jobs:
           key: ${{ steps.setup.outputs.key }}
 
   dart:
+    needs: changes
+    if: needs.changes.outputs.dart == 'true'
     name: Dart launcher
     runs-on: ubuntu-latest
     defaults:
