@@ -719,23 +719,27 @@ fn cross_file_corpus_matches_expectations() {
                     .into_iter()
                     .filter_map(|path| fs::read_to_string(&path).ok().map(|source| (path, source)))
                     .collect();
-            let mut files: Vec<ProjectFile> = fixture_sources
+            let dart_sources: Vec<_> = fixture_sources
                 .iter()
                 .filter(|(path, _)| {
                     path.extension().and_then(|extension| extension.to_str()) == Some("dart")
                 })
-                .map(|(path, source)| {
-                    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-                    ProjectFile {
-                        path: path.clone(),
-                        parsed: Arc::new(ParsedFile {
-                            source: source.clone().into_boxed_str(),
-                            tree,
-                        }),
-                        has_parse_errors: !errors.is_empty(),
-                    }
-                })
+                .cloned()
                 .collect();
+            let packages = falcon_rules::package_identities(
+                fixture_sources.iter().map(|(path, _)| path.as_path()),
+            );
+            let (_, mut files, indexes) = falcon_analyze::analyze_sequential_collecting_resolving(
+                &falcon_analyze::RuleRegistry::new(),
+                &dart_sources,
+                &config,
+                true,
+                rule_requires_resolution(rule_name),
+                falcon_analyze::Workspace {
+                    packages: &packages,
+                    environment: None,
+                },
+            );
             files.extend(
                 fixture_sources
                     .iter()
@@ -764,7 +768,7 @@ fn cross_file_corpus_matches_expectations() {
             }
 
             let mut diag_keys: Vec<(String, usize)> = rule
-                .analyze_project(&files, &config, None)
+                .analyze_project(&files, &config, indexes.as_ref())
                 .into_iter()
                 .filter(|d| d.rule == rule_name)
                 .map(|d| {

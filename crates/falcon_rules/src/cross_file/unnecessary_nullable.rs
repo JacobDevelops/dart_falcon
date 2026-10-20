@@ -1,15 +1,15 @@
 //! Report nullable parameters of private declarations that never receive null.
 //!
 //! Flags a nullable parameter (`T?`) of a private (`_`-prefixed) function or
-//! method when no call site anywhere in the project passes it null, and its body
-//! never assigns null to it either. Because the declaration is private, every
+//! method when every call site passes a proven non-null value, and its body
+//! only assigns proven non-null values to it. Because the declaration is private, every
 //! one of its call sites is visible in the analyzed set, which is what makes the
 //! conclusion sound; the `?` then widens the type for a value that is always
 //! non-null, so callers and the body carry null handling that can never trigger.
-//! An argument counts as non-null only when proven so — a literal, a `new` or
-//! arithmetic expression, or a call whose declared return type the cross-file
-//! index resolves as non-nullable. Anything uncertain (an ambiguous name shared
-//! by multiple declarations, a tear-off reference, an argument that might be
+//! An argument or write counts as non-null only when proven so, including type
+//! parameter bounds and the element types of for-in writes. Calls use the
+//! declared return types resolved by the cross-file index. Anything uncertain
+//! (an ambiguous name, a tear-off reference, an argument that might be
 //! null) suppresses the report. This is a cross-file rule: it runs in the
 //! cross-file pass over the whole analyzed file set and is configured under the
 //! top-level `cross-file` section rather than `linter`.
@@ -17,10 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use falcon_analyze::{
-    AnalyzeContext, CrossFileRule, IdentityIndex, IdentitySource, LibrarySource, ProjectFile,
-    SemanticIndexes, SignatureIndex, TypeIndex, group_libraries,
-};
+use falcon_analyze::{AnalyzeContext, CrossFileRule, ProjectFile, SemanticIndexes};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_function_body};
@@ -38,6 +35,7 @@ impl CrossFileRule for UnnecessaryNullable {
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
     ) -> Vec<Diagnostic> {
+        let indexes = indexes.expect("unnecessary-nullable requires semantic indexes");
         // Count every function/method by name project-wide so we only reason
         // about names that resolve to exactly one declaration.
         let mut decl_count: HashMap<&str, usize> = HashMap::new();
@@ -50,56 +48,9 @@ impl CrossFileRule for UnnecessaryNullable {
             }
         }
 
-        let owned_indexes;
-        let indexes = match indexes {
-            Some(indexes) => indexes,
-            None => {
-                let project_files: Vec<_> = files
-                    .iter()
-                    .map(|file| (file.path.clone(), file.program()))
-                    .collect();
-                let grouping = group_libraries(&project_files);
-                let sources: Vec<_> = files
-                    .iter()
-                    .map(|file| IdentitySource {
-                        path: &file.path,
-                        parsed: &file.parsed,
-                        has_parse_errors: file.has_parse_errors,
-                    })
-                    .collect();
-                let packages =
-                    crate::package_identities(files.iter().map(|file| file.path.as_path()));
-                let identities = IdentityIndex::from_project_files(&sources, &packages);
-                let types = TypeIndex::from_resolved_files(
-                    files.iter().enumerate().map(|(index, file)| {
-                        (
-                            file.path.as_path(),
-                            LibrarySource {
-                                program: file.program(),
-                                has_parse_errors: file.has_parse_errors,
-                                has_unresolved_parts: grouping.is_unresolved(index),
-                            },
-                        )
-                    }),
-                    &identities,
-                );
-                let signature_files: Vec<_> = project_files
-                    .into_iter()
-                    .zip(files)
-                    .map(|((path, _), file)| (path, std::sync::Arc::clone(&file.parsed)))
-                    .collect();
-                let signatures =
-                    SignatureIndex::from_project_files(&signature_files, &identities, &types);
-                owned_indexes = SemanticIndexes {
-                    types,
-                    identities,
-                    signatures,
-                };
-                &owned_indexes
-            }
-        };
         let mut calls = Vec::new();
         let mut tear_offs = HashSet::new();
+        let mut writes = HashMap::new();
         for file in files {
             if file
                 .path
@@ -113,12 +64,12 @@ impl CrossFileRule for UnnecessaryNullable {
                 .with_types(&indexes.types)
                 .with_identities(&indexes.identities)
                 .with_signatures(&indexes.signatures);
-            let mut members = MemberBindings(HashSet::new());
-            members.visit_program(file.program());
             let mut nullability = ArgumentNullability {
                 values: HashMap::new(),
-                members: members.0,
+                members: HashSet::new(),
+                loops: HashMap::new(),
             };
+            Visitor::visit_program(&mut nullability, file.program());
             let state = SemanticState::new(file.program(), &ctx)
                 .expect("project identities describe the analyzed files");
             visit_program(&mut nullability, file.program(), state);
@@ -126,10 +77,12 @@ impl CrossFileRule for UnnecessaryNullable {
                 calls: Vec::new(),
                 tear_offs: HashSet::new(),
                 nullability: &nullability.values,
+                declarations: &decl_count,
             };
             collector.visit_program(file.program());
             calls.extend(collector.calls);
             tear_offs.extend(collector.tear_offs);
+            writes.insert(file.path.as_path(), nullability.values);
         }
 
         let mut diags = Vec::new();
@@ -137,6 +90,9 @@ impl CrossFileRule for UnnecessaryNullable {
             if f.has_parse_errors {
                 continue;
             }
+            let Some(file_writes) = writes.get(f.path.as_path()) else {
+                continue;
+            };
             for target in private_targets(f.program()) {
                 if decl_count.get(&target.name).copied() != Some(1) {
                     continue; // ambiguous name — can't attribute call sites
@@ -150,12 +106,19 @@ impl CrossFileRule for UnnecessaryNullable {
                 if calls.is_empty() {
                     continue; // no evidence of how it's called
                 }
-                let assigned_null = body_null_assignments(target.body);
+                let assigned_null = body_null_assignments(target.body, file_writes);
                 for param in &target.nullable_params {
                     if assigned_null.contains(&param.name) {
                         continue;
                     }
-                    if calls.iter().any(|c| c.passes_null(param)) {
+                    let default_is_null = param.default.is_none_or(|value| {
+                        let span = value.span();
+                        file_writes
+                            .get(&(span.start, span.end))
+                            .copied()
+                            .unwrap_or(true)
+                    });
+                    if calls.iter().any(|c| c.passes_null(param, default_is_null)) {
                         continue;
                     }
                     diags.push(Diagnostic::new(
@@ -190,9 +153,7 @@ struct NullableParam<'a> {
     name: &'a str,
     span: Span,
     slot: ParamSlot,
-    /// True when an omitted optional param would default to null (no non-null
-    /// default is written), so omission is treated as passing null.
-    default_is_null: bool,
+    default: Option<Expr<'a>>,
 }
 
 /// A private top-level function or method under consideration.
@@ -292,16 +253,12 @@ fn make_param(p: FormalParam<'_>, slot: ParamSlot) -> Option<NullableParam<'_>> 
     if !ty.is_nullable() {
         return None;
     }
-    let default_is_null = match p.default_value().map(Expr::unparenthesized) {
-        None => true,
-        Some(Expr::NullLit(_)) => true,
-        Some(_) => false,
-    };
+    let default = p.default_value();
     Some(NullableParam {
         name: p.name().name(),
         span: p.name().span(),
         slot,
-        default_is_null,
+        default,
     })
 }
 
@@ -351,26 +308,22 @@ impl CallInfo<'_> {
     /// Whether this call *might* pass null (or omit-as-null) for `param`. A `true`
     /// here suppresses the diagnostic — the rule only flags a param when every
     /// call is proven to pass a non-null value.
-    fn passes_null(&self, param: &NullableParam) -> bool {
+    fn passes_null(&self, param: &NullableParam, default_is_null: bool) -> bool {
         match &param.slot {
             ParamSlot::Positional { index, optional } => {
                 match self.positional_maybe_null.get(*index) {
                     Some(maybe_null) => *maybe_null,
                     // Argument omitted: for an optional param that defaults to null,
                     // omission means null; a required param can't legally be omitted.
-                    None => *optional && param.default_is_null,
+                    None => *optional && default_is_null,
                 }
             }
             ParamSlot::Named { optional } => match self.named_maybe_null.get(&param.name) {
                 Some(maybe_null) => *maybe_null,
-                None => *optional && param.default_is_null,
+                None => *optional && default_is_null,
             },
         }
     }
-}
-
-fn is_null_expr(e: Expr<'_>) -> bool {
-    matches!(e.unparenthesized(), Expr::NullLit(_))
 }
 
 fn call_info<'a>(
@@ -400,6 +353,7 @@ fn callee_name(callee: Expr<'_>) -> Option<&str> {
     match callee.unparenthesized() {
         Expr::Ident(id) => Some(id.name()),
         Expr::Field(field) => Some(field.field().name()),
+        Expr::DotShorthand(shorthand) => Some(shorthand.name().name()),
         _ => None,
     }
 }
@@ -409,48 +363,122 @@ struct CallCollector<'a, 'n> {
     /// Names used as bare values (tear-offs), not as a call callee.
     tear_offs: HashSet<&'a str>,
     nullability: &'n HashMap<(usize, usize), bool>,
+    declarations: &'n HashMap<&'a str, usize>,
 }
 
 struct ArgumentNullability<'a> {
     values: HashMap<(usize, usize), bool>,
     members: HashSet<&'a str>,
+    loops: HashMap<(usize, usize), (Span, bool)>,
 }
 
-impl ArgumentNullability<'_> {
-    fn record<'a>(&mut self, args: ArgList<'a>, state: &SemanticState<'a>) {
-        for arg in args.positional().chain(args.named().map(|arg| arg.value())) {
-            let span = arg.span();
-            let mut shadow = MemberReference {
-                names: &self.members,
-                found: false,
-            };
-            if state.enclosing_type.is_some() && !self.members.is_empty() {
-                shadow.visit_expr(arg);
-            }
-            self.values.insert(
-                (span.start, span.end),
-                shadow.found || state.infer(arg).nullable(),
-            );
+impl<'a> ArgumentNullability<'a> {
+    fn record(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
+        let span = expr.span();
+        let mut shadow = MemberReference {
+            names: &self.members,
+            found: false,
+        };
+        if state.enclosing_type.is_some() && !self.members.is_empty() {
+            shadow.visit_expr(expr);
+        }
+        self.values.insert(
+            (span.start, span.end),
+            shadow.found || !state.infer(expr).is_non_nullable(),
+        );
+    }
+
+    fn record_loop(&mut self, header: ForHeader<'a>, is_await: bool) {
+        if let Some(ForInit::ForIn(initializer)) = header.init()
+            && !initializer.declares_variable()
+        {
+            let span = initializer.iterable().span();
+            let target = initializer.name().span();
+            self.loops
+                .insert((span.start, span.end), (target, is_await));
+            self.values.insert((target.start, target.end), true);
         }
     }
 }
 
-struct MemberBindings<'a>(HashSet<&'a str>);
+impl<'a> Visitor<'a> for ArgumentNullability<'a> {
+    fn visit_stmt(&mut self, statement: Stmt<'a>) {
+        if let Stmt::For(statement) = statement {
+            self.record_loop(statement.header(), statement.is_await());
+        }
+        falcon_syntax::cst::visit::walk_stmt(self, statement);
+    }
 
-impl<'a> Visitor<'a> for MemberBindings<'a> {
+    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
+        if let CollectionElement::For(element) = element {
+            self.record_loop(element.header(), element.is_await());
+        }
+        falcon_syntax::cst::visit::walk_collection_element(self, element);
+    }
+
+    fn visit_map_element(&mut self, element: MapElement<'a>) {
+        if let MapElement::For(element) = element {
+            self.record_loop(element.header(), element.is_await());
+        }
+        falcon_syntax::cst::visit::walk_map_element(self, element);
+    }
+
+    fn visit_formal_param(&mut self, parameter: FormalParam<'a>) {
+        if let Some(value) = parameter.default_value() {
+            let span = value.span();
+            self.values.insert((span.start, span.end), true);
+        }
+        falcon_syntax::cst::visit::walk_formal_param(self, parameter);
+    }
+
+    fn visit_expr(&mut self, expression: Expr<'a>) {
+        let mut add = |value: Expr<'a>| {
+            let span = value.span();
+            self.values.insert((span.start, span.end), true);
+        };
+        match expression {
+            Expr::Assign(assignment) => add(assignment.value()),
+            Expr::Call(call) => {
+                for value in call
+                    .args()
+                    .positional()
+                    .chain(call.args().named().map(|arg| arg.value()))
+                {
+                    add(value);
+                }
+            }
+            Expr::Cascade(cascade) => {
+                for section in cascade.sections() {
+                    for operation in section.ops() {
+                        if let CascadeOp::Call(call) = operation {
+                            for value in call
+                                .args()
+                                .positional()
+                                .chain(call.args().named().map(|arg| arg.value()))
+                            {
+                                add(value);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        walk_expr(self, expression);
+    }
     fn visit_class_member(&mut self, member: ClassMember<'a>) {
         match member {
             ClassMember::Method(method) => {
-                self.0.insert(method.name().name());
+                self.members.insert(method.name().name());
             }
             ClassMember::Getter(getter) => {
-                self.0.insert(getter.name().name());
+                self.members.insert(getter.name().name());
             }
             ClassMember::Setter(setter) => {
-                self.0.insert(setter.name().name());
+                self.members.insert(setter.name().name());
             }
             ClassMember::Field(field) => {
-                self.0.extend(
+                self.members.extend(
                     field
                         .declarators()
                         .map(|declarator| declarator.name().name()),
@@ -484,18 +512,20 @@ impl<'a> Visitor<'a> for MemberReference<'_> {
 
 impl<'a> SemanticRuleVisitor<'a> for ArgumentNullability<'a> {
     fn visit_expr(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
-        match expr {
-            Expr::Call(call) => self.record(call.args(), state),
-            Expr::Cascade(cascade) => {
-                for section in cascade.sections() {
-                    for op in section.ops() {
-                        if let CascadeOp::Call(call) = op {
-                            self.record(call.args(), state);
-                        }
-                    }
-                }
+        let span = expr.span();
+        if self.values.contains_key(&(span.start, span.end)) {
+            self.record(expr, state);
+        }
+        if let Some(&(target, is_await)) = self.loops.get(&(span.start, span.end)) {
+            let element = falcon_analyze::resolve::flow::FlowContext {
+                model: &state.model,
+                signatures: &state.signatures,
+                type_parameters: &state.type_parameters,
+                field_promotions: false,
             }
-            _ => {}
+            .iterable_element(&state.infer(expr), is_await);
+            self.values
+                .insert((target.start, target.end), !element.is_non_nullable());
         }
     }
 }
@@ -512,7 +542,7 @@ impl<'a> Visitor<'a> for CallCollector<'a, '_> {
                 // Recurse into the callee's receiver (but not the callee name
                 // itself) and the arguments.
                 match callee.unparenthesized() {
-                    Expr::Ident(_) => {}
+                    Expr::Ident(_) | Expr::DotShorthand(_) => {}
                     Expr::Field(field) => self.visit_expr(field.object()),
                     other => self.visit_expr(other),
                 }
@@ -557,10 +587,26 @@ impl<'a> Visitor<'a> for CallCollector<'a, '_> {
                                 self.visit_expr(assign.target());
                                 self.visit_expr(assign.value());
                             }
+                            CascadeOp::Field(field)
+                                if self.declarations.contains_key(field.name().name()) =>
+                            {
+                                self.tear_offs.insert(field.name().name());
+                            }
                             CascadeOp::Field(_) | CascadeOp::NullAssert(_) => {}
                         }
                     }
                 }
+            }
+            Expr::DotShorthand(shorthand)
+                if self.declarations.contains_key(shorthand.name().name()) =>
+            {
+                self.tear_offs.insert(shorthand.name().name());
+            }
+            Expr::Field(field) => {
+                if self.declarations.contains_key(field.field().name()) {
+                    self.tear_offs.insert(field.field().name());
+                }
+                self.visit_expr(field.object());
             }
             Expr::Ident(id) => {
                 self.tear_offs.insert(id.name());
@@ -572,10 +618,14 @@ impl<'a> Visitor<'a> for CallCollector<'a, '_> {
 
 // ── Body null-assignment scan ─────────────────────────────────────────────────
 
-/// Parameter names that are assigned `null` somewhere in `body`.
-fn body_null_assignments(body: Option<FunctionBody<'_>>) -> HashSet<&str> {
+/// Parameter names assigned a value that is not proven non-null.
+fn body_null_assignments<'a>(
+    body: Option<FunctionBody<'a>>,
+    nullability: &HashMap<(usize, usize), bool>,
+) -> HashSet<&'a str> {
     let mut finder = NullAssignFinder {
         names: HashSet::new(),
+        nullability,
     };
     if let Some(body) = body {
         walk_function_body(&mut finder, body);
@@ -583,18 +633,79 @@ fn body_null_assignments(body: Option<FunctionBody<'_>>) -> HashSet<&str> {
     finder.names
 }
 
-struct NullAssignFinder<'a> {
+struct NullAssignFinder<'a, 'n> {
     names: HashSet<&'a str>,
+    nullability: &'n HashMap<(usize, usize), bool>,
 }
 
-impl<'a> Visitor<'a> for NullAssignFinder<'a> {
-    fn visit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::Assign(assign) = node
-            && assign.op() == AssignOp::Eq
-            && let Expr::Ident(id) = assign.target().unparenthesized()
-            && is_null_expr(assign.value())
+impl<'a> NullAssignFinder<'a, '_> {
+    fn record_loop(&mut self, header: ForHeader<'a>) {
+        if let Some(ForInit::ForIn(initializer)) = header.init()
+            && !initializer.declares_variable()
+            && self
+                .nullability
+                .get(&(
+                    initializer.name().span().start,
+                    initializer.name().span().end,
+                ))
+                .copied()
+                .unwrap_or(true)
         {
-            self.names.insert(id.name());
+            self.names.insert(initializer.name().name());
+        }
+    }
+}
+
+struct PatternWrites<'a, 'n>(&'n mut HashSet<&'a str>);
+
+impl<'a> Visitor<'a> for PatternWrites<'a, '_> {
+    fn visit_identifier(&mut self, name: Identifier<'a>) {
+        self.0.insert(name.name());
+    }
+}
+
+impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
+    fn visit_stmt(&mut self, statement: Stmt<'a>) {
+        match statement {
+            Stmt::PatternAssign(assignment) => {
+                PatternWrites(&mut self.names).visit_pattern(assignment.pattern());
+            }
+            Stmt::For(statement) => self.record_loop(statement.header()),
+            _ => {}
+        }
+        falcon_syntax::cst::visit::walk_stmt(self, statement);
+    }
+
+    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
+        if let CollectionElement::For(element) = element {
+            self.record_loop(element.header());
+        }
+        falcon_syntax::cst::visit::walk_collection_element(self, element);
+    }
+
+    fn visit_map_element(&mut self, element: MapElement<'a>) {
+        if let MapElement::For(element) = element {
+            self.record_loop(element.header());
+        }
+        falcon_syntax::cst::visit::walk_map_element(self, element);
+    }
+
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        if let Expr::Assign(assign) = node {
+            match assign.target().unparenthesized() {
+                Expr::Ident(id) => {
+                    if self
+                        .nullability
+                        .get(&(assign.value().span().start, assign.value().span().end))
+                        .copied()
+                        .unwrap_or(true)
+                    {
+                        self.names.insert(id.name());
+                    }
+                }
+                Expr::Field(_) | Expr::Index(_) => {}
+                target => PatternWrites(&mut self.names).visit_expr(target),
+            }
         }
         walk_expr(self, node);
     }
@@ -603,25 +714,182 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_dart_parser::parse;
 
     fn count(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
+        let config = FalconConfig::default();
+        let sources = vec![("test.dart".into(), source.into())];
+        let (diagnostics, files, indexes) = falcon_analyze::analyze_sequential_collecting_resolving(
+            &falcon_analyze::RuleRegistry::new(),
+            &sources,
+            &config,
+            true,
+            true,
+            falcon_analyze::Workspace::default(),
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
         UnnecessaryNullable
-            .analyze_project(
-                &[ProjectFile {
-                    path: "test.dart".into(),
-                    parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                        source: source.into(),
-                        tree,
-                    }),
-                    has_parse_errors: false,
-                }],
-                &FalconConfig::default(),
-                None,
-            )
+            .analyze_project(&files, &config, indexes.as_ref())
             .len()
+    }
+
+    #[test]
+    fn property_reads_only_record_declared_callable_names() {
+        let source = "class C { int _field = 1; void _method(int? value) {} void use(C c) { c._field; c.._field; c._method; c.._method; } }";
+        let file = ProjectFile {
+            path: "test.dart".into(),
+            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: source.into(),
+                tree: falcon_dart_parser::parse(source).tree,
+            }),
+            has_parse_errors: false,
+        };
+        let declarations = decl_names(file.program())
+            .into_iter()
+            .map(|name| (name, 1))
+            .collect();
+        let nullability = HashMap::new();
+        let mut collector = CallCollector {
+            calls: Vec::new(),
+            tear_offs: HashSet::new(),
+            nullability: &nullability,
+            declarations: &declarations,
+        };
+        collector.visit_program(file.program());
+        assert_eq!(collector.tear_offs, HashSet::from(["_method", "c"]));
+    }
+
+    #[test]
+    fn unbounded_type_parameters_are_not_nonnull_proof() {
+        assert_eq!(
+            count("void _take(Object? value) {} void use<T>(T value) { _take(value); }"),
+            0
+        );
+        assert_eq!(
+            count(
+                "void _take<T>(Object? value, T other) { value = other; } void use<T>(T other) { _take(1, other); }"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                "void _take(Object? value) {} void use<T extends Object>(T value) { _take(value); }"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn for_in_writes_use_the_iterable_element_type() {
+        for body in [
+            "for (value in <int>[1, 2]) {}",
+            "final values = [for (value in <int>[1, 2]) value];",
+            "final values = {for (value in <int>[1, 2]) 1: value};",
+        ] {
+            assert_eq!(
+                count(&format!(
+                    "void _take(int? value) {{ {body} }} void use() {{ _take(1); }}"
+                )),
+                1,
+                "{body}"
+            );
+        }
+        for iterable in ["<int?>[null]", "unknown"] {
+            assert_eq!(
+                count(&format!(
+                    "void _take(int? value, dynamic unknown) {{ for (value in {iterable}) {{}} }} void use() {{ _take(1, []); }}"
+                )),
+                0,
+                "{iterable}"
+            );
+        }
+        assert_eq!(
+            count(
+                "void _take<T>(Object? value, Iterable<T> values) { for (value in values) {} } void use<T>(Iterable<T> values) { _take(1, values); }"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "unnecessary-nullable requires semantic indexes")]
+    fn semantic_indexes_are_required_even_for_empty_projects() {
+        UnnecessaryNullable.analyze_project(&[], &FalconConfig::default(), None);
+    }
+
+    #[test]
+    fn implicit_writes_and_nullable_defaults_preserve_nullable_parameters() {
+        for body in [
+            "final result = ([value] = <int?>[null]);",
+            "for (int i = 0; i < 1; [value] = <int?>[null]) { i++; }",
+            "final values = {for (value in <int?>[null]) 1: 1};",
+            "[value] = <int?>[null];",
+            "for (value in <int?>[null]) {}",
+            "final values = [for (value in <int?>[null]) value];",
+        ] {
+            assert_eq!(
+                count(&format!(
+                    "void _take(int? value) {{ {body} }} void use() {{ _take(1); }}"
+                )),
+                0,
+                "{body}"
+            );
+        }
+        for parameter in ["[int? value = none]", "{int? value = none}"] {
+            assert_eq!(
+                count(&format!(
+                    "const int? none = null; void _take({parameter}) {{}} void use() {{ _take(); }}"
+                )),
+                0,
+                "{parameter}"
+            );
+        }
+        assert_eq!(
+            count("void _take([int? value = 1]) {} void use() { _take(); }"),
+            1
+        );
+        assert_eq!(
+            count("void _take({int? value = 1}) {} void use() { _take(); }"),
+            1
+        );
+    }
+
+    #[test]
+    fn member_and_index_writes_do_not_reassign_parameters() {
+        assert_eq!(
+            count(
+                "class Foo { int x = 0; } void _set(Foo? foo) { foo?.x = 1; } void use() { _set(Foo()); }"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                "void _set(List<int> items, int? index) { items[index!] = 1; } void use() { _set([0], 0); }"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn arguments_are_inferred_after_prior_argument_writes() {
+        assert_eq!(
+            count(
+                "int? maybe() => null; void _take(int a, int? b) {} \
+             void use() { int? x = maybe(); if (x == null) return; \
+             _take((x = null) == null ? 1 : 2, x); }"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn shorthand_calls_contribute_nullable_arguments() {
+        assert_eq!(
+            count(
+                "class C { static C _make(int? value) => C(); \
+             static void use() { C a = ._make(null); _make(1); } }"
+            ),
+            0
+        );
     }
 
     #[test]
@@ -641,7 +909,40 @@ mod tests {
     }
 
     #[test]
-    fn package_import_proves_nonnull_with_fallback_and_retained_indexes() {
+    fn method_tear_offs_escape_even_with_nonnull_direct_calls() {
+        for reference in [
+            "this._take",
+            "_take",
+            "this.._take",
+            "this.._take.call(null)",
+        ] {
+            let source = format!(
+                "void accept(dynamic callback) {{}} class C {{ \
+                 void _take(int? value) {{}} \
+                 void use() {{ _take(1); accept({reference}); }} }}"
+            );
+            assert_eq!(count(&source), 0, "{reference}");
+        }
+    }
+
+    #[test]
+    fn parameter_writes_require_nonnull_proof() {
+        for value in ["maybe()", "unknown", "flag ? 1 : null"] {
+            let source = format!(
+                "int? maybe() => null; void _take(int? value) {{ \
+                 dynamic unknown; bool flag = true; value = {value}; }} \
+                 void use() {{ _take(1); }}"
+            );
+            assert_eq!(count(&source), 0, "{value}");
+        }
+        assert_eq!(
+            count("void _take(int? value) { value = 2; } void use() { _take(1); }"),
+            1
+        );
+    }
+
+    #[test]
+    fn package_import_proves_nonnull_with_retained_indexes() {
         let root = std::env::temp_dir().join(format!(
             "falcon-nullable-package-{}-{}",
             std::process::id(),
@@ -691,17 +992,15 @@ mod tests {
                 }),
                 has_parse_errors: false,
             });
-            for indexes in [None, indexes.as_ref()] {
-                let diagnostics = registry.run_all(&files, &config, indexes).unwrap();
-                assert_eq!(
-                    diagnostics.len(),
-                    expected,
-                    "{return_type}: {diagnostics:?}"
-                );
-                if expected == 1 {
-                    assert_eq!(diagnostics[0].rule, NAME);
-                    assert_eq!(diagnostics[0].file_path, sources[1].0.to_string_lossy());
-                }
+            let diagnostics = registry.run_all(&files, &config, indexes.as_ref()).unwrap();
+            assert_eq!(
+                diagnostics.len(),
+                expected,
+                "{return_type}: {diagnostics:?}"
+            );
+            if expected == 1 {
+                assert_eq!(diagnostics[0].rule, NAME);
+                assert_eq!(diagnostics[0].file_path, sources[1].0.to_string_lossy());
             }
         }
         std::fs::remove_dir_all(root).unwrap();

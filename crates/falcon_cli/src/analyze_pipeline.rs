@@ -14,8 +14,8 @@ use falcon_config::{load_config, load_or_default};
 use falcon_dart_parser::lex_tree;
 use falcon_diagnostics::{Diagnostic, LineIndex};
 use falcon_rules::{
-    apply_severities, build_cross_file_registry, build_registry, package_identities,
-    requires_resolution, run_cross_file,
+    apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
+    package_identities, requires_resolution, run_cross_file,
 };
 
 use crate::file_walker::{walk_files, walk_pubspecs};
@@ -123,7 +123,7 @@ pub fn collect_check_with_sdk_locator(
     let registry = build_registry(&config);
     let cross_file_registry = build_cross_file_registry(&config);
     let collect_programs = !cross_file_registry.is_empty();
-    let resolve = requires_resolution(&registry);
+    let resolve = requires_resolution(&registry) || cross_file_requires_resolution(&config);
     let mut manifests = if collect_programs || resolve {
         walk_pubspecs(&options.paths, filter)?
     } else {

@@ -28,12 +28,15 @@ use falcon_diagnostics::{Diagnostic, Severity};
 
 use crate::meta::{RULE_METADATA, RuleKind, meta_for, suppression_lookup};
 
-/// Whether a registered file rule needs semantic resolution; unknown names return false.
+/// Whether a registered rule needs semantic resolution; unknown names return false.
 pub fn rule_requires_resolution(name: &str) -> bool {
     meta_for(name).is_some_and(|meta| {
         matches!(
             meta.kind,
             RuleKind::File {
+                needs_resolution: true,
+                ..
+            } | RuleKind::CrossFile {
                 needs_resolution: true,
                 ..
             }
@@ -47,6 +50,11 @@ pub fn requires_resolution(registry: &RuleRegistry) -> bool {
         .rules()
         .iter()
         .any(|(name, _)| rule_requires_resolution(name))
+}
+
+/// Whether an enabled cross-file rule needs semantic resolution.
+pub fn cross_file_requires_resolution(config: &FalconConfig) -> bool {
+    enabled_cross_file_rules(config).any(|(_, needs_resolution)| needs_resolution)
 }
 
 fn resolve_rules(
@@ -266,7 +274,7 @@ pub fn all_rules() -> Vec<(&'static str, Box<dyn Rule>)> {
         .iter()
         .filter_map(|meta| match meta.kind {
             RuleKind::File { make, .. } => Some((meta.name, make())),
-            RuleKind::CrossFile(_) => None,
+            RuleKind::CrossFile { .. } => None,
         })
         .collect()
 }
@@ -275,7 +283,7 @@ pub fn all_cross_file_rules() -> Vec<(&'static str, Box<dyn CrossFileRule>)> {
     RULE_METADATA
         .iter()
         .filter_map(|meta| match meta.kind {
-            RuleKind::CrossFile(make) => Some((meta.name, make())),
+            RuleKind::CrossFile { make, .. } => Some((meta.name, make())),
             RuleKind::File { .. } => None,
         })
         .collect()
@@ -284,15 +292,23 @@ pub fn all_cross_file_rules() -> Vec<(&'static str, Box<dyn CrossFileRule>)> {
 fn resolve_cross_file_rules(
     config: &FalconConfig,
 ) -> impl Iterator<Item = Box<dyn CrossFileRule>> + '_ {
+    enabled_cross_file_rules(config).map(|(make, _)| make())
+}
+
+fn enabled_cross_file_rules(
+    config: &FalconConfig,
+) -> impl Iterator<Item = (fn() -> Box<dyn CrossFileRule>, bool)> + '_ {
     RULE_METADATA.iter().filter_map(|meta| match meta.kind {
-        RuleKind::CrossFile(make)
-            if config.is_cross_file_rule_enabled_anywhere(
-                meta.group.as_str(),
-                meta.name,
-                meta.recommended,
-            ) =>
+        RuleKind::CrossFile {
+            make,
+            needs_resolution,
+        } if config.is_cross_file_rule_enabled_anywhere(
+            meta.group.as_str(),
+            meta.name,
+            meta.recommended,
+        ) =>
         {
-            Some(make())
+            Some((make, needs_resolution))
         }
         _ => None,
     })

@@ -22,8 +22,8 @@ use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::{lex_tree, parse_for_package};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
-    apply_severities, build_cross_file_registry, build_registry, package_identities,
-    requires_resolution, run_cross_file,
+    apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
+    package_identities, requires_resolution, run_cross_file,
 };
 use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
@@ -161,6 +161,40 @@ struct ExternalIndexCache {
     signatures: Arc<SignatureIndex>,
 }
 
+impl ExternalIndexCache {
+    fn build(external: ExternalSources<'_>) -> Self {
+        let identities = Arc::new(IdentityIndex::build_external(external));
+        let mut types = TypeIndex::from_resolved_files(std::iter::empty(), &identities);
+        types.add_external(external.libraries, &identities);
+        let types = Arc::new(types);
+        let signatures = Arc::new(SignatureIndex::build(
+            &[],
+            Some(external.libraries),
+            &identities,
+            &types,
+        ));
+        Self {
+            identities,
+            types,
+            signatures,
+        }
+    }
+}
+
+/// Body edits rebuild only the project overlay, not the SDK/package graph.
+struct CrossFileExternalCache {
+    roots: Vec<(PathBuf, Vec<String>)>,
+    libraries: ExternalLibraries,
+    indexes: Option<ExternalIndexCache>,
+}
+
+/// Resolver facts for the exact Dart sources admitted by the cross-file view.
+struct CrossFileIndexCache {
+    files: Vec<ProjectFile>,
+    packages: Vec<PackageIdentity>,
+    indexes: SemanticIndexes,
+}
+
 enum ProjectView {
     Semantic,
     CrossFile,
@@ -175,10 +209,15 @@ pub struct LspState {
     /// Cross-file rules; empty unless enabled by config. When empty the
     /// cross-file pass is skipped entirely (the whole-workspace walk is expensive).
     cross_file_rules: CrossFileRuleRegistry,
+    cross_file_resolve_semantics: bool,
+    cross_file_index_cache: Option<CrossFileIndexCache>,
+    cross_file_index_build_count: u64,
+    cross_file_external_cache: Option<CrossFileExternalCache>,
+    cross_file_external_load_count: u64,
     /// Root under which the cross-file pass walks `.dart` files: the config's
     /// directory, falling back to the current directory.
     workspace_root: PathBuf,
-    /// Whether any enabled per-file rule consumes resolver-backed semantic facts.
+    /// Whether any enabled per-file or cross-file rule consumes resolver-backed semantic facts.
     resolve_semantics: bool,
     /// Lazily rebuilt after document, config, or watched-workspace changes.
     semantic_snapshot: Option<SemanticSnapshot>,
@@ -224,13 +263,17 @@ impl LspState {
         let rules = build_registry(&config);
         let cross_file_rules = build_cross_file_registry(&config);
         let workspace_root = workspace_root_for(config_path.as_deref());
-        let resolve_semantics = requires_resolution(&rules);
+        let cross_file_resolve_semantics = cross_file_requires_resolution(&config);
+        let resolve_semantics = requires_resolution(&rules) || cross_file_resolve_semantics;
         Self {
             documents: HashMap::new(),
             config,
             config_path,
             rules,
             cross_file_rules,
+            cross_file_resolve_semantics,
+            cross_file_index_cache: None,
+            cross_file_index_build_count: 0,
             workspace_root,
             resolve_semantics,
             semantic_snapshot: None,
@@ -247,6 +290,8 @@ impl LspState {
             watched_local_sources: Vec::new(),
             watched_dependency_generation: 0,
             external_index_build_count: 0,
+            cross_file_external_cache: None,
+            cross_file_external_load_count: 0,
         }
     }
 
@@ -306,6 +351,21 @@ impl LspState {
                 .values()
                 .any(|document| document.path == *path)
                 && (self.watched_local_paths.binary_search(path).is_ok()
+                    || self
+                        .cross_file_external_cache
+                        .as_ref()
+                        .is_some_and(|cache| {
+                            cache.libraries.libraries().iter().any(|library| {
+                                library
+                                    .files
+                                    .iter()
+                                    .any(|file| watched_path(&file.path) == *path)
+                            }) || cache
+                                .libraries
+                                .attempted_project_paths()
+                                .chain(cache.libraries.project_companions())
+                                .any(|loaded| watched_path(loaded) == *path)
+                        })
                     || (self
                         .environment
                         .watched_dependency_roots()
@@ -330,6 +390,7 @@ impl LspState {
             self.reset_external_environment();
         }
         self.pending_semantic_affected.clear();
+        self.cross_file_index_cache = None;
         self.invalidate_semantic_snapshot();
         if rules_changed {
             return self.reload_config();
@@ -348,6 +409,8 @@ impl LspState {
         self.environment_stamps = None;
         self.external_libraries = ExternalLibraries::default();
         self.external_indexes = None;
+        self.cross_file_index_cache = None;
+        self.cross_file_external_cache = None;
         self.external_topology = None;
         self.external_reset_count += 1;
         self.watched_dependency_generation += 1;
@@ -366,6 +429,8 @@ impl LspState {
             self.environment.extend(paths);
             self.environment_stamps = Some(self.environment.config_stamps());
             self.watched_dependency_generation += 1;
+            self.cross_file_index_cache = None;
+            self.cross_file_external_cache = None;
         }
     }
 
@@ -397,6 +462,7 @@ impl LspState {
             changed = true;
         }
         if changed {
+            self.cross_file_index_cache = None;
             self.invalidate_semantic_snapshot();
         }
     }
@@ -700,8 +766,12 @@ impl LspState {
     pub fn reload_config(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
         self.config = load_from(self.config_path.as_deref());
         self.rules = build_registry(&self.config);
-        self.resolve_semantics = requires_resolution(&self.rules);
+        self.cross_file_resolve_semantics = cross_file_requires_resolution(&self.config);
+        self.resolve_semantics =
+            requires_resolution(&self.rules) || self.cross_file_resolve_semantics;
         self.cross_file_rules = build_cross_file_registry(&self.config);
+        self.cross_file_index_cache = None;
+        self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
         self.invalidate_semantic_snapshot();
         if self
@@ -818,6 +888,19 @@ impl LspState {
                     });
             same_packages.then_some(&snapshot.indexes)
         });
+        let reuse_snapshot = indexes.is_some();
+        if !reuse_snapshot && self.cross_file_resolve_semantics {
+            self.ensure_cross_file_indexes(&files);
+        }
+        let indexes = if reuse_snapshot {
+            self.semantic_snapshot
+                .as_ref()
+                .map(|snapshot| &snapshot.indexes)
+        } else {
+            self.cross_file_index_cache
+                .as_ref()
+                .map(|cache| &cache.indexes)
+        };
         let diags = match run_cross_file(&self.cross_file_rules, &files, &self.config, indexes) {
             Ok(diags) => diags,
             Err(error) => {
@@ -843,6 +926,236 @@ impl LspState {
                 .push(diag);
         }
         grouped
+    }
+
+    fn ensure_cross_file_indexes(&mut self, files: &[ProjectFile]) {
+        let dart_files = || {
+            files.iter().filter(|file| {
+                file.path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    == Some("dart")
+            })
+        };
+        let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+        if self.cross_file_index_cache.as_ref().is_some_and(|cache| {
+            dart_files().count() == cache.files.len()
+                && packages.len() == cache.packages.len()
+                && packages
+                    .iter()
+                    .zip(&cache.packages)
+                    .all(|(current, cached)| {
+                        current.name == cached.name && current.lib_root == cached.lib_root
+                    })
+                && dart_files().zip(&cache.files).all(|(file, cached)| {
+                    file.path == cached.path
+                        && file.source() == cached.source()
+                        && file.has_parse_errors == cached.has_parse_errors
+                })
+        }) {
+            return;
+        }
+        let indexes = self.cross_file_indexes(files);
+        self.cross_file_index_cache = Some(CrossFileIndexCache {
+            files: dart_files()
+                .map(|file| ProjectFile {
+                    path: file.path.clone(),
+                    parsed: Arc::clone(&file.parsed),
+                    has_parse_errors: file.has_parse_errors,
+                })
+                .collect(),
+            indexes,
+            packages,
+        });
+        self.cross_file_index_build_count += 1;
+    }
+
+    /// Resolve the cross-file view independently when open buffers or disk edits
+    /// prevent reuse of the semantic snapshot.
+    fn cross_file_indexes(&mut self, files: &[ProjectFile]) -> SemanticIndexes {
+        let files: Vec<_> = files
+            .iter()
+            .filter(|file| {
+                file.path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    == Some("dart")
+            })
+            .collect();
+        let paths: HashSet<_> = files.iter().map(|file| file.path.as_path()).collect();
+        // The external layer excludes semantic project files. URI imports of
+        // removed SDK/package files may be absent from the local dependency graph.
+        let cache = self.external_indexes.as_ref().filter(|_| {
+            self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
+                files.iter().all(|file| {
+                    snapshot.by_path.get(&file.path).is_some_and(|&index| {
+                        let cached = &snapshot.files[index];
+                        cached.source() == file.source()
+                            && cached.has_parse_errors == file.has_parse_errors
+                    })
+                }) && snapshot.files.iter().enumerate().all(|(index, file)| {
+                    paths.contains(file.path.as_path())
+                        || (!files.iter().any(|retained| {
+                            self.environment
+                                .sdk(&retained.path)
+                                .is_some_and(|sdk| file.path.starts_with(&sdk.root))
+                                || self.environment.package_config(&retained.path).is_some_and(
+                                    |config| {
+                                        config
+                                            .packages
+                                            .iter()
+                                            .any(|package| file.path.starts_with(&package.lib_root))
+                                    },
+                                )
+                        }) && snapshot.reverse_dependencies[index]
+                            .iter()
+                            .all(|&dependent| {
+                                !paths.contains(snapshot.files[dependent].path.as_path())
+                            }))
+                })
+            })
+        });
+        if let Some(cache) = cache {
+            return self
+                .build_semantic_indexes(&files, &self.external_libraries, Some(cache))
+                .0;
+        }
+        let graph_roots: Vec<_> = files
+            .iter()
+            .map(|file| {
+                let program = file.program();
+                let mut uris: Vec<_> = program
+                    .imports()
+                    .map(|import| import.uri().value().into_owned())
+                    .chain(
+                        program
+                            .exports()
+                            .map(|export| export.uri().value().into_owned()),
+                    )
+                    .chain(
+                        program
+                            .part_directives()
+                            .map(|part| part.uri().value().into_owned()),
+                    )
+                    .collect();
+                if let Some(uri) = program.part_of_directive().and_then(|part| part.uri()) {
+                    uris.push(uri.value().into_owned());
+                }
+                uris.extend(
+                    falcon_analyze::resolve::doc_imports(program, file.source()).map(str::to_owned),
+                );
+                (file.path.clone(), uris)
+            })
+            .collect();
+        if !self
+            .cross_file_external_cache
+            .as_ref()
+            .is_some_and(|cache| cache.roots == graph_roots)
+        {
+            let roots: Vec<_> = files
+                .iter()
+                .map(|file| (file.path.as_path(), file.program(), file.source()))
+                .collect();
+            let libraries =
+                ExternalLibraries::load(&self.environment, &roots, |path| paths.contains(path));
+            let topology = ExternalTopology::build(&libraries, &self.environment);
+            let depends_on_project = files
+                .iter()
+                .any(|file| topology.project_dependency_targets.contains(&file.path));
+            let indexes = (!depends_on_project).then(|| {
+                ExternalIndexCache::build(ExternalSources {
+                    libraries: &libraries,
+                    environment: &self.environment,
+                })
+            });
+            self.cross_file_external_cache = Some(CrossFileExternalCache {
+                roots: graph_roots,
+                libraries,
+                indexes,
+            });
+            self.cross_file_external_load_count += 1;
+        }
+        let cache = self.cross_file_external_cache.as_ref().unwrap();
+        self.build_semantic_indexes(&files, &cache.libraries, cache.indexes.as_ref())
+            .0
+    }
+
+    /// Build both LSP views with identical grouping and resolver layering.
+    fn build_semantic_indexes(
+        &self,
+        files: &[&ProjectFile],
+        external: &ExternalLibraries,
+        cache: Option<&ExternalIndexCache>,
+    ) -> (SemanticIndexes, LibraryGrouping, Vec<PackageIdentity>) {
+        let grouping_files: Vec<_> = files
+            .iter()
+            .map(|file| (file.path.clone(), file.program()))
+            .collect();
+        let grouping = group_libraries(&grouping_files);
+        let identity_sources: Vec<_> = files
+            .iter()
+            .map(|file| IdentitySource {
+                path: &file.path,
+                parsed: &file.parsed,
+                has_parse_errors: file.has_parse_errors,
+            })
+            .collect();
+        let sources: Vec<_> = files.iter().map(|file| file.source()).collect();
+        let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+        let identities = IdentityIndex::build_layer(
+            &identity_sources,
+            &sources,
+            &packages,
+            Some(ExternalSources {
+                libraries: external,
+                environment: &self.environment,
+            }),
+            cache.map(|cache| Arc::clone(&cache.identities)),
+            Some(&grouping),
+        );
+        let resolved_files = || {
+            files.iter().enumerate().map(|(index, file)| {
+                (
+                    file.path.as_path(),
+                    LibrarySource {
+                        program: file.program(),
+                        has_parse_errors: file.has_parse_errors,
+                        has_unresolved_parts: grouping.is_unresolved(index),
+                    },
+                )
+            })
+        };
+        let mut types = if let Some(cache) = cache {
+            TypeIndex::with_external(resolved_files(), &identities, Arc::clone(&cache.types))
+        } else {
+            TypeIndex::from_resolved_files(resolved_files(), &identities)
+        };
+        if cache.is_none() {
+            types.add_external(external, &identities);
+        }
+        let signature_files: Vec<_> = files
+            .iter()
+            .map(|file| (file.path.clone(), Arc::clone(&file.parsed)))
+            .collect();
+        let signatures = if let Some(cache) = cache {
+            SignatureIndex::with_external(
+                &signature_files,
+                &identities,
+                &types,
+                Arc::clone(&cache.signatures),
+            )
+        } else {
+            SignatureIndex::build(&signature_files, Some(external), &identities, &types)
+        };
+        (
+            SemanticIndexes {
+                types,
+                identities,
+                signatures,
+            },
+            grouping,
+            packages,
+        )
     }
 
     fn invalidate_semantic_snapshot(&mut self) {
@@ -962,29 +1275,10 @@ impl LspState {
                 Err(error) => warn!("failed to read {}: {}", path.display(), error),
             }
         }
-        let semantic_files = files
-            .iter()
-            .map(|file| (file.path.clone(), Arc::clone(&file.parsed)))
-            .collect::<Vec<_>>();
         let external = ExternalSources {
             libraries: &self.external_libraries,
             environment: &self.environment,
         };
-        let grouping_files = files
-            .iter()
-            .map(|file| (file.path.clone(), file.program()))
-            .collect::<Vec<_>>();
-        let grouping = group_libraries(&grouping_files);
-        let identity_sources = files
-            .iter()
-            .map(|file| IdentitySource {
-                path: &file.path,
-                parsed: &file.parsed,
-                has_parse_errors: file.has_parse_errors,
-            })
-            .collect::<Vec<_>>();
-        let packages = package_identities(files.iter().map(|file| file.path.as_path()));
-        let sources: Vec<&str> = files.iter().map(ProjectFile::source).collect();
         // A dependency importing a project file depends on mutable buffer facts.
         // Keep the ordinary combined build for that graph instead of freezing
         // unresolved/project references into the immutable external layer.
@@ -1030,71 +1324,18 @@ impl LspState {
         if external_depends_on_project {
             self.external_indexes = None;
         } else if !topology_matches || self.external_indexes.is_none() {
-            let identities = Arc::new(IdentityIndex::build_external(external));
-            let mut types = TypeIndex::from_resolved_files(std::iter::empty(), &identities);
-            types.add_external(external.libraries, &identities);
-            let types = Arc::new(types);
-            let signatures = Arc::new(SignatureIndex::build(
-                &[],
-                Some(external.libraries),
-                &identities,
-                &types,
-            ));
-            self.external_indexes = Some(ExternalIndexCache {
-                identities,
-                types,
-                signatures,
-            });
+            self.external_indexes = Some(ExternalIndexCache::build(external));
             self.external_index_build_count += 1;
         }
         if self.external_indexes.is_none() {
             self.external_index_build_count += 1;
         }
-        let identities = IdentityIndex::build_layer(
-            &identity_sources,
-            &sources,
-            &packages,
-            Some(external),
-            self.external_indexes
-                .as_ref()
-                .map(|cache| Arc::clone(&cache.identities)),
-            Some(&grouping),
+        let project_files: Vec<_> = files.iter().collect();
+        let (indexes, grouping, packages) = self.build_semantic_indexes(
+            &project_files,
+            &self.external_libraries,
+            self.external_indexes.as_ref(),
         );
-        let resolved_files = || {
-            files.iter().enumerate().map(|(index, file)| {
-                (
-                    file.path.as_path(),
-                    LibrarySource {
-                        program: file.program(),
-                        has_parse_errors: file.has_parse_errors,
-                        has_unresolved_parts: grouping.is_unresolved(index),
-                    },
-                )
-            })
-        };
-        let mut types = if let Some(cache) = &self.external_indexes {
-            TypeIndex::with_external(resolved_files(), &identities, Arc::clone(&cache.types))
-        } else {
-            TypeIndex::from_resolved_files(resolved_files(), &identities)
-        };
-        if self.external_indexes.is_none() {
-            types.add_external(external.libraries, &identities);
-        }
-        let signatures = if let Some(cache) = &self.external_indexes {
-            SignatureIndex::with_external(
-                &semantic_files,
-                &identities,
-                &types,
-                Arc::clone(&cache.signatures),
-            )
-        } else {
-            SignatureIndex::build(
-                &semantic_files,
-                Some(external.libraries),
-                &identities,
-                &types,
-            )
-        };
         let by_path = files
             .iter()
             .enumerate()
@@ -1109,11 +1350,7 @@ impl LspState {
         );
         self.semantic_snapshot = Some(SemanticSnapshot {
             files,
-            indexes: SemanticIndexes {
-                types,
-                identities,
-                signatures,
-            },
+            indexes,
             packages,
             grouping,
             by_path,
@@ -1906,6 +2143,289 @@ mod dependency_tests {
                 .collect::<Vec<_>>(),
             ["name", "workspace", "value", "Simple", "Braced"]
         );
+    }
+
+    #[test]
+    fn opening_files_outside_cross_file_view_preserves_nullable_diagnostics() {
+        for opened in ["external", "excluded", "dependency"] {
+            let dir = tempfile::tempdir().unwrap();
+            let app = dir.path().join("app");
+            let flutter = dir.path().join("flutter");
+            let sdk = flutter.join("bin/cache/dart-sdk/lib");
+            std::fs::create_dir_all(sdk.join("core")).unwrap();
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(app.join("lib")).unwrap();
+            let dependency = dir.path().join("dep/lib/api.dart");
+            std::fs::create_dir_all(dependency.parent().unwrap()).unwrap();
+            let dependency_source = "int value() => 1;\n";
+            std::fs::write(&dependency, dependency_source).unwrap();
+            std::fs::write(
+                sdk.join("libraries.json"),
+                r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                sdk.join("core/core.dart"),
+                "library dart.core; class Object {} abstract final class int {}",
+            )
+            .unwrap();
+            std::fs::write(
+                app.join(".dart_tool/package_config.json"),
+                format!(
+                    r#"{{"configVersion":2,"flutterRoot":"file://{}","packages":[
+                        {{"name":"app","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}},
+                        {{"name":"dep","rootUri":"../../dep","packageUri":"lib/","languageVersion":"3.9"}}
+                    ]}}"#,
+                    flutter.display(),
+                ),
+            )
+            .unwrap();
+            let config = app.join("falcon.json");
+            std::fs::write(
+                &config,
+                r#"{
+                    "linter":{"enabled":false},
+                    "cross-file":{"rules":{"recommended":false,
+                        "correctness":{"unnecessary-nullable":"warn"}}}
+                }"#,
+            )
+            .unwrap();
+            let path = app.join("lib/main.dart");
+            let source = "import 'package:dep/api.dart';\nvoid _take(int? value) {}\nvoid main() { _take(value()); }\n";
+            std::fs::write(&path, source).unwrap();
+            let other = match opened {
+                "excluded" => app.join("lib/excluded.dart"),
+                "dependency" => dependency,
+                _ => dir.path().join("external.dart"),
+            };
+            let other_source = if opened == "dependency" {
+                dependency_source
+            } else {
+                "void unrelated() {}\n"
+            };
+            std::fs::write(&other, other_source).unwrap();
+            let mut state = LspState::new_with_sdk_locator(Some(config), |config| {
+                falcon_analyze::environment::DartSdk::load(
+                    &config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"),
+                )
+            });
+            if opened == "excluded" {
+                state
+                    .config
+                    .files
+                    .includes
+                    .extend_excludes(&[other.to_string_lossy().into_owned()]);
+            }
+            let uri = format!("file://{}", path.display());
+            state.open(&uri, source.into(), Some(1));
+            assert!(state.environment.has_sdk());
+            state.cross_file_pass();
+            assert!(
+                state.documents[&uri]
+                    .last_diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+            );
+
+            let other_uri = format!("file://{}", other.display());
+            state.open(&other_uri, other_source.into(), Some(1));
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            assert!(snapshot.by_path.contains_key(&canonical_or_lexical(&other)));
+            let builds = state.semantic_snapshot_build_count;
+            // An unrelated external buffer can reuse the loaded SDK layer.
+            // Removed package sources conservatively require a fresh layer.
+            if opened == "external" {
+                std::fs::remove_file(sdk.join("core/core.dart")).unwrap();
+            }
+            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            assert!(complete);
+            state.ensure_cross_file_indexes(&files);
+            assert!(
+                state
+                    .cross_file_index_cache
+                    .as_ref()
+                    .unwrap()
+                    .indexes
+                    .identities
+                    .has_sdk_sources()
+            );
+            let index_builds = state.cross_file_index_build_count;
+            state.cross_file_pass();
+            assert!(
+                state.documents[&uri]
+                    .last_diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+            );
+            assert_eq!(state.semantic_snapshot_build_count, builds);
+            state.cross_file_pass();
+            assert_eq!(state.cross_file_index_build_count, index_builds);
+            assert_eq!(state.semantic_snapshot_build_count, builds);
+            if opened != "external" {
+                let external_loads = state.cross_file_external_load_count;
+                assert!(external_loads > 0);
+                for version in [2, 3] {
+                    assert!(state.change(
+                        &uri,
+                        format!("{source}// body edit {version}\n"),
+                        Some(version),
+                    ));
+                    state.analyze(&uri);
+                    state.cross_file_pass();
+                    assert_eq!(state.cross_file_external_load_count, external_loads);
+                    assert!(
+                        state.documents[&uri]
+                            .last_diagnostics
+                            .iter()
+                            .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+                    );
+                }
+                let added = dir.path().join("dep/lib/added.dart");
+                std::fs::write(&added, "int addedValue() => 1;\n").unwrap();
+                let changed_imports = source
+                    .replace("package:dep/api.dart", "package:dep/added.dart")
+                    .replace("_take(value())", "_take(addedValue())");
+                assert!(state.change(&uri, changed_imports, Some(4)));
+                state.analyze(&uri);
+                state.cross_file_pass();
+                assert_eq!(state.cross_file_external_load_count, external_loads + 1);
+                assert!(
+                    state
+                        .cross_file_external_cache
+                        .as_ref()
+                        .unwrap()
+                        .libraries
+                        .libraries()
+                        .iter()
+                        .any(|library| {
+                            library
+                                .files
+                                .iter()
+                                .any(|file| file.path == canonical_or_lexical(&added))
+                        })
+                );
+                assert!(
+                    state.documents[&uri]
+                        .last_diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+                );
+                std::fs::write(&added, "int? addedValue() => null;\n").unwrap();
+                state.watched_files_changed(std::slice::from_ref(&added));
+                state.cross_file_pass();
+                assert_eq!(state.cross_file_external_load_count, external_loads + 2);
+                assert!(
+                    state.documents[&uri]
+                        .last_diagnostics
+                        .iter()
+                        .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cross_file_external_cache_invalidates_watched_excluded_companions() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app");
+        std::fs::create_dir_all(app.join("lib")).unwrap();
+        std::fs::create_dir_all(dir.path().join("dep")).unwrap();
+        let config = app.join("falcon.json");
+        std::fs::write(
+            &config,
+            r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,
+                "correctness":{"unnecessary-nullable":"warn"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("lib/main.dart"),
+            "library; part 'excluded.dart'; void main() {}",
+        )
+        .unwrap();
+        let companion = app.join("lib/excluded.dart");
+        // Enhanced parts can introduce dependencies without changing their owner.
+        std::fs::write(
+            &companion,
+            "part of 'main.dart'; import '../../dep/first.dart';",
+        )
+        .unwrap();
+        let first = dir.path().join("dep/first.dart");
+        let second = dir.path().join("dep/second.dart");
+        std::fs::write(&first, "class First {}").unwrap();
+        std::fs::write(&second, "class Second {}").unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+        state
+            .config
+            .files
+            .includes
+            .extend_excludes(&[companion.to_string_lossy().into_owned()]);
+        let has_external = |state: &LspState, path: &Path| {
+            let path = canonical_or_lexical(path);
+            state
+                .cross_file_external_cache
+                .as_ref()
+                .unwrap()
+                .libraries
+                .libraries()
+                .iter()
+                .any(|library| library.files.iter().any(|file| file.path == path))
+        };
+        state.cross_file_diagnostics();
+        assert!(has_external(&state, &first));
+        assert!(!has_external(&state, &second));
+        let loads = state.cross_file_external_load_count;
+        std::fs::write(
+            &companion,
+            "part of 'main.dart'; import '../../dep/second.dart';",
+        )
+        .unwrap();
+        state.watched_files_changed(std::slice::from_ref(&companion));
+        state.cross_file_diagnostics();
+        assert_eq!(state.cross_file_external_load_count, loads + 1);
+        assert!(has_external(&state, &second));
+        assert!(!has_external(&state, &first));
+    }
+
+    #[test]
+    fn cross_file_indexes_cache_tracks_disk_revisions_and_file_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("falcon.json");
+        std::fs::write(
+            &config,
+            r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,
+                "correctness":{"unnecessary-nullable":"warn"}}}}"#,
+        )
+        .unwrap();
+        let path = dir.path().join("main.dart");
+        std::fs::write(&path, "void _take(int? value) {} void main() { _take(1); }").unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+        state.cross_file_diagnostics();
+        assert_eq!(state.cross_file_index_build_count, 1);
+        // Disk collection reparses files, so Arc identity is not a revision key.
+        state.cross_file_diagnostics();
+        assert_eq!(state.cross_file_index_build_count, 1);
+        std::fs::write(
+            &path,
+            "void _take(int? value) {} void main() { _take(null); }",
+        )
+        .unwrap();
+        let diagnostics = state.cross_file_diagnostics();
+        assert!(
+            diagnostics
+                .values()
+                .flatten()
+                .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
+        );
+        assert_eq!(state.cross_file_index_build_count, 2);
+        let peer = dir.path().join("peer.dart");
+        std::fs::write(&peer, "void peer() {}").unwrap();
+        state.cross_file_diagnostics();
+        assert_eq!(state.cross_file_index_build_count, 3);
+        std::fs::remove_file(&peer).unwrap();
+        state.cross_file_diagnostics();
+        assert_eq!(state.cross_file_index_build_count, 4);
+        state.cross_file_diagnostics();
+        assert_eq!(state.cross_file_index_build_count, 4);
     }
 
     #[cfg(unix)]

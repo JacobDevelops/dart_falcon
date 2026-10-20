@@ -13,3 +13,9 @@ void driver() {
   _viaProvenNonNull(nonNull());
   _viaNullableReturn(maybeNull());
 }
+
+void nonnullLoopCalls() {
+  _nonnullLoop(1);
+  _nonnullCollectionLoop(1);
+  _nonnullMapLoop(1);
+}

@@ -56,7 +56,10 @@ pub enum RuleKind {
         make: fn() -> Box<dyn Rule>,
         needs_resolution: bool,
     },
-    CrossFile(fn() -> Box<dyn CrossFileRule>),
+    CrossFile {
+        make: fn() -> Box<dyn CrossFileRule>,
+        needs_resolution: bool,
+    },
 }
 
 /// Upstream provenance of a rule: which linter it was ported from (with the
@@ -136,8 +139,26 @@ impl RuleMeta {
             domain,
             recommended,
             source,
-            kind: RuleKind::CrossFile(make_cross_file_rule::<T>),
+            kind: RuleKind::CrossFile {
+                make: make_cross_file_rule::<T>,
+                needs_resolution: false,
+            },
         }
+    }
+
+    const fn resolved_cross_file<T: CrossFileRule + Default + 'static>(
+        name: &'static str,
+        group: RuleGroup,
+        domain: Option<Domain>,
+        recommended: bool,
+        source: RuleSource,
+    ) -> Self {
+        let mut meta = Self::cross_file::<T>(name, group, domain, recommended, source);
+        meta.kind = RuleKind::CrossFile {
+            make: make_cross_file_rule::<T>,
+            needs_resolution: true,
+        };
+        meta
     }
 
     pub fn domain_names(&self) -> &'static [&'static str] {
@@ -145,7 +166,7 @@ impl RuleMeta {
     }
 
     pub const fn is_cross_file(&self) -> bool {
-        matches!(self.kind, RuleKind::CrossFile(_))
+        matches!(self.kind, RuleKind::CrossFile { .. })
     }
 }
 
@@ -771,7 +792,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::DartCodeLinter("check-unused-code"),
     ),
-    RuleMeta::cross_file::<cross_file::unnecessary_nullable::UnnecessaryNullable>(
+    RuleMeta::resolved_cross_file::<cross_file::unnecessary_nullable::UnnecessaryNullable>(
         "unnecessary-nullable",
         RuleGroup::Correctness,
         NONE,

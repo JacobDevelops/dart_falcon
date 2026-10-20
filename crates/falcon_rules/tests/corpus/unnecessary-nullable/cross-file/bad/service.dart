@@ -50,3 +50,13 @@ void _viaProvenNonNull(int? v) { /* expect: unnecessary-nullable */
 void _viaNullableReturn(int? v) {
   print(v);
 }
+
+void _nonnullLoop(int? value) { /* expect: unnecessary-nullable */
+  for (value in <int>[1, 2]) {}
+}
+void _nonnullCollectionLoop(int? value) { /* expect: unnecessary-nullable */
+  final values = [for (value in <int>[1, 2]) value];
+}
+void _nonnullMapLoop(int? value) { /* expect: unnecessary-nullable */
+  final values = {for (value in <int>[1, 2]) 1: value};
+}

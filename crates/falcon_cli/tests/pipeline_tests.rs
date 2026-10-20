@@ -466,6 +466,58 @@ fn test_config_both_features_disabled_yields_no_diagnostics() {
     );
 }
 
+#[test]
+fn unnecessary_nullable_is_independent_of_enabled_file_rules() {
+    let temp = tempdir().unwrap();
+    let app = temp.path().join("app");
+    let dependency = temp.path().join("dep/lib");
+    fs::create_dir_all(app.join(".dart_tool")).unwrap();
+    fs::create_dir_all(&dependency).unwrap();
+    fs::write(dependency.join("api.dart"), "int value() => 1;").unwrap();
+    fs::write(
+        app.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"packages":[
+            {"name":"app","rootUri":"../","packageUri":""},
+            {"name":"dep","rootUri":"../../dep","packageUri":"lib/"}
+        ]}"#,
+    )
+    .unwrap();
+    fs::write(
+        app.join("a.dart"),
+        "import 'package:dep/api.dart'; void _take(int? value) {} void use() { _take(value()); }",
+    )
+    .unwrap();
+    let config = app.join("falcon.json");
+    let mut results = Vec::with_capacity(2);
+    for enabled in [false, true] {
+        fs::write(&config, serde_json::json!({
+            "linter": {
+                "enabled": enabled,
+                "rules": { "recommended": false, "suspicious": { "avoid-ignoring-return-values": "warn" } }
+            },
+            "cross-file": {
+                "rules": { "recommended": false, "correctness": { "unnecessary-nullable": "warn" } }
+            }
+        }).to_string()).unwrap();
+        let loaded = falcon_config::load_config(&config).unwrap();
+        assert_eq!(
+            falcon_rules::requires_resolution(&falcon_rules::build_registry(&loaded)),
+            enabled
+        );
+        assert!(falcon_rules::cross_file_requires_resolution(&loaded));
+        let out = collect_check(&options_for(&app, Some(config.clone()))).unwrap();
+        results.push(
+            out.diagnostics
+                .into_iter()
+                .filter(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+                .map(|diagnostic| (diagnostic.message, diagnostic.span))
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(results[0].len(), 1);
+    assert_eq!(results[0], results[1]);
+}
+
 /// max_errors from falcon.json truncates diagnostics; CLI flag wins over config.
 #[test]
 fn test_config_max_errors_and_cli_precedence() {
