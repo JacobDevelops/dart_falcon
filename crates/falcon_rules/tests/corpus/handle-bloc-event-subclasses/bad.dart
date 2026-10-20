@@ -32,3 +32,21 @@ class MismatchedValueBloc extends Bloc<GenericEvent, int> {
     on<Value<String>>((event, emit) {});
   }
 }
+
+class UnrelatedHelperBloc extends Bloc<Event, int> {
+  UnrelatedHelperBloc.other(UnrelatedHelperBloc other) : super(0) { /* expect: handle-bloc-event-subclasses */
+    other._registerHandlers();
+  }
+  UnrelatedHelperBloc.shadowed() : super(0) { /* expect: handle-bloc-event-subclasses */
+    void _registerHandlers() {}
+    _registerHandlers();
+  }
+  UnrelatedHelperBloc.staticCall() : super(0) { /* expect: handle-bloc-event-subclasses */
+    _staticHelper();
+  }
+  void _registerHandlers() {
+    on<Start>((event, emit) {});
+    on<Stop>((event, emit) {});
+  }
+  static void _staticHelper() {}
+}

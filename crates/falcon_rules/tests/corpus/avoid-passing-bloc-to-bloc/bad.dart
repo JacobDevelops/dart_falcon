@@ -8,28 +8,28 @@ class ConsumerCubit extends b.Cubit<int> {
 }
 
 void dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {
-  Consumer(/* expect: avoid-passing-bloc-to-bloc */ counter);
-  new Consumer(/* expect: avoid-passing-bloc-to-bloc */ counter);
-  Consumer.named(dependency: /* expect: avoid-passing-bloc-to-bloc */ cubit);
-  ChildConsumer(/* expect: avoid-passing-bloc-to-bloc */ counter);
-  ConsumerAlias(/* expect: avoid-passing-bloc-to-bloc */ counter);
-  consumer.accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
-  Consumer(/* expect: avoid-passing-bloc-to-bloc */ Counter());
-  ConsumerCubit(/* expect: avoid-passing-bloc-to-bloc */ counter);
-  consumer..accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
+  Consumer(counter); /* expect: avoid-passing-bloc-to-bloc */
+  new Consumer(counter); /* expect: avoid-passing-bloc-to-bloc */
+  Consumer.named(dependency: cubit); /* expect: avoid-passing-bloc-to-bloc */
+  ChildConsumer(counter); /* expect: avoid-passing-bloc-to-bloc */
+  ConsumerAlias(counter); /* expect: avoid-passing-bloc-to-bloc */
+  consumer.accept(counter); /* expect: avoid-passing-bloc-to-bloc */
+  Consumer(Counter()); /* expect: avoid-passing-bloc-to-bloc */
+  ConsumerCubit(counter); /* expect: avoid-passing-bloc-to-bloc */
+  consumer..accept(counter); /* expect: avoid-passing-bloc-to-bloc */
 }
 
 class ImplicitConsumer extends b.Cubit<int> {
   ImplicitConsumer() : super(0);
   void accept(Object dependency) {}
   void dependencies(Counter counter) {
-    accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
-    this.accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
+    accept(counter); /* expect: avoid-passing-bloc-to-bloc */
+    this.accept(counter); /* expect: avoid-passing-bloc-to-bloc */
   }
 }
 
 class InheritedConsumer extends ImplicitConsumer {
   void inherited(Counter counter) {
-    accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
+    accept(counter); /* expect: avoid-passing-bloc-to-bloc */
   }
 }

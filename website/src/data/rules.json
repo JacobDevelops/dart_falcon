@@ -10161,16 +10161,34 @@
         "file": null,
         "line": 31,
         "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 37,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 40,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
       }
     ],
-    "docs": "Warns when a Bloc constructor leaves a concrete event subclass without a handler.\n\nRegister a handler for every event subclass, or register a handler for their\nparent event. This rule checks event classes declared in the same file and\n`on<Event>` registrations in each generative constructor, including cascades.\nHandler coverage compares full event instantiations and accepts unknown subtyping.\nInferred registrations conservatively count as coverage. Factories, redirects,\nabstract event classes, generic event roots and overridden `on` APIs are ignored.",
+    "docs": "Warns when a Bloc constructor leaves a concrete event subclass without a handler.\n\nRegister a handler for every event subclass, or register a handler for their\nparent event. This rule checks event classes declared in the same file and\n`on<Event>` registrations in each generative constructor, including cascades.\nHandler coverage compares full event instantiations and accepts unknown subtyping.\nInferred registrations conservatively count as coverage. Factories, redirects,\nabstract event classes, generic event roots and overridden `on` APIs are ignored.\nCalls to own instance helpers conservatively count as unresolved coverage.",
     "domains": [
       "bloc"
     ],
     "examples": {
-      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.empty() : super(0) {}\n  CounterBloc.partialCascade() : super(0) {\n    this..on<Start>((event, emit) {});\n  }\n  CounterBloc.otherReceiver(Bloc<Event, int> other) : super(0) {\n    other\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CounterBloc.localOn() : super(0) {\n    void on(Object handler) {}\n    on((Event event, Emitter<int> emit) {});\n  }\n}\n\nabstract class GenericEvent {}\nabstract class Value<T> extends GenericEvent {}\nclass IntValue extends Value<int> {}\n\nclass MismatchedValueBloc extends Bloc<GenericEvent, int> {\n  MismatchedValueBloc() : super(0) {\n    on<Value<String>>((event, emit) {});\n  }\n}",
+      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.empty() : super(0) {}\n  CounterBloc.partialCascade() : super(0) {\n    this..on<Start>((event, emit) {});\n  }\n  CounterBloc.otherReceiver(Bloc<Event, int> other) : super(0) {\n    other\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CounterBloc.localOn() : super(0) {\n    void on(Object handler) {}\n    on((Event event, Emitter<int> emit) {});\n  }\n}\n\nabstract class GenericEvent {}\nabstract class Value<T> extends GenericEvent {}\nclass IntValue extends Value<int> {}\n\nclass MismatchedValueBloc extends Bloc<GenericEvent, int> {\n  MismatchedValueBloc() : super(0) {\n    on<Value<String>>((event, emit) {});\n  }\n}\n\nclass UnrelatedHelperBloc extends Bloc<Event, int> {\n  UnrelatedHelperBloc.other(UnrelatedHelperBloc other) : super(0) {\n    other._registerHandlers();\n  }\n  UnrelatedHelperBloc.shadowed() : super(0) {\n    void _registerHandlers() {}\n    _registerHandlers();\n  }\n  UnrelatedHelperBloc.staticCall() : super(0) {\n    _staticHelper();\n  }\n  void _registerHandlers() {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  static void _staticHelper() {}\n}",
       "crossFile": null,
-      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CompleteBloc extends Bloc<Event, int> {\n  CompleteBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CompleteBloc.parent() : super(0) {\n    on<Event>((event, emit) {});\n  }\n  CompleteBloc.redirect() : this();\n  CompleteBloc.inferred() : super(0) {\n    on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascade() : super(0) {\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CompleteBloc.inferredCascade() : super(0) {\n    this..on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascadeWithLocalOn() : super(0) {\n    void on<T>(Object handler) {}\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n}\nclass NotABloc {\n  NotABloc();\n}\n\nclass GenericBloc<Event extends Object> extends Bloc<Event, int> {\n  GenericBloc() : super(0) {\n    on<Event>((event, emit) {});\n  }\n}\n\nabstract class GenericEvent {}\nabstract class Value<T> extends GenericEvent {}\nclass IntValue extends Value<int> {}\n\nclass MatchingValueBloc extends Bloc<GenericEvent, int> {\n  MatchingValueBloc() : super(0) {\n    on<Value<int>>((event, emit) {});\n  }\n  MatchingValueBloc.raw() : super(0) {\n    on<Value>((event, emit) {});\n  }\n  MatchingValueBloc.dynamicArgument() : super(0) {\n    on<Value<dynamic>>((event, emit) {});\n  }\n}\n\nabstract class UnresolvedEvent {}\nabstract class UnknownValue<T> extends UnresolvedEvent {}\nclass FooValue extends UnknownValue<Foo> {}\n\nclass UnresolvedValueBloc extends Bloc<UnresolvedEvent, int> {\n  UnresolvedValueBloc() : super(0) {\n    on<UnknownValue<Foo>>((event, emit) {});\n  }\n}\n\nabstract class WrappedEvent {}\nabstract class WrappedValue<T> extends WrappedEvent {}\nclass Wrapped<T> extends WrappedValue<T> {}\n\nclass WrappedValueBloc extends Bloc<WrappedEvent, int> {\n  WrappedValueBloc() : super(0) {\n    on<WrappedValue<int>>((event, emit) {});\n  }\n}"
+      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CompleteBloc extends Bloc<Event, int> {\n  CompleteBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CompleteBloc.parent() : super(0) {\n    on<Event>((event, emit) {});\n  }\n  CompleteBloc.redirect() : this();\n  CompleteBloc.inferred() : super(0) {\n    on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascade() : super(0) {\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CompleteBloc.inferredCascade() : super(0) {\n    this..on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascadeWithLocalOn() : super(0) {\n    void on<T>(Object handler) {}\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n}\nclass NotABloc {\n  NotABloc();\n}\n\nclass GenericBloc<Event extends Object> extends Bloc<Event, int> {\n  GenericBloc() : super(0) {\n    on<Event>((event, emit) {});\n  }\n}\n\nabstract class GenericEvent {}\nabstract class Value<T> extends GenericEvent {}\nclass IntValue extends Value<int> {}\n\nclass MatchingValueBloc extends Bloc<GenericEvent, int> {\n  MatchingValueBloc() : super(0) {\n    on<Value<int>>((event, emit) {});\n  }\n  MatchingValueBloc.raw() : super(0) {\n    on<Value>((event, emit) {});\n  }\n  MatchingValueBloc.dynamicArgument() : super(0) {\n    on<Value<dynamic>>((event, emit) {});\n  }\n}\n\nabstract class UnresolvedEvent {}\nabstract class UnknownValue<T> extends UnresolvedEvent {}\nclass FooValue extends UnknownValue<Foo> {}\n\nclass UnresolvedValueBloc extends Bloc<UnresolvedEvent, int> {\n  UnresolvedValueBloc() : super(0) {\n    on<UnknownValue<Foo>>((event, emit) {});\n  }\n}\n\nabstract class WrappedEvent {}\nabstract class WrappedValue<T> extends WrappedEvent {}\nclass Wrapped<T> extends WrappedValue<T> {}\n\nclass WrappedValueBloc extends Bloc<WrappedEvent, int> {\n  WrappedValueBloc() : super(0) {\n    on<WrappedValue<int>>((event, emit) {});\n  }\n}\n\nclass HelperBloc extends Bloc<Event, int> {\n  HelperBloc() : super(0) {\n    _registerHandlers();\n  }\n  HelperBloc.explicitThis() : super(0) {\n    this._registerHandlers();\n  }\n  void _registerHandlers() {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n}"
     },
     "group": "correctness",
     "name": "handle-bloc-event-subclasses",
@@ -35482,73 +35500,73 @@
     "description": "Rejects direct Bloc and Cubit arguments to other blocs.",
     "diagnostics": [
       {
-        "column": 53,
+        "column": 12,
         "file": null,
         "line": 11,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 57,
+        "column": 16,
         "file": null,
         "line": 12,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 71,
+        "column": 30,
         "file": null,
         "line": 13,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 58,
+        "column": 17,
         "file": null,
         "line": 14,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 58,
+        "column": 17,
         "file": null,
         "line": 15,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 60,
+        "column": 19,
         "file": null,
         "line": 16,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 53,
+        "column": 12,
         "file": null,
         "line": 17,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 58,
+        "column": 17,
         "file": null,
         "line": 18,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 61,
+        "column": 20,
         "file": null,
         "line": 19,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 53,
+        "column": 12,
         "file": null,
         "line": 26,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 58,
+        "column": 17,
         "file": null,
         "line": 27,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       },
       {
-        "column": 53,
+        "column": 12,
         "file": null,
         "line": 33,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
@@ -35559,7 +35577,7 @@
       "bloc"
     ],
     "examples": {
-      "bad": "import 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ConsumerAlias = Consumer;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nvoid dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {\n  Consumer( counter);\n  new Consumer( counter);\n  Consumer.named(dependency:  cubit);\n  ChildConsumer( counter);\n  ConsumerAlias( counter);\n  consumer.accept( counter);\n  Consumer( Counter());\n  ConsumerCubit( counter);\n  consumer..accept( counter);\n}\n\nclass ImplicitConsumer extends b.Cubit<int> {\n  ImplicitConsumer() : super(0);\n  void accept(Object dependency) {}\n  void dependencies(Counter counter) {\n    accept( counter);\n    this.accept( counter);\n  }\n}\n\nclass InheritedConsumer extends ImplicitConsumer {\n  void inherited(Counter counter) {\n    accept( counter);\n  }\n}",
+      "bad": "import 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ConsumerAlias = Consumer;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nvoid dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {\n  Consumer(counter);\n  new Consumer(counter);\n  Consumer.named(dependency: cubit);\n  ChildConsumer(counter);\n  ConsumerAlias(counter);\n  consumer.accept(counter);\n  Consumer(Counter());\n  ConsumerCubit(counter);\n  consumer..accept(counter);\n}\n\nclass ImplicitConsumer extends b.Cubit<int> {\n  ImplicitConsumer() : super(0);\n  void accept(Object dependency) {}\n  void dependencies(Counter counter) {\n    accept(counter);\n    this.accept(counter);\n  }\n}\n\nclass InheritedConsumer extends ImplicitConsumer {\n  void inherited(Counter counter) {\n    accept(counter);\n  }\n}",
       "crossFile": null,
       "good": "import 'support.dart' as real;\n\nclass Bloc<E, S> {}\nclass Cubit<S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(real.Counter counter) => LookupConsumer();\n}\n\nvoid boundaries(real.Counter counter, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(real.Repository(0));\n  real.Repository(counter);\n  real.View(counter);\n  real.Consumer(Cubit<int>());\n  real.Consumer(Bloc<Object, int>());\n  real.Consumer(unknown);\n  LocalBloc(counter);\n  consumer.accept(1);\n  consumer..accept(1);\n  LookupConsumer.of(counter);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(counter);\n}\n\nvoid accept(Object value) {}\n\nclass ShadowedConsumer extends real.Consumer {\n  ShadowedConsumer() : super(0);\n  void localVariable(real.Counter counter) {\n    final accept = (Object value) {};\n    accept(counter);\n  }\n  void localFunction(real.Counter counter) {\n    void accept(Object value) {}\n    accept(counter);\n  }\n  void parameter(real.Counter counter, void Function(Object) accept) {\n    accept(counter);\n  }\n  void libraryFunction(real.Counter counter) {\n    accept(counter);\n  }\n  static void helper(Object value) {}\n  void staticFunction(real.Counter counter) {\n    helper(counter);\n  }\n}"
     },
@@ -35578,67 +35596,67 @@
     "description": "Rejects direct Bloc and Cubit arguments to Flutter widget constructors.",
     "diagnostics": [
       {
-        "column": 55,
+        "column": 12,
         "file": null,
         "line": 25,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 59,
+        "column": 16,
         "file": null,
         "line": 26,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 73,
+        "column": 30,
         "file": null,
         "line": 27,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 56,
+        "column": 13,
         "file": null,
         "line": 28,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 56,
+        "column": 13,
         "file": null,
         "line": 29,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 55,
+        "column": 12,
         "file": null,
         "line": 30,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 72,
+        "column": 29,
         "file": null,
         "line": 31,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 64,
+        "column": 21,
         "file": null,
         "line": 32,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 65,
+        "column": 22,
         "file": null,
         "line": 33,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 65,
+        "column": 22,
         "file": null,
         "line": 34,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
       },
       {
-        "column": 65,
+        "column": 22,
         "file": null,
         "line": 35,
         "message": "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
@@ -35649,7 +35667,7 @@
       "bloc"
     ],
     "examples": {
-      "bad": "import 'support.dart' as app;\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ViewAlias = app.View;\nclass ChildView extends app.View {\n  ChildView(Object dependency) : super(dependency);\n}\nclass BlocProvider extends app.View {\n  BlocProvider.value({required Object value}) : super(value);\n}\nclass BlocBuilder extends app.View {\n  BlocBuilder({required Object bloc}) : super(bloc);\n}\nclass BlocListener extends app.View {\n  BlocListener({required Object bloc}) : super(bloc);\n}\nclass BlocConsumer extends app.View {\n  BlocConsumer({required Object bloc}) : super(bloc);\n}\nclass BlocSelector extends app.View {\n  BlocSelector({required Object bloc}) : super(bloc);\n}\n\nvoid dependencies(app.Counter counter, b.Bloc<Object, int> bloc) {\n  app.View( counter);\n  new app.View( counter);\n  app.View.named(dependency:  bloc);\n  ChildView( counter);\n  ViewAlias( counter);\n  app.View( app.Counter());\n  BlocProvider.value(value:  counter);\n  BlocBuilder(bloc:  counter);\n  BlocListener(bloc:  counter);\n  BlocConsumer(bloc:  counter);\n  BlocSelector(bloc:  counter);\n}",
+      "bad": "import 'support.dart' as app;\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ViewAlias = app.View;\nclass ChildView extends app.View {\n  ChildView(Object dependency) : super(dependency);\n}\nclass BlocProvider extends app.View {\n  BlocProvider.value({required Object value}) : super(value);\n}\nclass BlocBuilder extends app.View {\n  BlocBuilder({required Object bloc}) : super(bloc);\n}\nclass BlocListener extends app.View {\n  BlocListener({required Object bloc}) : super(bloc);\n}\nclass BlocConsumer extends app.View {\n  BlocConsumer({required Object bloc}) : super(bloc);\n}\nclass BlocSelector extends app.View {\n  BlocSelector({required Object bloc}) : super(bloc);\n}\n\nvoid dependencies(app.Counter counter, b.Bloc<Object, int> bloc) {\n  app.View(counter);\n  new app.View(counter);\n  app.View.named(dependency: bloc);\n  ChildView(counter);\n  ViewAlias(counter);\n  app.View(app.Counter());\n  BlocProvider.value(value: counter);\n  BlocBuilder(bloc: counter);\n  BlocListener(bloc: counter);\n  BlocConsumer(bloc: counter);\n  BlocSelector(bloc: counter);\n}",
       "crossFile": null,
       "good": "import 'support.dart' as real;\nimport 'package:flutter_bloc/flutter_bloc.dart' as framework;\nimport 'package:flutter/widgets.dart' as flutter;\n\nclass Widget {\n  Widget(Object dependency);\n}\nclass LocalView extends Widget {\n  LocalView(Object dependency) : super(dependency);\n}\nclass Bloc<E, S> {}\nclass Cubit<S> {}\n\nclass LookupView extends real.View {\n  LookupView() : super(0);\n  static LookupView of(real.Counter counter) => LookupView();\n}\n\nvoid boundaries(real.Counter counter, dynamic unknown) {\n  Widget(counter);\n  LocalView(counter);\n  real.Repository(counter);\n  real.View(Bloc<Object, int>());\n  real.View(Cubit<int>());\n  real.View(real.Repository(0));\n  real.View(unknown);\n  LookupView.of(counter);\n  framework.BlocProvider.value(value: counter, child: flutter.SizedBox());\n  framework.RepositoryProvider.value(value: counter, child: flutter.SizedBox());\n  framework.BlocBuilder<real.Counter, int>(\n    bloc: counter,\n    builder: (context, state) => flutter.SizedBox(),\n  );\n  framework.BlocListener<real.Counter, int>(\n    bloc: counter,\n    listener: (context, state) {},\n    child: flutter.SizedBox(),\n  );\n  framework.BlocConsumer<real.Counter, int>(\n    bloc: counter,\n    builder: (context, state) => flutter.SizedBox(),\n    listener: (context, state) {},\n  );\n  framework.BlocSelector<real.Counter, int, bool>(\n    bloc: counter,\n    selector: (state) => state > 0,\n    builder: (context, selected) => flutter.SizedBox(),\n  );\n  final View = (Object dependency) => real.Repository(dependency);\n  View(counter);\n}"
     },
@@ -35668,91 +35686,91 @@
     "description": "Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.",
     "diagnostics": [
       {
-        "column": 63,
+        "column": 12,
         "file": null,
         "line": 27,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 67,
+        "column": 16,
         "file": null,
         "line": 28,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 81,
+        "column": 30,
         "file": null,
         "line": 29,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 68,
+        "column": 17,
         "file": null,
         "line": 30,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 68,
+        "column": 17,
         "file": null,
         "line": 31,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 70,
+        "column": 19,
         "file": null,
         "line": 32,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 68,
+        "column": 17,
         "file": null,
         "line": 33,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 63,
+        "column": 12,
         "file": null,
         "line": 34,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 71,
+        "column": 20,
         "file": null,
         "line": 35,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 69,
+        "column": 18,
         "file": null,
         "line": 39,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 79,
+        "column": 28,
         "file": null,
         "line": 40,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 76,
+        "column": 25,
         "file": null,
         "line": 45,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 63,
+        "column": 12,
         "file": null,
         "line": 52,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 68,
+        "column": 17,
         "file": null,
         "line": 53,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       },
       {
-        "column": 63,
+        "column": 12,
         "file": null,
         "line": 59,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
@@ -35763,7 +35781,7 @@
       "bloc"
     ],
     "examples": {
-      "bad": "import 'package:flutter/widgets.dart' as f;\nimport 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nclass CustomContext implements f.BuildContext {\n  bool get mounted => true;\n}\n\ntypedef ConsumerAlias = Consumer;\n\nclass Event {\n  Event(Object payload);\n}\nclass ChildEvent extends Event {\n  ChildEvent(Object payload) : super(payload);\n}\nclass EventBloc extends b.Bloc<Event, int> {\n  EventBloc() : super(0);\n  void add(Event event) {}\n}\n\nvoid dependencies(f.BuildContext context, Consumer consumer, CustomContext custom) {\n  Consumer( context);\n  new Consumer( context);\n  Consumer.named(dependency:  context);\n  ChildConsumer( context);\n  ConsumerAlias( context);\n  consumer.accept( context);\n  ConsumerCubit( context);\n  Consumer( custom);\n  consumer..accept( context);\n}\n\nvoid eventPayload(f.BuildContext context, EventBloc bloc) {\n  bloc.add(Event( context));\n  final event = ChildEvent( context);\n  bloc.add(event);\n}\n\nvoid importedEvents(f.BuildContext context, CounterBloc bloc) {\n  bloc.add(CounterEvent( context));\n}\n\nclass ImplicitConsumer extends b.Cubit<int> {\n  ImplicitConsumer() : super(0);\n  void accept(Object dependency) {}\n  void dependencies(f.BuildContext context) {\n    accept( context);\n    this.accept( context);\n  }\n}\n\nclass InheritedConsumer extends ImplicitConsumer {\n  void inherited(f.BuildContext context) {\n    accept( context);\n  }\n}",
+      "bad": "import 'package:flutter/widgets.dart' as f;\nimport 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nclass CustomContext implements f.BuildContext {\n  bool get mounted => true;\n}\n\ntypedef ConsumerAlias = Consumer;\n\nclass Event {\n  Event(Object payload);\n}\nclass ChildEvent extends Event {\n  ChildEvent(Object payload) : super(payload);\n}\nclass EventBloc extends b.Bloc<Event, int> {\n  EventBloc() : super(0);\n  void add(Event event) {}\n}\n\nvoid dependencies(f.BuildContext context, Consumer consumer, CustomContext custom) {\n  Consumer(context);\n  new Consumer(context);\n  Consumer.named(dependency: context);\n  ChildConsumer(context);\n  ConsumerAlias(context);\n  consumer.accept(context);\n  ConsumerCubit(context);\n  Consumer(custom);\n  consumer..accept(context);\n}\n\nvoid eventPayload(f.BuildContext context, EventBloc bloc) {\n  bloc.add(Event(context));\n  final event = ChildEvent(context);\n  bloc.add(event);\n}\n\nvoid importedEvents(f.BuildContext context, CounterBloc bloc) {\n  bloc.add(CounterEvent(context));\n}\n\nclass ImplicitConsumer extends b.Cubit<int> {\n  ImplicitConsumer() : super(0);\n  void accept(Object dependency) {}\n  void dependencies(f.BuildContext context) {\n    accept(context);\n    this.accept(context);\n  }\n}\n\nclass InheritedConsumer extends ImplicitConsumer {\n  void inherited(f.BuildContext context) {\n    accept(context);\n  }\n}",
       "crossFile": null,
       "good": "import 'package:flutter/widgets.dart' as flutter;\nimport 'support.dart' as real;\n\nclass BuildContext {}\nclass Bloc<E, S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(flutter.BuildContext context) => LookupConsumer();\n}\nclass UnrelatedEvent {\n  UnrelatedEvent(Object payload);\n}\n\nvoid boundaries(flutter.BuildContext context, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(BuildContext());\n  real.Consumer(real.Repository(0));\n  real.Consumer(unknown);\n  real.Repository(context);\n  real.View(context);\n  LocalBloc(context);\n  consumer.accept(context.mounted);\n  consumer..accept(context.mounted);\n  LookupConsumer.of(context);\n  UnrelatedEvent(context);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(context);\n}\n\nvoid accept(Object value) {}\n\nclass ShadowedConsumer extends real.Consumer {\n  ShadowedConsumer() : super(0);\n  void localVariable(flutter.BuildContext context) {\n    final accept = (Object value) {};\n    accept(context);\n  }\n  void localFunction(flutter.BuildContext context) {\n    void accept(Object value) {}\n    accept(context);\n  }\n  void parameter(flutter.BuildContext context, void Function(Object) accept) {\n    accept(context);\n  }\n  void libraryFunction(flutter.BuildContext context) {\n    accept(context);\n  }\n  static void helper(Object value) {}\n  void staticFunction(flutter.BuildContext context) {\n    helper(context);\n  }\n}"
     },

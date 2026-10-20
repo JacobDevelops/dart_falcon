@@ -24,38 +24,38 @@ class EventBloc extends b.Bloc<Event, int> {
 }
 
 void dependencies(f.BuildContext context, Consumer consumer, CustomContext custom) {
-  Consumer(/* expect: avoid-passing-build-context-to-blocs */ context);
-  new Consumer(/* expect: avoid-passing-build-context-to-blocs */ context);
-  Consumer.named(dependency: /* expect: avoid-passing-build-context-to-blocs */ context);
-  ChildConsumer(/* expect: avoid-passing-build-context-to-blocs */ context);
-  ConsumerAlias(/* expect: avoid-passing-build-context-to-blocs */ context);
-  consumer.accept(/* expect: avoid-passing-build-context-to-blocs */ context);
-  ConsumerCubit(/* expect: avoid-passing-build-context-to-blocs */ context);
-  Consumer(/* expect: avoid-passing-build-context-to-blocs */ custom);
-  consumer..accept(/* expect: avoid-passing-build-context-to-blocs */ context);
+  Consumer(context); /* expect: avoid-passing-build-context-to-blocs */
+  new Consumer(context); /* expect: avoid-passing-build-context-to-blocs */
+  Consumer.named(dependency: context); /* expect: avoid-passing-build-context-to-blocs */
+  ChildConsumer(context); /* expect: avoid-passing-build-context-to-blocs */
+  ConsumerAlias(context); /* expect: avoid-passing-build-context-to-blocs */
+  consumer.accept(context); /* expect: avoid-passing-build-context-to-blocs */
+  ConsumerCubit(context); /* expect: avoid-passing-build-context-to-blocs */
+  Consumer(custom); /* expect: avoid-passing-build-context-to-blocs */
+  consumer..accept(context); /* expect: avoid-passing-build-context-to-blocs */
 }
 
 void eventPayload(f.BuildContext context, EventBloc bloc) {
-  bloc.add(Event(/* expect: avoid-passing-build-context-to-blocs */ context));
-  final event = ChildEvent(/* expect: avoid-passing-build-context-to-blocs */ context);
+  bloc.add(Event(context)); /* expect: avoid-passing-build-context-to-blocs */
+  final event = ChildEvent(context); /* expect: avoid-passing-build-context-to-blocs */
   bloc.add(event);
 }
 
 void importedEvents(f.BuildContext context, CounterBloc bloc) {
-  bloc.add(CounterEvent(/* expect: avoid-passing-build-context-to-blocs */ context));
+  bloc.add(CounterEvent(context)); /* expect: avoid-passing-build-context-to-blocs */
 }
 
 class ImplicitConsumer extends b.Cubit<int> {
   ImplicitConsumer() : super(0);
   void accept(Object dependency) {}
   void dependencies(f.BuildContext context) {
-    accept(/* expect: avoid-passing-build-context-to-blocs */ context);
-    this.accept(/* expect: avoid-passing-build-context-to-blocs */ context);
+    accept(context); /* expect: avoid-passing-build-context-to-blocs */
+    this.accept(context); /* expect: avoid-passing-build-context-to-blocs */
   }
 }
 
 class InheritedConsumer extends ImplicitConsumer {
   void inherited(f.BuildContext context) {
-    accept(/* expect: avoid-passing-build-context-to-blocs */ context);
+    accept(context); /* expect: avoid-passing-build-context-to-blocs */
   }
 }

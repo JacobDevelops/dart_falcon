@@ -76,3 +76,16 @@ class WrappedValueBloc extends Bloc<WrappedEvent, int> {
     on<WrappedValue<int>>((event, emit) {});
   }
 }
+
+class HelperBloc extends Bloc<Event, int> {
+  HelperBloc() : super(0) {
+    _registerHandlers();
+  }
+  HelperBloc.explicitThis() : super(0) {
+    this._registerHandlers();
+  }
+  void _registerHandlers() {
+    on<Start>((event, emit) {});
+    on<Stop>((event, emit) {});
+  }
+}

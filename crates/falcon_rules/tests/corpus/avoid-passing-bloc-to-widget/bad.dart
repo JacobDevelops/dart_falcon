@@ -22,15 +22,15 @@ class BlocSelector extends app.View {
 }
 
 void dependencies(app.Counter counter, b.Bloc<Object, int> bloc) {
-  app.View(/* expect: avoid-passing-bloc-to-widget */ counter);
-  new app.View(/* expect: avoid-passing-bloc-to-widget */ counter);
-  app.View.named(dependency: /* expect: avoid-passing-bloc-to-widget */ bloc);
-  ChildView(/* expect: avoid-passing-bloc-to-widget */ counter);
-  ViewAlias(/* expect: avoid-passing-bloc-to-widget */ counter);
-  app.View(/* expect: avoid-passing-bloc-to-widget */ app.Counter());
-  BlocProvider.value(value: /* expect: avoid-passing-bloc-to-widget */ counter);
-  BlocBuilder(bloc: /* expect: avoid-passing-bloc-to-widget */ counter);
-  BlocListener(bloc: /* expect: avoid-passing-bloc-to-widget */ counter);
-  BlocConsumer(bloc: /* expect: avoid-passing-bloc-to-widget */ counter);
-  BlocSelector(bloc: /* expect: avoid-passing-bloc-to-widget */ counter);
+  app.View(counter); /* expect: avoid-passing-bloc-to-widget */
+  new app.View(counter); /* expect: avoid-passing-bloc-to-widget */
+  app.View.named(dependency: bloc); /* expect: avoid-passing-bloc-to-widget */
+  ChildView(counter); /* expect: avoid-passing-bloc-to-widget */
+  ViewAlias(counter); /* expect: avoid-passing-bloc-to-widget */
+  app.View(app.Counter()); /* expect: avoid-passing-bloc-to-widget */
+  BlocProvider.value(value: counter); /* expect: avoid-passing-bloc-to-widget */
+  BlocBuilder(bloc: counter); /* expect: avoid-passing-bloc-to-widget */
+  BlocListener(bloc: counter); /* expect: avoid-passing-bloc-to-widget */
+  BlocConsumer(bloc: counter); /* expect: avoid-passing-bloc-to-widget */
+  BlocSelector(bloc: counter); /* expect: avoid-passing-bloc-to-widget */
 }

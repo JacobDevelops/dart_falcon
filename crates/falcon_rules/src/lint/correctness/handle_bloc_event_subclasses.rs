@@ -6,6 +6,7 @@
 //! Handler coverage compares full event instantiations and accepts unknown subtyping.
 //! Inferred registrations conservatively count as coverage. Factories, redirects,
 //! abstract event classes, generic event roots and overridden `on` APIs are ignored.
+//! Calls to own instance helpers conservatively count as unresolved coverage.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
@@ -163,6 +164,28 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if !own_member(call.callee(), "on", &self.types, state) {
+            let name = match call.callee().unparenthesized() {
+                Expr::Ident(identifier) if !state.environment.is_bound(identifier.name()) => {
+                    identifier.name()
+                }
+                Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::This(_)) => {
+                    field.field().name()
+                }
+                _ => return,
+            };
+            if call
+                .syntax()
+                .ancestors()
+                .find_map(ClassDecl::cast)
+                .is_some_and(|class| {
+                    class.members().any(|member| {
+                        matches!(member, ClassMember::Method(method)
+                            if !method.is_static() && method.name().name() == name)
+                    })
+                })
+            {
+                self.register(call.syntax(), None, state);
+            }
             return;
         }
         let mut arguments = call.type_args();
