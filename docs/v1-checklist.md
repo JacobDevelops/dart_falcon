@@ -19,7 +19,7 @@ Owns `crates/falcon_dart_parser` and its tests.
 - [ ] **Unguarded pattern and type recursion.** `pattern.rs` and `types.rs` never call `guarded`, so deeply nested patterns or type arguments overflow the stack and kill the LSP.
 - [ ] **Switch-expression arms can loop forever.** `parse_switch_expr_arms` (`expr.rs:96`) has no progress check at the depth limit. Break when an iteration consumes nothing, and audit the other `while !close` loops.
 - [ ] **Quadratic top-level annotation lookahead.** `peek_kind_after_annotations` rescans to EOF on unclosed `(` every iteration (`mod.rs:803-913`), and abandoned top-level markers leave orphan nodes under `Program`. Parse annotations once, then dispatch.
-- [ ] **Unbounded tree depth from left-associative chains.** Binary, postfix and `as`/`is` chains are built in loops, so parse depth is bounded but tree depth isn't, and the recursive default `Visitor` can overflow. Count chain growth toward the depth limit.
+- [ ] **Unbounded tree depth from left-associative chains.** Binary, postfix and `as`/`is` chains are built in loops, so parse depth is bounded but tree depth isn't, and the recursive default `Visitor` can overflow. Long chains are valid Dart (generated string concatenation), so don't count them toward the depth limit. Walk chains with an explicit stack in the default `Visitor` so any length is safe.
 - [ ] **Adversarial parser corpus.** `corpus_tests.rs` hard-codes `/home/jacob/...` and silently skips elsewhere. Check in the crash witnesses above, walk each tree and call the accessors; consolidate the cloned `parser_tests.rs` cases behind a macro.
 
 #### 2. Constant evaluator
@@ -27,7 +27,8 @@ Owns `crates/falcon_dart_parser` and its tests.
 Owns `crates/falcon_analyze/src/constant_value.rs` evaluation internals.
 
 - [ ] **Constant evaluation has no size budget.** `const aN = aN-1 + aN-1;` chains grow exponentially: 560 MB RSS at N=24. Add a byte/node budget to `ConstEvaluator` and stop deep-cloning cached values.
-- [ ] **Constant alias chains have no depth limit.** Aliases recurse through `resolve_name → initializer` unchecked, and they also eat the 32-deep constructor limit (`constant_value.rs:968,1378`). Track constructor and reference depth separately.
+- [ ] **Constant reference chains recurse.** Each reference recurses through `resolve_name → initializer` and caches only after returning (`constant_value.rs:971-979`), so a long acyclic chain (`a1 = a0; a2 = a1; …`) overflows the stack: a cold evaluation of the last link resolves 20,000 links in 18 ms but aborts by 100,000 on the 256 MB rules stack. The chain also counts against the 32-deep constructor limit (`constant_value.rs:1378`). Cycles already stop through the `Evaluating` marker. Evaluate a constant's dependencies first with an explicit worklist, caching each one, so chains of any length resolve without recursion or a depth limit, and the constructor limit only counts constructors.
+- [ ] **Quadratic time on constant chains outside the evaluator.** `falcon check` on the same chains takes 0.6 s at 1,000 links, 2.3 s at 2,000, 9.7 s at 4,000 and 48 s at 8,000, while the evaluator alone is linear. Profile which pass re-walks the chain per declaration and make it linear.
 
 #### 3. `unnecessary-nullable` and cross-file resolution
 
@@ -182,7 +183,7 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 - [ ] **One lexical-scope resolver.** `lexical_usage`, `flow_writes`, `TypeEnvironment` and `semantic_scope` each reimplement Dart scoping by string.
 - [ ] **Shared flow joins.** `ScopedWalker` and `ClosureReturns` both hand-roll if/switch/try/loop joins. Move them into `FlowContext`, and move `switch_is_exhaustive` back to `flow.rs`.
 - [ ] **Shared collection/map element visiting.** Eleven visitors duplicate `visit_collection_element`/`visit_map_element`. Add an element trait in `falcon_syntax`.
-- [ ] **Bounded fixpoint.** `converge`/`infer_programs` rescan every program, SDK included, each round with no worklist or cap.
+- [ ] **Terminating fixpoint.** `converge`/`infer_programs` (`semantic.rs:4641-4695`) rescan every program, SDK included, each round, and only end if every pass makes monotone progress, which nothing enforces. Add a worklist that requeues only declarations whose inputs changed. Enforce at the type-map writes that a step only fills an unknown type or tightens a partial one, never replaces a concrete type. Keep a round cap as a backstop; hitting it is an internal error naming the declarations still changing, not silently half-inferred types.
 
 #### 18. Analyze infrastructure
 
@@ -210,7 +211,7 @@ Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. Af
 
 Owns the CLI fix commands and LSP code actions. After batches 9 and 19.
 
-- [ ] **Safe autofixes.** `--write` applies safe fixes and `--write --unsafe` also applies unsafe ones, with a preview mode. Fixes apply one at a time with re-analysis in between until nothing changes, under an iteration cap, so overlapping edits never merge. A per-rule `fix: "none" | "safe" | "unsafe"` option, also allowed in overrides, turns a fix off or reclassifies it. Editors offer both kinds as quick fixes plus fix-all; fix-on-save applies safe fixes only.
+- [ ] **Safe autofixes.** `--write` applies safe fixes and `--write --unsafe` also applies unsafe ones, with a preview mode. Fixes apply one at a time with re-analysis in between until nothing changes, so overlapping edits never merge. If a file's text repeats, fixes are undoing each other: stop and report the rules involved. An iteration cap stays as a backstop for fixes that grow the file without repeating, and hitting it is reported, not silent. A per-rule `fix: "none" | "safe" | "unsafe"` option, also allowed in overrides, turns a fix off or reclassifies it. Editors offer both kinds as quick fixes plus fix-all; fix-on-save applies safe fixes only.
 
 #### 21. CI adoption
 
