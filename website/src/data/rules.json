@@ -24890,45 +24890,45 @@
     "description": "Flags source lines longer than 80 characters.",
     "diagnostics": [
       {
-        "column": 41,
+        "column": 81,
         "file": null,
         "line": 4,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 80,
+        "column": 81,
         "file": null,
         "line": 5,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 79,
+        "column": 81,
         "file": null,
-        "line": 6,
+        "line": 7,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 77,
+        "column": 81,
         "file": null,
         "line": 8,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 77,
+        "column": 81,
         "file": null,
-        "line": 9,
+        "line": 11,
         "message": "The line length exceeds the 80-character limit."
       },
       {
         "column": 81,
         "file": null,
-        "line": 12,
+        "line": 19,
         "message": "The line length exceeds the 80-character limit."
       },
       {
         "column": 81,
         "file": null,
-        "line": 20,
+        "line": 23,
         "message": "The line length exceeds the 80-character limit."
       },
       {
@@ -24936,18 +24936,12 @@
         "file": null,
         "line": 24,
         "message": "The line length exceeds the 80-character limit."
-      },
-      {
-        "column": 81,
-        "file": null,
-        "line": 25,
-        "message": "The line length exceeds the 80-character limit."
       }
     ],
     "docs": "Flags source lines longer than 80 characters.\n\nLong lines are harder to read and to review side by side. Line length is\ncounted in UTF-16 code units, excluding the line break and a leading byte\norder mark, and the diagnostic starts at the 81st character, where the line\nneeds to wrap.\n\nLines that cannot reasonably be wrapped are exempt:\n\n- every line covered by a multiline (triple-quoted) string literal;\n- a line where a single-line string literal starts whose text contains `/`\n  or `\\` (a URI or path); as in the analyzer, string literals nested in an\n  interpolation are not considered;\n- a comment line (including comments inside interpolations) whose text\n  contains `/` or `\\`, and a `// ignore:` comment line.\n\n```dart\n// A comment that runs on and on and on and on and on and on and on and on.\n//                                                    flagged ^ past column 80\n// See https://github.com/dart-lang/sdk/blob/main/pkg/linter/doc/very/long.md\n//                                  fine: the comment contains a URI ^\n```",
     "domains": [],
     "examples": {
-      "bad": "void use(Object o) {}\n\nvoid main() {\n   // A plain comment that keeps going and going well past the eighty limit.\n  use('A single-line string literal that is long but has no path separators.');\n  var aVeryLongVariableNameThatJustKeepsGoing = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8;\n  use(aVeryLongVariableNameThatJustKeepsGoing);\n  /* Block comment text that is very long and keeps going past the limit. */\n  use('héllo wörld with accents ééééééééééééééééééééééééééééééééééééééééé');\n}\n\nvar nestedPath = '${\"p/q\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';\n\nconst kIsWeb = true;\nvar bindingMessage =\n        'The app requested a view, but the platform did not provide one.\\n'\n        'Try using `runWidget` instead of `runApp` to start your app.\\n'\n        '`runWidget` allows you to provide a `View` widget, without requiring '\n        'a default view.'\n        '${kIsWeb ? \"\\nSee: https://flutter.dev/to/web-multiview-runwidget\" : \"\"}';\n\nvoid patternStrings(Object value) {\n  switch (value) {\n    case '${\"a/b\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':\n    case '${\"${\"a/b\"}\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':\n      break;\n  }\n}",
+      "bad": "void use(Object o) {}\n\nvoid main() {\n  use('A single-line string literal that is quite long but has no path separators.');\n  var aVeryLongVariableNameThatJustKeepsGoing = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10;\n  use(aVeryLongVariableNameThatJustKeepsGoing);\n  /* Block comment text that is very long and keeps going and going past the limit. */\n  use('héllo wörld with accents éééééééééééééééééééééééééééééééééééééééééééééééééé');\n}\n\nvar nestedPath = '${\"p/q\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';\n\nconst kIsWeb = true;\nvar bindingMessage =\n        'The app requested a view, but the platform did not provide one.\\n'\n        'Try using `runWidget` instead of `runApp` to start your app.\\n'\n        '`runWidget` allows you to provide a `View` widget, without requiring '\n        'a default view.'\n        '${kIsWeb ? \"\\nSee: https://flutter.dev/to/web-multiview-runwidget\" : \"\"}';\n\nvoid patternStrings(Object value) {\n  switch (value) {\n    case '${\"a/b\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':\n    case '${\"${\"a/b\"}\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':\n      break;\n  }\n}",
       "crossFile": null,
       "good": "void use(Object o) {}\n\n// See https://github.com/dart-lang/sdk/blob/main/pkg/linter/lib/src/rules/lines_longer.dart\n/// Docs: https://dart.dev/tools/linter-rules/lines_longer_than_80_chars#details-and-more\nvoid main() {\n  use('https://example.com/a/very/long/path/that/cannot/be/wrapped/at/all/ok/really/long');\n  use(r'C:\\Users\\someone\\a\\very\\long\\windows\\path\\that\\is\\long\\too\\x\\y\\z\\w\\v\\u\\t');\n  use('''\nA multiline string line that is very long and goes past the eighty limit here, way past.\n''');\n  // ignore: some_lint_name_that_is_long_enough_to_push_this_line_past_eighty_chars_ok\n  /*\n   * Block comment line with a path segment a/b that is long enough to exceed the limit.\n   */\n  use('short');\n  use('éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé');\n}\n\nint a = 1;\nvar interpolationComment = '${a /* p/q */} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';"
     },
