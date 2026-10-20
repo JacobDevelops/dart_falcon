@@ -21,6 +21,7 @@ impl Rule for AvoidRefInsideStateDispose {
             let members = match declaration {
                 TopLevelDecl::Class(class) => class.members(),
                 TopLevelDecl::MixinClass(class) => class.members(),
+                TopLevelDecl::Mixin(mixin) => mixin.members(),
                 _ => continue,
             };
             for member in members {

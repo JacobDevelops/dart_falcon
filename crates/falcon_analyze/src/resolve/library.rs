@@ -203,7 +203,7 @@ fn is_generated_part(owner: &Path, uri: &str) -> bool {
     generated
         .parent()
         .is_some_and(|parent| parent.as_os_str().is_empty() || parent == Path::new("."))
-        && generated.extension().is_some_and(|ext| ext == "dart")
+        && is_generated_dart_file(generated)
         && owner
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -215,6 +215,17 @@ fn is_generated_part(owner: &Path, uri: &str) -> bool {
                     .and_then(|suffix| suffix.strip_prefix('.'))
                     .is_some_and(|suffix| !suffix.is_empty() && !suffix.contains('.'))
             })
+}
+
+/// Recognize Dart generator outputs by their conventional filename suffix.
+pub fn is_generated_dart_file(path: &Path) -> bool {
+    const SUFFIXES: &[&str] = &["g", "freezed", "gr", "config", "mocks", "chopper", "mapper"];
+    path.extension().is_some_and(|ext| ext == "dart")
+        && path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.rsplit_once('.'))
+            .is_some_and(|(stem, suffix)| !stem.is_empty() && SUFFIXES.contains(&suffix))
 }
 
 /// Build the [`LibraryUnit`] for file `i` from a grouping and the retained

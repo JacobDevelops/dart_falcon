@@ -446,3 +446,5 @@ prefer-correct-provider-file-name/good_generated_provider.dart
 prefer-riverpod-provider-suffix/good_generated.dart
 prefer-correct-provider-file-name/good_annotation_shadow.dart
 prefer-correct-provider-file-name/good_missing_manual_part.dart
+prefer-riverpod-notifier-suffix/counter.dart
+prefer-riverpod-notifier-suffix/counter.g.dart

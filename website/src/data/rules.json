@@ -7630,6 +7630,18 @@
         "file": null,
         "line": 8,
         "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 17,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 18,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
       }
     ],
     "docs": "Rejects Riverpod widget references used during State.dispose.",
@@ -7637,9 +7649,9 @@
       "riverpod"
     ],
     "examples": {
-      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nabstract class First extends ConsumerState<Object> {\n  void dispose() {\n    ref.read(Object());\n    this.ref.read(Object());\n    final cached = ref;\n    use(ref);\n    (() { ref.read(Object()); })();\n    super.dispose();\n  }\n}\nvoid use(WidgetRef value) {}",
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nabstract class First extends ConsumerState<Object> {\n  void dispose() {\n    ref.read(Object());\n    this.ref.read(Object());\n    final cached = ref;\n    use(ref);\n    (() { ref.read(Object()); })();\n    super.dispose();\n  }\n}\nvoid use(WidgetRef value) {}\n\nmixin DisposeMixin<W extends Object> on ConsumerState<W> {\n  @override\n  void dispose() {\n    ref.read(Object());\n    this.ref.read(Object());\n    super.dispose();\n  }\n}",
       "crossFile": null,
-      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nabstract class Good extends ConsumerState<Object> {\n  void initState() { ref.read(Object()); }\n  void build() { this.ref.read(Object()); }\n  void dispose() {\n    final ref = FakeRef();\n    ref.read(Object());\n    super.dispose();\n  }\n  static void disposeOther(WidgetRef ref) { ref.read(Object()); }\n}\nclass FakeRef { void read(Object value) {} }\nclass Other { WidgetRef? ref; void dispose() { ref?.read(Object()); } }\nvoid dispose(WidgetRef ref) { ref.read(Object()); }"
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nabstract class Good extends ConsumerState<Object> {\n  void initState() { ref.read(Object()); }\n  void build() { this.ref.read(Object()); }\n  void dispose() {\n    final ref = FakeRef();\n    ref.read(Object());\n    super.dispose();\n  }\n  static void disposeOther(WidgetRef ref) { ref.read(Object()); }\n}\nclass FakeRef { void read(Object value) {} }\nclass Other { WidgetRef? ref; void dispose() { ref?.read(Object()); } }\nvoid dispose(WidgetRef ref) { ref.read(Object()); }\n\nmixin BuildMixin<W extends Object> on ConsumerState<W> {\n  void build() { ref.read(Object()); }\n  @override\n  void dispose() {\n    final ref = FakeRef();\n    ref.read(Object());\n    super.dispose();\n  }\n}\nmixin OtherMixin {\n  WidgetRef get ref;\n  void dispose() { ref.read(Object()); }\n}"
     },
     "group": "correctness",
     "name": "avoid-ref-inside-state-dispose",
@@ -23831,7 +23843,7 @@
         "message": "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'."
       }
     ],
-    "docs": "Require Equatable semantics for configured class/file name patterns.\nNo pattern means no diagnostics. Already equatable subtypes (including\nEquatableMixin users) and unresolved inheritance are conservatively skipped.",
+    "docs": "Require Equatable semantics for configured class/file name patterns.\nConfigure `class_name_pattern` or `file_name_pattern`; without either option,\nthis rule reports no diagnostics. Already equatable subtypes (including\nEquatableMixin users) and unresolved inheritance are conservatively skipped.",
     "domains": [
       "equatable"
     ],
@@ -31029,7 +31041,7 @@
         "message": "Name Riverpod notifiers with a 'Notifier' suffix."
       }
     ],
-    "docs": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.\nAlso shares collection for provider suffixes and snake_case `_notifier.dart`\n/ `_provider.dart` file conventions. Package identities, including inherited\nidentities and re-exports, distinguish Riverpod declarations from lookalikes.\nProvider rules cover top-level variables and static fields, not local values.\nThe provider file convention also covers annotated generator functions.",
+    "docs": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.\nPackage identities, including inherited identities and re-exports, distinguish\nRiverpod notifiers from lookalikes. Generated Dart files are ignored.",
     "domains": [
       "riverpod"
     ],

@@ -1,9 +1,6 @@
 //! Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.
-//! Also shares collection for provider suffixes and snake_case `_notifier.dart`
-//! / `_provider.dart` file conventions. Package identities, including inherited
-//! identities and re-exports, distinguish Riverpod declarations from lookalikes.
-//! Provider rules cover top-level variables and static fields, not local values.
-//! The provider file convention also covers annotated generator functions.
+//! Package identities, including inherited identities and re-exports, distinguish
+//! Riverpod notifiers from lookalikes. Generated Dart files are ignored.
 
 use crate::lint::riverpod::is_type;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -104,6 +101,9 @@ pub(super) fn prepare<'a>(
     ctx: &'a AnalyzeContext<'a>,
     naming: Naming,
 ) -> RulePreparation<'a> {
+    if falcon_analyze::resolve::is_generated_dart_file(ctx.file_path) {
+        return RulePreparation::Diagnostics(Vec::new());
+    }
     RulePreparation::Semantic(Box::new(Collector {
         program,
         ctx,

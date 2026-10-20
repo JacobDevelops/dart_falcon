@@ -10,3 +10,12 @@ abstract class First extends ConsumerState<Object> {
   }
 }
 void use(WidgetRef value) {}
+
+mixin DisposeMixin<W extends Object> on ConsumerState<W> {
+  @override
+  void dispose() {
+    ref.read(Object()); /* expect: avoid-ref-inside-state-dispose */
+    this.ref.read(Object()); /* expect: avoid-ref-inside-state-dispose */
+    super.dispose();
+  }
+}

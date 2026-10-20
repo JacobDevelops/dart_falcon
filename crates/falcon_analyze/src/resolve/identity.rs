@@ -3729,6 +3729,12 @@ mod tests {
         for (body, expected) in [
             ("part 'main.g.dart';", true),
             ("part 'main.freezed.dart';", true),
+            ("part 'main.gr.dart';", true),
+            ("part 'main.config.dart';", true),
+            ("part 'main.mocks.dart';", true),
+            ("part 'main.chopper.dart';", true),
+            ("part 'main.mapper.dart';", true),
+            ("part 'main.helpers.dart';", false),
             ("part './main.g.dart';", true),
             ("part 'other.shared.dart';", false),
             ("part 'sub/main.g.dart';", false),
