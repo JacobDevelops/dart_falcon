@@ -1,239 +1,252 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Fragment } from 'react'
+import { Fragment, type CSSProperties } from 'react'
+import { BenchSummaryChart } from '../components/BenchChart'
 import { CodeBlock } from '../components/CodeBlock'
+import { CopyCommand } from '../components/CopyCommand'
+import { Icon } from '../components/Icon'
 import { Tabs } from '../components/Tabs'
+import { scenarioSummaries, summaryText } from '../lib/benchmarks'
 import { highlightDart } from '../lib/highlight'
-import { rules, recommendedCount, heroRule, REPO_URL } from '../lib/rules'
+import { REPO_URL } from '../lib/rules'
+import { getHomeData } from '../lib/server'
+import { seo, SOFTWARE_APPLICATION } from '../lib/seo'
 import cli from '../data/cli.json'
+
 export const Route = createFileRoute('/')({
+  loader: () => getHomeData(),
+  head: ({ loaderData }) =>
+    seo({
+      title: 'falcon: the fast Dart & Flutter linter, written in Rust',
+      description: `falcon is a fast, standalone Dart and Flutter linter and language server written in Rust. ${loaderData?.coverage.total} lint rules including the official Dart lints, cross-file checks, one falcon.json. A free dart analyze, DCM and custom_lint alternative.`,
+      path: '/',
+      jsonLd: [{ ...SOFTWARE_APPLICATION, softwareVersion: cli.version }],
+    }),
   component: Home,
 })
 
-const INSTALL_BINARY = `# download the prebuilt static binary (Linux x86_64)
-curl -fsSL ${REPO_URL}/releases/latest/download/falcon-x86_64-linux.tar.gz | tar -xz
+const INSTALL = `curl -fsSL ${REPO_URL}/releases/latest/download/falcon-x86_64-linux.tar.gz | tar -xz`
+
+const INSTALL_PUB = `# Linux and macOS; needs Dart's pub cache bin directory on PATH
+dart pub global activate falcon
+
+falcon check .`
+
+const INSTALL_BINARY = `# Linux x86_64; see Installation for aarch64 and macOS
+${INSTALL}
 sudo mv falcon /usr/local/bin/
 
-# lint your project — no Dart SDK required
-falcon check lib/`
+falcon check .`
 
-const INSTALL_CARGO = `# build from source with a stable Rust toolchain
-cargo install --git ${REPO_URL} dart_falcon
+const INSTALL_CARGO = `# build from source with a nightly Rust toolchain
+cargo +nightly install --git ${REPO_URL} dart_falcon
 
-falcon check lib/`
+falcon check .`
 
-const INSTALL_MISE = `# mise.toml
-[tools]
+const INSTALL_MISE = `[tools]
 "github:${REPO_URL.slice('https://github.com/'.length)}" = { version = "${cli.version}", matching = "falcon-" }
 
-# then run: mise install
-# lint with: mise exec -- falcon check lib/`
+# then: mise install && mise exec -- falcon check .`
 
 function Home() {
+  const { coverage, hero, bench } = Route.useLoaderData()
+  const [lead, ...rest] = scenarioSummaries(bench)
+  const maxGroup = Math.max(...coverage.groups.map((g) => g.count))
   return (
-    <main>
-      <Hero />
-      <Features />
-      <QuickStart />
-    </main>
-  )
-}
-
-function Hero() {
-  return (
-    <section className="hero">
-      <div className="wrap hero-grid">
-        <div>
-          <span className="eyebrow">Rust-powered · standalone</span>
-          <h1>
-            Lint Dart &amp; Flutter <span className="squiggle">without</span> the
-            Dart SDK.
-          </h1>
-          <p className="lede">
-            falcon is a fast, self-contained linter written in Rust. Point it at
-            your code and get {rules.length} rules of Dart &amp; Flutter analysis
-            — no toolchain, no waiting.
-          </p>
-          <div className="hero-cta">
-            <Link to="/docs/installation" className="btn btn-primary">
-              Get started
-            </Link>
-            <Link to="/linter/rules" className="btn btn-ghost">
-              Browse rules
-            </Link>
+    <>
+      <section className="hero" aria-labelledby="hero-h">
+        <div className="wrap hero-grid">
+          <div className="hero-copy">
+            <h1 id="hero-h">
+              The fast linter for <span className="nowrap">Dart &amp; Flutter</span>
+            </h1>
+            <p className="lede">
+              falcon lints Dart and Flutter projects with {coverage.total} rules
+              from a single Rust binary. It parses Dart itself, so it never boots
+              the Dart analyzer, and it speaks LSP for your editor.
+            </p>
+            <CopyCommand command="dart pub global activate falcon" />
+            <div className="hero-cta">
+              <Link to="/docs/getting-started" className="btn btn-primary">
+                Get started <Icon name="arrow" />
+              </Link>
+              <Link to="/linter/rules" className="btn btn-ghost">
+                Browse {coverage.total} rules
+              </Link>
+            </div>
           </div>
-          <div className="stat-row">
-            <div className="stat">
-              <b>{rules.length}</b>
-              <span>lint rules</span>
+          <div className="hero-figure">
+            {lead ? (
+              <>
+                <BenchSummaryChart summary={lead} />
+                <ul className="bench-notes">
+                  {rest.map((s) => (
+                    <li key={s.scenario.id}>{summaryText(s)}</li>
+                  ))}
+                  <li>
+                    Same official lint names enabled in both; <code>dart analyze</code>{' '}
+                    also type-checks, so the work and output are not identical
+                  </li>
+                </ul>
+                <Link to="/benchmarks" className="more-link">
+                  All {bench.runs.length} runs and methodology <Icon name="arrow" />
+                </Link>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {hero ? (
+        <section className="section" aria-labelledby="output-h">
+          <div className="wrap split">
+            <div className="split-copy">
+              <h2 id="output-h">Real diagnostics, pinned to the line</h2>
+              <p>
+                This is falcon's actual output for{' '}
+                <Link to="/linter/rules/$rule" params={{ rule: hero.name }}>
+                  <code>{hero.name}</code>
+                </Link>
+                , taken from the rule's test fixture. Every rule page shows the
+                same: the code that triggers it, the exact message, and the fix.
+              </p>
+              <ul className="ticks">
+                <li>One <code>falcon.json</code>, rules grouped by intent</li>
+                <li>Inline suppressions that must state a reason</li>
+                <li>
+                  <code>falcon migrate</code> reads your{' '}
+                  <code>analysis_options.yaml</code>
+                </li>
+                <li>
+                  Text or JSON output for CI, and LSP for your editor
+                </li>
+              </ul>
             </div>
-            <div className="stat">
-              <b>{recommendedCount}</b>
-              <span>recommended</span>
-            </div>
-            <div className="stat">
-              <b>0</b>
-              <span>Dart SDK needed</span>
+            <AnnotatedCode name={hero.name} source={hero.bad} diagnostics={hero.diagnostics} />
+          </div>
+        </section>
+      ) : null}
+
+      <section className="section section-band" aria-labelledby="coverage-h">
+        <div className="wrap">
+          <h2 id="coverage-h">{coverage.total} rules, sorted by what they catch</h2>
+          <p className="section-sub">
+            {coverage.mappedToOfficial} rules implement official Dart lints and
+            keep their analyzer names, so <code>falcon migrate</code> can carry
+            your <code>analysis_options.yaml</code> over. The rest come from Dart
+            Code Metrics, Pyramid Lint, and falcon itself.
+          </p>
+          <div className="coverage">
+            <ol className="ledger" aria-label="Rules per group">
+              {coverage.groups.map((g) => (
+                <li key={g.id}>
+                  <Link to="/linter/rules" hash={g.id} className="ledger-name">
+                    {g.label}
+                  </Link>
+                  <span className="ledger-bar" aria-hidden="true">
+                    <span style={{ width: `${(g.count / maxGroup) * 100}%` }} />
+                  </span>
+                  <span className="num">{g.count}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="coverage-side">
+              <h3>Framework domains</h3>
+              <ul className="chips">
+                {coverage.domains.map((d) => (
+                  <li key={d.name}>
+                    <Link to="/linter/domains" hash={d.name}>
+                      {d.name} <span className="num">{d.count}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <h3>Where the rules come from</h3>
+              <dl className="sources">
+                {coverage.sources.map((s) => (
+                  <div key={s.label}>
+                    <dt>{s.label}</dt>
+                    <dd className="num">{s.count}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           </div>
         </div>
-        <HeroEditor />
-      </div>
-    </section>
+      </section>
+
+      <section className="section" aria-labelledby="switch-h">
+        <div className="wrap split">
+          <div className="split-copy">
+            <h2 id="switch-h">Coming from dart analyze, DCM, or custom_lint?</h2>
+            <p>
+              falcon runs beside the analyzer, not inside it, so it adds no
+              plugin to your analysis server.
+              {lead ? ` ${summaryText(lead)}` : ''}{' '}
+              Every rule is free and MIT licensed.
+            </p>
+            <Link to="/compare" className="more-link">
+              Compare falcon with other Dart linters <Icon name="arrow" />
+            </Link>
+          </div>
+          <div className="install">
+            <h3 className="install-h">Install</h3>
+            <Tabs
+              tabs={[
+                { id: 'pub', label: 'dart pub', content: <CodeBlock code={INSTALL_PUB} lang="bash" filename="terminal" /> },
+                { id: 'binary', label: 'Binary', content: <CodeBlock code={INSTALL_BINARY} lang="bash" filename="terminal" /> },
+                { id: 'mise', label: 'mise', content: <CodeBlock code={INSTALL_MISE} lang="toml" filename="mise.toml" /> },
+                { id: 'cargo', label: 'Cargo', content: <CodeBlock code={INSTALL_CARGO} lang="bash" filename="terminal" /> },
+              ]}
+            />
+            <Link to="/docs/installation" className="more-link">
+              All platforms and editor extensions <Icon name="arrow" />
+            </Link>
+          </div>
+        </div>
+      </section>
+    </>
   )
 }
 
-function HeroEditor() {
-  const rule = heroRule()
-  const bad = rule?.examples.bad ?? ''
-  const lines = bad.split('\n')
-  const flagged = new Set(rule?.diagnostics.map((d) => d.line) ?? [])
-  const firstDiag = rule?.diagnostics[0]
-
+function AnnotatedCode({
+  name,
+  source,
+  diagnostics,
+}: {
+  name: string
+  source: string
+  diagnostics: { line: number; column: number; message: string }[]
+}) {
+  const first = diagnostics[0]
   return (
-    <div className="editor" aria-hidden="true">
-      <div className="editor-bar">
-        <span className="dot" />
-        <span className="dot" />
-        <span className="dot" />
-        <span className="fname">example.dart</span>
-      </div>
-      <div className="ed-rows">
-        {lines.map((line, i) => {
+    <figure className="editor">
+      <figcaption className="editor-bar">
+        <span>example.dart</span>
+        <span>
+          {diagnostics.length} {diagnostics.length === 1 ? 'diagnostic' : 'diagnostics'}
+        </span>
+      </figcaption>
+      <pre className="editor-code">
+        {source.split('\n').map((line, i) => {
           const n = i + 1
-          const isFlagged = flagged.has(n)
+          const flagged = diagnostics.some((d) => d.line === n)
           return (
-            <Fragment key={i}>
-              <div className={`erow${isFlagged ? ' flagged' : ''}`}>
-                <span className="enum">{n}</span>
-                <code
-                  className="ecode"
-                  dangerouslySetInnerHTML={{
-                    __html: highlightDart(line) || ' ',
-                  }}
-                />
-              </div>
-              {firstDiag && firstDiag.line === n ? (
-                <div className="diag-callout">
-                  <b>{rule?.name}</b>
-                  {firstDiag.message}
-                </div>
+            <Fragment key={n}>
+              <span className={`eline${flagged ? ' flagged' : ''}`}>
+                <span className="enum" aria-hidden="true">
+                  {n}
+                </span>
+                <code dangerouslySetInnerHTML={{ __html: highlightDart(line) || ' ' }} />
+              </span>
+              {first && first.line === n ? (
+                <span className="fieldmark" style={{ '--col': first.column } as CSSProperties}>
+                  <b>{name}</b> {first.message}
+                </span>
               ) : null}
             </Fragment>
           )
         })}
-      </div>
-    </div>
-  )
-}
-
-function Features() {
-  const items = [
-    {
-      ic: '⚡',
-      title: 'Fast by default',
-      body: 'A Rust engine analyzes whole projects in a fraction of the time a Dart-based analyzer takes.',
-    },
-    {
-      ic: '📦',
-      title: 'Zero dependencies',
-      body: 'A single binary. No Dart or Flutter SDK, no pub, no analysis server to boot.',
-    },
-    {
-      ic: '🎯',
-      title: 'Real diagnostics',
-      body: 'Every rule ships tested against golden fixtures — the examples in these docs are its actual output.',
-    },
-    {
-      ic: '🔗',
-      title: 'Cross-file analysis',
-      body: 'Finds unused code, unused files, and unnecessary nullability across your entire project graph.',
-    },
-    {
-      ic: '🛠️',
-      title: 'Biome-inspired config',
-      body: 'One falcon.json, rules grouped by intent, domain toggles for Flutter. Familiar and predictable.',
-    },
-    {
-      ic: '🪶',
-      title: 'Curated rule set',
-      body: `${recommendedCount} recommended rules distilled from Dart lints, DCM, and Pyramid Lint — plus falcon originals.`,
-    },
-  ]
-  return (
-    <section className="section section-alt">
-      <div className="wrap">
-        <h2>Built for speed and precision</h2>
-        <p className="sub">
-          Everything a Dart or Flutter team needs from a linter, packed into a
-          binary that runs anywhere.
-        </p>
-        <div className="feature-grid">
-          {items.map((f) => (
-            <div className="feature" key={f.title}>
-              <div className="ic">{f.ic}</div>
-              <h3>{f.title}</h3>
-              <p>{f.body}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function QuickStart() {
-  return (
-    <section className="section">
-      <div className="wrap">
-        <h2>Up and running in one command</h2>
-        <p className="sub">
-          Install the binary, then check your code. falcon reads an optional
-          falcon.json for configuration.
-        </p>
-        <div className="install">
-          <Tabs
-            tabs={[
-              {
-                id: 'binary',
-                label: 'Binary',
-                content: (
-                  <CodeBlock
-                    code={INSTALL_BINARY}
-                    lang="bash"
-                    filename="terminal"
-                  />
-                ),
-              },
-              {
-                id: 'cargo',
-                label: 'Cargo',
-                content: (
-                  <CodeBlock
-                    code={INSTALL_CARGO}
-                    lang="bash"
-                    filename="terminal"
-                  />
-                ),
-              },
-              {
-                id: 'mise',
-                label: 'mise',
-                content: (
-                  <CodeBlock code={INSTALL_MISE} lang="toml" filename="mise.toml" />
-                ),
-              },
-            ]}
-          />
-          <div style={{ marginTop: '18px', display: 'flex', gap: '12px' }}>
-            <Link to="/docs/getting-started" className="btn btn-ghost">
-              Getting started
-            </Link>
-            <Link to="/docs/installation" className="btn btn-ghost">
-              All channels
-            </Link>
-          </div>
-        </div>
-      </div>
-    </section>
+      </pre>
+    </figure>
   )
 }

@@ -16,6 +16,7 @@ for (const name of [
   'installation',
   'configuration',
   'suppressions',
+  'benchmarks',
 ]) {
   const src = join(repoRoot, 'docs', `${name}.md`)
   const md = readFileSync(src, 'utf-8')

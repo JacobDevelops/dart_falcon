@@ -2,10 +2,17 @@ import { createFileRoute } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
 import { CodeBlock } from '../../components/CodeBlock'
 import { ValueList } from '../../components/ValueList'
+import { breadcrumbs, seo } from '../../lib/seo'
 import cliJson from '../../data/cli.json'
 
 export const Route = createFileRoute('/reference/cli')({
-  head: () => ({ meta: [{ title: 'CLI Reference — falcon' }] }),
+  head: () =>
+    seo({
+      title: 'falcon CLI reference: check, lsp, migrate and every flag',
+      description: `Every falcon command and flag for linting Dart and Flutter from the terminal and CI: falcon check, falcon lsp, falcon migrate, output formats, and exit codes. Generated from falcon v${cli.version}.`,
+      path: '/reference/cli',
+      jsonLd: [breadcrumbs([['Reference', '/reference/cli'], ['CLI', '/reference/cli']])],
+    }),
   component: CliReference,
 })
 
@@ -76,7 +83,7 @@ function CliReference() {
     <DocsLayout
       aside={
         <nav className="toc" aria-label="Commands">
-          <h4>Commands</h4>
+          <p className="side-heading">Commands</p>
           {cli.subcommands.map((c) => (
             <a key={c.name} href={`#cmd-${c.name}`}>
               {cli.name} {c.name}
@@ -86,7 +93,7 @@ function CliReference() {
       }
     >
       <div className="reference">
-        <div className="rules-head">
+        <div className="page-head">
           <h1>CLI Reference</h1>
           <p>
             Generated from falcon's argument parser (v{cli.version}). {cli.about}.

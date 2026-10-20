@@ -1,6 +1,5 @@
-import rulesJson from '../data/rules.json'
-import domainsJson from '../data/domains.json'
-
+// Types and static metadata only: the 2 MB rule catalog stays on the server
+// (see rules.data.ts) so it never ships in the client bundle.
 export const REPO_URL = 'https://github.com/JacobDevelops/dart_falcon'
 
 export type RuleGroup =
@@ -34,7 +33,7 @@ export interface CrossFileFixture {
 export interface RuleExamples {
   bad: string | null
   good: string | null
-  crossFile?: CrossFileFixture[]
+  crossFile?: CrossFileFixture[] | null
 }
 
 export interface Rule {
@@ -55,15 +54,33 @@ export interface Domain {
   rules: string[]
 }
 
-// The JSON is generated and committed by `cargo xtask docgen`; treat it as a
-// trusted boundary and assert the shape once here.
-export const rules = rulesJson as unknown as Rule[]
-export const domains = domainsJson as unknown as Domain[]
+/** The slice of a rule that lists and links need. */
+export interface RuleSummary {
+  name: string
+  group: RuleGroup
+  description: string
+  recommended: boolean
+  crossFile: boolean
+  domains: string[]
+  upstreamId: string | null
+}
 
 export interface GroupMeta {
   id: RuleGroup
   label: string
   blurb: string
+}
+
+/** Rule-catalog counts derived from rules.json/domains.json. */
+export interface Coverage {
+  total: number
+  recommended: number
+  crossFile: number
+  /** Rules that map one-to-one to an official Dart lint. */
+  mappedToOfficial: number
+  groups: (GroupMeta & { count: number; recommended: number })[]
+  domains: { name: string; count: number }[]
+  sources: { label: string; count: number }[]
 }
 
 export const GROUPS: GroupMeta[] = [
@@ -104,37 +121,18 @@ export const GROUPS: GroupMeta[] = [
   },
 ]
 
-const byName = new Map(rules.map((r) => [r.name, r]))
-
-export function getRule(name: string): Rule | undefined {
-  return byName.get(name)
-}
-
 export function groupLabel(id: string): string {
   return GROUPS.find((g) => g.id === id)?.label ?? id
 }
 
-export interface GroupedRules extends GroupMeta {
-  rules: Rule[]
-}
-
-export const groupedRules: GroupedRules[] = GROUPS.map((g) => ({
-  ...g,
-  rules: rules
-    .filter((r) => r.group === g.id && !r.crossFile)
-    .sort((a, b) => a.name.localeCompare(b.name)),
-}))
-
-export const crossFileRules: Rule[] = rules
-  .filter((r) => r.crossFile)
-  .sort((a, b) => a.name.localeCompare(b.name))
-
-export const recommendedCount = rules.filter((r) => r.recommended).length
-
-/** Picks a real rule with both a bad example and diagnostics for the hero. */
-export function heroRule(): Rule | undefined {
-  return (
-    getRule('avoid-function-literals-in-foreach-calls') ??
-    rules.find((r) => r.examples.bad && r.diagnostics.length > 0)
-  )
+export function summarize(rule: Rule): RuleSummary {
+  return {
+    name: rule.name,
+    group: rule.group,
+    description: rule.description,
+    recommended: rule.recommended,
+    crossFile: rule.crossFile,
+    domains: rule.domains,
+    upstreamId: rule.source.upstreamId,
+  }
 }

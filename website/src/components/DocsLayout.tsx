@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
+import { Icon } from './Icon'
 
 interface NavItem {
   to: string
@@ -29,6 +30,13 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    heading: 'Why falcon',
+    items: [
+      { to: '/benchmarks', label: 'Benchmarks' },
+      { to: '/compare', label: 'Compare linters' },
+    ],
+  },
+  {
     heading: 'Reference',
     items: [
       { to: '/reference/cli', label: 'CLI' },
@@ -37,33 +45,9 @@ export const NAV: NavGroup[] = [
   },
 ]
 
-function DocsNav({ onNavigate }: { onNavigate?: () => void }) {
-  return (
-    <nav aria-label="Documentation">
-      {NAV.map((group) => (
-        <div key={group.heading}>
-          <h4>{group.heading}</h4>
-          {group.items.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              activeProps={{ className: 'active' }}
-              activeOptions={{ exact: false }}
-              onClick={onNavigate}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-      ))}
-    </nav>
-  )
-}
-
 /**
- * Consistent docs shell: a sticky left sidebar with the three-tier IA on every
- * docs/linter/reference page, plus a mobile disclosure toggle. `aside` lets a
- * page add an in-page table of contents beneath the primary nav.
+ * Docs shell: a sticky sidebar with the site IA, collapsible on small screens.
+ * `aside` adds an in-page table of contents beneath the primary nav.
  */
 export function DocsLayout({
   children,
@@ -74,24 +58,39 @@ export function DocsLayout({
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="wrap">
-      <div className="layout">
-        <div className="sidebar-col">
-          <button
-            type="button"
-            className="docs-menu-toggle"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            <span className="menu-ico">{open ? '✕' : '☰'}</span> Documentation menu
-          </button>
-          <aside className={`sidebar${open ? ' open' : ''}`}>
-            <DocsNav onNavigate={() => setOpen(false)} />
-            {aside}
-          </aside>
-        </div>
-        <div className="content">{children}</div>
+    <div className="wrap layout">
+      <div className="sidebar-col">
+        <button
+          type="button"
+          className="docs-menu-toggle"
+          aria-expanded={open}
+          aria-controls="docs-sidebar"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Icon name={open ? 'close' : 'menu'} /> Documentation menu
+        </button>
+        <aside id="docs-sidebar" className={`sidebar${open ? ' open' : ''}`}>
+          <nav aria-label="Documentation">
+            {NAV.map((group) => (
+              <div key={group.heading} className="side-group">
+                <p className="side-heading">{group.heading}</p>
+                {group.items.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    activeProps={{ 'aria-current': 'page' }}
+                    onClick={() => setOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            ))}
+          </nav>
+          {aside}
+        </aside>
       </div>
+      <div className="content">{children}</div>
     </div>
   )
 }

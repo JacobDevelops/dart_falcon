@@ -1,8 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { DocsPage } from '../../components/DocsPage'
-import markdown from '../../content/getting-started.md?raw'
+import { breadcrumbs, seo } from '../../lib/seo'
+import source from '../../content/getting-started.md?raw'
 
 export const Route = createFileRoute('/docs/getting-started')({
-  head: () => ({ meta: [{ title: 'Getting Started — falcon' }] }),
-  component: () => <DocsPage markdown={markdown} />,
+  head: () =>
+    seo({
+      title: 'Getting started with falcon, the fast Dart & Flutter linter',
+      description:
+        'Install falcon, run your first Dart and Flutter lint check, configure falcon.json, wire it into CI, and connect the language server to your editor.',
+      path: '/docs/getting-started',
+      type: 'article',
+      jsonLd: [breadcrumbs([['Docs', '/docs/getting-started'], ['Getting started', '/docs/getting-started']])],
+    }),
+  component: () => <DocsPage source={source} />,
 })

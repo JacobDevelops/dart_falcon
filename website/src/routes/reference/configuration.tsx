@@ -1,10 +1,18 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
 import { ValueList } from '../../components/ValueList'
+import { breadcrumbs, seo } from '../../lib/seo'
 import configJson from '../../data/config-reference.json'
 
 export const Route = createFileRoute('/reference/configuration')({
-  head: () => ({ meta: [{ title: 'Configuration Reference — falcon' }] }),
+  head: () =>
+    seo({
+      title: 'falcon.json configuration reference: every key and default',
+      description:
+        'Every falcon.json key for the falcon Dart and Flutter linter, with its type, default, and accepted values, generated from the configuration schema.',
+      path: '/reference/configuration',
+      jsonLd: [breadcrumbs([['Reference', '/reference/cli'], ['Configuration', '/reference/configuration']])],
+    }),
   component: ConfigReference,
 })
 
@@ -55,7 +63,7 @@ function ConfigReference() {
     <DocsLayout
       aside={
         <nav className="toc" aria-label="Config sections">
-          <h4>Sections</h4>
+          <p className="side-heading">Sections</p>
           {sections.map((s) => (
             <a key={s} href={`#sec-${s}`}>
               {s}
@@ -65,7 +73,7 @@ function ConfigReference() {
       }
     >
       <div className="reference">
-        <div className="rules-head">
+        <div className="page-head">
           <h1>Configuration Reference</h1>
           <p>
             Every <code>falcon.json</code> key, its type, default, and accepted

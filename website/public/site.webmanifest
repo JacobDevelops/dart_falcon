@@ -1,0 +1,12 @@
+{
+  "name": "falcon: the fast Dart & Flutter linter",
+  "short_name": "falcon",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#0d1114",
+  "theme_color": "#0d1114",
+  "icons": [
+    { "src": "/falcon-icon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ]
+}
