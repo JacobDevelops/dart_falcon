@@ -15,15 +15,15 @@ Falcon's default set has been re-chosen independently of upstream presets, with 
 Falcon uses an arena concrete syntax tree that retains every token and trivia, so syntax rules read from one tree without parser changes.
 
 - **Engine checklist complete.** Per-package-context library identity and the concrete syntax tree are shipped.
-- **Must-have and DCM nice-to-have rules shipped.** All 139 DCM nice-to-have rules have shipped; the 137 new rules and two aliases bring the registry to 513 rules. The checklist retains 24 DCM post-1.0 rules.
+- **Must-have and DCM nice-to-have rules shipped.** All 139 DCM nice-to-have rules have shipped; the 137 new rules and two aliases bring the registry to 513 rules.
 
 ### Remaining
 
-- **Rule-catalog expansion.** Every must-have and DCM nice-to-have rule has shipped. Checklist rows remain in two sources:
-  - **DCM-inspired rules: 24** post-1.0 rules.
-  - **Additional rules: 3** post-1.0 rules.
-  Cross-file checklist rows remain as described below.
-- **Cross-file rules.** Eleven ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `sort-pub-dependencies`, `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, and `banned-imports`. The 8 planned additions are Tier 2 `unused-assets`, `unused-l10n`, `architecture-layer-boundaries`, `unexported-public-api`, and four Tier 3 post-1.0 rules.
+- **Rule-catalog expansion.** Every must-have and DCM nice-to-have rule has shipped, and every remaining checklist row is now 1.0 scope:
+  - **DCM-inspired rules: 24**, including whole-program-race analyses like `require-atomic-async-updates`, config-schema-heavy rules, and single-type-per-file style rules.
+  - **Additional rules: 3.**
+- **Cross-file rules.** Eleven ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `sort-pub-dependencies`, `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, and `banned-imports`. The 8 planned additions are `unused-assets`, `unused-l10n`, `architecture-layer-boundaries`, `unexported-public-api`, `missing-assets`, `unused-dev-dependencies`, `no-deep-package-imports`, and `duplicate-barrel-exports`.
+- **Hardening.** The October 2026 audit's engine, tooling and docs fixes plus the 1.0 workflow features (safe autofixes, baselines, CI report formats, git-aware PR review, severity thresholds, install and update, monorepo runs), staged in the checklist.
 - **e2e OSS corpus.** Add a `cargo xtask e2e` harness for pinned, shallow clones of large Dart/Flutter repos, including immich, AppFlowy, flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples, and dart-lang/sdk `tests/language`. It should catch panics and parser/internal errors, snapshot diagnostic counts, and smoke-test migration of common `analysis_options.yaml` presets. Run a fast subset in PR CI and the full set nightly.
 - **Fix `prefer-iterable-every` porting bug.** Our port detects the *negated*
   `!where(pred).isEmpty` (which is `any(pred)` semantics, overlapping
@@ -35,9 +35,5 @@ Falcon uses an arena concrete syntax tree that retains every token and trivia, s
 
 ## Post-1.0
 
-- **Niche-package DCM rules + deep analyses.** The flame / patrol / mocktail /
-  get_it / fake_async rule sets, plus the DCM rules the catalog marks post-1.0
-  (config-schema-heavy meta-rules, whole-program-race analyses like
-  `require-atomic-async-updates`, and single-type-per-file style rules).
-- **Cross-file Tier 3.** `missing-assets`, `unused-dev-dependencies`,
-  `no-deep-package-imports`, `duplicate-barrel-exports`.
+- **Niche-package rule sets.** The flame / patrol / mocktail / get_it /
+  fake_async rule sets.

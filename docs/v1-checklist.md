@@ -1,6 +1,6 @@
 # Falcon 1.0 checklist
 
-Hardening items and must-have rules must be resolved before falcon 1.0; nice-to-have rules are stretch goals and post-1.0 rules are out of scope (see [Priorities](#priorities)). A hardening item or rule row is deleted once it ships, and a batch heading goes with its last item. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
+Every hardening item and rule row below must be resolved before falcon 1.0; there is no post-1.0 tier. A hardening item or rule row is deleted once it ships, and a batch heading goes with its last item. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
 ## Hardening
 
@@ -50,8 +50,6 @@ Owns `xtask/`, `.github/`, `Makefile.toml`, `.cargo/config.toml`, `extensions/` 
 
 - [ ] **Docgen and website in CI.** Add `docgen --check`, a website typecheck/build job, and stop casting `rules.json` through `unknown`.
 - [ ] **Docgen fails on gaps.** Empty descriptions and zero-diagnostic fixtures only print; the temp config path is fixed and a write failure falls back silently.
-- [ ] **Website bundle.** The root route imports the 2.3 MB `rules.json` to show one count; have docgen emit a summary.
-- [ ] **Website SDK claim.** `__root.tsx` and `index.tsx` say "No Dart SDK required" while README tells users to install the SDK for SDK- and package-typed rules.
 - [ ] **`validate-rules --rule <typo>` fails.** A filter matching nothing currently reports PASS.
 - [ ] **Honour `CARGO_TARGET_DIR`.** `validate-rules`, docgen and `makers validate_rules` hard-code `target/debug/falcon`.
 - [ ] **Release token exposure.** `prepare-release.yml` persists `RELEASE_PAT` in `.git/config` while dependency build scripts compile; the `cargo xtask` alias lacks `--locked`.
@@ -249,14 +247,7 @@ Touches every crate, so it runs alone after the refactors above; earlier it woul
 - [ ] **Clippy pedantic.** Enable `pedantic` in `[workspace.lints.clippy]`, inherited by every crate, under the existing `-D warnings` gate. A trial run reported 4,546 warnings, 3,492 with machine-applicable suggestions.
 - [ ] **Decompose long functions.** Clippy's `too_many_lines` flags 242 functions over 100 lines (`infer_non_call` 649, `semantic_scope::visit_expr` 568, `add_declarations` 532). Moving files doesn't fix these.
 
-## Priorities
-
-- **must-have**: blocks 1.0. The rule is either an official preset member or a
-  high-signal correctness/idiom check expected of a serious Dart/Flutter linter.
-- **nice-to-have**: 1.0 stretch. Shipped if the workstream reaches it, but the
-  release does not block on it.
-- **post-1.0**: explicitly out of 1.0 scope (experimental, hyper-niche, or
-  needs config/schema design that is itself post-1.0 work).
+## Legend
 
 **Falcon groups** are `a11y | complexity | correctness | performance | security |
 style | suspicious`.
@@ -270,94 +261,94 @@ style | suspicious`.
 
 ## Rule totals
 
-| Source | must-have | nice-to-have | post-1.0 | total |
-|---|---:|---:|---:|---:|
-| DCM-inspired | 0 | 0 | 24 | 24 |
-| Cross-file additions | 0 | 4 | 4 | 8 |
-| Additional rules | 0 | 0 | 3 | 3 |
-| **Total** | **0** | **4** | **31** | **35** |
+| Source | remaining |
+|---|---:|
+| DCM-inspired | 24 |
+| Cross-file additions | 8 |
+| Additional rules | 3 |
+| **Total** | **35** |
 
-Counts reflect remaining checklist rows. DCM nice-to-have rows shipped and were removed.
+Counts reflect remaining checklist rows. Every DCM must-have and nice-to-have row has shipped and was removed.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
 
 ## Remaining DCM-inspired rules (24)
 
-These post-1.0 candidates are from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
+These rules are from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
 Analysis legend: **S** syntax-only, **LT** needs-local-type-inference, **FT**
 needs-full-type-resolution, **X** needs-cross-file/project.
 
 ### 2a. core: correctness
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-not-encodable-in-to-json` | correctness | FT | paid | `toJson` returns a non-encodable value. | post-1.0 |
-| `require-atomic-async-updates` | correctness | FT | paid | Read-modify-write across an await race. | post-1.0 |
-| `pass-correct-accepted-type` | correctness | FT | paid | Argument type mismatch (DCM-style). | post-1.0 |
-| `handle-throwing-invocations` | correctness | FT | paid | Call to throwing API without try/catch. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-not-encodable-in-to-json` | correctness | FT | paid | `toJson` returns a non-encodable value. |
+| `require-atomic-async-updates` | correctness | FT | paid | Read-modify-write across an await race. |
+| `pass-correct-accepted-type` | correctness | FT | paid | Argument type mismatch (DCM-style). |
+| `handle-throwing-invocations` | correctness | FT | paid | Call to throwing API without try/catch. |
 
 ### 2b. core: suspicious
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-importing-entrypoint-exports` | suspicious | X | paid | Importing from an app entrypoint. | post-1.0 |
-| `avoid-similar-names` | suspicious | S | paid | Confusingly similar identifiers in scope. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-importing-entrypoint-exports` | suspicious | X | paid | Importing from an app entrypoint. |
+| `avoid-similar-names` | suspicious | S | paid | Confusingly similar identifiers in scope. |
 
 ### 2c. core: style
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `prefer-single-declaration-per-file` | style | S | paid | One public type per file. | post-1.0 |
-| `prefer-single-widget-per-file` | style | S | paid | One widget per file. | post-1.0 |
-| `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. | post-1.0 |
-| `match-class-name-pattern` | style | S | paid | Class names must match a configured regex. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `prefer-single-declaration-per-file` | style | S | paid | One public type per file. |
+| `prefer-single-widget-per-file` | style | S | paid | One widget per file. |
+| `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. |
+| `match-class-name-pattern` | style | S | paid | Class names must match a configured regex. |
 
 ### 2d. core: complexity
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-local-functions` | complexity | S | paid | Overuse of local functions. | post-1.0 |
-| `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-local-functions` | complexity | S | paid | Overuse of local functions. |
+| `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. |
 
 ### 2e. core: performance
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `prefer-bytes-builder` | performance | FT | paid | Building byte lists without BytesBuilder. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `prefer-bytes-builder` | performance | FT | paid | Building byte lists without BytesBuilder. |
 
 ### 2f. flutter domain
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. | post-1.0 |
-| `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. |
+| `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). |
 
 ### 2g. test domain
 
 Activated for `*_test.dart`.
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-missing-test-files` | correctness | X | paid | Source file without a matching test. | post-1.0 |
-| `avoid-misused-test-matchers` | correctness | FT | paid | Matcher applied to the wrong type. | post-1.0 |
-| `format-test-name` | style | S | paid | Test description formatting. | post-1.0 |
-| `prefer-test-structure` | style | S | paid | Arrange/act/assert structure. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-missing-test-files` | correctness | X | paid | Source file without a matching test. |
+| `avoid-misused-test-matchers` | correctness | FT | paid | Matcher applied to the wrong type. |
+| `format-test-name` | style | S | paid | Test description formatting. |
+| `prefer-test-structure` | style | S | paid | Arrange/act/assert structure. |
 
 ### 2h. bloc domain
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-empty-build-when` | correctness | S | paid | Empty `buildWhen` callback. | post-1.0 |
-| `avoid-cubits` | style | LT | paid | Opinionated: prefer Bloc over Cubit. | post-1.0 |
-| `avoid-returning-value-from-cubit-methods` | style | LT | paid | Cubit methods should be void. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-empty-build-when` | correctness | S | paid | Empty `buildWhen` callback. |
+| `avoid-cubits` | style | LT | paid | Opinionated: prefer Bloc over Cubit. |
+| `avoid-returning-value-from-cubit-methods` | style | LT | paid | Cubit methods should be void. |
 
 ### 2i. riverpod domain
 
-| DCM rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-notifier-constructors` | style | LT | paid | Notifiers shouldn't declare constructors. | post-1.0 |
-| `prefer-single-notifier-per-file` | style | S | paid | One notifier per file. | post-1.0 |
+| DCM rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-notifier-constructors` | style | LT | paid | Notifiers shouldn't declare constructors. |
+| `prefer-single-notifier-per-file` | style | S | paid | One notifier per file. |
 
 ### Deduplication notes
 
@@ -376,13 +367,13 @@ These eight DCM names are covered by shipped rules and are not counted in the DC
 
 ## Remaining additional rules (3)
 
-These post-1.0 candidates come from outside the DCM catalog.
+These rules come from outside the DCM catalog.
 
-| rule | falcon group | analysis | paywall | description | priority |
-|---|---|---|---|---|---|
-| `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. | post-1.0 |
-| `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. | post-1.0 |
-| `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
+| rule | falcon group | analysis | paywall | description |
+|---|---|---|---|---|
+| `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. |
+| `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. |
+| `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. |
 
 ## Planned cross-file rules (8)
 
@@ -396,19 +387,12 @@ asset/l10n index (filesystem walk and/or `.arb` parsing).
 
 **Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `sort-pub-dependencies`, `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, and `banned-imports`. The four shipped official lints are not counted in the 8 planned additions below.
 
-### 3b. Tier 2: nice-to-have (4)
-
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
 | `unused-assets` | correctness | needs-cross-file/project | C | Asset declared in pubspec `flutter: assets:` but no string literal references its path. |
 | `unused-l10n` | correctness | needs-cross-file/project | C | Generated localization key (`.arb`) never referenced through the generated accessor. |
 | `architecture-layer-boundaries` | correctness | needs-cross-file/project | A | Warn when imports cross clean-architecture or feature-first layers classified heuristically by path. |
 | `unexported-public-api` | style | needs-cross-file/project | A | Public declaration used across the package but never surfaced through a barrel/public library. |
-
-### 3c. Tier 3: post-1.0 (4)
-
-| rule | falcon group | analysis | difficulty | description |
-|---|---|---|---|---|
 | `missing-assets` | suspicious | needs-cross-file/project | C | String literal that looks like an asset path (`assets/…`) not declared in pubspec. |
 | `unused-dev-dependencies` | correctness | needs-cross-file/project | B | Dev-dependency imported nowhere under `test/`, `tool/`, `integration_test/`. |
 | `no-deep-package-imports` | correctness | needs-cross-file/project | A | Importing another package's internal file past its public barrel. |
