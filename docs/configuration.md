@@ -278,7 +278,7 @@ patterns select nothing. For example:
 |--------|---------|---------|
 | `max_number` | `1` | Maximum positional parameters before named parameters are preferred. Inherited method contracts, extension types, closures, setters and operators are excluded. |
 
-The `prefer-boolean-prefixes` rule id is an alias for `boolean-prefixes` and uses the same options and declaration scope.
+The `prefer-boolean-prefixes` rule id is an alias for `boolean-prefixes` and uses the same options and declaration scope. Like the other legacy ids, the JSON schema only lists the canonical `boolean-prefixes`, so prefer that id in new configs.
 
 ### `prefer-commenting-analyzer-ignores` (`style`)
 

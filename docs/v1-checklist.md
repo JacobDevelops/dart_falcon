@@ -95,7 +95,6 @@ needs-full-type-resolution, **X** needs-cross-file/project.
 |---|---|---|---|---|---|
 | `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. | post-1.0 |
 | `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). | post-1.0 |
-| `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. | post-1.0 |
 
 ### 2g. test domain
 
@@ -103,7 +102,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. | post-1.0 |
 | `avoid-missing-test-files` | correctness | X | paid | Source file without a matching test. | post-1.0 |
 | `avoid-misused-test-matchers` | correctness | FT | paid | Matcher applied to the wrong type. | post-1.0 |
 | `format-test-name` | style | S | paid | Test description formatting. | post-1.0 |
@@ -121,7 +119,6 @@ Activated for `*_test.dart`.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
-| `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
 | `avoid-notifier-constructors` | style | LT | paid | Notifiers shouldn't declare constructors. | post-1.0 |
 | `prefer-single-notifier-per-file` | style | S | paid | One notifier per file. | post-1.0 |
 
@@ -139,6 +136,16 @@ These eight DCM names are covered by shipped rules and are not counted in the DC
 | `avoid-banned-imports` | `banned-imports` |
 | `avoid-self-compare` | `no-self-comparisons` |
 | `prefer-boolean-prefixes` | `boolean-prefixes` |
+
+## Remaining additional rules (3)
+
+These post-1.0 candidates come from outside the DCM catalog.
+
+| rule | falcon group | analysis | paywall | description | priority |
+|---|---|---|---|---|---|
+| `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. | post-1.0 |
+| `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. | post-1.0 |
+| `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
 
 ## Planned cross-file rules (8)
 
