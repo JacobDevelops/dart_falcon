@@ -178,7 +178,8 @@ fn with_version_references(text: &str, version: &str) -> String {
 }
 
 /// `cargo xtask version 0.4.2`: bump `[workspace.package]`, every pinned
-/// reference in `versioned_files`, and the workspace entries in Cargo.lock.
+/// reference in `versioned_files`, the workspace entries in Cargo.lock, and
+/// mirror the release changelog into the pub.dev launcher.
 fn set_version(version: &str) {
     if !Regex::new(r"^\d+\.\d+\.\d+$").unwrap().is_match(version) {
         eprintln!("error: expected a version like 0.4.2, got `{version}`");
@@ -205,6 +206,10 @@ fn set_version(version: &str) {
             println!("updated {}", path.display());
         }
     }
+
+    let launcher_changelog = root.join("packages/falcon/CHANGELOG.md");
+    fs::copy(root.join("CHANGELOG.md"), &launcher_changelog).expect("copy launcher changelog");
+    println!("updated {}", launcher_changelog.display());
 
     let status = Command::new("cargo")
         .args(["update", "--workspace", "--offline"])
