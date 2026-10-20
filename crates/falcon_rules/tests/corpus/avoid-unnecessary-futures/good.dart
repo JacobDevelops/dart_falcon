@@ -33,3 +33,14 @@ Future<int> iteration(Stream<int> values) async {
   await for (final value in values) {}
   return 1;
 }
+Future<int> destructureList(List<int> values) async {
+  final [value] = values;
+  return value;
+}
+class ThrowingGetter {
+  int get value => throw StateError('failed');
+}
+Future<int> destructureObject(ThrowingGetter object) async {
+  final ThrowingGetter(:value) = object;
+  return value;
+}

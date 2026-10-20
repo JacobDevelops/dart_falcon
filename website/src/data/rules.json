@@ -4058,7 +4058,7 @@
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       },
       {
-        "column": 44,
+        "column": 9,
         "file": null,
         "line": 15,
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
@@ -4076,13 +4076,13 @@
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       },
       {
-        "column": 43,
+        "column": 8,
         "file": null,
         "line": 26,
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       },
       {
-        "column": 44,
+        "column": 9,
         "file": null,
         "line": 31,
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
@@ -16329,12 +16329,12 @@
         "message": "This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers."
       }
     ],
-    "docs": "Prefer synchronous declarations when an async Future only returns scalars.\n\nOnly explicitly typed SDK Future top-level/local functions with known scalar\nreturns are reported. Methods/getters are excluded to preserve inherited\ncontracts. Awaiting, throwing, calls, accesses and operators exclude the body.\nNo automatic fix is offered: changing a public return type requires callers\nto be updated as well.",
+    "docs": "Prefer synchronous declarations when an async Future only returns scalars.\n\nOnly explicitly typed SDK Future top-level/local functions with known scalar\nreturns are reported. Methods/getters are excluded to preserve inherited\ncontracts. Awaiting, throwing, calls, accesses, operators and patterns exclude\nthe body.\nNo automatic fix is offered: changing a public return type requires callers\nto be updated as well.",
     "domains": [],
     "examples": {
       "bad": "import 'dart:async';\nimport 'dart:async' as async;\n\nFuture<int> immediate() async => 1;\nFuture<String> text() async => 'value';\nasync.Future<bool> flag() async => true;\nFuture<double> number() async {\n  return 1.5;\n}\nFuture<int> parameter(int value) async => value;\nFuture<int> local() async {\n  final value = 1;\n  return value;\n}",
       "crossFile": null,
-      "good": "import 'dart:async';\nFuture<int> forwarding() => Future<int>.value(1);\nFuture<int> awaited() async => await Future<int>.value(1);\nFuture<int> flatten(Future<int> value) async => value;\nFuture<int> union(FutureOr<int> value) async => value;\nFuture<dynamic> unknown(dynamic value) async => value;\nFuture<int> throwing() async { throw StateError('failed'); }\nFuture<int> canThrow() async => int.parse('1');\nFuture<int> asserts(int? value) async => value!;\nFuture<int> effects() async { print('effect'); return 1; }\nFuture<void> main() async {}\nabstract class Contract { Future<int> value(); }\nclass Implementation implements Contract {\n  @override\n  Future<int> value() async => 1;\n}\nclass Member {\n  Future<int> value() async => 1;\n}\nFuture<void> empty() async {}\nStream<int> generator() async* { yield 1; }\nvoid callback() {\n  final action = () async => 1;\n  print(action);\n}\nint get dangerous => throw StateError('failed');\nFuture<int> getter() async => dangerous;\nFuture<int> interpolation(Object value) async {\n  final text = '$value';\n  return 1;\n}\nFuture<int> iteration(Stream<int> values) async {\n  await for (final value in values) {}\n  return 1;\n}"
+      "good": "import 'dart:async';\nFuture<int> forwarding() => Future<int>.value(1);\nFuture<int> awaited() async => await Future<int>.value(1);\nFuture<int> flatten(Future<int> value) async => value;\nFuture<int> union(FutureOr<int> value) async => value;\nFuture<dynamic> unknown(dynamic value) async => value;\nFuture<int> throwing() async { throw StateError('failed'); }\nFuture<int> canThrow() async => int.parse('1');\nFuture<int> asserts(int? value) async => value!;\nFuture<int> effects() async { print('effect'); return 1; }\nFuture<void> main() async {}\nabstract class Contract { Future<int> value(); }\nclass Implementation implements Contract {\n  @override\n  Future<int> value() async => 1;\n}\nclass Member {\n  Future<int> value() async => 1;\n}\nFuture<void> empty() async {}\nStream<int> generator() async* { yield 1; }\nvoid callback() {\n  final action = () async => 1;\n  print(action);\n}\nint get dangerous => throw StateError('failed');\nFuture<int> getter() async => dangerous;\nFuture<int> interpolation(Object value) async {\n  final text = '$value';\n  return 1;\n}\nFuture<int> iteration(Stream<int> values) async {\n  await for (final value in values) {}\n  return 1;\n}\nFuture<int> destructureList(List<int> values) async {\n  final [value] = values;\n  return value;\n}\nclass ThrowingGetter {\n  int get value => throw StateError('failed');\n}\nFuture<int> destructureObject(ThrowingGetter object) async {\n  final ThrowingGetter(:value) = object;\n  return value;\n}"
     },
     "group": "performance",
     "name": "avoid-unnecessary-futures",
@@ -18848,151 +18848,151 @@
     "description": "Named arguments follow their resolved parameter declaration order by default.",
     "diagnostics": [
       {
-        "column": 71,
+        "column": 39,
         "file": null,
         "line": 4,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 62,
+        "column": 30,
         "file": null,
         "line": 7,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 53,
+        "column": 21,
         "file": null,
         "line": 10,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 54,
+        "column": 22,
         "file": null,
         "line": 11,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 58,
+        "column": 26,
         "file": null,
         "line": 12,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 60,
+        "column": 28,
         "file": null,
         "line": 13,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 53,
+        "column": 21,
         "file": null,
         "line": 16,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 52,
+        "column": 20,
         "file": null,
         "line": 20,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 65,
+        "column": 33,
         "file": null,
         "line": 28,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 63,
+        "column": 31,
         "file": null,
         "line": 36,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 63,
+        "column": 31,
         "file": null,
         "line": 40,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 64,
+        "column": 32,
         "file": null,
         "line": 41,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 62,
+        "column": 30,
         "file": null,
         "line": 42,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 66,
+        "column": 34,
         "file": null,
         "line": 43,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 63,
+        "column": 31,
         "file": null,
         "line": 44,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 64,
+        "column": 32,
         "file": null,
         "line": 45,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 61,
+        "column": 29,
         "file": null,
         "line": 48,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 66,
+        "column": 34,
         "file": null,
         "line": 52,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 64,
+        "column": 32,
         "file": null,
         "line": 54,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 63,
+        "column": 31,
         "file": null,
         "line": 57,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 67,
+        "column": 35,
         "file": null,
         "line": 60,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 58,
+        "column": 26,
         "file": null,
         "line": 64,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 63,
+        "column": 31,
         "file": null,
         "line": 72,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 61,
+        "column": 29,
         "file": null,
         "line": 78,
         "message": "Reorder named arguments to follow the parameter declaration order."
       },
       {
-        "column": 59,
+        "column": 27,
         "file": null,
         "line": 79,
         "message": "Reorder named arguments to follow the parameter declaration order."
@@ -21881,19 +21881,19 @@
     "description": "Flags a getter that only exposes a private final field.",
     "diagnostics": [
       {
-        "column": 50,
+        "column": 12,
         "file": null,
         "line": 3,
         "message": "This getter only exposes a final field; replace both with a public final field."
       },
       {
-        "column": 50,
+        "column": 12,
         "file": null,
         "line": 7,
         "message": "This getter only exposes a final field; replace both with a public final field."
       },
       {
-        "column": 50,
+        "column": 12,
         "file": null,
         "line": 12,
         "message": "This getter only exposes a final field; replace both with a public final field."
@@ -22329,7 +22329,7 @@
     "description": "Omit implicit `super()` initializers and provably redundant member prefixes.",
     "diagnostics": [
       {
-        "column": 51,
+        "column": 14,
         "file": null,
         "line": 3,
         "message": "This empty super() call is implicit; remove the explicit initializer."
@@ -24023,7 +24023,7 @@
     "description": "Flags a non-empty file that does not end with exactly one line break.",
     "diagnostics": [
       {
-        "column": 48,
+        "column": 15,
         "file": null,
         "line": 1,
         "message": "Missing a newline at the end of the file."
@@ -24126,49 +24126,49 @@
     "description": "Flags `TODO` comments that do not follow the Flutter style `// TODO(username): message, https://URL-to-issue`.",
     "diagnostics": [
       {
-        "column": 35,
+        "column": 2,
         "file": null,
         "line": 1,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 35,
+        "column": 2,
         "file": null,
         "line": 2,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 35,
+        "column": 2,
         "file": null,
         "line": 3,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 35,
+        "column": 2,
         "file": null,
         "line": 4,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 35,
+        "column": 2,
         "file": null,
         "line": 5,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 35,
+        "column": 2,
         "file": null,
         "line": 6,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 37,
+        "column": 4,
         "file": null,
         "line": 8,
         "message": "To-do comment doesn't follow the Flutter style."
       },
       {
-        "column": 48,
+        "column": 15,
         "file": null,
         "line": 12,
         "message": "To-do comment doesn't follow the Flutter style."
@@ -24642,31 +24642,31 @@
     "description": "Requires field initializers to follow their containing type's field declaration order by default.",
     "diagnostics": [
       {
-        "column": 62,
+        "column": 27,
         "file": null,
         "line": 4,
         "message": "Reorder field initializers to follow field declaration order."
       },
       {
-        "column": 56,
+        "column": 21,
         "file": null,
         "line": 6,
         "message": "Reorder field initializers to follow field declaration order."
       },
       {
-        "column": 62,
+        "column": 27,
         "file": null,
         "line": 11,
         "message": "Reorder field initializers to follow field declaration order."
       },
       {
-        "column": 45,
+        "column": 10,
         "file": null,
         "line": 20,
         "message": "Reorder field initializers to follow field declaration order."
       },
       {
-        "column": 56,
+        "column": 21,
         "file": null,
         "line": 29,
         "message": "Reorder field initializers to follow field declaration order."
@@ -24694,31 +24694,31 @@
     "description": "Flags a multiline string spanning several lines whose text does not start with a line break right after the opening quotes.",
     "diagnostics": [
       {
-        "column": 59,
+        "column": 8,
         "file": null,
         "line": 5,
         "message": "Missing a newline at the beginning of a multiline string."
       },
       {
-        "column": 59,
+        "column": 8,
         "file": null,
         "line": 8,
         "message": "Missing a newline at the beginning of a multiline string."
       },
       {
-        "column": 59,
+        "column": 8,
         "file": null,
         "line": 10,
         "message": "Missing a newline at the beginning of a multiline string."
       },
       {
-        "column": 59,
+        "column": 8,
         "file": null,
         "line": 12,
         "message": "Missing a newline at the beginning of a multiline string."
       },
       {
-        "column": 63,
+        "column": 12,
         "file": null,
         "line": 14,
         "message": "Missing a newline at the beginning of a multiline string."
@@ -24866,31 +24866,31 @@
     "description": "Flags source lines longer than 80 characters.",
     "diagnostics": [
       {
-        "column": 81,
+        "column": 41,
         "file": null,
         "line": 4,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 81,
+        "column": 80,
         "file": null,
         "line": 5,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 81,
+        "column": 79,
         "file": null,
         "line": 6,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 81,
+        "column": 77,
         "file": null,
         "line": 8,
         "message": "The line length exceeds the 80-character limit."
       },
       {
-        "column": 81,
+        "column": 77,
         "file": null,
         "line": 9,
         "message": "The line length exceeds the 80-character limit."
@@ -25176,7 +25176,7 @@
         "message": "Missing whitespace between adjacent strings."
       },
       {
-        "column": 65,
+        "column": 8,
         "file": null,
         "line": 13,
         "message": "Missing whitespace between adjacent strings."
@@ -26585,37 +26585,37 @@
     "description": "Requires named parameters to follow the explicitly configured alphabetical order.",
     "diagnostics": [
       {
-        "column": 64,
+        "column": 31,
         "file": null,
         "line": 1,
         "message": "Reorder named entries to follow the configured order."
       },
       {
-        "column": 65,
+        "column": 32,
         "file": null,
         "line": 4,
         "message": "Reorder named entries to follow the configured order."
       },
       {
-        "column": 69,
+        "column": 36,
         "file": null,
         "line": 5,
         "message": "Reorder named entries to follow the configured order."
       },
       {
-        "column": 75,
+        "column": 42,
         "file": null,
         "line": 9,
         "message": "Reorder named entries to follow the configured order."
       },
       {
-        "column": 68,
+        "column": 35,
         "file": null,
         "line": 10,
         "message": "Reorder named entries to follow the configured order."
       },
       {
-        "column": 84,
+        "column": 51,
         "file": null,
         "line": 13,
         "message": "Reorder named entries to follow the configured order."
@@ -27463,49 +27463,49 @@
     "description": "Require explanations for analyzer `ignore:` and `ignore_for_file:` comments.",
     "diagnostics": [
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 1,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 4,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 6,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 11,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 15,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 19,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 22,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
       },
       {
-        "column": 50,
+        "column": 2,
         "file": null,
         "line": 25,
         "message": "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment."
@@ -28479,12 +28479,12 @@
         "message": "This non-function field matches callback pattern '^on[A-Z]|^builder$|.*Builder$'; rename it so it does not match."
       }
     ],
-    "docs": "Match callback field names to a configured regular expression.\n\n`name_pattern` must be a nonempty valid regex; otherwise the rule is inactive.\nLeading privacy underscores are ignored. Resolved function fields, including\naliases and Function, must match; proven non-function fields must not match.\nUnknown, dynamic and type-parameter types are excluded, as are inferred,\nstatic and annotated fields. Classes with supertypes are skipped to preserve\ninherited field/getter contracts.",
+    "docs": "Match callback field names to a configured regular expression.\n\n`name_pattern` must be a nonempty valid regex; otherwise the rule is inactive.\nLeading privacy underscores are ignored. Resolved function fields, including\naliases and Function, must match; proven non-function fields must not match.\nUnknown, dynamic and enclosing type-parameter types are excluded, as are\ninferred, static and annotated fields. Classes with supertypes are skipped\nto preserve inherited field/getter contracts.",
     "domains": [],
     "examples": {
       "bad": "typedef Callback = void Function();\nclass Callbacks {\n  final void Function() tap;\n  void Function(int)? _changed;\n  Function? work;\n  Callback? alias;\n  String onValue = '';\n  Callbacks(this.tap);\n}",
       "crossFile": null,
-      "good": "typedef Callback = void Function();\nclass Callbacks {\n  final void Function() onTap;\n  void Function(int)? _onChanged;\n  Callback? onAlias;\n  Function? onUntypedFunction;\n  static void Function()? staticCallback;\n  final inferred = () {};\n  int count = 0;\n  Callbacks(this.onTap);\n}\nabstract class Contract {\n  void Function() get tap;\n}\nclass Implementation implements Contract {\n  final void Function() tap;\n  Implementation(this.tap);\n}"
+      "good": "typedef Callback = void Function();\nclass Callbacks {\n  final void Function() onTap;\n  void Function(int)? _onChanged;\n  Callback? onAlias;\n  Function? onUntypedFunction;\n  static void Function()? staticCallback;\n  final inferred = () {};\n  int count = 0;\n  Callbacks(this.onTap);\n}\nabstract class Contract {\n  void Function() get tap;\n}\nclass Implementation implements Contract {\n  final void Function() tap;\n  Implementation(this.tap);\n}\nclass Box<Callback> {\n  final Callback value;\n  Box(this.value);\n}"
     },
     "group": "style",
     "name": "prefer-correct-callback-field-name",
@@ -36755,25 +36755,25 @@
     "description": "Flags ordinary comments that contain recognizable Dart statements.",
     "diagnostics": [
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 2,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 3,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 4,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 5,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
@@ -36785,37 +36785,37 @@
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 7,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 8,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 42,
+        "column": 4,
         "file": null,
         "line": 9,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 40,
+        "column": 2,
         "file": null,
         "line": 11,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 40,
+        "column": 2,
         "file": null,
         "line": 13,
         "message": "Remove commented-out code; version control preserves obsolete implementations."
       },
       {
-        "column": 40,
+        "column": 2,
         "file": null,
         "line": 15,
         "message": "Remove commented-out code; version control preserves obsolete implementations."

@@ -16,3 +16,7 @@ class Implementation implements Contract {
   final void Function() tap;
   Implementation(this.tap);
 }
+class Box<Callback> {
+  final Callback value;
+  Box(this.value);
+}

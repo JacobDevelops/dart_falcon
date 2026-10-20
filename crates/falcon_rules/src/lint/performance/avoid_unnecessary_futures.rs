@@ -2,7 +2,8 @@
 //!
 //! Only explicitly typed SDK Future top-level/local functions with known scalar
 //! returns are reported. Methods/getters are excluded to preserve inherited
-//! contracts. Awaiting, throwing, calls, accesses and operators exclude the body.
+//! contracts. Awaiting, throwing, calls, accesses, operators and patterns exclude
+//! the body.
 //! No automatic fix is offered: changing a public return type requires callers
 //! to be updated as well.
 
@@ -104,6 +105,17 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn visit_pattern(
+        &mut self,
+        node: Pattern<'a>,
+        _matched: Option<&falcon_analyze::ResolvedType>,
+        _state: &SemanticState<'a>,
+    ) {
+        if let Some(body) = self.bodies.enclosing(&node.span()) {
+            self.unsafe_bodies.insert(body.span.start);
         }
     }
 

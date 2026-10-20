@@ -3,9 +3,9 @@
 //! `name_pattern` must be a nonempty valid regex; otherwise the rule is inactive.
 //! Leading privacy underscores are ignored. Resolved function fields, including
 //! aliases and Function, must match; proven non-function fields must not match.
-//! Unknown, dynamic and type-parameter types are excluded, as are inferred,
-//! static and annotated fields. Classes with supertypes are skipped to preserve
-//! inherited field/getter contracts.
+//! Unknown, dynamic and enclosing type-parameter types are excluded, as are
+//! inferred, static and annotated fields. Classes with supertypes are skipped
+//! to preserve inherited field/getter contracts.
 
 use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{
@@ -55,14 +55,26 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         match node {
-            TopLevelDecl::Class(class) if class.extends().is_none() && class.with_clause().is_empty() && class.implements().is_empty() => StructuralTraversal::Continue,
+            TopLevelDecl::Class(class) if class.extends().is_none() && class.with_clause().is_empty() && class.implements().is_empty() => {
+                self.state.type_parameters.push(class.type_params(), &self.state.model);
+                StructuralTraversal::Continue
+            },
             _ => StructuralTraversal::SkipChildren,
+        }
+    }
+    fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
+        if let TopLevelDecl::Class(class) = node
+            && class.extends().is_none()
+            && class.with_clause().is_empty()
+            && class.implements().is_empty()
+        {
+            self.state.type_parameters.pop();
         }
     }
     fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
         if node.is_static() || !node.annotations().is_empty() { return StructuralTraversal::Continue; }
         let Some(ty) = node.field_type() else { return StructuralTraversal::Continue; };
-        let resolved = self.state.model.resolve_type(ty);
+        let resolved = self.state.model.resolve_type_in(ty, &self.state.type_parameters);
         let function = match &resolved {
             ResolvedType::Function { .. } => true,
             ResolvedType::Interface { .. } => resolved.interface("dart:core", "Function"),
