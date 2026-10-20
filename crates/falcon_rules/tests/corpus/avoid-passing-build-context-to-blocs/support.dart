@@ -20,3 +20,15 @@ class Repository {
   Repository(Object dependency);
   void accept(Object dependency) {}
 }
+
+class CounterEvent {
+  CounterEvent(Object payload);
+}
+
+class GenericBloc<E> extends Bloc<E, int> {
+  GenericBloc() : super(0);
+}
+
+class CounterBloc extends GenericBloc<CounterEvent> {
+  void add(CounterEvent event) {}
+}

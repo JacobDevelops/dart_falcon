@@ -5875,12 +5875,6 @@
       {
         "column": 3,
         "file": null,
-        "line": 8,
-        "message": "Use create to construct a new provided instance instead of a value provider."
-      },
-      {
-        "column": 3,
-        "file": null,
         "line": 9,
         "message": "Use create to construct a new provided instance instead of a value provider."
       },
@@ -5891,15 +5885,75 @@
         "message": "Use create to construct a new provided instance instead of a value provider."
       },
       {
-        "column": 7,
+        "column": 3,
         "file": null,
         "line": 11,
         "message": "Use create to construct a new provided instance instead of a value provider."
       },
       {
-        "column": 3,
+        "column": 7,
         "file": null,
         "line": 12,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 15,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 16,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 17,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 18,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 19,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 20,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 21,
+        "message": "Use create to construct a new provided instance instead of a value provider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
         "message": "Use create to construct a new provided instance instead of a value provider."
       }
     ],
@@ -5908,9 +5962,9 @@
       "provider"
     ],
     "examples": {
-      "bad": "import 'package:provider/provider.dart' as p;\nclass Model {\n  Model();\n  Model.named();\n  factory Model.make() => Model();\n}\nvoid examples() {\n  p.Provider.value(value: Model());\n  p.ChangeNotifierProvider.value(value: new Model());\n  p.ListenableProvider.value(value: Model.named());\n  new p.Provider.value(value: (Model()));\n  p.Provider<Model>.value(value: Model.make());\n}",
+      "bad": "import 'package:provider/provider.dart' as p;\nclass Model {\n  Model();\n  Model.named();\n  factory Model.make() => Model();\n  void initialize() {}\n}\nvoid examples(bool flag, Model existing, Model? cached) {\n  p.Provider.value(value: Model());\n  p.ChangeNotifierProvider.value(value: new Model());\n  p.ListenableProvider.value(value: Model.named());\n  new p.Provider.value(value: (Model()));\n  p.Provider<Model>.value(value: Model.make());\n  p.ChangeNotifierProvider.value(value: Model()..initialize());\n  p.Provider.value(value: flag ? Model() : Model());\n  p.Provider.value(value: flag ? Model() : existing);\n  p.Provider.value(value: flag ? existing : new Model());\n  p.Provider.value(value: (flag ? existing : (Model.named()..initialize())));\n  p.Provider.value(value: cached ?? Model());\n  p.Provider.value(value: cached ?? (Model.named()..initialize()));\n  p.Provider.value(value: cached ?? (flag ? existing : Model()));\n  p.Provider.value(value: cached ?? (flag ? Model() : null) ?? existing);\n}",
       "crossFile": null,
-      "good": "import 'package:provider/provider.dart' as p;\nclass Model {\n  Model();\n  static final Model instance = Model();\n  static Model cached() => instance;\n}\nclass Provider {\n  Provider.value({Object? value});\n}\nModel makeModel() => Model();\nvoid examples(Model existing, dynamic factory) {\n  p.Provider.value(value: existing);\n  p.ChangeNotifierProvider.value(value: existing);\n  p.ListenableProvider.value(value: existing);\n  p.Provider(create: (_) => Model());\n  Provider.value(value: Model());\n  p.Provider.value(value: makeModel());\n  p.Provider.value(value: factory());\n  p.Provider.value(value: Model.cached());\n}\nvoid shadowed(dynamic Model) {\n  p.Provider.value(value: Model());\n}"
+      "good": "import 'package:provider/provider.dart' as p;\nclass Model {\n  Model();\n  static final Model instance = Model();\n  static Model cached() => instance;\n  void initialize() {}\n}\nclass Provider {\n  Provider.value({Object? value});\n}\nModel makeModel() => Model();\nvoid examples(Model existing, dynamic factory, bool flag, Model? cached) {\n  p.Provider.value(value: existing);\n  p.ChangeNotifierProvider.value(value: existing);\n  p.ListenableProvider.value(value: existing);\n  p.Provider(create: (_) => Model());\n  Provider.value(value: Model());\n  p.Provider.value(value: makeModel());\n  p.Provider.value(value: factory());\n  p.Provider.value(value: Model.cached());\n  p.Provider.value(value: existing..initialize());\n  p.Provider.value(value: flag ? existing : Model.instance);\n  p.Provider.value(value: (flag ? existing : Model.cached())..initialize());\n  p.Provider.value(value: flag ? makeModel() : Model.cached());\n  p.Provider.value(value: cached ?? existing);\n  p.Provider.value(value: cached ?? Model.cached());\n}\nvoid shadowed(dynamic Model) {\n  p.Provider.value(value: Model());\n}"
     },
     "group": "correctness",
     "name": "avoid-instantiating-in-value-provider",
@@ -10101,16 +10155,22 @@
         "file": null,
         "line": 20,
         "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 31,
+        "message": "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event."
       }
     ],
-    "docs": "Warns when a Bloc constructor leaves a concrete event subclass without a handler.\n\nRegister a handler for every event subclass, or register a handler for their\nparent event. This rule checks event classes declared in the same file and\n`on<Event>` registrations in each generative constructor, including cascades.\nInferred registrations conservatively count as coverage. Factories, redirects,\nabstract event classes, generic event roots and overridden `on` APIs are ignored.",
+    "docs": "Warns when a Bloc constructor leaves a concrete event subclass without a handler.\n\nRegister a handler for every event subclass, or register a handler for their\nparent event. This rule checks event classes declared in the same file and\n`on<Event>` registrations in each generative constructor, including cascades.\nHandler coverage compares full event instantiations and accepts unknown subtyping.\nInferred registrations conservatively count as coverage. Factories, redirects,\nabstract event classes, generic event roots and overridden `on` APIs are ignored.",
     "domains": [
       "bloc"
     ],
     "examples": {
-      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.empty() : super(0) {}\n  CounterBloc.partialCascade() : super(0) {\n    this..on<Start>((event, emit) {});\n  }\n  CounterBloc.otherReceiver(Bloc<Event, int> other) : super(0) {\n    other\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CounterBloc.localOn() : super(0) {\n    void on(Object handler) {}\n    on((Event event, Emitter<int> emit) {});\n  }\n}",
+      "bad": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CounterBloc extends Bloc<Event, int> {\n  CounterBloc() : super(0) {\n    on<Start>((event, emit) {});\n  }\n  CounterBloc.empty() : super(0) {}\n  CounterBloc.partialCascade() : super(0) {\n    this..on<Start>((event, emit) {});\n  }\n  CounterBloc.otherReceiver(Bloc<Event, int> other) : super(0) {\n    other\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CounterBloc.localOn() : super(0) {\n    void on(Object handler) {}\n    on((Event event, Emitter<int> emit) {});\n  }\n}\n\nabstract class GenericEvent {}\nabstract class Value<T> extends GenericEvent {}\nclass IntValue extends Value<int> {}\n\nclass MismatchedValueBloc extends Bloc<GenericEvent, int> {\n  MismatchedValueBloc() : super(0) {\n    on<Value<String>>((event, emit) {});\n  }\n}",
       "crossFile": null,
-      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CompleteBloc extends Bloc<Event, int> {\n  CompleteBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CompleteBloc.parent() : super(0) {\n    on<Event>((event, emit) {});\n  }\n  CompleteBloc.redirect() : this();\n  CompleteBloc.inferred() : super(0) {\n    on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascade() : super(0) {\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CompleteBloc.inferredCascade() : super(0) {\n    this..on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascadeWithLocalOn() : super(0) {\n    void on<T>(Object handler) {}\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n}\nclass NotABloc {\n  NotABloc();\n}\n\nclass GenericBloc<Event extends Object> extends Bloc<Event, int> {\n  GenericBloc() : super(0) {\n    on<Event>((event, emit) {});\n  }\n}"
+      "good": "import 'package:bloc/bloc.dart';\n\nsealed class Event {}\nfinal class Start extends Event {}\nfinal class Stop extends Event {}\n\nclass CompleteBloc extends Bloc<Event, int> {\n  CompleteBloc() : super(0) {\n    on<Start>((event, emit) {});\n    on<Stop>((event, emit) {});\n  }\n  CompleteBloc.parent() : super(0) {\n    on<Event>((event, emit) {});\n  }\n  CompleteBloc.redirect() : this();\n  CompleteBloc.inferred() : super(0) {\n    on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascade() : super(0) {\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n  CompleteBloc.inferredCascade() : super(0) {\n    this..on((Event event, Emitter<int> emit) {});\n  }\n  CompleteBloc.cascadeWithLocalOn() : super(0) {\n    void on<T>(Object handler) {}\n    this\n      ..on<Start>((event, emit) {})\n      ..on<Stop>((event, emit) {});\n  }\n}\nclass NotABloc {\n  NotABloc();\n}\n\nclass GenericBloc<Event extends Object> extends Bloc<Event, int> {\n  GenericBloc() : super(0) {\n    on<Event>((event, emit) {});\n  }\n}\n\nabstract class GenericEvent {}\nabstract class Value<T> extends GenericEvent {}\nclass IntValue extends Value<int> {}\n\nclass MatchingValueBloc extends Bloc<GenericEvent, int> {\n  MatchingValueBloc() : super(0) {\n    on<Value<int>>((event, emit) {});\n  }\n  MatchingValueBloc.raw() : super(0) {\n    on<Value>((event, emit) {});\n  }\n  MatchingValueBloc.dynamicArgument() : super(0) {\n    on<Value<dynamic>>((event, emit) {});\n  }\n}\n\nabstract class UnresolvedEvent {}\nabstract class UnknownValue<T> extends UnresolvedEvent {}\nclass FooValue extends UnknownValue<Foo> {}\n\nclass UnresolvedValueBloc extends Bloc<UnresolvedEvent, int> {\n  UnresolvedValueBloc() : super(0) {\n    on<UnknownValue<Foo>>((event, emit) {});\n  }\n}\n\nabstract class WrappedEvent {}\nabstract class WrappedValue<T> extends WrappedEvent {}\nclass Wrapped<T> extends WrappedValue<T> {}\n\nclass WrappedValueBloc extends Bloc<WrappedEvent, int> {\n  WrappedValueBloc() : super(0) {\n    on<WrappedValue<int>>((event, emit) {});\n  }\n}"
     },
     "group": "correctness",
     "name": "handle-bloc-event-subclasses",
@@ -28962,6 +29022,42 @@
         "file": null,
         "line": 8,
         "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 10,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 11,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 12,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 13,
+        "message": "Replace directly nested providers with MultiProvider."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 14,
+        "message": "Replace directly nested providers with MultiProvider."
       }
     ],
     "docs": "Prefer a flat MultiProvider to directly nested provider widgets.",
@@ -28969,7 +29065,7 @@
       "provider"
     ],
     "examples": {
-      "bad": "import 'package:provider/provider.dart' as p;\nvoid examples(Object existing) {\n  p.Provider(create: (_) => 1, child: p.Provider(create: (_) => 2));\n  p.Provider.value(value: existing, child: p.ChangeNotifierProvider.value(value: existing));\n  p.ChangeNotifierProvider(create: (_) => existing, child: p.ListenableProvider.value(value: existing));\n  new p.ListenableProvider(create: (_) => existing, child: new p.Provider(create: (_) => 1));\n  p.Provider<int>(create: (_) => 1, child: (p.Provider<String>(create: (_) => 'a')));\n  p.Provider<Object>.value(value: existing, child: p.ChangeNotifierProvider<Object>.value(value: existing));\n}",
+      "bad": "import 'package:provider/provider.dart' as p;\nvoid examples(Object existing) {\n  p.Provider(create: (_) => 1, child: p.Provider(create: (_) => 2));\n  p.Provider.value(value: existing, child: p.ChangeNotifierProvider.value(value: existing));\n  p.ChangeNotifierProvider(create: (_) => existing, child: p.ListenableProvider.value(value: existing));\n  new p.ListenableProvider(create: (_) => existing, child: new p.Provider(create: (_) => 1));\n  p.Provider<int>(create: (_) => 1, child: (p.Provider<String>(create: (_) => 'a')));\n  p.Provider<Object>.value(value: existing, child: p.ChangeNotifierProvider<Object>.value(value: existing));\n  p.ProxyProvider0<Object>(update: (_, previous) => existing, child: p.Provider.value(value: existing));\n  p.Provider.value(value: existing, child: p.ProxyProvider0<Object>(update: (_, previous) => existing));\n  p.ChangeNotifierProxyProvider0<Object>(update: (_, previous) => existing, child: p.Provider.value(value: existing));\n  p.Provider.value(value: existing, child: p.ChangeNotifierProxyProvider0<Object>(update: (_, previous) => existing));\n  p.ListenableProxyProvider0<Object>(update: (_, previous) => existing, child: p.Provider.value(value: existing));\n  p.Provider.value(value: existing, child: p.ListenableProxyProvider0<Object>(update: (_, previous) => existing));\n}",
       "crossFile": null,
       "good": "import 'package:flutter/widgets.dart';\nimport 'package:provider/provider.dart' as p;\nclass Provider { Provider({Object? child}); }\nclass Wrapper { Wrapper({Object? child}); }\nvoid examples(Object existing, Object child) {\n  p.Provider(create: (_) => 1);\n  p.Provider.value(value: existing, child: child);\n  p.MultiProvider(providers: [p.Provider(create: (_) => 1), p.Provider(create: (_) => 2)], child: child);\n  p.Provider(create: (_) => 1, child: Wrapper(child: p.Provider(create: (_) => 2)));\n  Provider(child: p.Provider(create: (_) => 1));\n  p.Provider(create: (_) => 1, child: Provider(child: child));\n  p.Provider(create: (_) => 1, child: p.MultiProvider(providers: [], child: child));\n}\nvoid shadowed(dynamic p) {\n  p.Provider(child: p.Provider());\n}\nvoid lookupChild(BuildContext context) {\n  p.Provider(create: (_) => 1, child: p.Provider.of<Object>(context));\n}"
     },
@@ -35438,6 +35534,24 @@
         "file": null,
         "line": 19,
         "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 26,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 58,
+        "file": null,
+        "line": 27,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+      },
+      {
+        "column": 53,
+        "file": null,
+        "line": 33,
+        "message": "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
       }
     ],
     "docs": "Rejects direct Bloc and Cubit arguments to other blocs.",
@@ -35445,9 +35559,9 @@
       "bloc"
     ],
     "examples": {
-      "bad": "import 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ConsumerAlias = Consumer;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nvoid dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {\n  Consumer( counter);\n  new Consumer( counter);\n  Consumer.named(dependency:  cubit);\n  ChildConsumer( counter);\n  ConsumerAlias( counter);\n  consumer.accept( counter);\n  Consumer( Counter());\n  ConsumerCubit( counter);\n  consumer..accept( counter);\n}",
+      "bad": "import 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\ntypedef ConsumerAlias = Consumer;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nvoid dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {\n  Consumer( counter);\n  new Consumer( counter);\n  Consumer.named(dependency:  cubit);\n  ChildConsumer( counter);\n  ConsumerAlias( counter);\n  consumer.accept( counter);\n  Consumer( Counter());\n  ConsumerCubit( counter);\n  consumer..accept( counter);\n}\n\nclass ImplicitConsumer extends b.Cubit<int> {\n  ImplicitConsumer() : super(0);\n  void accept(Object dependency) {}\n  void dependencies(Counter counter) {\n    accept( counter);\n    this.accept( counter);\n  }\n}\n\nclass InheritedConsumer extends ImplicitConsumer {\n  void inherited(Counter counter) {\n    accept( counter);\n  }\n}",
       "crossFile": null,
-      "good": "import 'support.dart' as real;\n\nclass Bloc<E, S> {}\nclass Cubit<S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(real.Counter counter) => LookupConsumer();\n}\n\nvoid boundaries(real.Counter counter, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(real.Repository(0));\n  real.Repository(counter);\n  real.View(counter);\n  real.Consumer(Cubit<int>());\n  real.Consumer(Bloc<Object, int>());\n  real.Consumer(unknown);\n  LocalBloc(counter);\n  consumer.accept(1);\n  consumer..accept(1);\n  LookupConsumer.of(counter);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(counter);\n}"
+      "good": "import 'support.dart' as real;\n\nclass Bloc<E, S> {}\nclass Cubit<S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(real.Counter counter) => LookupConsumer();\n}\n\nvoid boundaries(real.Counter counter, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(real.Repository(0));\n  real.Repository(counter);\n  real.View(counter);\n  real.Consumer(Cubit<int>());\n  real.Consumer(Bloc<Object, int>());\n  real.Consumer(unknown);\n  LocalBloc(counter);\n  consumer.accept(1);\n  consumer..accept(1);\n  LookupConsumer.of(counter);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(counter);\n}\n\nvoid accept(Object value) {}\n\nclass ShadowedConsumer extends real.Consumer {\n  ShadowedConsumer() : super(0);\n  void localVariable(real.Counter counter) {\n    final accept = (Object value) {};\n    accept(counter);\n  }\n  void localFunction(real.Counter counter) {\n    void accept(Object value) {}\n    accept(counter);\n  }\n  void parameter(real.Counter counter, void Function(Object) accept) {\n    accept(counter);\n  }\n  void libraryFunction(real.Counter counter) {\n    accept(counter);\n  }\n  static void helper(Object value) {}\n  void staticFunction(real.Counter counter) {\n    helper(counter);\n  }\n}"
     },
     "group": "suspicious",
     "name": "avoid-passing-bloc-to-bloc",
@@ -35618,6 +35732,30 @@
         "file": null,
         "line": 40,
         "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 76,
+        "file": null,
+        "line": 45,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 52,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 68,
+        "file": null,
+        "line": 53,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+      },
+      {
+        "column": 63,
+        "file": null,
+        "line": 59,
+        "message": "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
       }
     ],
     "docs": "Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.",
@@ -35625,9 +35763,9 @@
       "bloc"
     ],
     "examples": {
-      "bad": "import 'package:flutter/widgets.dart' as f;\nimport 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nclass CustomContext implements f.BuildContext {\n  bool get mounted => true;\n}\n\ntypedef ConsumerAlias = Consumer;\n\nclass Event {\n  Event(Object payload);\n}\nclass ChildEvent extends Event {\n  ChildEvent(Object payload) : super(payload);\n}\nclass EventBloc extends b.Bloc<Event, int> {\n  EventBloc() : super(0);\n  void add(Event event) {}\n}\n\nvoid dependencies(f.BuildContext context, Consumer consumer, CustomContext custom) {\n  Consumer( context);\n  new Consumer( context);\n  Consumer.named(dependency:  context);\n  ChildConsumer( context);\n  ConsumerAlias( context);\n  consumer.accept( context);\n  ConsumerCubit( context);\n  Consumer( custom);\n  consumer..accept( context);\n}\n\nvoid eventPayload(f.BuildContext context, EventBloc bloc) {\n  bloc.add(Event( context));\n  final event = ChildEvent( context);\n  bloc.add(event);\n}",
+      "bad": "import 'package:flutter/widgets.dart' as f;\nimport 'support.dart';\nimport 'package:bloc/bloc.dart' as b;\n\nclass ConsumerCubit extends b.Cubit<int> {\n  ConsumerCubit(Object dependency) : super(0);\n}\n\nclass CustomContext implements f.BuildContext {\n  bool get mounted => true;\n}\n\ntypedef ConsumerAlias = Consumer;\n\nclass Event {\n  Event(Object payload);\n}\nclass ChildEvent extends Event {\n  ChildEvent(Object payload) : super(payload);\n}\nclass EventBloc extends b.Bloc<Event, int> {\n  EventBloc() : super(0);\n  void add(Event event) {}\n}\n\nvoid dependencies(f.BuildContext context, Consumer consumer, CustomContext custom) {\n  Consumer( context);\n  new Consumer( context);\n  Consumer.named(dependency:  context);\n  ChildConsumer( context);\n  ConsumerAlias( context);\n  consumer.accept( context);\n  ConsumerCubit( context);\n  Consumer( custom);\n  consumer..accept( context);\n}\n\nvoid eventPayload(f.BuildContext context, EventBloc bloc) {\n  bloc.add(Event( context));\n  final event = ChildEvent( context);\n  bloc.add(event);\n}\n\nvoid importedEvents(f.BuildContext context, CounterBloc bloc) {\n  bloc.add(CounterEvent( context));\n}\n\nclass ImplicitConsumer extends b.Cubit<int> {\n  ImplicitConsumer() : super(0);\n  void accept(Object dependency) {}\n  void dependencies(f.BuildContext context) {\n    accept( context);\n    this.accept( context);\n  }\n}\n\nclass InheritedConsumer extends ImplicitConsumer {\n  void inherited(f.BuildContext context) {\n    accept( context);\n  }\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/widgets.dart' as flutter;\nimport 'support.dart' as real;\n\nclass BuildContext {}\nclass Bloc<E, S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(flutter.BuildContext context) => LookupConsumer();\n}\nclass UnrelatedEvent {\n  UnrelatedEvent(Object payload);\n}\n\nvoid boundaries(flutter.BuildContext context, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(BuildContext());\n  real.Consumer(real.Repository(0));\n  real.Consumer(unknown);\n  real.Repository(context);\n  real.View(context);\n  LocalBloc(context);\n  consumer.accept(context.mounted);\n  consumer..accept(context.mounted);\n  LookupConsumer.of(context);\n  UnrelatedEvent(context);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(context);\n}"
+      "good": "import 'package:flutter/widgets.dart' as flutter;\nimport 'support.dart' as real;\n\nclass BuildContext {}\nclass Bloc<E, S> {}\nclass LocalBloc extends Bloc<Object, int> {\n  LocalBloc(Object dependency);\n}\n\nclass LookupConsumer extends real.Consumer {\n  LookupConsumer() : super(0);\n  static LookupConsumer of(flutter.BuildContext context) => LookupConsumer();\n}\nclass UnrelatedEvent {\n  UnrelatedEvent(Object payload);\n}\n\nvoid boundaries(flutter.BuildContext context, real.Consumer consumer, dynamic unknown) {\n  real.Consumer(BuildContext());\n  real.Consumer(real.Repository(0));\n  real.Consumer(unknown);\n  real.Repository(context);\n  real.View(context);\n  LocalBloc(context);\n  consumer.accept(context.mounted);\n  consumer..accept(context.mounted);\n  LookupConsumer.of(context);\n  UnrelatedEvent(context);\n  final Consumer = (Object dependency) => real.Repository(dependency);\n  Consumer(context);\n}\n\nvoid accept(Object value) {}\n\nclass ShadowedConsumer extends real.Consumer {\n  ShadowedConsumer() : super(0);\n  void localVariable(flutter.BuildContext context) {\n    final accept = (Object value) {};\n    accept(context);\n  }\n  void localFunction(flutter.BuildContext context) {\n    void accept(Object value) {}\n    accept(context);\n  }\n  void parameter(flutter.BuildContext context, void Function(Object) accept) {\n    accept(context);\n  }\n  void libraryFunction(flutter.BuildContext context) {\n    accept(context);\n  }\n  static void helper(Object value) {}\n  void staticFunction(flutter.BuildContext context) {\n    helper(context);\n  }\n}"
     },
     "group": "suspicious",
     "name": "avoid-passing-build-context-to-blocs",

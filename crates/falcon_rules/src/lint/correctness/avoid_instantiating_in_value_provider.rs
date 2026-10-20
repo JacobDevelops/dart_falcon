@@ -46,6 +46,22 @@ fn constructor<'a>(
     scoped_constructor_invocation(expression, state)
 }
 
+fn instantiates(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
+    match expression.unparenthesized() {
+        Expr::Cascade(cascade) => instantiates(cascade.object(), state),
+        Expr::Conditional(conditional) => {
+            instantiates(conditional.then_expr(), state)
+                || instantiates(conditional.else_expr(), state)
+        }
+        Expr::Binary(binary) if binary.op() == BinaryOp::NullCoalesce => {
+            instantiates(binary.left(), state) || instantiates(binary.right(), state)
+        }
+        expression => constructor(expression, state).is_some_and(|(identity, constructor, _)| {
+            state.signatures.has_constructor(&identity, constructor)
+        }),
+    }
+}
+
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
         let Some((identity, name, args)) = constructor(expression, state) else {
@@ -68,9 +84,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(value) = args.named().find(|arg| arg.name().name() == "value") else {
             return;
         };
-        if constructor(value.value(), state).is_some_and(|(identity, constructor, _)| {
-            state.signatures.has_constructor(&identity, constructor)
-        }) {
+        if instantiates(value.value(), state) {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-instantiating-in-value-provider",
                 "Use create to construct a new provided instance instead of a value provider.",

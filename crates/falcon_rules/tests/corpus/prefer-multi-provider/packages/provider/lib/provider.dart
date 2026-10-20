@@ -12,6 +12,15 @@ class ListenableProvider<T> {
   ListenableProvider({T Function(BuildContext)? create, Object? child});
   ListenableProvider.value({T? value, Object? child});
 }
+class ProxyProvider0<R> {
+  ProxyProvider0({required R Function(BuildContext, R?) update, Object? child});
+}
+class ChangeNotifierProxyProvider0<R> {
+  ChangeNotifierProxyProvider0({required R Function(BuildContext, R?) update, Object? child});
+}
+class ListenableProxyProvider0<R> {
+  ListenableProxyProvider0({required R Function(BuildContext, R?) update, Object? child});
+}
 class MultiProvider {
   MultiProvider({List<Object>? providers, Object? child});
 }

@@ -25,3 +25,27 @@ void boundaries(real.Counter counter, real.Consumer consumer, dynamic unknown) {
   final Consumer = (Object dependency) => real.Repository(dependency);
   Consumer(counter);
 }
+
+void accept(Object value) {}
+
+class ShadowedConsumer extends real.Consumer {
+  ShadowedConsumer() : super(0);
+  void localVariable(real.Counter counter) {
+    final accept = (Object value) {};
+    accept(counter);
+  }
+  void localFunction(real.Counter counter) {
+    void accept(Object value) {}
+    accept(counter);
+  }
+  void parameter(real.Counter counter, void Function(Object) accept) {
+    accept(counter);
+  }
+  void libraryFunction(real.Counter counter) {
+    accept(counter);
+  }
+  static void helper(Object value) {}
+  void staticFunction(real.Counter counter) {
+    helper(counter);
+  }
+}

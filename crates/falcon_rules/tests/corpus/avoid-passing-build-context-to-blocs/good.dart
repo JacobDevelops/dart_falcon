@@ -29,3 +29,27 @@ void boundaries(flutter.BuildContext context, real.Consumer consumer, dynamic un
   final Consumer = (Object dependency) => real.Repository(dependency);
   Consumer(context);
 }
+
+void accept(Object value) {}
+
+class ShadowedConsumer extends real.Consumer {
+  ShadowedConsumer() : super(0);
+  void localVariable(flutter.BuildContext context) {
+    final accept = (Object value) {};
+    accept(context);
+  }
+  void localFunction(flutter.BuildContext context) {
+    void accept(Object value) {}
+    accept(context);
+  }
+  void parameter(flutter.BuildContext context, void Function(Object) accept) {
+    accept(context);
+  }
+  void libraryFunction(flutter.BuildContext context) {
+    accept(context);
+  }
+  static void helper(Object value) {}
+  void staticFunction(flutter.BuildContext context) {
+    helper(context);
+  }
+}

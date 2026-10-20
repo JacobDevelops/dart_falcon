@@ -336,7 +336,11 @@ impl<'a> BlocTypes<'a> {
     }
 }
 
-fn is_api_identity(identity: &DeclarationIdentity, model: &SemanticModel<'_>, name: &str) -> bool {
+pub(crate) fn is_api_identity(
+    identity: &DeclarationIdentity,
+    model: &SemanticModel<'_>,
+    name: &str,
+) -> bool {
     identity.name() == name
         && (identity.is_package("bloc", name)
             || identity.is_package("flutter_bloc", name)

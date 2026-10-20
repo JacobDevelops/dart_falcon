@@ -40,3 +40,22 @@ void eventPayload(f.BuildContext context, EventBloc bloc) {
   final event = ChildEvent(/* expect: avoid-passing-build-context-to-blocs */ context);
   bloc.add(event);
 }
+
+void importedEvents(f.BuildContext context, CounterBloc bloc) {
+  bloc.add(CounterEvent(/* expect: avoid-passing-build-context-to-blocs */ context));
+}
+
+class ImplicitConsumer extends b.Cubit<int> {
+  ImplicitConsumer() : super(0);
+  void accept(Object dependency) {}
+  void dependencies(f.BuildContext context) {
+    accept(/* expect: avoid-passing-build-context-to-blocs */ context);
+    this.accept(/* expect: avoid-passing-build-context-to-blocs */ context);
+  }
+}
+
+class InheritedConsumer extends ImplicitConsumer {
+  void inherited(f.BuildContext context) {
+    accept(/* expect: avoid-passing-build-context-to-blocs */ context);
+  }
+}

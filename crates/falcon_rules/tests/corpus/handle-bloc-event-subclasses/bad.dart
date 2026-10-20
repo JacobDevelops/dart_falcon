@@ -22,3 +22,13 @@ class CounterBloc extends Bloc<Event, int> {
     on((Event event, Emitter<int> emit) {});
   }
 }
+
+abstract class GenericEvent {}
+abstract class Value<T> extends GenericEvent {}
+class IntValue extends Value<int> {}
+
+class MismatchedValueBloc extends Bloc<GenericEvent, int> {
+  MismatchedValueBloc() : super(0) { /* expect: handle-bloc-event-subclasses */
+    on<Value<String>>((event, emit) {});
+  }
+}

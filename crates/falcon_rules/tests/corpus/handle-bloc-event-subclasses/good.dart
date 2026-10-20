@@ -40,3 +40,39 @@ class GenericBloc<Event extends Object> extends Bloc<Event, int> {
     on<Event>((event, emit) {});
   }
 }
+
+abstract class GenericEvent {}
+abstract class Value<T> extends GenericEvent {}
+class IntValue extends Value<int> {}
+
+class MatchingValueBloc extends Bloc<GenericEvent, int> {
+  MatchingValueBloc() : super(0) {
+    on<Value<int>>((event, emit) {});
+  }
+  MatchingValueBloc.raw() : super(0) {
+    on<Value>((event, emit) {});
+  }
+  MatchingValueBloc.dynamicArgument() : super(0) {
+    on<Value<dynamic>>((event, emit) {});
+  }
+}
+
+abstract class UnresolvedEvent {}
+abstract class UnknownValue<T> extends UnresolvedEvent {}
+class FooValue extends UnknownValue<Foo> {}
+
+class UnresolvedValueBloc extends Bloc<UnresolvedEvent, int> {
+  UnresolvedValueBloc() : super(0) {
+    on<UnknownValue<Foo>>((event, emit) {});
+  }
+}
+
+abstract class WrappedEvent {}
+abstract class WrappedValue<T> extends WrappedEvent {}
+class Wrapped<T> extends WrappedValue<T> {}
+
+class WrappedValueBloc extends Bloc<WrappedEvent, int> {
+  WrappedValueBloc() : super(0) {
+    on<WrappedValue<int>>((event, emit) {});
+  }
+}

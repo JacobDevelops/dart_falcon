@@ -6,4 +6,10 @@ void examples(Object existing) {
   new p.ListenableProvider(create: (_) => existing, child: new p.Provider(create: (_) => 1)); /* expect: prefer-multi-provider */
   p.Provider<int>(create: (_) => 1, child: (p.Provider<String>(create: (_) => 'a'))); /* expect: prefer-multi-provider */
   p.Provider<Object>.value(value: existing, child: p.ChangeNotifierProvider<Object>.value(value: existing)); /* expect: prefer-multi-provider */
+  p.ProxyProvider0<Object>(update: (_, previous) => existing, child: p.Provider.value(value: existing)); /* expect: prefer-multi-provider */
+  p.Provider.value(value: existing, child: p.ProxyProvider0<Object>(update: (_, previous) => existing)); /* expect: prefer-multi-provider */
+  p.ChangeNotifierProxyProvider0<Object>(update: (_, previous) => existing, child: p.Provider.value(value: existing)); /* expect: prefer-multi-provider */
+  p.Provider.value(value: existing, child: p.ChangeNotifierProxyProvider0<Object>(update: (_, previous) => existing)); /* expect: prefer-multi-provider */
+  p.ListenableProxyProvider0<Object>(update: (_, previous) => existing, child: p.Provider.value(value: existing)); /* expect: prefer-multi-provider */
+  p.Provider.value(value: existing, child: p.ListenableProxyProvider0<Object>(update: (_, previous) => existing)); /* expect: prefer-multi-provider */
 }

@@ -3,6 +3,7 @@
 //! Register a handler for every event subclass, or register a handler for their
 //! parent event. This rule checks event classes declared in the same file and
 //! `on<Event>` registrations in each generative constructor, including cascades.
+//! Handler coverage compares full event instantiations and accepts unknown subtyping.
 //! Inferred registrations conservatively count as coverage. Factories, redirects,
 //! abstract event classes, generic event roots and overridden `on` APIs are ignored.
 
@@ -70,16 +71,13 @@ impl<'a> Collector<'a> {
             events.missing.clear();
             return;
         };
-        let ResolvedType::Interface {
-            identity: handled, ..
-        } = state.model.resolve_type_in(event, &state.type_parameters)
-        else {
+        let handled = state.model.resolve_type_in(event, &state.type_parameters);
+        if !matches!(handled, ResolvedType::Interface { .. }) {
             return;
-        };
-        events.missing.retain(|(identity, ty)| {
-            identity != &handled
-                && state.signatures.is_subtype_of(ty, &handled, &state.model) != Truth::Yes
-        });
+        }
+        events
+            .missing
+            .retain(|(_, ty)| state.signatures.subtype(ty, &handled, &state.model) == Truth::No);
     }
 }
 
@@ -137,7 +135,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let Some(identity) = state.model.resolve_name(event_class.name().name()) else {
                 continue;
             };
-            let ty = ResolvedType::interface_identity(identity.clone());
+            let mut ty = ResolvedType::interface_identity(identity.clone());
+            if let Some(count) = state.signatures.type_parameter_count(&identity)
+                && count > 0
+                && let ResolvedType::Interface { arguments, .. } = &mut ty
+            {
+                // A generic declaration represents unknown instantiations, not dynamic.
+                *arguments = vec![ResolvedType::Unknown; count].into();
+            }
             if identity != root
                 && state.signatures.is_subtype_of(&ty, &root, &state.model) == Truth::Yes
             {

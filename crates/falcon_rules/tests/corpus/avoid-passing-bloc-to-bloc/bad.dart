@@ -18,3 +18,18 @@ void dependencies(Counter counter, Consumer consumer, b.Cubit<int> cubit) {
   ConsumerCubit(/* expect: avoid-passing-bloc-to-bloc */ counter);
   consumer..accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
 }
+
+class ImplicitConsumer extends b.Cubit<int> {
+  ImplicitConsumer() : super(0);
+  void accept(Object dependency) {}
+  void dependencies(Counter counter) {
+    accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
+    this.accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
+  }
+}
+
+class InheritedConsumer extends ImplicitConsumer {
+  void inherited(Counter counter) {
+    accept(/* expect: avoid-passing-bloc-to-bloc */ counter);
+  }
+}

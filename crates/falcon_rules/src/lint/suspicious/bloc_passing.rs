@@ -2,9 +2,7 @@
 
 use crate::lint::bloc::BlocTypes;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, SemanticModel, Truth,
-};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -21,28 +19,7 @@ pub(super) fn prepare<'a>(
     passing: Passing,
 ) -> RulePreparation<'a> {
     let types = BlocTypes::new(program);
-    let mut events = Vec::new();
-    if matches!(passing, Passing::ContextToBloc)
-        && let Some(identities) = ctx.identities
-    {
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
-        for declaration in program.declarations() {
-            let TopLevelDecl::Class(class) = declaration else {
-                continue;
-            };
-            let Some(supertype) = class.extends() else {
-                continue;
-            };
-            let ty = model.resolve_type(supertype);
-            if types.is_api_type(&ty, &model, "Bloc")
-                && let Some(ResolvedType::Interface { identity, .. }) = ty.arguments().first()
-                && matches!(identity, DeclarationIdentity::Project { .. })
-                && !events.contains(identity)
-            {
-                events.push(identity.clone());
-            }
-        }
-    }
+    let events = None;
     RulePreparation::Semantic(Box::new(Collector {
         ctx,
         types,
@@ -56,7 +33,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     types: BlocTypes<'a>,
     passing: Passing,
-    events: Vec<DeclarationIdentity>,
+    events: Option<Vec<DeclarationIdentity>>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -92,9 +69,19 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             (ResolvedType::interface_identity(identity), args)
         } else if !matches!(self.passing, Passing::BlocToWidget)
             && let Expr::Call(call) = node
-            && let Expr::Field(field) = call.callee().unparenthesized()
         {
-            (state.infer(field.object()), call.args())
+            let receiver = match call.callee().unparenthesized() {
+                Expr::Field(field) => state.infer(field.object()),
+                Expr::Ident(identifier) => {
+                    let Some(receiver) = state.implicit_invocation_receiver(identifier.name())
+                    else {
+                        return;
+                    };
+                    receiver
+                }
+                _ => return,
+            };
+            (receiver, call.args())
         } else {
             return;
         };
@@ -123,48 +110,19 @@ impl<'a> Collector<'a> {
         args: ArgList<'a>,
         state: &SemanticState<'a>,
     ) {
-        let matches_target = match self.passing {
-            Passing::BlocToWidget => {
-                state.signatures.is_subtype_of(
-                    target,
-                    &DeclarationIdentity::flutter("Widget"),
-                    &state.model,
-                ) == Truth::Yes
-            }
-            Passing::BlocToBloc => {
-                self.types
-                    .is_bloc_type(target, &state.model, Some(&state.signatures))
-            }
-            Passing::ContextToBloc => {
-                self.types
-                    .is_bloc_type(target, &state.model, Some(&state.signatures))
-                    || self.events.iter().any(|event| {
-                        state.signatures.is_subtype_of(target, event, &state.model) == Truth::Yes
-                    })
-            }
-        };
-        if !matches_target {
+        if !args
+            .positional()
+            .chain(args.named().map(|argument| argument.value()))
+            .any(|argument| self.matches_argument(argument, state))
+            || !self.matches_target(target, state)
+        {
             return;
         }
         for argument in args
             .positional()
             .chain(args.named().map(|argument| argument.value()))
         {
-            let ty = state.infer(argument);
-            let matches_argument = match self.passing {
-                Passing::ContextToBloc => {
-                    state.signatures.is_subtype_of(
-                        &ty,
-                        &DeclarationIdentity::flutter("BuildContext"),
-                        &state.model,
-                    ) == Truth::Yes
-                }
-                Passing::BlocToBloc | Passing::BlocToWidget => {
-                    self.types
-                        .is_bloc_type(&ty, &state.model, Some(&state.signatures))
-                }
-            };
-            if matches_argument {
+            if self.matches_argument(argument, state) {
                 let (rule, message) = match self.passing {
                     Passing::BlocToBloc => (
                         "avoid-passing-bloc-to-bloc",
@@ -183,5 +141,78 @@ impl<'a> Collector<'a> {
                     .push(self.ctx.diagnostic(rule, message, argument.span()));
             }
         }
+    }
+
+    fn matches_argument(&self, argument: Expr<'a>, state: &SemanticState<'a>) -> bool {
+        let ty = state.infer(argument);
+        match self.passing {
+            Passing::ContextToBloc => {
+                state.signatures.is_subtype_of(
+                    &ty,
+                    &DeclarationIdentity::flutter("BuildContext"),
+                    &state.model,
+                ) == Truth::Yes
+            }
+            Passing::BlocToBloc | Passing::BlocToWidget => {
+                self.types
+                    .is_bloc_type(&ty, &state.model, Some(&state.signatures))
+            }
+        }
+    }
+
+    fn matches_target(&mut self, target: &ResolvedType, state: &SemanticState<'a>) -> bool {
+        match self.passing {
+            Passing::BlocToWidget => {
+                state.signatures.is_subtype_of(
+                    target,
+                    &DeclarationIdentity::flutter("Widget"),
+                    &state.model,
+                ) == Truth::Yes
+            }
+            Passing::BlocToBloc => {
+                self.types
+                    .is_bloc_type(target, &state.model, Some(&state.signatures))
+            }
+            Passing::ContextToBloc => {
+                self.types
+                    .is_bloc_type(target, &state.model, Some(&state.signatures))
+                    || self
+                        .events
+                        .get_or_insert_with(|| Self::event_types(state))
+                        .iter()
+                        .any(|event| {
+                            state.signatures.is_subtype_of(target, event, &state.model)
+                                == Truth::Yes
+                        })
+            }
+        }
+    }
+
+    fn event_types(state: &SemanticState<'a>) -> Vec<DeclarationIdentity> {
+        state
+            .signatures
+            .declaration_identities()
+            .filter(|identity| matches!(identity, DeclarationIdentity::Project { .. }))
+            .filter_map(|identity| {
+                let bloc = state.signatures.instantiated_supertype_matching(
+                    &ResolvedType::interface_identity(identity.clone()),
+                    |identity| crate::lint::bloc::is_api_identity(identity, &state.model, "Bloc"),
+                    &state.model,
+                )?;
+                match bloc.arguments().first()? {
+                    ResolvedType::Interface { identity, .. }
+                        if matches!(identity, DeclarationIdentity::Project { .. }) =>
+                    {
+                        Some(identity.clone())
+                    }
+                    _ => None,
+                }
+            })
+            .fold(Vec::new(), |mut events, event| {
+                if !events.contains(&event) {
+                    events.push(event);
+                }
+                events
+            })
     }
 }

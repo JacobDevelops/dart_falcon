@@ -7321,6 +7321,10 @@ impl SignatureIndex {
         self.declarations.get(identity)
     }
 
+    pub fn declaration_identities(&self) -> impl Iterator<Item = &DeclarationIdentity> {
+        self.declarations.keys()
+    }
+
     /// Type of a closure parameter or return that `context` does not supply:
     /// Dart's `dynamic` without a context or under a resolved non-function
     /// one, but `Unknown` when the context exists and is unresolved.
@@ -8473,6 +8477,16 @@ impl SignatureIndex {
             let instantiated = model.substitute(supertype, &substitutions);
             self.instantiated_matching(&instantiated, target, model, visited)
         })
+    }
+
+    /// Finds an instantiated supertype by declaration, retaining inherited substitutions.
+    pub fn instantiated_supertype_matching(
+        &self,
+        ty: &ResolvedType,
+        target: impl Fn(&DeclarationIdentity) -> bool,
+        model: &SemanticModel<'_>,
+    ) -> Option<ResolvedType> {
+        self.instantiated_matching(ty, &target, model, &mut FxHashSet::default())
     }
 
     pub fn instantiated_supertype(
@@ -11303,7 +11317,7 @@ impl TypeEnvironment {
     /// The method an unqualified call `name(…)` invokes through implicit
     /// `this`: a member the enclosing type declares (instance or static), or
     /// an inherited one no library or imported declaration shadows.
-    fn implicit_this_method<'a>(
+    pub(crate) fn implicit_this_method<'a>(
         &self,
         name: &str,
         model: &SemanticModel<'_>,
