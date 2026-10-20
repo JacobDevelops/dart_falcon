@@ -2,6 +2,12 @@
   "configVersion": 2,
   "packages": [
     {
+      "name": "riverpod_annotation",
+      "rootUri": "../packages/riverpod_annotation",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
       "name": "riverpod",
       "rootUri": "../packages/riverpod",
       "packageUri": "lib/",

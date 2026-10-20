@@ -2743,6 +2743,15 @@ impl<'a> SemanticModel<'a> {
             .resolve_imported_member(self.library?, name.into())
     }
 
+    /// Resolve imported annotations before generation when only generated parts are missing.
+    pub fn resolve_annotation_before_generation<'n>(
+        &self,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
+        self.identities
+            .resolve_annotation_before_generation(self.library?, name.into())
+    }
+
     /// Resolve a visible named extension, which is not a type declaration.
     pub fn resolve_extension<'n>(
         &self,

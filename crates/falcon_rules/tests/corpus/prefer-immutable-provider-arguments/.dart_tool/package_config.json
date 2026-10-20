@@ -2,6 +2,12 @@
   "configVersion": 2,
   "packages": [
     {
+      "name": "equatable",
+      "rootUri": "../packages/equatable",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
       "name": "riverpod",
       "rootUri": "../packages/riverpod",
       "packageUri": "lib/",

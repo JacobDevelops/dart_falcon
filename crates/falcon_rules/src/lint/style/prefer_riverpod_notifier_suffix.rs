@@ -3,6 +3,7 @@
 //! / `_provider.dart` file conventions. Package identities, including inherited
 //! identities and re-exports, distinguish Riverpod declarations from lookalikes.
 //! Provider rules cover top-level variables and static fields, not local values.
+//! The provider file convention also covers annotated generator functions.
 
 use crate::lint::riverpod::is_type;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -182,6 +183,26 @@ impl<'a> Collector<'a> {
             }
         }
     }
+
+    fn generated_provider(&mut self, function: FunctionDecl<'a>, state: &SemanticState<'a>) {
+        if let Some(identities) = self.ctx.identities
+            && function.annotations().any(|annotation| {
+                falcon_analyze::QualifiedName::from_identifiers(annotation.name())
+                    .and_then(|name| state.model.resolve_annotation_before_generation(name))
+                    .is_some_and(|identity| {
+                        ["riverpod", "Riverpod"].iter().any(|name| {
+                            identities.is_package_declaration(
+                                &identity,
+                                "riverpod_annotation",
+                                name,
+                            )
+                        })
+                    })
+            })
+        {
+            self.check(function.name());
+        }
+    }
 }
 
 fn valid_file_stem(stem: &str, suffix: &str) -> bool {
@@ -212,6 +233,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 match declaration {
                     TopLevelDecl::Variable(variable) => {
                         self.providers(variable.var_type(), variable.declarators(), state);
+                    }
+                    TopLevelDecl::Function(function)
+                        if matches!(self.naming, Naming::ProviderFile) =>
+                    {
+                        self.generated_provider(function, state);
                     }
                     TopLevelDecl::Class(class) => {
                         let Some(falcon_analyze::ResolvedType::Interface { identity, .. }) =

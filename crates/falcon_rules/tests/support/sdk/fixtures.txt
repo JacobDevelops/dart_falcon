@@ -439,3 +439,10 @@ extend-equatable/good.dart
 prefer-equatable-mixin/bad.dart
 prefer-equatable-mixin/good.dart
 prefer-equatable-mixin/good_unresolved.dart
+prefer-correct-provider-file-name/bad_generated.dart
+prefer-riverpod-provider-suffix/good_static_shadow.dart
+prefer-correct-provider-file-name/bad_generated_keep_alive.dart
+prefer-correct-provider-file-name/good_generated_provider.dart
+prefer-riverpod-provider-suffix/good_generated.dart
+prefer-correct-provider-file-name/good_annotation_shadow.dart
+prefer-correct-provider-file-name/good_missing_manual_part.dart

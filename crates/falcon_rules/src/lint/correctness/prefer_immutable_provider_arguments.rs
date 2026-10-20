@@ -1,16 +1,18 @@
-//! Requires immutable keys when invoking Riverpod provider families.
+//! Requires stable value equality for freshly created Riverpod family keys.
 //!
-//! Checks calls to package-resolved Riverpod family objects, including subclasses
-//! and aliases. Non-constant lists, sets, maps, and classes with known non-final
-//! instance fields are mutable; constant arguments and `@immutable` types are
-//! accepted. Records are checked recursively. Unknown types and unresolved field
-//! layouts are not diagnosed.
+//! Checks package-resolved Riverpod family objects, including subclasses and
+//! aliases. Non-constant collections, closures, and fresh instances inheriting
+//! Object's equality are rejected. Records are checked recursively; existing
+//! values, constants, and unresolved equality implementations are accepted.
 
-use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
+use crate::lint::flutter::scoped_constructor_invocation;
 use crate::lint::riverpod::is_identity;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+};
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
 
 #[derive(Default)]
@@ -19,12 +21,11 @@ pub struct PreferImmutableProviderArguments;
 impl Rule for PreferImmutableProviderArguments {
     fn prepare<'a>(
         &self,
-        program: Program<'a>,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            deferred: deferred_prefixes(program),
             diagnostics: Vec::new(),
         }))
     }
@@ -32,27 +33,68 @@ impl Rule for PreferImmutableProviderArguments {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    deferred: Vec<&'a str>,
     diagnostics: Vec<Diagnostic>,
 }
 
+struct ArgumentEquality<'s, 'a> {
+    state: &'s SemanticState<'a>,
+    unstable: bool,
+}
+
+impl<'a> Visitor<'a> for ArgumentEquality<'_, 'a> {
+    fn visit_expr(&mut self, expression: Expr<'a>) {
+        if self.unstable {
+            return;
+        }
+        match expression {
+            Expr::Record(record) if !record.is_const() => walk_expr(self, expression),
+            Expr::Conditional(_) | Expr::Paren(_) | Expr::As(_) | Expr::NullAssert(_) => {
+                walk_expr(self, expression);
+            }
+            _ => self.unstable = Collector::unstable(expression, self.state),
+        }
+    }
+}
+
 impl Collector<'_> {
-    fn mutable(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-        match ty {
-            ResolvedType::Interface { identity, .. } => {
-                if state.signatures.has_immutable_supertype(identity, false) == Truth::Yes {
+    fn unstable(argument: Expr<'_>, state: &SemanticState<'_>) -> bool {
+        let argument = argument.unparenthesized();
+        match argument {
+            Expr::List(list) => !list.is_const(),
+            Expr::Set(set) => !set.is_const(),
+            Expr::Map(map) => !map.is_const(),
+            Expr::FuncExpr(_) => true,
+            Expr::New(construction) if construction.is_const() => false,
+            Expr::New(_) | Expr::Call(_) => {
+                let Some((identity, constructor, _)) =
+                    scoped_constructor_invocation(argument, state)
+                else {
+                    return false;
+                };
+                if !state.signatures.has_constructor(&identity, constructor)
+                    || matches!(state.infer(argument), ResolvedType::Interface { extension_type: true, .. })
+                    // Factories may return a cached value or a subtype with its own equality.
+                    || state.signatures.declaration(&identity).is_some_and(|declaration| {
+                        declaration.constructors.iter().any(|fact| {
+                            fact.name == constructor && fact.is_factory
+                        })
+                    })
+                    || state
+                        .signatures
+                        .declared_member_facts(&identity, "==")
+                        .iter()
+                        .any(|member| !member.is_static && !member.is_abstract)
+                {
                     return false;
                 }
-                ["List", "Set", "Map"]
-                    .iter()
-                    .any(|name| ty.interface("dart:core", name))
-                    || state.signatures.has_non_final_field(identity) == Some(true)
-            }
-            ResolvedType::Record {
-                positional, named, ..
-            } => {
-                positional.iter().any(|ty| Self::mutable(ty, state))
-                    || named.iter().any(|(_, ty)| Self::mutable(ty, state))
+                state
+                    .signatures
+                    .inherited_concrete_member(&identity, "==")
+                    .is_some_and(|member| {
+                        member.is_none_or(|member| {
+                            member.declaring_type == DeclarationIdentity::OBJECT
+                        })
+                    })
             }
             _ => false,
         }
@@ -81,23 +123,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .positional()
             .chain(call.args().named().map(|argument| argument.value()))
         {
-            if !Self::mutable(&state.infer(argument), state) {
-                continue;
-            }
-            let constant = match argument.unparenthesized() {
-                Expr::List(list) => list.is_const(),
-                Expr::Set(set) => set.is_const(),
-                Expr::Map(map) => map.is_const(),
-                Expr::New(construction) => construction.is_const(),
-                Expr::Ident(_) | Expr::Field(_) => {
-                    constant_in_context(argument, &self.deferred, state)
-                }
-                _ => false,
+            let mut equality = ArgumentEquality {
+                state,
+                unstable: false,
             };
-            if !constant {
+            equality.visit_expr(argument);
+            if equality.unstable {
                 self.diagnostics.push(self.ctx.diagnostic(
                     "prefer-immutable-provider-arguments",
-                    "Use an immutable provider family argument so its cache key cannot change.",
+                    "Use a provider family argument with stable value equality.",
                     argument.span(),
                 ));
             }

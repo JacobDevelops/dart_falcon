@@ -13167,45 +13167,39 @@
   },
   {
     "crossFile": false,
-    "description": "Requires immutable keys when invoking Riverpod provider families.",
+    "description": "Requires stable value equality for freshly created Riverpod family keys.",
     "diagnostics": [
       {
         "column": 10,
         "file": null,
-        "line": 7,
-        "message": "Use an immutable provider family argument so its cache key cannot change."
-      },
-      {
-        "column": 10,
-        "file": null,
         "line": 8,
-        "message": "Use an immutable provider family argument so its cache key cannot change."
+        "message": "Use a provider family argument with stable value equality."
       },
       {
         "column": 10,
         "file": null,
         "line": 9,
-        "message": "Use an immutable provider family argument so its cache key cannot change."
+        "message": "Use a provider family argument with stable value equality."
       },
       {
         "column": 13,
         "file": null,
         "line": 10,
-        "message": "Use an immutable provider family argument so its cache key cannot change."
+        "message": "Use a provider family argument with stable value equality."
       },
       {
         "column": 9,
         "file": null,
         "line": 12,
-        "message": "Use an immutable provider family argument so its cache key cannot change."
+        "message": "Use a provider family argument with stable value equality."
       }
     ],
-    "docs": "Requires immutable keys when invoking Riverpod provider families.\n\nChecks calls to package-resolved Riverpod family objects, including subclasses\nand aliases. Non-constant lists, sets, maps, and classes with known non-final\ninstance fields are mutable; constant arguments and `@immutable` types are\naccepted. Records are checked recursively. Unknown types and unresolved field\nlayouts are not diagnosed.",
+    "docs": "Requires stable value equality for freshly created Riverpod family keys.\n\nChecks package-resolved Riverpod family objects, including subclasses and\naliases. Non-constant collections, closures, and fresh instances inheriting\nObject's equality are rejected. Records are checked recursively; existing\nvalues, constants, and unresolved equality implementations are accepted.",
     "domains": [
       "riverpod"
     ],
     "examples": {
-      "bad": "import 'package:riverpod/riverpod.dart';\nclass Mutable { int value = 0; }\nfinal family = ProviderFamily<int, Mutable>();\nfinal future = FutureProviderFamily<int, Mutable>();\nfinal automatic = AutoDisposeProviderFamily<int, Mutable>();\nvoid bad(Mutable mutable) {\n  family(mutable);\n  family(Mutable());\n  future(mutable);\n  automatic(mutable);\n  final alias = family;\n  alias(mutable);\n}",
+      "bad": "import 'package:riverpod/riverpod.dart';\nclass Mutable { int value = 0; }\nfinal family = ProviderFamily<int, Mutable>();\nfinal future = FutureProviderFamily<int, Mutable>();\nfinal automatic = AutoDisposeProviderFamily<int, Mutable>();\nvoid bad(Mutable mutable) {\n  family(mutable);\n  family(Mutable());\n  future(Mutable());\n  automatic(Mutable());\n  final alias = family;\n  alias(Mutable());\n}",
       "crossFile": null,
       "good": "import 'package:riverpod/riverpod.dart' as rp;\nimport 'package:meta/meta.dart';\n@immutable\nclass Key { final int value; const Key(this.value); }\nfinal integer = rp.ProviderFamily<int, int>();\nfinal string = rp.ProviderFamily<int, String>();\nfinal boolean = rp.ProviderFamily<int, bool>();\nfinal key = rp.ProviderFamily<int, Key>();\nfinal unknown = rp.ProviderFamily<int, dynamic>();\nclass ProviderFamily { void call(Object argument) {} }\nclass Mutable { int value = 0; }\nvoid good(dynamic value) {\n  integer(1);\n  string('key');\n  boolean(true);\n  key(const Key(1));\n  unknown(value);\n  ProviderFamily()(Mutable());\n}"
     },
@@ -28276,7 +28270,7 @@
   },
   {
     "crossFile": false,
-    "description": "Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations.",
+    "description": "Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including annotated generator functions.",
     "diagnostics": [
       {
         "column": 7,
@@ -28285,7 +28279,7 @@
         "message": "Name files containing Riverpod providers using snake_case ending in '_provider.dart'."
       }
     ],
-    "docs": "Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations.",
+    "docs": "Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including annotated generator functions.",
     "domains": [
       "riverpod"
     ],
@@ -31035,7 +31029,7 @@
         "message": "Name Riverpod notifiers with a 'Notifier' suffix."
       }
     ],
-    "docs": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.\nAlso shares collection for provider suffixes and snake_case `_notifier.dart`\n/ `_provider.dart` file conventions. Package identities, including inherited\nidentities and re-exports, distinguish Riverpod declarations from lookalikes.\nProvider rules cover top-level variables and static fields, not local values.",
+    "docs": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.\nAlso shares collection for provider suffixes and snake_case `_notifier.dart`\n/ `_provider.dart` file conventions. Package identities, including inherited\nidentities and re-exports, distinguish Riverpod declarations from lookalikes.\nProvider rules cover top-level variables and static fields, not local values.\nThe provider file convention also covers annotated generator functions.",
     "domains": [
       "riverpod"
     ],

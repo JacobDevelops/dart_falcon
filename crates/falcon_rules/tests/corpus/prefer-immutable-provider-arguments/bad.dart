@@ -4,10 +4,10 @@ final family = ProviderFamily<int, Mutable>();
 final future = FutureProviderFamily<int, Mutable>();
 final automatic = AutoDisposeProviderFamily<int, Mutable>();
 void bad(Mutable mutable) {
-  family(mutable); /* expect: prefer-immutable-provider-arguments */
+  family(mutable);
   family(Mutable()); /* expect: prefer-immutable-provider-arguments */
-  future(mutable); /* expect: prefer-immutable-provider-arguments */
-  automatic(mutable); /* expect: prefer-immutable-provider-arguments */
+  future(Mutable()); /* expect: prefer-immutable-provider-arguments */
+  automatic(Mutable()); /* expect: prefer-immutable-provider-arguments */
   final alias = family;
-  alias(mutable); /* expect: prefer-immutable-provider-arguments */
+  alias(Mutable()); /* expect: prefer-immutable-provider-arguments */
 }
