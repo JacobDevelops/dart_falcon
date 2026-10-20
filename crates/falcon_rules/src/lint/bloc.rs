@@ -336,7 +336,11 @@ impl<'a> BlocTypes<'a> {
     }
 }
 
-fn is_api_identity(identity: &DeclarationIdentity, model: &SemanticModel<'_>, name: &str) -> bool {
+pub(crate) fn is_api_identity(
+    identity: &DeclarationIdentity,
+    model: &SemanticModel<'_>,
+    name: &str,
+) -> bool {
     identity.name() == name
         && (identity.is_package("bloc", name)
             || identity.is_package("flutter_bloc", name)
@@ -402,6 +406,7 @@ pub(crate) enum ModelKind {
 pub(crate) enum ModelRequirement {
     Sealed,
     Immutable,
+    Suffix,
 }
 
 pub(crate) fn prepare_models<'a>(
@@ -446,6 +451,14 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
             return StructuralTraversal::SkipChildren;
         };
         self.classes.push(class);
+        if matches!(self.requirement, ModelRequirement::Suffix) {
+            if let Some(root) = class.extends().and_then(|ty| {
+                self.suffix_root(self.model.resolve_type(ty))
+            }) && !self.roots.contains(&root) {
+                self.roots.push(root);
+            }
+            return StructuralTraversal::SkipChildren;
+        }
         if let Some(supertype) = class.extends() {
             let resolved = self.model.resolve_type(supertype);
             let is_bloc = self.types.is_resolved_api_syntax(
@@ -513,6 +526,10 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
                 ModelRequirement::Immutable => class.annotations().any(|annotation| {
                     immutable_annotation(annotation, &self.types, &self.model)
                 }),
+                ModelRequirement::Suffix => class.name().name().ends_with(match self.kind {
+                    ModelKind::Event => "Event",
+                    ModelKind::State => "State",
+                }),
             };
             if satisfied {
                 continue;
@@ -522,10 +539,59 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
                 (ModelKind::State, ModelRequirement::Sealed) => "Declare this Bloc state sealed or final.",
                 (ModelKind::Event, ModelRequirement::Immutable) => "Annotate this Bloc event with @immutable.",
                 (ModelKind::State, ModelRequirement::Immutable) => "Annotate this Bloc state with @immutable.",
+                (ModelKind::Event, ModelRequirement::Suffix) => "End Bloc event class names with 'Event'.",
+                (ModelKind::State, ModelRequirement::Suffix) => "End Bloc state class names with 'State'.",
             };
             diagnostics.push(self.ctx.diagnostic(self.rule, message, class.name().span()));
         }
         diagnostics
     }
 }
+}
+
+impl ModelCollector<'_> {
+    // Follow only the superclass chain: implementing Bloc does not establish a
+    // Bloc's event/state contract. Substitute each generic intermediate owner.
+    fn suffix_root(&self, mut ty: ResolvedType) -> Option<DeclarationIdentity> {
+        let mut substitutions = std::collections::HashMap::new();
+        for _ in 0..64 {
+            let ResolvedType::Interface {
+                identity,
+                arguments,
+                ..
+            } = &ty
+            else {
+                return None;
+            };
+            let index = if self.types.is_api_type(&ty, &self.model, "Bloc") {
+                match self.kind {
+                    ModelKind::Event => 0,
+                    ModelKind::State => 1,
+                }
+            } else if matches!(self.kind, ModelKind::State)
+                && self.types.is_api_type(&ty, &self.model, "Cubit")
+            {
+                0
+            } else {
+                let superclass = self.signatures.superclass(identity)?;
+                let parameters = self.signatures.type_parameters(identity)?;
+                if parameters.len() != arguments.len() {
+                    return None;
+                }
+                substitutions.clear();
+                substitutions.extend(parameters.iter().cloned().zip(arguments.iter().cloned()));
+                ty = self.model.substitute(superclass, &substitutions);
+                continue;
+            };
+            return match arguments.get(index) {
+                Some(ResolvedType::Interface { identity, .. })
+                    if !matches!(identity, DeclarationIdentity::Sdk { .. }) =>
+                {
+                    Some(identity.clone())
+                }
+                _ => None,
+            };
+        }
+        None
+    }
 }

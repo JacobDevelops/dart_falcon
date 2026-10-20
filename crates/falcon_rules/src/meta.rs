@@ -2203,6 +2203,45 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Falcon,
     ),
+    RuleMeta::resolved::<lint::correctness::handle_bloc_event_subclasses::HandleBlocEventSubclasses>(
+        "handle-bloc-event-subclasses", RuleGroup::Correctness, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_instantiating_in_value_provider::AvoidInstantiatingInValueProvider>(
+        "avoid-instantiating-in-value-provider", RuleGroup::Correctness, Some(Domain::Provider), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::suspicious::avoid_passing_bloc_to_bloc::AvoidPassingBlocToBloc>(
+        "avoid-passing-bloc-to-bloc", RuleGroup::Suspicious, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::suspicious::avoid_passing_build_context_to_blocs::AvoidPassingBuildContextToBlocs>(
+        "avoid-passing-build-context-to-blocs", RuleGroup::Suspicious, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::suspicious::avoid_passing_bloc_to_widget::AvoidPassingBlocToWidget>(
+        "avoid-passing-bloc-to-widget", RuleGroup::Suspicious, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_bloc_public_fields::AvoidBlocPublicFields>(
+        "avoid-bloc-public-fields", RuleGroup::Style, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::avoid_bloc_public_methods::AvoidBlocPublicMethods>(
+        "avoid-bloc-public-methods", RuleGroup::Style, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_bloc_extensions::PreferBlocExtensions>(
+        "prefer-bloc-extensions", RuleGroup::Style, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_bloc_event_suffix::PreferBlocEventSuffix>(
+        "prefer-bloc-event-suffix", RuleGroup::Style, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_bloc_state_suffix::PreferBlocStateSuffix>(
+        "prefer-bloc-state-suffix", RuleGroup::Style, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_multi_bloc_provider::PreferMultiBlocProvider>(
+        "prefer-multi-bloc-provider", RuleGroup::Style, Some(Domain::Bloc), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_multi_provider::PreferMultiProvider>(
+        "prefer-multi-provider", RuleGroup::Style, Some(Domain::Provider), false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::style::prefer_provider_extensions::PreferProviderExtensions>(
+        "prefer-provider-extensions", RuleGroup::Style, Some(Domain::Provider), false, RuleSource::Falcon,
+    ),
     RuleMeta::resolved::<lint::correctness::check_is_not_closed_after_async_gap::CheckIsNotClosedAfterAsyncGap>(
         "check-is-not-closed-after-async-gap",
         RuleGroup::Correctness,

@@ -1,0 +1,17 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "bloc",
+      "rootUri": "../packages/bloc",
+      "packageUri": "lib/",
+      "languageVersion": "3.6"
+    },
+    {
+      "name": "flutter_bloc",
+      "rootUri": "../packages/flutter_bloc",
+      "packageUri": "lib/",
+      "languageVersion": "3.6"
+    }
+  ]
+}

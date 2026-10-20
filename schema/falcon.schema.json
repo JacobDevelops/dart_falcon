@@ -356,6 +356,9 @@
                 "avoid-inherited-widget-in-initstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-instantiating-in-value-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -498,6 +501,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "handle-bloc-event-subclasses": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "hash-and-equals": {
@@ -761,6 +767,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-annotating-with-dynamic": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bloc-public-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bloc-public-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-bool-literals-in-conditional-expressions": {
@@ -1069,6 +1081,15 @@
                 "prefer-async-callback": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-bloc-event-suffix": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-bloc-extensions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-bloc-state-suffix": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-center-over-align": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1174,6 +1195,12 @@
                 "prefer-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-multi-bloc-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-multi-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-named-boolean-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1181,6 +1208,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-padding-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-provider-extensions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-returning-condition": {
@@ -1434,6 +1464,15 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-passing-async-when-sync-expected": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-bloc-to-bloc": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-bloc-to-widget": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-build-context-to-blocs": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-print": {
@@ -2005,6 +2044,9 @@
                 "avoid-inherited-widget-in-initstate": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-instantiating-in-value-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-late-context": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2147,6 +2189,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "handle-bloc-event-subclasses": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "hash-and-equals": {
@@ -2410,6 +2455,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-annotating-with-dynamic": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bloc-public-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bloc-public-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-bool-literals-in-conditional-expressions": {
@@ -2718,6 +2769,15 @@
                 "prefer-async-callback": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-bloc-event-suffix": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-bloc-extensions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-bloc-state-suffix": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-center-over-align": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2823,6 +2883,12 @@
                 "prefer-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-multi-bloc-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-multi-provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-named-boolean-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2830,6 +2896,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-padding-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-provider-extensions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-returning-condition": {
@@ -3083,6 +3152,15 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-passing-async-when-sync-expected": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-bloc-to-bloc": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-bloc-to-widget": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-build-context-to-blocs": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-print": {

@@ -90,12 +90,22 @@
   {
     "name": "bloc",
     "rules": [
+      "avoid-bloc-public-fields",
+      "avoid-bloc-public-methods",
       "avoid-duplicate-bloc-event-handlers",
       "avoid-emit-outside-bloc",
+      "avoid-passing-bloc-to-bloc",
+      "avoid-passing-bloc-to-widget",
+      "avoid-passing-build-context-to-blocs",
       "check-is-not-closed-after-async-gap",
       "emit-new-bloc-state-instances",
+      "handle-bloc-event-subclasses",
+      "prefer-bloc-event-suffix",
+      "prefer-bloc-extensions",
+      "prefer-bloc-state-suffix",
       "prefer-immutable-bloc-events",
       "prefer-immutable-bloc-state",
+      "prefer-multi-bloc-provider",
       "prefer-sealed-bloc-events",
       "prefer-sealed-bloc-state"
     ]
@@ -117,9 +127,12 @@
   {
     "name": "provider",
     "rules": [
+      "avoid-instantiating-in-value-provider",
       "avoid-read-inside-build",
       "avoid-watch-outside-build",
       "dispose-providers",
+      "prefer-multi-provider",
+      "prefer-provider-extensions",
       "prefer-read-for-methods"
     ]
   },

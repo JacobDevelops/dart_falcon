@@ -413,6 +413,26 @@ impl<'a> SemanticState<'a> {
             .unwrap_or_else(|| Self::callable_return_type(receiver))
     }
 
+    /// The implicit `this` receiver of an unqualified instance method, unless shadowed.
+    pub fn implicit_invocation_receiver(&self, name: &str) -> Option<ResolvedType> {
+        if self.environment.is_bound(name) || self.implicit_member_type(name).is_some() {
+            return None;
+        }
+        self.environment
+            .implicit_this_method(name, &self.model, &self.signatures)?;
+        let receiver = self.environment.lookup("this");
+        if let ResolvedType::Interface { identity, .. } = &receiver
+            && self
+                .signatures
+                .declared_member_facts(identity, name)
+                .iter()
+                .any(|facts| facts.is_static)
+        {
+            return None;
+        }
+        Some(receiver)
+    }
+
     /// Whether the enclosing type itself declares a member `name`.
     fn enclosing_type_declares(&self, name: &str) -> bool {
         matches!(
