@@ -348,13 +348,27 @@ struct DiagnosticJson {
 fn character_column(source: &str, line: usize, utf16_column: usize) -> usize {
     let text = source.lines().nth(line.saturating_sub(1)).unwrap_or("");
     let mut units = 0;
-    1 + text
+    let prefix_bytes: usize = text
         .chars()
         .take_while(|character| {
             units += character.len_utf16();
             units < utf16_column
         })
-        .count()
+        .map(char::len_utf8)
+        .sum();
+    let column = expectation_segments(text)
+        .map(|(start, segment)| {
+            let end = prefix_bytes.saturating_sub(start).min(segment.len());
+            segment[..end].chars().count()
+        })
+        .sum::<usize>();
+    let trimmed_length = expectation_segments(text)
+        .flat_map(|(_, segment)| segment.chars())
+        .enumerate()
+        .filter_map(|(index, character)| (!character.is_whitespace()).then_some(index + 1))
+        .last()
+        .unwrap_or(0);
+    1 + column.min(trimmed_length)
 }
 
 #[path = "../../crates/falcon_rules/tests/support/sdk_fixture.rs"]
@@ -1152,6 +1166,25 @@ fn strip_provenance(lines: &mut Vec<String>) {
     }
 }
 
+fn expectation_segments(mut line: &str) -> impl Iterator<Item = (usize, &str)> {
+    let length = line.len();
+    std::iter::from_fn(move || {
+        if line.is_empty() {
+            return None;
+        }
+        let offset = length - line.len();
+        if let Some(start) = line.find("/* expect:") {
+            let before = &line[..start];
+            line = line[start..]
+                .find("*/")
+                .map_or("", |end| &line[start + end + 2..]);
+            Some((offset, before))
+        } else {
+            Some((offset, std::mem::take(&mut line)))
+        }
+    })
+}
+
 /// Remove all `/* expect: … */` annotation comments from fixture source, then
 /// rstrip each line so the displayed code is clean.
 fn strip_expectations(source: &str) -> String {
@@ -1161,18 +1194,9 @@ fn strip_expectations(source: &str) -> String {
             cleaned.push('\n');
         }
         let mut out = String::with_capacity(line.len());
-        let mut rest = line;
-        while let Some(start) = rest.find("/* expect:") {
-            out.push_str(&rest[..start]);
-            match rest[start..].find("*/") {
-                Some(end) => rest = &rest[start + end + 2..],
-                None => {
-                    rest = "";
-                    break;
-                }
-            }
+        for (_, segment) in expectation_segments(line) {
+            out.push_str(segment);
         }
-        out.push_str(rest);
         cleaned.push_str(out.trim_end());
     }
     cleaned
@@ -1946,6 +1970,23 @@ releases/latest/download/falcon-x86_64-linux.tar.gz regex 0.4.17"#
         assert_eq!(super::character_column("x😀é target\n", 1, 6), 5);
         assert_eq!(super::character_column("first\n😀 target\n", 2, 4), 3);
         assert_eq!(super::character_column("plain target\n", 1, 7), 7);
+        assert_eq!(
+            super::character_column("/* expect: rule */ // ignore: unused_import", 1, 20),
+            2
+        );
+        assert_eq!(
+            super::character_column("é😀 /* expect: 😀 */ x /* expect: rule */ target", 1, 43),
+            8
+        );
+        assert_eq!(
+            super::character_column("x /* expect: rule */ target", 1, 7),
+            3
+        );
+        assert_eq!(super::character_column("x /* expect: rule", 1, 18), 2);
+        assert_eq!(
+            super::character_column("target /* expect: rule */  ", 1, 27),
+            7
+        );
     }
 
     #[test]

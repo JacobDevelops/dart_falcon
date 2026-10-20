@@ -1,0 +1,1 @@
+class GoodOAuth2Client {}

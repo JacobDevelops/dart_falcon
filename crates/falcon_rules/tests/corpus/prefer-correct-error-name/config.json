@@ -1,0 +1,1 @@
+{"linter":{"rules":{"style":{"prefer-correct-error-name":{"level":"warn","options":{"allowed_names":["error","exception"],"ignored_names":["ignored"]}}}}}}

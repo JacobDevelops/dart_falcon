@@ -711,13 +711,22 @@
                 "avoid-slow-collection-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unnecessary-collections": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unnecessary-consumer-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-gesture-detector": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-hook-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "move-variable-closer-to-its-usage": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "move-variable-outside-iteration": {
@@ -739,6 +748,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-foreach": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-return-await": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-single-setstate": {
@@ -1126,6 +1138,9 @@
                 "prefer-align-over-container": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-any-or-every": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-asserts-in-initializer-lists": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1153,6 +1168,9 @@
                 "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-commenting-analyzer-ignores": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-const-constructors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1172,6 +1190,15 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-callback-field-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-error-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-handler-name": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -1228,6 +1255,9 @@
                 "prefer-generic-function-type-aliases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-getter-over-method": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-initializing-formals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1258,6 +1288,9 @@
                 "prefer-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-match-file-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1268,6 +1301,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-named-boolean-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-named-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-null-aware-method-calls": {
@@ -1307,6 +1343,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-transform-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-type-over-var": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-typing-uninitialized-variables": {
@@ -2471,13 +2510,22 @@
                 "avoid-slow-collection-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-unnecessary-collections": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unnecessary-consumer-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-gesture-detector": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-hook-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "move-variable-closer-to-its-usage": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "move-variable-outside-iteration": {
@@ -2499,6 +2547,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-foreach": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-return-await": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-single-setstate": {
@@ -2886,6 +2937,9 @@
                 "prefer-align-over-container": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-any-or-every": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-asserts-in-initializer-lists": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2913,6 +2967,9 @@
                 "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-commenting-analyzer-ignores": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-const-constructors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -2932,6 +2989,15 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-callback-field-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-error-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-handler-name": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -2988,6 +3054,9 @@
                 "prefer-generic-function-type-aliases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-getter-over-method": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-initializing-formals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -3018,6 +3087,9 @@
                 "prefer-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-match-file-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-mixin": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -3028,6 +3100,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-named-boolean-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-named-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-null-aware-method-calls": {
@@ -3067,6 +3142,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-transform-over-container": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-type-over-var": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-typing-uninitialized-variables": {

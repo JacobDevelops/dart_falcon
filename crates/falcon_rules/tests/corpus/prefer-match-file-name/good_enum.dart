@@ -1,0 +1,1 @@
+enum GoodEnum { first, second }

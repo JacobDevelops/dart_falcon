@@ -1,0 +1,27 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-commenting-analyzer-ignores": {
+          "level": "warn",
+          "options": { "ignore_global": false }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/good_default_global.dart"],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-commenting-analyzer-ignores": {
+              "level": "warn",
+              "options": {}
+            }
+          }
+        }
+      }
+    }
+  ]
+}
