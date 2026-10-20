@@ -236,7 +236,7 @@ After batch 19.
 
 Owns release packaging. Independent of the engine; can start any time.
 
-- [ ] **Easier install and update.** Publish a `falcon` package on pub.dev so `dart pub global activate falcon` installs a launcher that downloads and verifies the release binary for the platform. Add self-update and version selection, cargo-binstall metadata, optional signing/notarisation, and Homebrew publishing.
+- [ ] **Easier install and update.** Add self-update and version selection to the `falcon` launcher, cargo-binstall metadata, optional signing/notarisation, and Homebrew publishing.
 
 ### Stage 7: last
 
