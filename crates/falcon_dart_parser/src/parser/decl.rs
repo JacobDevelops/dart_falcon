@@ -2,7 +2,7 @@ use falcon_syntax::Feature;
 use falcon_syntax::cst::{AsyncMarker, NodeKind};
 use falcon_syntax::token::TokenKind;
 
-use super::{CompletedMarker, Parser};
+use super::{CompletedMarker, Marker, Parser};
 
 #[derive(Clone, Copy, Default)]
 struct MemberModifiers {
@@ -12,13 +12,7 @@ struct MemberModifiers {
 }
 
 impl<'src> Parser<'src> {
-    pub(super) fn try_parse_library_directive(&mut self) -> Option<CompletedMarker> {
-        // May be preceded by metadata: `@Deprecated('x') library foo;`.
-        if self.peek_kind_after_annotations() != TokenKind::Library {
-            return None;
-        }
-        let marker = self.start();
-        self.parse_annotations();
+    pub(super) fn parse_library_directive(&mut self, marker: Marker) -> CompletedMarker {
         self.advance(); // library
         // Dart 3 allows bare `library;` with no name.
         if self.cur().kind.is_identifier_like() {
@@ -28,21 +22,10 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::Semicolon);
-        Some(marker.complete(self, NodeKind::LibraryDirective))
+        marker.complete(self, NodeKind::LibraryDirective)
     }
 
-    pub(super) fn try_parse_part_of(&mut self) -> Option<CompletedMarker> {
-        // `part of …`, optionally preceded by metadata: `@A part of foo;`.
-        let i = self.index_after_annotations(self.pos);
-        let part = self.tokens.get(i);
-        let of = self.tokens.get(i + 1);
-        let is_part_of = part.is_some_and(|t| t.kind == TokenKind::Part)
-            && of.is_some_and(|t| t.kind == TokenKind::Ident && t.text(self.src) == "of");
-        if !is_part_of {
-            return None;
-        }
-        let marker = self.start();
-        self.parse_annotations();
+    pub(super) fn parse_part_of(&mut self, marker: Marker) -> CompletedMarker {
         self.advance(); // part
         self.advance(); // of
         if matches!(self.cur().kind, TokenKind::StringLit) {
@@ -54,27 +37,22 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::Semicolon);
-        Some(marker.complete(self, NodeKind::PartOfDirective))
+        marker.complete(self, NodeKind::PartOfDirective)
     }
 
-    pub(super) fn try_parse_part(&mut self) -> Option<CompletedMarker> {
-        let marker = self.start();
-        self.parse_annotations();
+    pub(super) fn parse_part(&mut self, marker: Marker) -> CompletedMarker {
         self.expect(TokenKind::Part);
         if !matches!(self.cur().kind, TokenKind::StringLit) {
             self.error("expected string literal in part directive");
             self.missing(NodeKind::Error);
-            marker.complete(self, NodeKind::Error);
-            return None;
+            return marker.complete(self, NodeKind::Error);
         }
         self.parse_adjacent_strings();
         self.expect(TokenKind::Semicolon);
-        Some(marker.complete(self, NodeKind::PartDirective))
+        marker.complete(self, NodeKind::PartDirective)
     }
 
-    pub(super) fn parse_import(&mut self) -> CompletedMarker {
-        let marker = self.start();
-        self.parse_annotations();
+    pub(super) fn parse_import(&mut self, marker: Marker) -> CompletedMarker {
         self.expect(TokenKind::Import);
         self.parse_adjacent_strings();
         self.parse_configurable_uris();
@@ -87,9 +65,7 @@ impl<'src> Parser<'src> {
         marker.complete(self, NodeKind::ImportDirective)
     }
 
-    pub(super) fn parse_export(&mut self) -> CompletedMarker {
-        let marker = self.start();
-        self.parse_annotations();
+    pub(super) fn parse_export(&mut self, marker: Marker) -> CompletedMarker {
         self.expect(TokenKind::Export);
         self.parse_adjacent_strings();
         self.parse_configurable_uris();
@@ -140,18 +116,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    pub(super) fn parse_top_level_decl(&mut self) -> Option<CompletedMarker> {
-        let marker = self.start();
-        if let Some(kind) = self.parse_top_level_decl_inner() {
-            Some(marker.complete(self, kind))
-        } else {
-            marker.abandon(self);
-            None
-        }
-    }
-
-    fn parse_top_level_decl_inner(&mut self) -> Option<NodeKind> {
-        self.parse_annotations();
+    pub(super) fn parse_top_level_decl(&mut self) -> Option<NodeKind> {
         let mut is_final = false;
         loop {
             match self.cur().kind {

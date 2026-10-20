@@ -989,10 +989,7 @@ fn nested_paren_arithmetic_initializer_before_block_body() {
 
 #[test]
 fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
-    // `C(): g = (e) {}` — `(e)` is a valid formal-parameter list, so the
-    // speculative lambda parse *succeeds*, yet the trailing `{}` is the
-    // constructor body: the initializer value is the parenthesized expression
-    // `(e)`, not a lambda `(e) {}`.
+    // The constructor's body follows a valid parenthesized initializer, not a lambda.
     let source = "class C { var g; C(): g = (e) {} }";
     let parsed = parse("class C { var g; C(): g = (e) {} }");
     let errors = &parsed.errors;

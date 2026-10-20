@@ -236,8 +236,24 @@ pub trait Visitor<'a>: Sized {
         walk_for_header(self, node);
     }
 
+    /// Walks expression chains without consuming the call stack. Overrides retain
+    /// synchronous, recursive traversal when they delegate to [`walk_expr`].
     fn visit_expr(&mut self, node: Expr<'a>) {
-        walk_expr(self, node);
+        match node {
+            Expr::Binary(_)
+            | Expr::Assign(_)
+            | Expr::Conditional(_)
+            | Expr::PostfixIncDec(_)
+            | Expr::NullAssert(_)
+            | Expr::Is(_)
+            | Expr::As(_)
+            | Expr::Field(_)
+            | Expr::Index(_)
+            | Expr::Call(_)
+            | Expr::GenericInstantiation(_)
+            | Expr::Cascade(_) => walk_default_chain(self, Work::Expr(node)),
+            _ => walk_expr(self, node),
+        }
     }
 
     fn visit_collection_element(&mut self, node: CollectionElement<'a>) {
@@ -253,7 +269,14 @@ pub trait Visitor<'a>: Sized {
     }
 
     fn visit_pattern(&mut self, node: Pattern<'a>) {
-        walk_pattern(self, node);
+        match node {
+            Pattern::LogicalOr(_)
+            | Pattern::LogicalAnd(_)
+            | Pattern::NullCheck(_)
+            | Pattern::NullAssert(_)
+            | Pattern::Cast(_) => walk_default_chain(self, Work::Pattern(node)),
+            _ => walk_pattern(self, node),
+        }
     }
 
     fn visit_annotation(&mut self, node: Annotation<'a>) {
@@ -967,6 +990,159 @@ pub fn walk_stmt<'a, V: Visitor<'a>>(v: &mut V, node: Stmt<'a>) {
         Stmt::Continue(x) => v.visit_continue_stmt(x),
         Stmt::Error(x) => v.visit_error_node(x),
         Stmt::Rethrow(_) | Stmt::Empty(_) => {}
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Work<'a> {
+    Expr(Expr<'a>),
+    Pattern(Pattern<'a>),
+    Type(DartType<'a>),
+    Name(Identifier<'a>),
+    Call(CallExpr<'a>),
+    TypeArgs(GenericInstantiationExpr<'a>),
+    Cascade(CascadeExpr<'a>),
+}
+
+// Default hooks flatten chains; explicit walkers retain synchronous overrides.
+#[inline(never)]
+fn walk_default_chain<'a, V: Visitor<'a>>(v: &mut V, mut work: Work<'a>) {
+    struct WorkStack<'a> {
+        inline: [Option<Work<'a>>; 4],
+        len: usize,
+        spill: Vec<Work<'a>>,
+    }
+
+    impl<'a> WorkStack<'a> {
+        fn push(&mut self, work: Work<'a>) {
+            if self.len < self.inline.len() {
+                self.inline[self.len] = Some(work);
+                self.len += 1;
+            } else {
+                self.spill.push(work);
+            }
+        }
+
+        fn pop(&mut self) -> Option<Work<'a>> {
+            if let Some(work) = self.spill.pop() {
+                return Some(work);
+            }
+            self.len = self.len.checked_sub(1)?;
+            self.inline[self.len].take()
+        }
+    }
+
+    let mut pending = WorkStack {
+        inline: [None; 4],
+        len: 0,
+        spill: Vec::new(),
+    };
+    loop {
+        match work {
+            Work::Expr(node) => {
+                let child = match node {
+                    Expr::Binary(n) => {
+                        pending.push(Work::Expr(n.right()));
+                        Some(n.left())
+                    }
+                    Expr::Assign(n) => {
+                        pending.push(Work::Expr(n.value()));
+                        Some(n.target())
+                    }
+                    Expr::Conditional(n) => {
+                        pending.push(Work::Expr(n.else_expr()));
+                        pending.push(Work::Expr(n.then_expr()));
+                        Some(n.condition())
+                    }
+                    Expr::PostfixIncDec(n) => Some(n.operand()),
+                    Expr::NullAssert(n) => Some(n.operand()),
+                    Expr::Is(n) => {
+                        pending.push(Work::Type(n.dart_type()));
+                        Some(n.expr())
+                    }
+                    Expr::As(n) => {
+                        pending.push(Work::Type(n.dart_type()));
+                        Some(n.expr())
+                    }
+                    Expr::Field(n) => {
+                        pending.push(Work::Name(n.field()));
+                        Some(n.object())
+                    }
+                    Expr::Index(n) => {
+                        pending.push(Work::Expr(n.index()));
+                        Some(n.object())
+                    }
+                    Expr::Call(n) => {
+                        pending.push(Work::Call(n));
+                        Some(n.callee())
+                    }
+                    Expr::GenericInstantiation(n) => {
+                        pending.push(Work::TypeArgs(n));
+                        Some(n.target())
+                    }
+                    Expr::Cascade(n) => {
+                        pending.push(Work::Cascade(n));
+                        Some(n.object())
+                    }
+                    _ => {
+                        walk_expr(v, node);
+                        None
+                    }
+                };
+                if let Some(child) = child {
+                    work = Work::Expr(child);
+                    continue;
+                }
+            }
+            Work::Pattern(node) => {
+                let child = match node {
+                    Pattern::LogicalOr(n) => {
+                        pending.push(Work::Pattern(n.right()));
+                        Some(n.left())
+                    }
+                    Pattern::LogicalAnd(n) => {
+                        pending.push(Work::Pattern(n.right()));
+                        Some(n.left())
+                    }
+                    Pattern::NullCheck(n) => Some(n.inner()),
+                    Pattern::NullAssert(n) => Some(n.inner()),
+                    Pattern::Cast(n) => {
+                        pending.push(Work::Type(n.cast_type()));
+                        Some(n.inner())
+                    }
+                    _ => {
+                        walk_pattern(v, node);
+                        None
+                    }
+                };
+                if let Some(child) = child {
+                    work = Work::Pattern(child);
+                    continue;
+                }
+            }
+            Work::Type(node) => v.visit_dart_type(node),
+            Work::Name(node) => v.visit_name(node),
+            Work::Call(node) => {
+                for ty in node.type_args() {
+                    v.visit_dart_type(ty);
+                }
+                v.visit_arg_list(node.args());
+            }
+            Work::TypeArgs(node) => {
+                for ty in node.type_args() {
+                    v.visit_dart_type(ty);
+                }
+            }
+            Work::Cascade(node) => {
+                for section in node.sections() {
+                    v.visit_cascade_section(section);
+                }
+            }
+        }
+        let Some(next) = pending.pop() else {
+            break;
+        };
+        work = next;
     }
 }
 

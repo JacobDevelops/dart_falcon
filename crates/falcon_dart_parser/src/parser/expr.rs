@@ -1,4 +1,4 @@
-use falcon_syntax::cst::{AssignOp, AsyncMarker, BinaryOp, NodeKind};
+use falcon_syntax::cst::{AssignOp, AsyncMarker, BinaryOp, Event, NodeKind};
 use falcon_syntax::token::TokenKind;
 
 use super::{CompletedMarker, Marker, Parser};
@@ -94,6 +94,7 @@ impl<'src> Parser<'src> {
     fn parse_switch_expr_arms(&mut self) {
         self.expect(TokenKind::LBrace);
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let before = self.pos;
             let arm = self.start();
             self.parse_pattern();
             if self.eat(TokenKind::When).is_some() {
@@ -106,6 +107,9 @@ impl<'src> Parser<'src> {
             self.parse_expr();
             arm.complete(self, NodeKind::SwitchExprArm);
             self.eat(TokenKind::Comma);
+            if self.pos == before {
+                break;
+            }
         }
         self.expect(TokenKind::RBrace);
     }
@@ -802,25 +806,10 @@ impl<'src> Parser<'src> {
                     TokenKind::Switch => p.parse_switch_expr_primary(start),
                     TokenKind::LParen => {
                         if p.looks_like_function_expr() {
-                            // `(...)` followed by `{` is ambiguous: a lambda `(params) {body}`,
-                            // or a parenthesized expression whose trailing `{` opens an
-                            // *enclosing* block (e.g. a constructor body in `C(): g = (e) {}`).
-                            // Speculatively parse the lambda; if its parameter list doesn't
-                            // parse cleanly, roll back and treat it as a paren/record.
-                            p.speculate(|p| {
-                                let errors = p.errors.len();
-                                let marker = p.start_at(start);
-                                let (expr, is_plain_block_lambda) =
-                                    p.parse_function_expr_with_type_params(marker);
-                                if p.errors.len() > errors
-                                    || (p.ctx.in_ctor_init_value && is_plain_block_lambda)
-                                {
-                                    None
-                                } else {
-                                    Some(expr)
-                                }
-                            })
-                            .unwrap_or_else(|| p.parse_paren_or_record(start))
+                            let marker = p.start_at(start);
+                            p.parse_formal_param_list();
+                            let async_marker = p.parse_async_marker();
+                            p.finish_function_expr(marker, async_marker)
                         } else {
                             p.parse_paren_or_record(start)
                         }
@@ -836,7 +825,7 @@ impl<'src> Parser<'src> {
                             {
                                 return None;
                             }
-                            Some(p.parse_function_expr_with_type_params(marker).0)
+                            Some(p.parse_function_expr_with_type_params(marker))
                         })
                         .unwrap_or_else(|| {
                             let marker = p.start_at(start);
@@ -947,11 +936,13 @@ impl<'src> Parser<'src> {
         if close.is_some_and(|i| Some(i + 1) == self.ctx.switch_guard_arrow) {
             return false;
         }
+        if self.ctx.in_ctor_init_value
+            && close.is_some_and(|i| self.kind_at(i + 1) == TokenKind::LBrace)
+        {
+            return false;
+        }
 
-        if matches!(
-            self.peek(1).kind,
-            TokenKind::Final | TokenKind::Var | TokenKind::Required | TokenKind::Covariant
-        ) {
+        if matches!(self.peek(1).kind, TokenKind::Final | TokenKind::Var) {
             return true;
         }
 
@@ -963,11 +954,19 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_function_expr_with_type_params(&mut self, marker: Marker) -> (CompletedMarker, bool) {
+    fn parse_function_expr_with_type_params(&mut self, marker: Marker) -> CompletedMarker {
         self.parse_formal_param_list();
         let async_marker = self.parse_async_marker();
+        self.finish_function_expr(marker, async_marker)
+    }
+
+    fn finish_function_expr(
+        &mut self,
+        marker: Marker,
+        async_marker: AsyncMarker,
+    ) -> CompletedMarker {
         // Closure arrows leave the enclosing declaration's semicolon untouched.
-        let body = self.with_body(async_marker, |p| match p.cur().kind {
+        self.with_body(async_marker, |p| match p.cur().kind {
             TokenKind::Arrow => {
                 let marker = p.start();
                 p.advance();
@@ -980,12 +979,7 @@ impl<'src> Parser<'src> {
                 p.missing(NodeKind::Block)
             }
         });
-        let is_plain_block_lambda =
-            async_marker == AsyncMarker::Sync && body.kind == NodeKind::Block;
-        (
-            marker.complete(self, NodeKind::FuncExpr),
-            is_plain_block_lambda,
-        )
+        marker.complete(self, NodeKind::FuncExpr)
     }
 
     fn parse_switch_expr_primary(&mut self, start: usize) -> CompletedMarker {
@@ -1033,20 +1027,21 @@ impl<'src> Parser<'src> {
                 },
             );
         }
-        // Decide map vs set by looking for a `k: v` entry leaf: a colon means a
-        // map, a plain/spread element a set. Works for plain, spread- and
-        // comprehension-led (`for`/`if`) literals alike. A spread-only literal is
-        // ambiguous (`{...a}` could be either) — explicit type-arg arity decides,
-        // otherwise it defaults to a Set.
-        let is_map = self.map_literal_lookahead().unwrap_or(type_arg_count == 2);
+        let mut is_map = None;
+        let mut ambiguous = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            if is_map {
-                self.parse_map_element();
-            } else {
-                self.parse_collection_element();
-            }
+            self.parse_brace_element(&mut is_map, &mut ambiguous);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
+            }
+        }
+        let is_map = is_map.unwrap_or(type_arg_count == 2);
+        if is_map {
+            for (pos, map_kind) in ambiguous {
+                let Event::Start { kind, .. } = &mut self.events[pos] else {
+                    panic!("ambiguous collection element must be a completed start event");
+                };
+                *kind = map_kind;
             }
         }
         self.expect(TokenKind::RBrace);
@@ -1060,113 +1055,133 @@ impl<'src> Parser<'src> {
         )
     }
 
-    /// Look ahead (without consuming) to classify a non-empty `{...}` literal:
-    /// `Some(true)` for a map (a `k: v` entry leaf), `Some(false)` for a set (a
-    /// plain element leaf), `None` when every element is a spread and no entry is
-    /// present (`{...a}` / `{...a, ...b}`) — genuinely ambiguous, so the caller
-    /// decides. Descends through leading `for`/`if` comprehension headers and
-    /// looks *past* leading spreads for a decisive `:` leaf.
-    fn map_literal_lookahead(&mut self) -> Option<bool> {
-        let checkpoint = self.checkpoint();
-        let result = loop {
-            loop {
-                // `await for` comprehension headers lead with `await`; skip it so the
-                // `for` is recognized and `{ await for (...) k: v }` reaches the map
-                // classification path.
-                if self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For {
-                    self.advance();
-                }
-                match self.cur().kind {
-                    TokenKind::For | TokenKind::If => {
-                        self.advance();
-                        self.skip_balanced_parens();
-                    }
-                    _ => break,
-                }
-            }
-            match self.cur().kind {
-                TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
-                    // A spread is ambiguous on its own; skip it and inspect the
-                    // next element for a decisive `k: v` entry.
-                    self.advance();
-                    let _ = self.parse_expr();
-                    if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
-                        continue;
-                    }
-                    break None;
-                }
-                _ => {
-                    // A null-aware key/element leads with `?`; skip it so `{?k: v}`
-                    // (map) is told apart from `{?x}` (set).
-                    let _ = self.eat(TokenKind::Qmark);
-                    let _ = self.parse_expr();
-                    break Some(self.at(TokenKind::Colon));
-                }
-            }
-        };
-        self.restore(checkpoint);
-        result
-    }
-
-    /// Skip a balanced `( ... )` group starting at the current token. Used by
-    /// lookahead to step over a comprehension header without interpreting it.
-    fn skip_balanced_parens(&mut self) {
-        if self.at(TokenKind::LParen) {
-            self.pos = self
-                .index_after_balanced_parens(self.pos)
-                .min(self.tokens.len() - 1);
-        }
-    }
-
     fn parse_spread(&mut self) {
         self.advance();
         self.parse_expr();
     }
 
-    /// Parse one element of a comprehension-form map literal (`k: v`, or a
-    /// `for`/`if`/spread wrapping such entries).
-    fn parse_map_element(&mut self) -> CompletedMarker {
+    fn parse_brace_element(
+        &mut self,
+        is_map: &mut Option<bool>,
+        ambiguous: &mut Vec<(usize, NodeKind)>,
+    ) -> CompletedMarker {
+        if !self.at_any(&[TokenKind::If, TokenKind::For])
+            && !(self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For)
+        {
+            return self.parse_brace_element_inner(is_map, ambiguous);
+        }
+        if let Some(element) = self.guarded(
+            |_| None,
+            |p| Some(p.parse_brace_element_inner(is_map, ambiguous)),
+        ) {
+            return element;
+        }
         let marker = self.start();
-        match self.cur().kind {
+        self.missing(NodeKind::ErrorExpr);
+        self.missing(NodeKind::ErrorExpr);
+        let kind = if *is_map == Some(true) {
+            NodeKind::MapEntry
+        } else {
+            if is_map.is_none() {
+                ambiguous.push((marker.pos, NodeKind::MapEntry));
+            }
+            NodeKind::ErrorExpr
+        };
+        marker.complete(self, kind)
+    }
+
+    fn parse_brace_element_inner(
+        &mut self,
+        is_map: &mut Option<bool>,
+        ambiguous: &mut Vec<(usize, NodeKind)>,
+    ) -> CompletedMarker {
+        let marker = self.start();
+        let (set_kind, map_kind) = match self.cur().kind {
             TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
                 self.parse_spread();
-                marker.complete(self, NodeKind::MapSpreadElement)
+                (NodeKind::SpreadElement, NodeKind::MapSpreadElement)
             }
             TokenKind::If => {
                 self.advance();
-                let condition_marker = self.start();
+                let condition = self.start();
                 self.parse_if_condition();
-                condition_marker.complete(self, NodeKind::ExprCondition);
-                self.parse_map_element();
+                condition.complete(self, NodeKind::ExprCondition);
+                self.parse_brace_element(is_map, ambiguous);
                 if self.eat(TokenKind::Else).is_some() {
-                    self.parse_map_element();
+                    self.parse_brace_element(is_map, ambiguous);
                 }
-                marker.complete(self, NodeKind::MapIfElement)
+                (NodeKind::IfElement, NodeKind::MapIfElement)
             }
-            TokenKind::Await if self.peek(1).kind == TokenKind::For => {
+            TokenKind::For | TokenKind::Await
+                if self.at(TokenKind::For) || self.peek(1).kind == TokenKind::For =>
+            {
+                let is_await = self.eat(TokenKind::Await).is_some();
                 self.advance();
-                self.advance();
-                self.finish_for_map_element(true);
-                marker.complete(self, NodeKind::MapForElement)
-            }
-            TokenKind::For => {
-                self.advance();
-                self.finish_for_map_element(false);
-                marker.complete(self, NodeKind::MapForElement)
+                self.parse_collection_for_header(is_await);
+                self.parse_brace_element(is_map, ambiguous);
+                (NodeKind::ForElement, NodeKind::MapForElement)
             }
             _ => {
-                // Dart 3.0 null-aware key `?k: v` and/or value `k: ?v`.
-                self.eat(TokenKind::Qmark);
-                self.parse_expr();
-                self.expect(TokenKind::Colon);
-                self.eat(TokenKind::Qmark);
-                self.parse_expr();
-                marker.complete(self, NodeKind::MapEntry)
+                let null_aware = self.eat(TokenKind::Qmark).is_some();
+                let before = self.pos;
+                let element = self.parse_expr();
+                if self.pos == before && is_map.is_none() {
+                    self.missing(NodeKind::ErrorExpr);
+                    ambiguous.push((marker.pos, NodeKind::MapEntry));
+                    return marker.complete(self, NodeKind::ErrorExpr);
+                }
+                if self.eat(TokenKind::Colon).is_some() {
+                    if *is_map == Some(false) {
+                        self.error("map entry in set literal");
+                    }
+                    is_map.get_or_insert(true);
+                    self.eat(TokenKind::Qmark);
+                    self.parse_expr();
+                    return marker.complete(
+                        self,
+                        if *is_map == Some(false) {
+                            NodeKind::ErrorExpr
+                        } else {
+                            NodeKind::MapEntry
+                        },
+                    );
+                }
+                if *is_map == Some(true) {
+                    self.expect(TokenKind::Colon);
+                    self.missing(NodeKind::ErrorExpr);
+                    return marker.complete(self, NodeKind::MapEntry);
+                }
+                is_map.get_or_insert(false);
+                if null_aware {
+                    return marker.complete(self, NodeKind::NullAwareElement);
+                }
+                marker.abandon(self);
+                return element;
+            }
+        };
+        match is_map {
+            Some(true) => marker.complete(self, map_kind),
+            Some(false) => marker.complete(self, set_kind),
+            None => {
+                ambiguous.push((marker.pos, map_kind));
+                marker.complete(self, set_kind)
             }
         }
     }
 
     fn parse_collection_element(&mut self) -> CompletedMarker {
+        if !self.at_any(&[TokenKind::If, TokenKind::For])
+            && !(self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For)
+        {
+            return self.parse_collection_element_inner();
+        }
+        self.guarded(
+            |p| p.missing(NodeKind::ErrorExpr),
+            Self::parse_collection_element_inner,
+        )
+    }
+
+    fn parse_collection_element_inner(&mut self) -> CompletedMarker {
         let marker = self.start();
         match self.cur().kind {
             // Dart 3.0 null-aware element `?expr`
@@ -1212,11 +1227,6 @@ impl<'src> Parser<'src> {
     fn finish_for_collection_element(&mut self, is_await: bool) {
         self.parse_collection_for_header(is_await);
         self.parse_collection_element();
-    }
-
-    fn finish_for_map_element(&mut self, is_await: bool) {
-        self.parse_collection_for_header(is_await);
-        self.parse_map_element();
     }
 
     pub(super) fn parse_if_condition(&mut self) -> CompletedMarker {

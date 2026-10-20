@@ -789,14 +789,6 @@ impl<'src> Parser<'src> {
         count
     }
 
-    /// Kind of the first token past any leading annotations, without moving the
-    /// cursor. Used to route `@meta import/export/part/library …` directives,
-    /// whose keyword is hidden behind metadata the directive parser re-consumes.
-    pub(super) fn peek_kind_after_annotations(&self) -> TokenKind {
-        let i = self.index_after_annotations(self.pos);
-        self.tokens.get(i).map(|t| t.kind).unwrap_or(TokenKind::Eof)
-    }
-
     /// Token index after skipping any run of annotations starting at `i`. A pure
     /// lookahead helper (no cursor mutation); approximate by design — it only has
     /// to land on the token that follows the metadata.
@@ -885,32 +877,51 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_program(&mut self) -> CompletedMarker {
         let marker = self.start();
-        self.try_parse_library_directive();
-        self.try_parse_part_of();
+        let mut allow_library = true;
+        let mut allow_part_of = true;
 
         while !self.at(TokenKind::Eof) {
-            // Route past any leading metadata so `@meta import/export/part …`
-            // reaches the directive parser (which re-consumes the annotations).
-            match self.peek_kind_after_annotations() {
+            let item = self.start();
+            self.parse_annotations();
+            let kind = self.cur().kind;
+            if allow_library && kind == TokenKind::Library {
+                self.parse_library_directive(item);
+                allow_library = false;
+                continue;
+            }
+            allow_library = false;
+            if allow_part_of
+                && kind == TokenKind::Part
+                && self.peek(1).kind == TokenKind::Ident
+                && self.peek(1).text(self.src) == "of"
+            {
+                self.parse_part_of(item);
+                allow_part_of = false;
+                continue;
+            }
+            allow_part_of = false;
+            match kind {
                 TokenKind::Import => {
-                    self.parse_import();
+                    self.parse_import(item);
                 }
                 TokenKind::Export => {
-                    self.parse_export();
+                    self.parse_export(item);
                 }
                 TokenKind::Part => {
-                    self.try_parse_part();
+                    self.parse_part(item);
                 }
                 _ => {
-                    if self.parse_top_level_decl().is_none() {
-                        let marker = self.start();
+                    if let Some(kind) = self.parse_top_level_decl() {
+                        item.complete(self, kind);
+                    } else {
                         let recovery = self.start();
                         self.missing(NodeKind::Identifier);
                         recovery.complete(self, NodeKind::Error);
-                        // Recovery: skip one token
                         self.error(format!("unexpected token {:?}", self.cur().kind));
-                        self.advance();
-                        marker.complete(self, NodeKind::ErrorNode);
+                        if !self.at(TokenKind::Eof) {
+                            self.advance();
+                        }
+                        item.complete(self, NodeKind::ErrorNode);
                     }
                 }
             }

@@ -566,3 +566,287 @@ fn shorthand_pattern_labels_are_not_duplicate_source_names() {
     assert_eq!(names.bindings, 2);
     assert_eq!(names.labels, 0);
 }
+
+#[test]
+fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
+    use falcon_syntax::TokenKind;
+
+    const LINKS: usize = 100_000;
+    for (kind, suffix, identifiers_per_link, types_per_link) in [
+        (NodeKind::BinaryExpr, "+a", 1, 0),
+        (NodeKind::AssignExpr, "=a", 1, 0),
+        (NodeKind::ConditionalExpr, "?a:a", 2, 0),
+        (NodeKind::NullAssertExpr, "!", 0, 0),
+        (NodeKind::PostfixIncDecExpr, "++", 0, 0),
+        (NodeKind::FieldExpr, ".a", 1, 0),
+        (NodeKind::IndexExpr, "[a]", 1, 0),
+        (NodeKind::CallExpr, "(a)", 1, 0),
+        (NodeKind::GenericInstantiationExpr, "<dynamic>", 0, 1),
+        (NodeKind::CascadeExpr, "..a", 1, 0),
+        (NodeKind::AsExpr, " as dynamic", 0, 1),
+        (NodeKind::IsExpr, " is dynamic", 0, 1),
+    ] {
+        // Use one parsed link to capture valid child shapes, then build the
+        // deep arena directly so parser depth policies cannot mask regressions.
+        let template_source = format!("var value = a{suffix};");
+        let template = parse(&template_source);
+        assert!(template.errors.is_empty(), "{:?}", template.errors);
+        let TopLevelDecl::Variable(variable) = template
+            .tree
+            .program(&template_source)
+            .declarations()
+            .next()
+            .unwrap()
+        else {
+            panic!("expected variable");
+        };
+        let expr = variable
+            .declarators()
+            .next()
+            .unwrap()
+            .initializer()
+            .unwrap();
+        assert_eq!(expr.syntax().kind(), kind);
+
+        fn append_events(element: SyntaxElement<'_>, base: usize, events: &mut Vec<Event>) {
+            match element {
+                SyntaxElement::Node(node) => {
+                    events.push(Event::Start {
+                        kind: node.kind(),
+                        forward_parent: None,
+                        offset: node.span().start - base,
+                    });
+                    for child in node.children_with_tokens() {
+                        append_events(child, base, events);
+                    }
+                    events.push(Event::Finish);
+                }
+                SyntaxElement::Token(token) => events.push(Event::Token {
+                    kind: token.kind(),
+                    len: token.text().len(),
+                    offset: token.offset() - base,
+                }),
+            }
+        }
+
+        fn append_shifted(events: &mut Vec<Event>, template: &[Event], shift: usize) {
+            for event in template {
+                let mut event = event.clone();
+                match &mut event {
+                    Event::Start { offset, .. } | Event::Token { offset, .. } => {
+                        *offset += shift;
+                    }
+                    _ => {}
+                }
+                events.push(event);
+            }
+        }
+
+        // Assignment values and conditional else branches are right-associative
+        // in parsed source; exercise those spines rather than synthetic targets
+        // or conditions nested on the left.
+        let right_nested = matches!(kind, NodeKind::AssignExpr | NodeKind::ConditionalExpr);
+        let children: Vec<_> = expr.syntax().children_with_tokens().collect();
+        let edge_children = if right_nested {
+            &children[..children.len() - 1]
+        } else {
+            &children[1..]
+        };
+        let mut edge_events = Vec::new();
+        for child in edge_children {
+            append_events(*child, expr.span().start, &mut edge_events);
+        }
+        let mut source = String::with_capacity(1 + LINKS * suffix.len());
+        source.push('a');
+        for _ in 0..LINKS {
+            source.push_str(suffix);
+        }
+        let mut events = Vec::with_capacity(3 + LINKS * (edge_events.len() + 2));
+        for link in 0..LINKS {
+            events.push(Event::Start {
+                kind,
+                forward_parent: None,
+                offset: if right_nested { link * suffix.len() } else { 0 },
+            });
+            if right_nested {
+                append_shifted(&mut events, &edge_events, link * suffix.len());
+            }
+        }
+        let leaf_offset = if right_nested {
+            LINKS * suffix.len()
+        } else {
+            0
+        };
+        events.extend([
+            Event::Start {
+                kind: NodeKind::Identifier,
+                forward_parent: None,
+                offset: leaf_offset,
+            },
+            Event::Token {
+                kind: TokenKind::Ident,
+                len: 1,
+                offset: leaf_offset,
+            },
+            Event::Finish,
+        ]);
+        for link in 0..LINKS {
+            if !right_nested {
+                append_shifted(&mut events, &edge_events, link * suffix.len());
+            }
+            events.push(Event::Finish);
+        }
+        let tree = SyntaxTree::build(&source, &[], events);
+        struct Counter {
+            identifiers: usize,
+            types: usize,
+            last_offset: Option<usize>,
+        }
+        impl<'a> Visitor<'a> for Counter {
+            fn visit_identifier(&mut self, node: Identifier<'a>) {
+                if let Some(previous) = self.last_offset {
+                    assert!(previous < node.span().start);
+                }
+                self.last_offset = Some(node.span().start);
+                self.identifiers += 1;
+            }
+
+            fn visit_name(&mut self, node: Identifier<'a>) {
+                self.visit_identifier(node);
+            }
+
+            fn visit_dart_type(&mut self, node: DartType<'a>) {
+                assert!(matches!(node, DartType::Dynamic(_)));
+                if let Some(previous) = self.last_offset {
+                    assert!(previous < node.span().start);
+                }
+                self.last_offset = Some(node.span().start);
+                self.types += 1;
+            }
+        }
+        let mut counter = Counter {
+            identifiers: 0,
+            types: 0,
+            last_offset: None,
+        };
+        counter.visit_expr(Expr::cast(tree.root(&source)).expect("expression root"));
+        assert_eq!(
+            counter.identifiers,
+            1 + LINKS * identifiers_per_link,
+            "{kind:?}",
+        );
+        assert_eq!(counter.types, LINKS * types_per_link, "{kind:?}",);
+    }
+}
+
+#[test]
+fn expression_overrides_keep_synchronous_walk_and_pruning() {
+    struct Expressions(Vec<String>);
+    impl<'a> Visitor<'a> for Expressions {
+        fn visit_expr(&mut self, node: Expr<'a>) {
+            let text = node.syntax().text();
+            self.0.push(format!("enter {text}"));
+            if text != "skip.hidden" {
+                walk_expr(self, node);
+            }
+            self.0.push(format!("exit {text}"));
+        }
+    }
+
+    let source = "var value = keep.visible + skip.hidden;";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut visitor = Expressions(Vec::new());
+    visitor.visit_program(parsed.tree.program(source));
+    assert_eq!(
+        visitor.0,
+        [
+            "enter keep.visible + skip.hidden",
+            "enter keep.visible",
+            "enter keep",
+            "exit keep",
+            "exit keep.visible",
+            "enter skip.hidden",
+            "exit skip.hidden",
+            "exit keep.visible + skip.hidden",
+        ],
+    );
+}
+
+#[test]
+fn default_expression_chains_preserve_suffix_hooks_and_pruning() {
+    struct Order(Vec<String>);
+    impl<'a> Visitor<'a> for Order {
+        fn visit_identifier(&mut self, node: Identifier<'a>) {
+            self.0.push(node.name().to_owned());
+        }
+
+        fn visit_name(&mut self, node: Identifier<'a>) {
+            self.0.push(node.name().to_owned());
+        }
+
+        fn visit_dart_type(&mut self, node: DartType<'a>) {
+            self.0.push(node.syntax().text().to_owned());
+        }
+
+        fn visit_arg_list(&mut self, _node: ArgList<'a>) {
+            self.0.push("args".to_owned());
+        }
+    }
+
+    let source = "var result = target.field<Type>(hidden)[index]!.last as Cast is Check; \
+                  var conditional = flag ? yes : no; var assigned = destination = value;";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut visitor = Order(Vec::new());
+    visitor.visit_program(parsed.tree.program(source));
+    assert_eq!(
+        visitor.0,
+        [
+            "result",
+            "target",
+            "field",
+            "Type",
+            "args",
+            "index",
+            "last",
+            "Cast",
+            "Check",
+            "conditional",
+            "flag",
+            "yes",
+            "no",
+            "assigned",
+            "destination",
+            "value",
+        ],
+    );
+}
+
+#[test]
+fn default_pattern_chains_preserve_leaf_and_cast_order() {
+    struct Order(Vec<String>);
+    impl<'a> Visitor<'a> for Order {
+        fn visit_identifier(&mut self, node: Identifier<'a>) {
+            self.0.push(node.name().to_owned());
+        }
+
+        fn visit_dart_type(&mut self, node: DartType<'a>) {
+            self.0.push(node.syntax().text().to_owned());
+        }
+    }
+
+    let source =
+        "void f() { switch (value) { case var a?! as A || var b && var c as C as D: break; } }";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let pattern = parsed
+        .tree
+        .root(source)
+        .descendants()
+        .find_map(Pattern::cast)
+        .unwrap();
+    let mut order = Order(Vec::new());
+    order.visit_pattern(pattern);
+    assert_eq!(order.0, ["a", "A", "b", "c", "C", "D"]);
+}

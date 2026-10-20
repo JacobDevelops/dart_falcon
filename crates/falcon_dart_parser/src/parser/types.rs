@@ -11,6 +11,13 @@ impl<'src> Parser<'src> {
 
     /// Also reports whether the type is an unqualified, argument-free, nonnullable name.
     pub(super) fn parse_type_with_binding_name(&mut self) -> (CompletedMarker, bool) {
+        self.guarded(
+            |p| (p.missing(NodeKind::DynamicType), false),
+            Self::parse_type_with_binding_name_inner,
+        )
+    }
+
+    fn parse_type_with_binding_name_inner(&mut self) -> (CompletedMarker, bool) {
         if matches!(self.cur().kind, TokenKind::Void | TokenKind::Dynamic) {
             let marker = self.start();
             let kind = self.advance().kind;
@@ -82,6 +89,16 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_function_type(&mut self, return_marker: Option<CompletedMarker>) -> CompletedMarker {
+        self.guarded(
+            |p| return_marker.unwrap_or_else(|| p.missing(NodeKind::DynamicType)),
+            |p| p.parse_function_type_inner(return_marker),
+        )
+    }
+
+    fn parse_function_type_inner(
+        &mut self,
+        return_marker: Option<CompletedMarker>,
+    ) -> CompletedMarker {
         let keyword = self.checkpoint();
         let marker = match return_marker {
             Some(completed) => completed.precede(self),
@@ -233,6 +250,13 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_formal_param_list(&mut self) -> CompletedMarker {
+        self.guarded(
+            |p| p.missing(NodeKind::FormalParamList),
+            Self::parse_formal_param_list_inner,
+        )
+    }
+
+    fn parse_formal_param_list_inner(&mut self) -> CompletedMarker {
         let marker = self.start();
         self.expect(TokenKind::LParen);
 

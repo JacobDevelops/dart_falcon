@@ -15,34 +15,43 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_logical_or_pattern(&mut self) -> (CompletedMarker, bool) {
-        let mut marker = self.start();
-        let mut left = self.parse_logical_and_pattern();
-        while self.eat(TokenKind::PipePipe).is_some() {
-            self.parse_logical_and_pattern();
-            let completed = marker.complete(self, NodeKind::LogicalOrPattern);
-            left = (completed, false);
-            if !self.at(TokenKind::PipePipe) {
-                return left;
-            }
-            marker = completed.precede(self);
-        }
-        marker.abandon(self);
-        left
+        self.guarded(
+            |p| (p.missing(NodeKind::ErrorPattern), false),
+            |p| {
+                let left = p.parse_logical_and_pattern();
+                p.parse_logical_pattern_tail(
+                    left,
+                    TokenKind::PipePipe,
+                    NodeKind::LogicalOrPattern,
+                    Self::parse_logical_and_pattern,
+                )
+            },
+        )
     }
 
     fn parse_logical_and_pattern(&mut self) -> (CompletedMarker, bool) {
-        let mut marker = self.start();
-        let mut left = self.parse_relational_pattern();
-        while self.eat(TokenKind::AmpAmp).is_some() {
-            self.parse_relational_pattern();
-            let completed = marker.complete(self, NodeKind::LogicalAndPattern);
-            left = (completed, false);
-            if !self.at(TokenKind::AmpAmp) {
-                return left;
-            }
-            marker = completed.precede(self);
+        let left = self.parse_relational_pattern();
+        self.parse_logical_pattern_tail(
+            left,
+            TokenKind::AmpAmp,
+            NodeKind::LogicalAndPattern,
+            Self::parse_relational_pattern,
+        )
+    }
+
+    fn parse_logical_pattern_tail(
+        &mut self,
+        mut left: (CompletedMarker, bool),
+        operator: TokenKind,
+        kind: NodeKind,
+        operand: fn(&mut Self) -> (CompletedMarker, bool),
+    ) -> (CompletedMarker, bool) {
+        while self.at(operator) {
+            let marker = left.0.precede(self);
+            self.advance();
+            operand(self);
+            left = (marker.complete(self, kind), false);
         }
-        marker.abandon(self);
         left
     }
 
@@ -81,27 +90,26 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_postfix_pattern(&mut self) -> (CompletedMarker, bool) {
-        let mut marker = self.start();
-        let mut inner = self.parse_primary_pattern();
-        loop {
-            let kind = if self.eat(TokenKind::Qmark).is_some() {
-                NodeKind::NullCheckPattern
-            } else if self.eat(TokenKind::Bang).is_some() {
-                NodeKind::NullAssertPattern
-            } else if self.eat(TokenKind::As).is_some() {
-                self.parse_type();
-                NodeKind::CastPattern
-            } else {
-                break;
+        let inner = self.parse_primary_pattern();
+        self.parse_postfix_pattern_tail(inner)
+    }
+
+    fn parse_postfix_pattern_tail(
+        &mut self,
+        mut inner: (CompletedMarker, bool),
+    ) -> (CompletedMarker, bool) {
+        while self.at_any(&[TokenKind::Qmark, TokenKind::Bang, TokenKind::As]) {
+            let marker = inner.0.precede(self);
+            let kind = match self.advance().kind {
+                TokenKind::Qmark => NodeKind::NullCheckPattern,
+                TokenKind::Bang => NodeKind::NullAssertPattern,
+                _ => {
+                    self.parse_type();
+                    NodeKind::CastPattern
+                }
             };
-            let completed = marker.complete(self, kind);
-            inner.0 = completed;
-            if !self.at_any(&[TokenKind::Qmark, TokenKind::Bang, TokenKind::As]) {
-                return inner;
-            }
-            marker = completed.precede(self);
+            inner.0 = marker.complete(self, kind);
         }
-        marker.abandon(self);
         inner
     }
 
@@ -186,21 +194,11 @@ impl<'src> Parser<'src> {
         }
         // A member access on a string is a constant expression.
         if self.at(TokenKind::StringLit) {
-            let mut field_marker = self.start();
-            self.parse_adjacent_strings();
+            let string = self.parse_adjacent_strings();
             if !(self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like()) {
-                field_marker.abandon(self);
                 return (NodeKind::LiteralPattern, false, false);
             }
-            while self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like() {
-                self.advance();
-                self.expect_ident();
-                let completed = field_marker.complete(self, NodeKind::FieldExpr);
-                if !(self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like()) {
-                    break;
-                }
-                field_marker = completed.precede(self);
-            }
+            self.parse_string_pattern_fields(string);
             return (NodeKind::ConstPattern, false, true);
         }
         if self.at(TokenKind::Hash) {
@@ -241,6 +239,15 @@ impl<'src> Parser<'src> {
         (NodeKind::ErrorPattern, false, false)
     }
 
+    fn parse_string_pattern_fields(&mut self, mut target: CompletedMarker) {
+        while self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like() {
+            let marker = target.precede(self);
+            self.advance();
+            self.expect_ident();
+            target = marker.complete(self, NodeKind::FieldExpr);
+        }
+    }
+
     // A binding after a balanced record type distinguishes it from a record pattern.
     fn record_type_var_pattern_ahead(&self) -> bool {
         debug_assert_eq!(self.cur().kind, TokenKind::LParen);
@@ -270,7 +277,10 @@ impl<'src> Parser<'src> {
         self.parse_pattern();
         if self.at(TokenKind::Comma) {
             first_marker.complete(self, NodeKind::RecordPatternField);
-            while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
+            while self.eat(TokenKind::Comma).is_some()
+                && !self.at(TokenKind::RParen)
+                && !self.at(TokenKind::Eof)
+            {
                 self.parse_record_field();
             }
             self.eat(TokenKind::Comma);

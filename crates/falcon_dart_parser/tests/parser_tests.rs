@@ -6,6 +6,25 @@ use insta::assert_debug_snapshot;
 mod common_expr;
 use common_expr::first_stmt_expr;
 
+macro_rules! parser_case {
+    ($name:ident, $source:expr, |$prog:ident| $assertions:block) => {
+        #[test]
+        fn $name() {
+            parser_case!($source, |source, tree, errors, $prog| $assertions);
+        }
+    };
+    ($source:expr, |$src:ident, $tree:ident, $errors:ident, $prog:ident| $assertions:block) => {{
+        let $src = $source;
+        let falcon_dart_parser::ParseResult {
+            tree: $tree,
+            errors: $errors,
+        } = parse($src);
+        let $prog = $tree.program($src);
+        assert!($errors.is_empty(), "errors: {:?}", $errors);
+        $assertions
+    }};
+}
+
 #[test]
 fn test_empty_program() {
     let falcon_dart_parser::ParseResult { tree, errors } = parse("");
@@ -14,110 +33,76 @@ fn test_empty_program() {
     assert!(prog.declarations().is_empty());
 }
 
-#[test]
-fn test_import_simple() {
-    let src = r#"import 'dart:core';"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_import_simple, r#"import 'dart:core';"#, |prog| {
     assert_eq!(prog.imports().len(), 1);
     assert_eq!(prog.imports().next().unwrap().uri().value(), "dart:core");
-}
+});
 
-#[test]
-fn test_import_with_as() {
-    let src = r#"import 'foo.dart' as foo;"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_eq!(prog.imports().len(), 1);
-    assert!(prog.imports().next().unwrap().as_name().is_some());
-    assert_eq!(
-        prog.imports()
-            .next()
-            .unwrap()
-            .as_name()
-            .as_ref()
-            .unwrap()
-            .name(),
-        "foo"
-    );
-}
+parser_case!(
+    test_import_with_as,
+    r#"import 'foo.dart' as foo;"#,
+    |prog| {
+        assert_eq!(prog.imports().len(), 1);
+        assert!(prog.imports().next().unwrap().as_name().is_some());
+        assert_eq!(
+            prog.imports()
+                .next()
+                .unwrap()
+                .as_name()
+                .as_ref()
+                .unwrap()
+                .name(),
+            "foo"
+        );
+    }
+);
 
-#[test]
-fn test_import_with_show() {
-    let src = r#"import 'pkg.dart' show foo, bar;"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
-}
+parser_case!(
+    test_import_with_show,
+    r#"import 'pkg.dart' show foo, bar;"#,
+    |prog| {
+        assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
+    }
+);
 
-#[test]
-fn test_import_with_hide() {
-    let src = r#"import 'pkg.dart' hide Secret;"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
-}
+parser_case!(
+    test_import_with_hide,
+    r#"import 'pkg.dart' hide Secret;"#,
+    |prog| {
+        assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
+    }
+);
 
-#[test]
-fn test_import_deferred() {
-    let src = r#"import 'pkg.dart' deferred as lazy;"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert!(prog.imports().next().unwrap().is_deferred());
-}
+parser_case!(
+    test_import_deferred,
+    r#"import 'pkg.dart' deferred as lazy;"#,
+    |prog| {
+        assert!(prog.imports().next().unwrap().is_deferred());
+    }
+);
 
-#[test]
-fn test_export_simple() {
-    let src = r#"export 'foo.dart';"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_export_simple, r#"export 'foo.dart';"#, |prog| {
     assert_eq!(prog.exports().len(), 1);
-}
+});
 
-#[test]
-fn test_library_directive() {
-    let src = "library my.lib;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_library_directive, "library my.lib;", |prog| {
     assert!(prog.library_directive().is_some());
-}
+});
 
-#[test]
-fn test_part_directive() {
-    let src = r#"part 'foo.dart';"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_part_directive, r#"part 'foo.dart';"#, |prog| {
     assert_eq!(prog.part_directives().len(), 1);
-}
+});
 
-#[test]
-fn test_class_empty() {
-    let src = "class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_class_empty, "class Foo {}", |prog| {
     assert_eq!(prog.declarations().len(), 1);
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
         panic!("expected class")
     };
     assert_eq!(cls.name().name(), "Foo");
     assert!(cls.members().is_empty());
-}
+});
 
-#[test]
-fn test_class_with_field() {
-    let src = "class Foo { int x; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_class_with_field, "class Foo { int x; }", |prog| {
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
         panic!("expected class")
     };
@@ -127,101 +112,90 @@ fn test_class_with_field() {
     };
     assert_eq!(fld.declarators().len(), 1);
     assert_eq!(fld.declarators().next().unwrap().name().name(), "x");
-}
+});
 
-#[test]
-fn test_class_with_multiple_fields() {
-    let src = "class Foo { int x, y; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    let ClassMember::Field(fld) = cls.members().next().unwrap() else {
-        panic!("expected field")
-    };
-    assert_eq!(fld.declarators().len(), 2);
-}
+parser_case!(
+    test_class_with_multiple_fields,
+    "class Foo { int x, y; }",
+    |prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        let ClassMember::Field(fld) = cls.members().next().unwrap() else {
+            panic!("expected field")
+        };
+        assert_eq!(fld.declarators().len(), 2);
+    }
+);
 
-#[test]
-fn test_class_with_method() {
-    let src = "class Foo { void bar() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.members().len(), 1);
-    let ClassMember::Method(meth) = cls.members().next().unwrap() else {
-        panic!("expected method")
-    };
-    assert_eq!(meth.name().name(), "bar");
-}
+parser_case!(
+    test_class_with_method,
+    "class Foo { void bar() {} }",
+    |prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.members().len(), 1);
+        let ClassMember::Method(meth) = cls.members().next().unwrap() else {
+            panic!("expected method")
+        };
+        assert_eq!(meth.name().name(), "bar");
+    }
+);
 
-#[test]
-fn test_class_with_constructor() {
-    let src = "class Foo { Foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    let ClassMember::Constructor(ctor) = cls.members().next().unwrap() else {
-        panic!("expected constructor")
-    };
-    assert_eq!(ctor.name().name(), "Foo");
-}
+parser_case!(
+    test_class_with_constructor,
+    "class Foo { Foo(); }",
+    |prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        let ClassMember::Constructor(ctor) = cls.members().next().unwrap() else {
+            panic!("expected constructor")
+        };
+        assert_eq!(ctor.name().name(), "Foo");
+    }
+);
 
-#[test]
-fn test_class_extends() {
-    let src = "class Child extends Parent {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert!(cls.extends().is_some());
-}
+parser_case!(
+    test_class_extends,
+    "class Child extends Parent {}",
+    |prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert!(cls.extends().is_some());
+    }
+);
 
-#[test]
-fn test_class_with_clause() {
-    let src = "class Child with Mixin1, Mixin2 {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.with_clause().len(), 2);
-}
+parser_case!(
+    test_class_with_clause,
+    "class Child with Mixin1, Mixin2 {}",
+    |prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.with_clause().len(), 2);
+    }
+);
 
-#[test]
-fn test_class_implements() {
-    let src = "class Foo implements Bar, Baz {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.implements().len(), 2);
-}
+parser_case!(
+    test_class_implements,
+    "class Foo implements Bar, Baz {}",
+    |prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.implements().len(), 2);
+    }
+);
 
-#[test]
-fn test_class_abstract() {
-    let src = "abstract class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
+parser_case!(test_class_abstract, "abstract class Foo {}", |prog| {
     let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
         panic!("expected class")
     };
     assert!(cls.modifiers().is_abstract);
-}
+});
 
 #[test]
 fn test_class_abstract_base_modifiers_are_independent() {
@@ -245,114 +219,102 @@ fn test_class_abstract_base_modifiers_are_independent() {
 
 #[test]
 fn test_class_interface() {
-    let src = "interface class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(
-        cls.modifiers().restriction,
-        Some(ClassRestriction::Interface)
-    );
+    parser_case!("interface class Foo {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(
+            cls.modifiers().restriction,
+            Some(ClassRestriction::Interface)
+        );
+    });
 }
 
 #[test]
 fn test_class_final() {
-    let src = "final class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.modifiers().restriction, Some(ClassRestriction::Final));
+    parser_case!("final class Foo {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.modifiers().restriction, Some(ClassRestriction::Final));
+    });
 }
 
 #[test]
 fn test_class_sealed() {
-    let src = "sealed class Foo {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.modifiers().restriction, Some(ClassRestriction::Sealed));
+    parser_case!("sealed class Foo {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.modifiers().restriction, Some(ClassRestriction::Sealed));
+    });
 }
 
 #[test]
 fn test_class_generic() {
-    let src = "class Box<T> {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.type_params().len(), 1);
+    parser_case!("class Box<T> {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.type_params().len(), 1);
+    });
 }
 
 #[test]
 fn test_mixin_simple() {
-    let src = "mixin M {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Mixin(m) = prog.declarations().next().unwrap() else {
-        panic!("expected mixin")
-    };
-    assert_eq!(m.name().name(), "M");
+    parser_case!("mixin M {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Mixin(m) = prog.declarations().next().unwrap() else {
+            panic!("expected mixin")
+        };
+        assert_eq!(m.name().name(), "M");
+    });
 }
 
 #[test]
 fn test_mixin_with_on() {
-    let src = "mixin M on Base {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Mixin(m) = prog.declarations().next().unwrap() else {
-        panic!("expected mixin")
-    };
-    assert_eq!(m.on_clause().len(), 1);
+    parser_case!("mixin M on Base {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Mixin(m) = prog.declarations().next().unwrap() else {
+            panic!("expected mixin")
+        };
+        assert_eq!(m.on_clause().len(), 1);
+    });
 }
 
 #[test]
 fn test_mixin_class() {
-    let src = "mixin class M {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert!(matches!(
-        prog.declarations().next().unwrap(),
-        TopLevelDecl::MixinClass(_)
-    ));
+    parser_case!("mixin class M {}", |src, tree, errors, prog| {
+        assert!(matches!(
+            prog.declarations().next().unwrap(),
+            TopLevelDecl::MixinClass(_)
+        ));
+    });
 }
 
 #[test]
 fn test_enum_simple() {
-    let src = "enum Color { red, green, blue }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Enum(en) = prog.declarations().next().unwrap() else {
-        panic!("expected enum")
-    };
-    assert_eq!(en.name().name(), "Color");
-    assert_eq!(en.variants().len(), 3);
+    parser_case!(
+        "enum Color { red, green, blue }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Enum(en) = prog.declarations().next().unwrap() else {
+                panic!("expected enum")
+            };
+            assert_eq!(en.name().name(), "Color");
+            assert_eq!(en.variants().len(), 3);
+        }
+    );
 }
 
 #[test]
 fn test_enum_enhanced_with_members() {
-    let src = "enum Status { active, inactive; final int code; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Enum(en) = prog.declarations().next().unwrap() else {
-        panic!("expected enum")
-    };
-    assert!(!en.members().is_empty());
+    parser_case!(
+        "enum Status { active, inactive; final int code; }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Enum(en) = prog.declarations().next().unwrap() else {
+                panic!("expected enum")
+            };
+            assert!(!en.members().is_empty());
+        }
+    );
 }
 
 #[test]
@@ -375,74 +337,68 @@ fn test_extension_with_name() {
 
 #[test]
 fn test_extension_type() {
-    let src = "extension type UserId(int value) {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert!(matches!(
-        prog.declarations().next().unwrap(),
-        TopLevelDecl::ExtensionType(_)
-    ));
+    parser_case!(
+        "extension type UserId(int value) {}",
+        |src, tree, errors, prog| {
+            assert!(matches!(
+                prog.declarations().next().unwrap(),
+                TopLevelDecl::ExtensionType(_)
+            ));
+        }
+    );
 }
 
 #[test]
 fn test_function_void_no_params() {
-    let src = "void foo() {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert_eq!(fun.name().name(), "foo");
+    parser_case!("void foo() {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        assert_eq!(fun.name().name(), "foo");
+    });
 }
 
 #[test]
 fn test_function_with_return_type() {
-    let src = "int add(int a, int b) { return a + b; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert!(fun.return_type().is_some());
+    parser_case!(
+        "int add(int a, int b) { return a + b; }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
+            };
+            assert!(fun.return_type().is_some());
+        }
+    );
 }
 
 #[test]
 fn test_function_async() {
-    let src = "void foo() async {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert_eq!(fun.async_marker(), AsyncMarker::Async);
+    parser_case!("void foo() async {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        assert_eq!(fun.async_marker(), AsyncMarker::Async);
+    });
 }
 
 #[test]
 fn test_function_generator() {
-    let src = "Iterable<int> foo() sync* {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert_eq!(fun.async_marker(), AsyncMarker::SyncStar);
+    parser_case!("Iterable<int> foo() sync* {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        assert_eq!(fun.async_marker(), AsyncMarker::SyncStar);
+    });
 }
 
 #[test]
 fn test_function_arrow() {
-    let src = "int double(int x) => x * 2;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert!(fun.body().is_some());
+    parser_case!("int double(int x) => x * 2;", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        assert!(fun.body().is_some());
+    });
 }
 
 #[test]
@@ -459,38 +415,32 @@ fn test_top_level_var() {
 
 #[test]
 fn test_top_level_final() {
-    let src = "final int x = 42;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
-        panic!("expected var")
-    };
-    assert_eq!(v.keyword(), VarKeyword::Final, "field should be final");
+    parser_case!("final int x = 42;", |src, tree, errors, prog| {
+        let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
+            panic!("expected var")
+        };
+        assert_eq!(v.keyword(), VarKeyword::Final, "field should be final");
+    });
 }
 
 #[test]
 fn test_top_level_const() {
-    let src = "const int x = 42;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
-        panic!("expected var")
-    };
-    assert_eq!(v.keyword(), VarKeyword::Const);
+    parser_case!("const int x = 42;", |src, tree, errors, prog| {
+        let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
+            panic!("expected var")
+        };
+        assert_eq!(v.keyword(), VarKeyword::Const);
+    });
 }
 
 #[test]
 fn test_top_level_late() {
-    let src = "late int x;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
-        panic!("expected var")
-    };
-    assert!(v.is_late());
+    parser_case!("late int x;", |src, tree, errors, prog| {
+        let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
+            panic!("expected var")
+        };
+        assert!(v.is_late());
+    });
 }
 
 #[test]
@@ -510,944 +460,896 @@ fn test_top_level_late_final_typed() {
 
 #[test]
 fn test_top_level_late_final_untyped() {
-    let src = "late final x;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
-        panic!("expected var")
-    };
-    assert!(v.is_late());
-    assert_eq!(v.keyword(), VarKeyword::Final);
+    parser_case!("late final x;", |src, tree, errors, prog| {
+        let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
+            panic!("expected var")
+        };
+        assert!(v.is_late());
+        assert_eq!(v.keyword(), VarKeyword::Final);
+    });
 }
 
 #[test]
 fn test_static_late_final_field() {
-    let src = "class C { static late final int x; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(c) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    let ClassMember::Field(f) = c.members().next().unwrap() else {
-        panic!("expected field")
-    };
-    assert!(f.is_static());
-    assert!(f.is_late());
-    assert_eq!(f.keyword(), VarKeyword::Final);
+    parser_case!(
+        "class C { static late final int x; }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Class(c) = prog.declarations().next().unwrap() else {
+                panic!("expected class")
+            };
+            let ClassMember::Field(f) = c.members().next().unwrap() else {
+                panic!("expected field")
+            };
+            assert!(f.is_static());
+            assert!(f.is_late());
+            assert_eq!(f.keyword(), VarKeyword::Final);
+        }
+    );
 }
 
 #[test]
 fn test_typedef_function_type() {
-    let src = "typedef Callback = void Function(int);";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert!(matches!(
-        prog.declarations().next().unwrap(),
-        TopLevelDecl::TypeAlias(_)
-    ));
+    parser_case!(
+        "typedef Callback = void Function(int);",
+        |src, tree, errors, prog| {
+            assert!(matches!(
+                prog.declarations().next().unwrap(),
+                TopLevelDecl::TypeAlias(_)
+            ));
+        }
+    );
 }
 
 #[test]
 fn test_stmt_if() {
-    let src = "main() { if (true) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    let Some(body) = fun.body() else {
-        panic!("expected body")
-    };
-    match body {
-        FunctionBody::Block(b) => {
-            assert_eq!(b.stmts().len(), 1);
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::If(_)));
+    parser_case!("main() { if (true) {} }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        let Some(body) = fun.body() else {
+            panic!("expected body")
+        };
+        match body {
+            FunctionBody::Block(b) => {
+                assert_eq!(b.stmts().len(), 1);
+                assert!(matches!(b.stmts().next().unwrap(), Stmt::If(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_stmt_if_else() {
-    let src = "main() { if (true) { } else { } }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::If(if_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected if")
+    parser_case!(
+        "main() { if (true) { } else { } }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(if_stmt.else_branch().is_some());
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::If(if_stmt) = b.stmts().next().unwrap() else {
+                        panic!("expected if")
+                    };
+                    assert!(if_stmt.else_branch().is_some());
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_if_case() {
-    let src = "main() { if (x case 42) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::If(if_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected if")
-            };
-            assert!(matches!(if_stmt.condition(), IfCondition::Case(_)));
+    parser_case!("main() { if (x case 42) {} }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::If(if_stmt) = b.stmts().next().unwrap() else {
+                    panic!("expected if")
+                };
+                assert!(matches!(if_stmt.condition(), IfCondition::Case(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_stmt_while() {
-    let src = "main() { while (true) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::While(_)));
+    parser_case!("main() { while (true) {} }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                assert!(matches!(b.stmts().next().unwrap(), Stmt::While(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_stmt_do_while() {
-    let src = "main() { do {} while (true); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::DoWhile(_)));
+    parser_case!(
+        "main() { do {} while (true); }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
+            };
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    assert!(matches!(b.stmts().next().unwrap(), Stmt::DoWhile(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_for() {
-    let src = "main() { for (var i = 0; i < 10; i++) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::For(_)));
+    parser_case!(
+        "main() { for (var i = 0; i < 10; i++) {} }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
+            };
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    assert!(matches!(b.stmts().next().unwrap(), Stmt::For(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_for_in() {
-    let src = "main() { for (var x in list) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected for")
+    parser_case!(
+        "main() { for (var x in list) {} }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(matches!(for_stmt.header().init(), Some(ForInit::ForIn(_))));
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
+                        panic!("expected for")
+                    };
+                    assert!(matches!(for_stmt.header().init(), Some(ForInit::ForIn(_))));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_for_await_in() {
-    let src = "main() async { for (var x in stream) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected for")
+    parser_case!(
+        "main() async { for (var x in stream) {} }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(matches!(for_stmt.header().init(), Some(ForInit::ForIn(_))));
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
+                        panic!("expected for")
+                    };
+                    assert!(matches!(for_stmt.header().init(), Some(ForInit::ForIn(_))));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_switch() {
-    let src = "main() { switch (x) { case 1: break; } }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::Switch(_)));
+    parser_case!(
+        "main() { switch (x) { case 1: break; } }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
+            };
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    assert!(matches!(b.stmts().next().unwrap(), Stmt::Switch(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_try_catch() {
-    let src = "main() { try {} catch (e) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::TryCatch(_)));
+    parser_case!(
+        "main() { try {} catch (e) {} }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
+            };
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    assert!(matches!(b.stmts().next().unwrap(), Stmt::TryCatch(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_try_catch_finally() {
-    let src = "main() { try {} catch (e) {} finally {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::TryCatch(tc) = b.stmts().next().unwrap() else {
-                panic!("expected try-catch")
+    parser_case!(
+        "main() { try {} catch (e) {} finally {} }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(tc.finally().is_some());
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::TryCatch(tc) = b.stmts().next().unwrap() else {
+                        panic!("expected try-catch")
+                    };
+                    assert!(tc.finally().is_some());
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_return() {
-    let src = "main() { return 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Return(ret) = b.stmts().next().unwrap() else {
-                panic!("expected return")
-            };
-            assert!(ret.value().is_some());
+    parser_case!("main() { return 42; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Return(ret) = b.stmts().next().unwrap() else {
+                    panic!("expected return")
+                };
+                assert!(ret.value().is_some());
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_stmt_throw() {
-    let src = "main() { throw Exception(); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::Throw(_)));
+    parser_case!(
+        "main() { throw Exception(); }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
+            };
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    assert!(matches!(b.stmts().next().unwrap(), Stmt::Throw(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_break() {
-    let src = "main() { for (;;) { break; } }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected for")
+    parser_case!(
+        "main() { for (;;) { break; } }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            match for_stmt.body() {
-                Stmt::Block(bl) => {
-                    assert!(matches!(bl.stmts().next().unwrap(), Stmt::Break(_)));
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
+                        panic!("expected for")
+                    };
+                    match for_stmt.body() {
+                        Stmt::Block(bl) => {
+                            assert!(matches!(bl.stmts().next().unwrap(), Stmt::Break(_)));
+                        }
+                        _ => panic!("expected block body"),
+                    }
                 }
                 _ => panic!("expected block body"),
             }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_continue() {
-    let src = "main() { for (;;) { continue; } }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected for")
+    parser_case!(
+        "main() { for (;;) { continue; } }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            match for_stmt.body() {
-                Stmt::Block(bl) => {
-                    assert!(matches!(bl.stmts().next().unwrap(), Stmt::Continue(_)));
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::For(for_stmt) = b.stmts().next().unwrap() else {
+                        panic!("expected for")
+                    };
+                    match for_stmt.body() {
+                        Stmt::Block(bl) => {
+                            assert!(matches!(bl.stmts().next().unwrap(), Stmt::Continue(_)));
+                        }
+                        _ => panic!("expected block body"),
+                    }
                 }
                 _ => panic!("expected block body"),
             }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_assert() {
-    let src = "main() { assert(x > 0); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::Assert(_)));
+    parser_case!("main() { assert(x > 0); }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                assert!(matches!(b.stmts().next().unwrap(), Stmt::Assert(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_stmt_yield() {
-    let src = "gen() sync* { yield 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::Yield(_)));
+    parser_case!("gen() sync* { yield 42; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                assert!(matches!(b.stmts().next().unwrap(), Stmt::Yield(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_stmt_yield_star() {
-    let src = "gen() sync* { yield* other; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Yield(ys) = b.stmts().next().unwrap() else {
-                panic!("expected yield")
+    parser_case!(
+        "gen() sync* { yield* other; }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(ys.is_star());
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::Yield(ys) = b.stmts().next().unwrap() else {
+                        panic!("expected yield")
+                    };
+                    assert!(ys.is_star());
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_stmt_local_var() {
-    let src = "main() { int x = 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            assert!(matches!(b.stmts().next().unwrap(), Stmt::LocalVar(_)));
+    parser_case!("main() { int x = 42; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                assert!(matches!(b.stmts().next().unwrap(), Stmt::LocalVar(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_integer_literal() {
-    let src = "main() { 42; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::IntLit(_)));
+    parser_case!("main() { 42; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::IntLit(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_string_literal() {
-    let src = r#"main() { "hello"; }"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::StringLit(_)));
+    parser_case!(r#"main() { "hello"; }"#, |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::StringLit(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_bool_literal() {
-    let src = "main() { true; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::BoolLit(literal) if literal.value()));
+    parser_case!("main() { true; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::BoolLit(literal) if literal.value()));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_null_literal() {
-    let src = "main() { null; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::NullLit(_)));
+    parser_case!("main() { null; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::NullLit(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_identifier() {
-    let src = "main() { foo; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Ident(_)));
+    parser_case!("main() { foo; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Ident(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_this() {
-    let src = "main() { this; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::This(_)));
+    parser_case!("main() { this; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::This(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_super() {
-    let src = "main() { super; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Super(_)));
+    parser_case!("main() { super; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Super(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_binary_add() {
-    let src = "main() { a + b; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Binary(_)));
+    parser_case!("main() { a + b; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Binary(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_unary_minus() {
-    let src = "main() { -x; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Unary(_)));
+    parser_case!("main() { -x; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Unary(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_field_access() {
-    let src = "main() { obj.field; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Field(_)));
+    parser_case!("main() { obj.field; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Field(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_null_safe_field_access() {
-    let src = "main() { obj?.field; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            let Expr::Field(node) = es.expr() else {
-                panic!("expected field")
-            };
-            let is_null_safe = node.is_null_safe();
-            assert!(is_null_safe);
+    parser_case!("main() { obj?.field; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                let Expr::Field(node) = es.expr() else {
+                    panic!("expected field")
+                };
+                let is_null_safe = node.is_null_safe();
+                assert!(is_null_safe);
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_index_access() {
-    let src = "main() { arr[0]; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Index(_)));
+    parser_case!("main() { arr[0]; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Index(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_call() {
-    let src = "main() { foo(1, 2); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Call(_)));
+    parser_case!("main() { foo(1, 2); }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Call(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_cascade() {
-    let src = "main() { obj..foo()..bar; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Cascade(_)));
+    parser_case!("main() { obj..foo()..bar; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Cascade(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_conditional() {
-    let src = "main() { a ? b : c; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Conditional(_)));
+    parser_case!("main() { a ? b : c; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Conditional(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_is_type() {
-    let src = "main() { x is int; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Is(_)));
+    parser_case!("main() { x is int; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Is(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_is_not_type() {
-    let src = "main() { x is! int; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            let Expr::Is(node) = es.expr() else {
-                panic!("expected is")
-            };
-            let negated = node.negated();
-            assert!(negated);
+    parser_case!("main() { x is! int; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                let Expr::Is(node) = es.expr() else {
+                    panic!("expected is")
+                };
+                let negated = node.negated();
+                assert!(negated);
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_as_cast() {
-    let src = "main() { (x as int); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            let Expr::Paren(node) = es.expr() else {
-                panic!("expected parenthesized expression")
-            };
-            let expr = node.expr();
-            assert!(matches!(expr, Expr::As(_)));
+    parser_case!("main() { (x as int); }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                let Expr::Paren(node) = es.expr() else {
+                    panic!("expected parenthesized expression")
+                };
+                let expr = node.expr();
+                assert!(matches!(expr, Expr::As(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_list_literal() {
-    let src = "main() { [1, 2, 3]; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::List(_)));
+    parser_case!("main() { [1, 2, 3]; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::List(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_map_literal() {
-    let src = "main() { {'a': 1, 'b': 2}; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Map(_)));
+    parser_case!("main() { {'a': 1, 'b': 2}; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Map(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_set_literal() {
-    let src = "main() { {1, 2, 3}; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Set(_)));
+    parser_case!("main() { {1, 2, 3}; }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Set(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_record_literal() {
-    let src = "main() { (1, 2, x: 3); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::Record(_)));
+    parser_case!("main() { (1, 2, x: 3); }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::Record(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_await() {
-    let src = "main() async { await foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
+    parser_case!(
+        "main() async { await foo(); }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(matches!(es.expr(), Expr::Await(_)));
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                        panic!("expected expr stmt")
+                    };
+                    assert!(matches!(es.expr(), Expr::Await(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
 fn test_expr_new() {
-    let src = "main() { new Foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            assert!(matches!(es.expr(), Expr::New(_)));
+    parser_case!("main() { new Foo(); }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                assert!(matches!(es.expr(), Expr::New(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_const_new() {
-    let src = "main() { const Foo(); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
-            };
-            let Expr::New(node) = es.expr() else {
-                panic!("expected new")
-            };
-            let is_const = node.is_const();
-            assert!(is_const);
+    parser_case!("main() { const Foo(); }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                    panic!("expected expr stmt")
+                };
+                let Expr::New(node) = es.expr() else {
+                    panic!("expected new")
+                };
+                let is_const = node.is_const();
+                assert!(is_const);
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
 fn test_expr_switch_expression() {
-    let src = "main() { x switch { 1 => 'a', _ => 'b' }; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::Expr(es) = b.stmts().next().unwrap() else {
-                panic!("expected expr stmt")
+    parser_case!(
+        "main() { x switch { 1 => 'a', _ => 'b' }; }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+                panic!("expected function")
             };
-            assert!(matches!(es.expr(), Expr::Switch(_)));
+            match fun.body() {
+                Some(FunctionBody::Block(b)) => {
+                    let Stmt::Expr(es) = b.stmts().next().unwrap() else {
+                        panic!("expected expr stmt")
+                    };
+                    assert!(matches!(es.expr(), Expr::Switch(_)));
+                }
+                _ => panic!("expected block body"),
+            }
         }
-        _ => panic!("expected block body"),
-    }
+    );
 }
 
 #[test]
@@ -1655,22 +1557,20 @@ fn test_double_digit_separator_literal() {
 
 #[test]
 fn test_pattern_wildcard() {
-    let src = "main() { if (x case _) {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    match fun.body() {
-        Some(FunctionBody::Block(b)) => {
-            let Stmt::If(if_stmt) = b.stmts().next().unwrap() else {
-                panic!("expected if")
-            };
-            assert!(matches!(if_stmt.condition(), IfCondition::Case(_)));
+    parser_case!("main() { if (x case _) {} }", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        match fun.body() {
+            Some(FunctionBody::Block(b)) => {
+                let Stmt::If(if_stmt) = b.stmts().next().unwrap() else {
+                    panic!("expected if")
+                };
+                assert!(matches!(if_stmt.condition(), IfCondition::Case(_)));
+            }
+            _ => panic!("expected block body"),
         }
-        _ => panic!("expected block body"),
-    }
+    });
 }
 
 #[test]
@@ -1734,87 +1634,78 @@ fn test_error_recovery_malformed_function() {
 
 #[test]
 fn test_annotation_override() {
-    let src = "class Foo { @override void bar() {} }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    let ClassMember::Method(meth) = cls.members().next().unwrap() else {
-        panic!("expected method")
-    };
-    assert!(!meth.annotations().is_empty());
+    parser_case!(
+        "class Foo { @override void bar() {} }",
+        |src, tree, errors, prog| {
+            let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+                panic!("expected class")
+            };
+            let ClassMember::Method(meth) = cls.members().next().unwrap() else {
+                panic!("expected method")
+            };
+            assert!(!meth.annotations().is_empty());
+        }
+    );
 }
 
 #[test]
 fn test_named_parameter() {
-    let src = "main({required int x}) {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert!(
-        fun.params()
-            .unwrap()
-            .params()
-            .any(|param| matches!(param.kind(), ParamKind::Named { .. }))
-    );
+    parser_case!("main({required int x}) {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        assert!(
+            fun.params()
+                .unwrap()
+                .params()
+                .any(|param| matches!(param.kind(), ParamKind::Named { .. }))
+        );
+    });
 }
 
 #[test]
 fn test_optional_positional_parameter() {
-    let src = "main([int x]) {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
-        panic!("expected function")
-    };
-    assert!(
-        fun.params()
-            .unwrap()
-            .params()
-            .any(|param| param.kind() == ParamKind::OptionalPositional)
-    );
+    parser_case!("main([int x]) {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Function(fun) = prog.declarations().next().unwrap() else {
+            panic!("expected function")
+        };
+        assert!(
+            fun.params()
+                .unwrap()
+                .params()
+                .any(|param| param.kind() == ParamKind::OptionalPositional)
+        );
+    });
 }
 
 #[test]
 fn test_nullable_type() {
-    let src = "int? x;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
-        panic!("expected var")
-    };
-    assert!(v.var_type().is_some());
+    parser_case!("int? x;", |src, tree, errors, prog| {
+        let TopLevelDecl::Variable(v) = prog.declarations().next().unwrap() else {
+            panic!("expected var")
+        };
+        assert!(v.var_type().is_some());
+    });
 }
 
 #[test]
 fn test_generic_single_param() {
-    let src = "class Box<T> {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.type_params().len(), 1);
+    parser_case!("class Box<T> {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.type_params().len(), 1);
+    });
 }
 
 #[test]
 fn test_generic_multiple_params() {
-    let src = "class Map<K, V> {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
-        panic!("expected class")
-    };
-    assert_eq!(cls.type_params().len(), 2);
+    parser_case!("class Map<K, V> {}", |src, tree, errors, prog| {
+        let TopLevelDecl::Class(cls) = prog.declarations().next().unwrap() else {
+            panic!("expected class")
+        };
+        assert_eq!(cls.type_params().len(), 2);
+    });
 }
 
 #[test]
@@ -1921,129 +1812,142 @@ fn snap_mixin_declaration() {
 
 #[test]
 fn snap_class_extends_with_implements() {
-    let src = "class Dog extends Animal with Barker implements Pet { final String name; Dog(this.name); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "class Dog extends Animal with Barker implements Pet { final String name; Dog(this.name); }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_named_constructor() {
-    let src = "class Vec2 { final double x; final double y; Vec2(this.x, this.y); Vec2.zero() : x = 0, y = 0; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "class Vec2 { final double x; final double y; Vec2(this.x, this.y); Vec2.zero() : x = 0, y = 0; }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_factory_constructor() {
-    let src = "class Singleton { static final Singleton _i = Singleton._(); factory Singleton() => _i; Singleton._(); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "class Singleton { static final Singleton _i = Singleton._(); factory Singleton() => _i; Singleton._(); }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_async_function() {
-    let src =
-        "Future<String> fetchName() async { await Future.delayed(Duration.zero); return 'dart'; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "Future<String> fetchName() async { await Future.delayed(Duration.zero); return 'dart'; }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_generic_function() {
-    let src = "T identity<T>(T value) => value;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "T identity<T>(T value) => value;",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_record_return_type() {
-    let src = "(String, int) pair() => ('hello', 42);";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "(String, int) pair() => ('hello', 42);",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_annotation_with_args() {
-    let src = "@Deprecated('Use newFn instead')\nvoid oldFn() {}";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "@Deprecated('Use newFn instead')\nvoid oldFn() {}",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_late_final_field() {
-    let src = "class Lazy { late final String value; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "class Lazy { late final String value; }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_typed_list_literal() {
-    let src = "List<String> names() => <String>['Alice', 'Bob'];";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "List<String> names() => <String>['Alice', 'Bob'];",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_collection_for() {
-    let src = "List<int> doubled(List<int> xs) => [for (final x in xs) x * 2];";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "List<int> doubled(List<int> xs) => [for (final x in xs) x * 2];",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_switch_pattern_guard() {
-    let src = r#"String classify(int n) => switch (n) { < 0 => 'neg', 0 => 'zero', _ => 'pos' };"#;
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        r#"String classify(int n) => switch (n) { < 0 => 'neg', 0 => 'zero', _ => 'pos' };"#,
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_enum_with_members() {
-    let src = "enum Color { red, green, blue; bool get isPrimary => this != Color.green; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "enum Color { red, green, blue; bool get isPrimary => this != Color.green; }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_typedef_function_type() {
-    let src = "typedef Predicate<T> = bool Function(T value);";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "typedef Predicate<T> = bool Function(T value);",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 #[test]
 fn snap_const_class_field() {
-    let src = "class Config { static const int maxRetries = 3; static const String baseUrl = 'https://api.example.com'; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert_debug_snapshot!(prog.declarations().next().unwrap());
+    parser_case!(
+        "class Config { static const int maxRetries = 3; static const String baseUrl = 'https://api.example.com'; }",
+        |src, tree, errors, prog| {
+            assert_debug_snapshot!(prog.declarations().next().unwrap());
+        }
+    );
 }
 
 // ── Bug reproduction: Dart 3 pattern elements in collections ──────────────────
@@ -2084,52 +1988,56 @@ fn test_bug_collection_if_case_keeps_all_elements() {
 
 #[test]
 fn test_bug_collection_if_case_with_when_guard() {
-    let src = "f(e) => [ if (e.x case final y? when y > 0) y, other, elements ];";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
-        panic!("expected list")
-    };
-    let elements = node.elements();
-    assert_eq!(elements.len(), 3, "elements: {elements:#?}");
+    parser_case!(
+        "f(e) => [ if (e.x case final y? when y > 0) y, other, elements ];",
+        |src, tree, errors, prog| {
+            let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
+                panic!("expected list")
+            };
+            let elements = node.elements();
+            assert_eq!(elements.len(), 3, "elements: {elements:#?}");
+        }
+    );
 }
 
 #[test]
 fn test_bug_collection_for_record_destructuring() {
-    let src = "f(list) => [ for (final (i, s) in list.indexed) widget(i, s), tail ];";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
-        panic!("expected list")
-    };
-    let elements = node.elements();
-    assert_eq!(elements.len(), 2, "elements: {elements:#?}");
+    parser_case!(
+        "f(list) => [ for (final (i, s) in list.indexed) widget(i, s), tail ];",
+        |src, tree, errors, prog| {
+            let Expr::List(node) = first_fn_arrow_or_block_expr(prog) else {
+                panic!("expected list")
+            };
+            let elements = node.elements();
+            assert_eq!(elements.len(), 2, "elements: {elements:#?}");
+        }
+    );
 }
 
 #[test]
 fn test_bug_map_comprehension_for_element() {
-    let src = "f(xs) => { for (final x in xs) x.id: x };";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert!(
-        matches!(first_fn_arrow_or_block_expr(prog), Expr::Map(_)),
-        "expected map, got {:#?}",
-        first_fn_arrow_or_block_expr(prog)
+    parser_case!(
+        "f(xs) => { for (final x in xs) x.id: x };",
+        |src, tree, errors, prog| {
+            assert!(
+                matches!(first_fn_arrow_or_block_expr(prog), Expr::Map(_)),
+                "expected map, got {:#?}",
+                first_fn_arrow_or_block_expr(prog)
+            );
+        }
     );
 }
 
 #[test]
 fn test_bug_map_comprehension_for_pattern() {
-    let src = "f(xs) => { for (final (k, v) in xs) k: v };";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    assert!(
-        matches!(first_fn_arrow_or_block_expr(prog), Expr::Map(_)),
-        "expected map"
+    parser_case!(
+        "f(xs) => { for (final (k, v) in xs) k: v };",
+        |src, tree, errors, prog| {
+            assert!(
+                matches!(first_fn_arrow_or_block_expr(prog), Expr::Map(_)),
+                "expected map"
+            );
+        }
     );
 }
 
@@ -2225,51 +2133,54 @@ fn assert_parses(src: &str) {
 
 #[test]
 fn test_closure_final_param() {
-    let src = "void f() { list.map((final x) => x.y); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    // Drill to the closure argument and confirm it is a function expression.
-    let arg = first_call_first_arg(prog);
-    assert!(
-        matches!(arg, Expr::FuncExpr(function) if function.params().params().len() == 1
-            && function.params().params().next().unwrap().kind() == ParamKind::Positional),
-        "expected FuncExpr with one positional param, got {arg:#?}"
+    parser_case!(
+        "void f() { list.map((final x) => x.y); }",
+        |src, tree, errors, prog| {
+            // Drill to the closure argument and confirm it is a function expression.
+            let arg = first_call_first_arg(prog);
+            assert!(
+                matches!(arg, Expr::FuncExpr(function) if function.params().params().len() == 1
+        && function.params().params().next().unwrap().kind() == ParamKind::Positional),
+                "expected FuncExpr with one positional param, got {arg:#?}"
+            );
+            if let Expr::FuncExpr(function) = arg {
+                let param = function.params().params().next().unwrap();
+                assert!(param.is_final(), "param should be final");
+                assert_eq!(param.name().name(), "x");
+            }
+        }
     );
-    if let Expr::FuncExpr(function) = arg {
-        let param = function.params().params().next().unwrap();
-        assert!(param.is_final(), "param should be final");
-        assert_eq!(param.name().name(), "x");
-    }
 }
 
 #[test]
 fn test_closure_var_param() {
-    let src = "void f() { g((var x) => x); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let arg = first_call_first_arg(prog);
-    assert!(
-        matches!(arg, Expr::FuncExpr(function) if function.params().params().len() == 1
-            && function.params().params().next().unwrap().kind() == ParamKind::Positional
-            && function.params().params().next().unwrap().param_type().is_none()),
-        "expected untyped var param, got {arg:#?}"
+    parser_case!(
+        "void f() { g((var x) => x); }",
+        |src, tree, errors, prog| {
+            let arg = first_call_first_arg(prog);
+            assert!(
+                matches!(arg, Expr::FuncExpr(function) if function.params().params().len() == 1
+        && function.params().params().next().unwrap().kind() == ParamKind::Positional
+        && function.params().params().next().unwrap().param_type().is_none()),
+                "expected untyped var param, got {arg:#?}"
+            );
+        }
     );
 }
 
 #[test]
 fn test_closure_final_typed_param() {
-    let src = "void f() { g((final int x) => x); }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let arg = first_call_first_arg(prog);
-    assert!(
-        matches!(arg, Expr::FuncExpr(function) if function.params().params().next().unwrap().kind() == ParamKind::Positional
-            && function.params().params().next().unwrap().is_final()
-            && function.params().params().next().unwrap().param_type().is_some()),
-        "expected final typed param, got {arg:#?}"
+    parser_case!(
+        "void f() { g((final int x) => x); }",
+        |src, tree, errors, prog| {
+            let arg = first_call_first_arg(prog);
+            assert!(
+                matches!(arg, Expr::FuncExpr(function) if function.params().params().next().unwrap().kind() == ParamKind::Positional
+        && function.params().params().next().unwrap().is_final()
+        && function.params().params().next().unwrap().param_type().is_some()),
+                "expected final typed param, got {arg:#?}"
+            );
+        }
     );
 }
 
@@ -2338,21 +2249,22 @@ fn test_generic_method_call_in_closure() {
 
 #[test]
 fn test_c_style_for_in_list_literal() {
-    let src = "void f() { final l = [for (var i = 0; i < n; i++) i]; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let Expr::List(list) = first_local_var_init(prog).expect("init") else {
-        panic!("expected list literal")
-    };
-    let elements = list.elements();
-    assert!(
-        matches!(
-            elements.clone().next(),
-            Some(CollectionElement::For(element))
-                if matches!(element.header().init(), Some(ForInit::VarDecl(_)))
-        ),
-        "expected C-style For element, got {elements:#?}"
+    parser_case!(
+        "void f() { final l = [for (var i = 0; i < n; i++) i]; }",
+        |src, tree, errors, prog| {
+            let Expr::List(list) = first_local_var_init(prog).expect("init") else {
+                panic!("expected list literal")
+            };
+            let elements = list.elements();
+            assert!(
+                matches!(
+                    elements.clone().next(),
+                    Some(CollectionElement::For(element))
+                        if matches!(element.header().init(), Some(ForInit::VarDecl(_)))
+                ),
+                "expected C-style For element, got {elements:#?}"
+            );
+        }
     );
 }
 
@@ -2368,24 +2280,25 @@ fn test_c_style_for_in_map_literal() {
 
 #[test]
 fn test_async_getter() {
-    let src = "class A { Future<int> get token async { return 1; } }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let getter = prog
-        .declarations()
-        .find_map(|d| match d {
-            TopLevelDecl::Class(c) => c.members().find_map(|m| match m {
-                ClassMember::Getter(g) => Some(g),
-                _ => None,
-            }),
-            _ => None,
-        })
-        .expect("getter");
-    assert_eq!(
-        getter.async_marker(),
-        AsyncMarker::Async,
-        "getter should be async"
+    parser_case!(
+        "class A { Future<int> get token async { return 1; } }",
+        |src, tree, errors, prog| {
+            let getter = prog
+                .declarations()
+                .find_map(|d| match d {
+                    TopLevelDecl::Class(c) => c.members().find_map(|m| match m {
+                        ClassMember::Getter(g) => Some(g),
+                        _ => None,
+                    }),
+                    _ => None,
+                })
+                .expect("getter");
+            assert_eq!(
+                getter.async_marker(),
+                AsyncMarker::Async,
+                "getter should be async"
+            );
+        }
     );
 }
 
@@ -2397,14 +2310,15 @@ fn test_nullable_function_type_param() {
 
 #[test]
 fn test_generic_function_expression() {
-    let src = "void f() { final g = <T extends Object>(final T x) { return x; }; }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-    let prog = tree.program(src);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let init = first_local_var_init(prog).expect("init");
-    assert!(
-        matches!(init, Expr::FuncExpr(function) if function.type_params().len() == 1),
-        "expected generic FuncExpr, got {init:#?}"
+    parser_case!(
+        "void f() { final g = <T extends Object>(final T x) { return x; }; }",
+        |src, tree, errors, prog| {
+            let init = first_local_var_init(prog).expect("init");
+            assert!(
+                matches!(init, Expr::FuncExpr(function) if function.type_params().len() == 1),
+                "expected generic FuncExpr, got {init:#?}"
+            );
+        }
     );
 }
 

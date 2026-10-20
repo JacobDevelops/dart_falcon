@@ -1,138 +1,73 @@
-/// Corpus tests: parse every .dart file in the jfit project and assert no panics.
-///
-/// The jfit corpus path is resolved via the `JFIT_PATH` environment variable
-/// first, then falls back to the known local development path. The tests are
-/// silently skipped when the corpus is not accessible (e.g. in CI without the
-/// jfit repo checked out).
-use falcon_dart_parser::parser::parse;
-use std::path::PathBuf;
-#[path = "common/collect_dart_files.rs"]
-mod common_files;
-use common_files::collect_dart_files;
+//! Checked-in crash and complexity witnesses, exercised on every test run.
+use falcon_dart_parser::parse;
+use falcon_syntax::cst::visit::Visitor;
+use falcon_syntax::cst::{DartType, Expr, Pattern};
 
-fn corpus_root() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("JFIT_PATH") {
-        let path = PathBuf::from(p);
-        if path.exists() {
-            return Some(path);
+struct Accessors;
+impl<'a> Visitor<'a> for Accessors {}
+
+fn exercise_corpus(source: &str) {
+    let parsed = parse(source);
+    assert!(parsed.tree.is_lossless(source));
+    let root = parsed.tree.root(source);
+    assert_eq!(root.full_span().start, 0);
+    assert_eq!(root.full_span().end, source.len());
+
+    // Accepted expression chains must not create an unbounded default visitor stack.
+    Accessors.visit_program(parsed.tree.program(source));
+
+    // Include recovery/orphan nodes, not only nodes reachable through Program's
+    // typed declarations. Walking each cast exercises required-child accessors
+    // even when malformed input interrupts the enclosing declaration.
+    for node in root.descendants() {
+        let span = node.span();
+        assert!(span.start <= span.end && span.end <= source.len());
+        assert_eq!(node.text(), &source[span.start..span.end]);
+        for token in node
+            .children_with_tokens()
+            .filter_map(|child| child.into_token())
+        {
+            assert_eq!(token.text(), &source[token.span().start..token.span().end]);
+        }
+        if let Some(expr) = Expr::cast(node) {
+            let _ = expr.span();
+            Accessors.visit_expr(expr);
+        }
+        if let Some(pattern) = Pattern::cast(node) {
+            let _ = pattern.span();
+            Accessors.visit_pattern(pattern);
+        }
+        if let Some(ty) = DartType::cast(node) {
+            let _ = ty.is_nullable();
+            Accessors.visit_dart_type(ty);
         }
     }
-    let local = PathBuf::from("/home/jacob/Documents/Developer/jfit");
-    if local.exists() {
-        return Some(local);
-    }
-    None
 }
 
-/// Directories that are not project-owned Dart source — skip them entirely.
-const SKIP_DIRS: &[&str] = &[
-    ".direnv",
-    ".dart_tool",
-    ".pub-cache",
-    "build",
-    ".flutter-plugins",
-    ".flutter-plugins-dependencies",
-];
-
-#[test]
-fn corpus_parses_without_panic() {
-    let Some(root) = corpus_root() else {
-        eprintln!("jfit corpus not found — skipping corpus_parses_without_panic");
-        return;
-    };
-
-    // Target: jfit mobile app lib — the primary corpus per the M1 plan.
-    let mobile_lib = root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() {
-        mobile_lib
-    } else {
-        root.clone()
-    };
-
-    let files = collect_dart_files(&search_root, SKIP_DIRS);
-    assert!(
-        !files.is_empty(),
-        "corpus root exists but contains no .dart files: {}",
-        search_root.display()
-    );
-
-    let total = files.len();
-    let mut error_files: Vec<(PathBuf, usize)> = Vec::new();
-
-    for path in &files {
-        let source = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("could not read {}: {e}", path.display());
-                continue;
+macro_rules! corpus_case {
+    ($($name:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                exercise_corpus(include_str!(concat!("fixtures/adversarial/", stringify!($name), ".dart")));
             }
-        };
-        // parse() must not panic — if it does the test aborts with a clear message.
-        let falcon_dart_parser::ParseResult { errors, .. } = parse(&source);
-        if !errors.is_empty() {
-            error_files.push((path.clone(), errors.len()));
-        }
-    }
-
-    let error_count = error_files.len();
-
-    // Report files with parse errors (informational — not a hard failure yet).
-    if !error_files.is_empty() {
-        eprintln!("\nParse errors in {error_count}/{total} corpus files (informational):");
-        for (path, n) in &error_files {
-            eprintln!("  {n} error(s): {}", path.display());
-        }
-    }
-
-    println!(
-        "Corpus: {total} files parsed, {error_count} had parse errors, {} clean",
-        total - error_count
-    );
-
-    // Hard limit: at most 20 % of files may have parse errors.
-    // This threshold will tighten as the parser matures.
-    let allowed = total / 5;
-    assert!(
-        error_count <= allowed,
-        "Too many corpus files with parse errors: {error_count}/{total} \
-         (limit {allowed}). Run with RUST_LOG=debug for details."
-    );
+        )+
+    };
 }
 
-#[test]
-fn corpus_no_panics_on_generated_files() {
-    let Some(root) = corpus_root() else {
-        eprintln!("jfit corpus not found — skipping corpus_no_panics_on_generated_files");
-        return;
-    };
-
-    // Focus on the mobile app lib directory which is the primary target.
-    let mobile_lib = root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() {
-        mobile_lib
-    } else {
-        root
-    };
-
-    let files = collect_dart_files(&search_root, SKIP_DIRS);
-    let total = files.len();
-
-    if total == 0 {
-        eprintln!("no .dart files found under {}", search_root.display());
-        return;
-    }
-
-    // This test's sole assertion is that parse() never panics.
-    // Any panic would abort the test process with a clear stack trace.
-    for path in &files {
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let _ = parse(&source);
-    }
-
-    println!(
-        "no-panic check: parsed {total} files under {}",
-        search_root.display()
-    );
-}
+corpus_case!(
+    nested_map_set,
+    map_depth26,
+    mixed_brace_elements,
+    malformed_lambda_fallback,
+    malformed_block_lambda,
+    malformed_arrow_chain,
+    nested_patterns,
+    nested_types,
+    switch_arm_depth,
+    unclosed_annotations,
+    annotated_declarations,
+    binary_chain,
+    postfix_chain,
+    as_is_chain,
+);

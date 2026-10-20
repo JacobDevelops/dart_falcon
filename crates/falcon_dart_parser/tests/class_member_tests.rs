@@ -738,8 +738,7 @@ fn test_non_const_factory_is_not_const() {
 }
 
 #[test]
-fn test_constructor_call_block_is_initializer_lambda() {
-    // Keep this odd recovery outcome pinned until a deliberate parser-behavior change.
+fn test_constructor_call_block_belongs_to_constructor() {
     let source = "class C { var g; C(): g = (e) { f(); } }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
@@ -747,10 +746,9 @@ fn test_constructor_call_block_is_initializer_lambda() {
     let ClassMember::Constructor(ctor) = only_class(prog).members().nth(1).unwrap() else {
         panic!("expected constructor: {prog:?}");
     };
-    assert!(
-        ctor.body().is_none(),
-        "body belongs to the initializer lambda"
-    );
+    let Some(FunctionBody::Block(body)) = ctor.body() else {
+        panic!("expected constructor block: {:?}", ctor.body());
+    };
     assert_eq!(ctor.initializers().len(), 1);
     let ConstructorInitializer::FieldInit(initializer) = ctor.initializers().next().unwrap() else {
         panic!("expected field initializer: {:?}", ctor.initializers());
@@ -758,23 +756,16 @@ fn test_constructor_call_block_is_initializer_lambda() {
     let field = initializer.field();
     let value = initializer.value();
     assert_eq!(field.name(), "g");
-    let Expr::FuncExpr(function) = value else {
-        panic!("expected initializer lambda: {value:?}");
+    let Expr::Paren(paren) = value else {
+        panic!("expected parenthesized initializer: {value:?}");
     };
-    let params = function.params();
-    let body = function.body();
-    assert_eq!(function.async_marker(), AsyncMarker::Sync);
-    assert_eq!(params.params().len(), 1);
-    assert_eq!(params.params().next().unwrap().name().name(), "e");
-    let FunctionBody::Block(body) = body else {
-        panic!("expected lambda block: {body:?}");
-    };
+    assert!(matches!(paren.expr(), Expr::Ident(id) if id.name() == "e"));
     assert_eq!(body.stmts().len(), 1);
     let Stmt::Expr(stmt) = body.stmts().next().unwrap() else {
-        panic!("expected lambda call statement: {body:?}");
+        panic!("expected constructor call statement: {body:?}");
     };
     let Expr::Call(call) = stmt.expr() else {
-        panic!("expected lambda call: {stmt:?}");
+        panic!("expected constructor call: {stmt:?}");
     };
     let callee = call.callee();
     let args = call.args();
