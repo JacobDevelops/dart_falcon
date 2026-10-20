@@ -141,7 +141,7 @@ jobs:
         run: falcon check .
 ```
 
-> Pin both the release tag and archive version in CI, for example `/releases/download/v0.4.3/falcon-0.4.3-x86_64-linux.tar.gz`. A `/releases/latest/download/` URL is not pinned. falcon is [pre-1.0](../ROADMAP.md), so behavior can change between releases.
+> Pin both the release tag and archive version in CI, for example `/releases/download/v0.4.3/falcon-0.4.3-x86_64-linux.tar.gz`. A `/releases/latest/download/` URL is not pinned. falcon is [pre-1.0](./v1-checklist.md), so behavior can change between releases.
 
 ## Next steps
 
@@ -150,4 +150,4 @@ jobs:
 - [Suppressions](./suppressions.md): silence diagnostics with `// falcon-ignore`.
 - [Installation](./installation.md): channels, platforms, and releases.
 - [Migrating](./configuration.md#migrating-from-dart_code_linter--pyramid_lint): generate a `falcon.json` from `analysis_options.yaml`.
-- [Roadmap](../ROADMAP.md): plans for 1.0.
+- [1.0 checklist](./v1-checklist.md): what's left before 1.0.

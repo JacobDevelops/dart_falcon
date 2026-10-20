@@ -6,7 +6,6 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 const RULE_COUNT_DOCUMENTS: &[&str] = &[
     "README.md",
-    "ROADMAP.md",
     "docs/getting-started.md",
     "docs/installation.md",
     "docs/configuration.md",

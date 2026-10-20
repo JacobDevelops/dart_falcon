@@ -76,12 +76,13 @@ Owns rule files' helper exports, a new `lint` support module, and `falcon_syntax
 
 #### 13. Rule tests and docs
 
-Owns rule `#[cfg(test)]` modules, `crates/falcon_rules/tests/`, rule messages and `//!` docs.
+Owns rule `#[cfg(test)]` modules, `crates/falcon_rules/tests/`, rule messages and `//!` docs, and `prefer_iterable_every`'s matching.
 
 - [ ] **Rule test support.** 19 files hand-build identity harnesses and 12 build SDK trees. Add a shared `#[cfg(test)]` support module, move misplaced tests to the rule they test, and move `lint/semantic_scope_tests.rs` to `falcon_analyze`.
 - [ ] **Corpus checks messages in-process.** `cargo test` ignores `msg:` and only reads top-level fixtures; only the xtask harness compares messages. Check them in both and fix the CONTRIBUTING wording.
 - [ ] **Message style.** 61 messages lack terminal punctuation and code is quoted three ways. Messages are full sentences ending in a full stop, with code in backticks; enforce it in a meta test.
 - [ ] **User-facing module docs.** Several `//!` docs read as fix logs and docgen publishes them; `unnecessary_nullable`'s doc is stale and `prefer_iterable_every`'s describes the wrong semantics.
+- [ ] **Fix `prefer-iterable-every` semantics.** The port flags the negated `!where(pred).isEmpty`, which is `any(pred)` and overlaps `prefer-iterable-any`, and suggests `.every()` with the wrong predicate. Match the non-negated `where(pred).isEmpty` (`every(!pred)`) instead, keep the `where(pred).length == length` case, and update the corpus. Ship it separately from other changes, with a changeset.
 
 #### 14. Shared analysis for rules
 
@@ -180,9 +181,15 @@ Owns release packaging. Independent of the engine; can start any time.
 
 - [ ] **Easier install and update.** Add self-update and version selection to the `falcon` launcher, cargo-binstall metadata, optional signing/notarisation, and Homebrew publishing.
 
+#### 25. End-to-end OSS corpus
+
+Owns a new `cargo xtask e2e` and its CI jobs. Independent of the engine; can start any time.
+
+- [ ] **e2e OSS corpus.** Run falcon over pinned, shallow clones of large Dart/Flutter repos (immich, AppFlowy, flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples, dart-lang/sdk `tests/language`). Catch panics and parser/internal errors, snapshot diagnostic counts, and smoke-test migration of common `analysis_options.yaml` presets. A fast subset runs in PR CI and the full set nightly.
+
 ### Stage 7: last
 
-#### 25. Clippy pedantic
+#### 26. Clippy pedantic
 
 Touches every crate, so it runs alone after the refactors above; earlier it would conflict with every parallel batch, and its `too_many_lines` hits overlap batches 15-17.
 

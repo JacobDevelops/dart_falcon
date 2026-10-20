@@ -24,8 +24,8 @@ Project skills live in `.agents/skills/`.
 - Docs pin the current falcon version only where a pin is the point (mise and
   CI snippets); `cargo xtask version` rewrites those, and an xtask test fails if
   one drifts. Install links use the versionless `releases/latest/download/` form.
-- For planned scope, consult `ROADMAP.md`; use `docs/v1-checklist.md` for the
-  detailed catalog, not as evidence of implemented behavior.
+- For planned scope, consult `docs/v1-checklist.md`; it lists unshipped work,
+  so don't treat it as evidence of implemented behavior.
 
 ## Boundaries and generated content
 

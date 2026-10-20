@@ -20,7 +20,7 @@ Configure rules, severities, options, and per-path overrides in `falcon.json`. C
 
 > **Status: pre-1.0.** falcon is usable today but the rule set, rule ids, and
 > config surface are still moving. Expect breaking changes before 1.0 (see the
-> [roadmap](./ROADMAP.md)). Pin a revision if you depend on stable behaviour.
+> [1.0 checklist](./docs/v1-checklist.md)). Pin a revision if you depend on stable behaviour.
 
 ## Performance
 
@@ -128,7 +128,7 @@ falcon speaks LSP (`falcon lsp`). First-party extensions live in
 
 ## Roadmap
 
-Near-term plans and the road to 1.0 are tracked in [ROADMAP.md](./ROADMAP.md).
+The remaining work before 1.0 is tracked in the [1.0 checklist](./docs/v1-checklist.md).
 
 ## Contributing
 
