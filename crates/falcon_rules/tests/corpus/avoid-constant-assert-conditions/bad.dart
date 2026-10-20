@@ -14,3 +14,7 @@ class Settings {
   static const enabled = true;
   const Settings() : assert(enabled); /* expect: avoid-constant-assert-conditions */
 }
+
+void constAllocationAssertions() {
+  assert(const <int>[] == const <int>[]); /* expect: avoid-constant-assert-conditions */
+}

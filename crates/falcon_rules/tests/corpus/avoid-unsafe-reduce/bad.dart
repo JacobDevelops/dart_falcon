@@ -20,3 +20,46 @@ int mutatingCallback(List<int> list) {
   }
   return list.isNotEmpty ? list.reduce(callback()) : 0; /* expect: avoid-unsafe-reduce */
 }
+
+var reads = 0;
+List<int> get values => reads++ == 0 ? [1] : [];
+int unstableGetter() =>
+    values.isNotEmpty ? values.reduce((a, b) => a + b) : 0; /* expect: avoid-unsafe-reduce */
+
+void mutatedCascades() {
+  [1, 2]..clear()..reduce(sum); /* expect: avoid-unsafe-reduce */
+  [1, 2]..length = 0..reduce(sum); /* expect: avoid-unsafe-reduce */
+}
+
+class UnstableReceiver {
+  List<int> values = [];
+  List<int> get items => [];
+  int field() =>
+      values.isNotEmpty ? values.reduce(sum) : 0; /* expect: avoid-unsafe-reduce */
+  int getter() =>
+      items.isNotEmpty ? items.reduce(sum) : 0; /* expect: avoid-unsafe-reduce */
+}
+
+class StaticReceiver {
+  static List<int> values = [];
+  int sum() =>
+      values.isNotEmpty ? values.reduce((a, b) => a + b) : 0; /* expect: avoid-unsafe-reduce */
+}
+
+abstract class AbstractReceiver {
+  abstract final List<int> values;
+  int sum() =>
+      values.isNotEmpty ? values.reduce((a, b) => a + b) : 0; /* expect: avoid-unsafe-reduce */
+}
+
+extension EmptyingRead on List<int> {
+  int get empty {
+    clear();
+    return 0;
+  }
+}
+
+void getterCascade() {
+  [1]..empty..reduce(sum); /* expect: avoid-unsafe-reduce */
+  [1, 2]..length..reduce(sum); /* expect: avoid-unsafe-reduce */
+}

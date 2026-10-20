@@ -64,3 +64,11 @@ extension on List<int> {
   Object? get shadowedResult => this;
   Object? unnamedResult() => shadowedResult;
 }
+
+Object? freshListEquality() => <int>[] == <int>[] ? null : 1;
+Object? freshSetInequality() => <int>{} != <int>{} ? 1 : null;
+Object? freshMapIdentity() => identical(<int, int>{}, <int, int>{}) ? null : 1;
+class FreshValue { const FreshValue(); }
+Object? freshConstructorEquality() => FreshValue() == FreshValue() ? null : 1;
+Object? nestedRecordIdentity() => identical((<int>[],), (<int>[],)) ? null : 1;
+Object? nestedRecordEquality() => (<int>[],) == (<int>[],) ? null : 1;

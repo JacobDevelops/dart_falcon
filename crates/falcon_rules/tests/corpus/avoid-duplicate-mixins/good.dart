@@ -30,3 +30,7 @@ class UnknownBetween with Greeter, missing.Other, Greeter {}
 mixin Delegating on Greeter { String greet() => super.greet(); }
 class DelegatingBase extends BaseGreeter with Delegating {}
 class DelegatingAgain extends DelegatingBase with Delegating {}
+class Base { int f() => 0; }
+mixin Increment on Base { int f() => super.f() + 1; }
+class Twice extends Base with Increment, Increment {}
+class TwiceAlias = Base with Increment, Increment;

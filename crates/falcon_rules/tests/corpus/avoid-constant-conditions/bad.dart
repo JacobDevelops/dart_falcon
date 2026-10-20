@@ -31,3 +31,8 @@ void enumAndStatic() {
   if (Choice.first == Choice.second) {} /* expect: avoid-constant-conditions */
   if (Settings.enabled == true) {} /* expect: avoid-constant-conditions */
 }
+
+const implicitConstCondition = <int>[] == <int>[] ? 1 : 2; /* expect: avoid-constant-conditions */
+const implicitConstCollection = [if (<int>[] == <int>[]) 1]; /* expect: avoid-constant-conditions */
+class ConstValue { const ConstValue(); }
+const implicitConstConstructor = ConstValue() == ConstValue() ? 1 : 2; /* expect: avoid-constant-conditions */

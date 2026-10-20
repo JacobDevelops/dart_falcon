@@ -1,9 +1,10 @@
 //! Warn when SDK Iterable.reduce can receive an empty collection.
 //!
 //! Constant nonempty collections and fresh literals with an unconditional
-//! element are safe. Immediate isEmpty/isNotEmpty branches are recognized only
-//! when no intervening expression can mutate the receiver. Custom reduce
-//! members and unresolved receivers are excluded.
+//! element are safe, including reduce as the first cascade operation.
+//! Immediate isEmpty/isNotEmpty branches require a local or final-field receiver
+//! and no intervening expression that can mutate it. Custom reduce members and
+//! unresolved receivers are excluded.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
@@ -182,6 +183,32 @@ fn immediately_guarded(call: CallExpr<'_>, receiver: Expr<'_>, state: &SemanticS
     let Expr::Ident(receiver) = receiver.unparenthesized() else {
         return false;
     };
+    let name = receiver.name();
+    let stable = if state.environment.binding_declaration(name).is_some() {
+        !state.environment.is_local_function(name)
+    } else {
+        state.enclosing_type.as_ref().is_some_and(|owner| {
+            state
+                .signatures
+                .resolved_member_facts(owner, name, &state.model)
+                .is_some_and(|facts| {
+                    !facts.is_empty()
+                        && facts.iter().all(|fact| {
+                            !fact.is_abstract
+                                && matches!(
+                                    fact.kind,
+                                    MemberKind::Field {
+                                        writable: false,
+                                        ..
+                                    }
+                                )
+                        })
+                })
+        })
+    };
+    if !stable {
+        return false;
+    }
     // Evaluating an arbitrary callback-producing expression could empty the list.
     if !call
         .args()
@@ -317,6 +344,20 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if let CascadeOp::Call(call) = operation
             && call.name().name() == "reduce"
             && sdk_reduce(receiver, state)
+            && !call
+                .syntax()
+                .parent()
+                .and_then(CascadeSection::cast)
+                .and_then(|section| section.syntax().parent())
+                .and_then(CascadeExpr::cast)
+                .is_some_and(|cascade| {
+                    nonempty(cascade.object(), state)
+                        && cascade
+                            .sections()
+                            .next()
+                            .and_then(|section| section.ops().next())
+                            .is_some_and(|first| first.span() == call.span())
+                })
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-unsafe-reduce",

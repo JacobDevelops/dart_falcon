@@ -2,6 +2,7 @@
 //! Calls, construction, await, mutation, collection allocation, and closures are
 //! excluded. Non-declaration statements invalidate local candidates, so writes
 //! or calls between reads cannot turn an intentional state snapshot into a lint.
+//! Lazy static initializers are compared only when they contain no state reads.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -51,6 +52,9 @@ impl<'a> Collector<'a> {
             };
             if !safe(value) {
                 seen.clear();
+                continue;
+            }
+            if category.0 && !category.2 && !safe_lazy(value) {
                 continue;
             }
             let original = seen.iter().find(|earlier| {
@@ -119,6 +123,22 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 }
+}
+
+fn safe_lazy(value: cst::Expr<'_>) -> bool {
+    !value
+        .syntax()
+        .descendants()
+        .filter_map(cst::Expr::cast)
+        .any(|expr| {
+            matches!(
+                expr,
+                cst::Expr::Ident(_)
+                    | cst::Expr::Field(_)
+                    | cst::Expr::This(_)
+                    | cst::Expr::Super(_)
+            )
+        })
 }
 
 fn safe(value: cst::Expr<'_>) -> bool {

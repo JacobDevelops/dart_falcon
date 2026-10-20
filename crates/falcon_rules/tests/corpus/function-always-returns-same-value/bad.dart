@@ -21,3 +21,16 @@ class Example {
     return 42;
   }
 }
+
+bool constListEquality(bool flag) { /* expect: function-always-returns-same-value */
+  if (flag) return const <int>[] == const <int>[];
+  return true;
+}
+class ConstWrapper {
+  final List<int> values;
+  const ConstWrapper(this.values);
+}
+bool implicitConstContents(bool flag) { /* expect: function-always-returns-same-value */
+  if (flag) return const ConstWrapper([]) == const ConstWrapper([]);
+  return true;
+}

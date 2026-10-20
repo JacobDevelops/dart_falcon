@@ -1,6 +1,6 @@
 //! Flags repeated mixins in a with clause or a same-library superclass chain.
-//! Implemented interfaces do not count. Unknown ancestry and intervening member
-//! overrides are skipped: reapplying a mixin can intentionally restore methods.
+//! Implemented interfaces do not count. Unknown ancestry, super calls, and
+//! intervening member overrides are skipped: reapplication can change behavior.
 
 use crate::lint::declarations::{member_names, members_of};
 use falcon_analyze::{
@@ -170,8 +170,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         let count = mixins.clone().count();
         for (index, mixin) in mixins.clone().enumerate() {
-            let adjacent = index > 0 && mixins.clone().nth(index - 1).is_some_and(|previous| same(previous, mixin));
-            let redundant = adjacent || self.mixin_members(mixin).is_some_and(|members| {
+            let redundant = self.mixin_members(mixin).is_some_and(|members| {
                 let names = member_names(members);
                 for earlier in mixins.clone().rev().skip(count - index) {
                     if same(earlier, mixin) { return true; }

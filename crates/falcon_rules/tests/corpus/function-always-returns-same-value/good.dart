@@ -90,3 +90,29 @@ extension on List<int> {
     return 42;
   }
 }
+
+bool freshListEquality(bool flag) {
+  if (flag) return <int>[] == <int>[];
+  return true;
+}
+bool freshSetEquality(bool flag) {
+  if (flag) return <int>{} != <int>{};
+  return false;
+}
+bool freshMapIdentity(bool flag) {
+  if (flag) return identical(<int, int>{}, <int, int>{});
+  return true;
+}
+class FreshValue { const FreshValue(); }
+bool freshConstructorEquality(bool flag) {
+  if (flag) return FreshValue() == FreshValue();
+  return true;
+}
+bool nestedRecordIdentity(bool flag) {
+  if (flag) return identical((<int>[],), (<int>[],));
+  return true;
+}
+bool nestedRecordEquality(bool flag) {
+  if (flag) return (<int>[],) == (<int>[],);
+  return true;
+}

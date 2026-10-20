@@ -147,13 +147,16 @@ fn normalized<'a>(
                 TokenKind::Dot | TokenKind::QmarkDot | TokenKind::DotDot | TokenKind::DotDotQmark
             )
         });
-        let label = token
-            .next_significant()
-            .is_some_and(|next| next.kind() == TokenKind::Colon);
+        let label = token.parent().parent().is_some_and(|parent| {
+            cst::NamedArg::cast(parent)
+                .map(|argument| argument.name())
+                .or_else(|| cst::RecordField::cast(parent).and_then(|field| field.name()))
+                .is_some_and(|name| name.span() == token.span())
+        });
         let type_name = token
             .parent()
             .ancestors()
-            .any(|node| node.kind() == cst::NodeKind::NamedType);
+            .any(|node| cst::DartType::cast(node).is_some());
         if !member
             && !label
             && !type_name

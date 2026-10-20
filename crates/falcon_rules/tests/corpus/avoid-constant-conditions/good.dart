@@ -69,3 +69,15 @@ extension NamedFlag on List<int> {
     if (extensionFlag == true) {}
   }
 }
+
+class FreshValue { const FreshValue(); }
+void freshAllocationConditions() {
+  if (<int>[] == <int>[]) {}
+  if (<int>{} != <int>{}) {}
+  if (identical(<int, int>{}, <int, int>{}) == true) {}
+  if (FreshValue() == FreshValue()) {}
+  if (identical((<int>[],), (<int>[],)) == true) {}
+}
+void nestedRecordCondition() {
+  if ((<int>[],) == (<int>[],)) {}
+}

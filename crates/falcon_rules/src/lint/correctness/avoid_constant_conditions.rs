@@ -1,7 +1,8 @@
 //! Flags statically constant binary branch, loop, collection, and expression conditions.
 //! Replace the condition with the reachable branch or remove the unreachable code.
+//! Expressions containing runtime allocations are conservatively left unchanged.
 
-use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
+use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
 use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ConstantValue, Rule, RulePreparation};
@@ -71,6 +72,9 @@ pub(crate) fn constant_value(
             return None;
         }
     }
+    if has_runtime_allocation(expression, state, ctx.parsed.program()) {
+        return None;
+    }
     if !constant_in_context(expression, &deferred_prefixes(ctx.parsed.program()), state) {
         return None;
     }
@@ -81,6 +85,58 @@ pub(crate) fn constant_value(
         &state.model,
         &state.signatures,
     )
+}
+
+fn has_runtime_allocation(
+    expression: Expr<'_>,
+    state: &SemanticState<'_>,
+    program: Program<'_>,
+) -> bool {
+    struct Allocations<'s, 'a> {
+        state: &'s SemanticState<'a>,
+        found: bool,
+    }
+    impl<'a> falcon_syntax::cst::visit::Visitor<'a> for Allocations<'_, 'a> {
+        fn visit_expr(&mut self, node: Expr<'a>) {
+            let allocation = match node {
+                Expr::List(node) => Some(node.is_const()),
+                Expr::Map(node) => Some(node.is_const()),
+                Expr::Set(node) => Some(node.is_const()),
+                Expr::Record(node) => Some(node.is_const()),
+                Expr::New(node) => Some(node.is_const()),
+                Expr::Call(call)
+                    if matches!(call.callee().unparenthesized(),
+                        Expr::DotShorthand(node) if node.is_const()) =>
+                {
+                    Some(true)
+                }
+                Expr::Call(call)
+                    if falcon_analyze::resolve_call_constructor(
+                        call.callee(),
+                        &self.state.model,
+                        true,
+                    )
+                    .is_some() =>
+                {
+                    Some(false)
+                }
+                _ => None,
+            };
+            match allocation {
+                Some(false) => self.found = true,
+                // Explicit const allocations also make their contents constant.
+                Some(true) => {}
+                None if !self.found => falcon_syntax::cst::visit::walk_expr(self, node),
+                None => {}
+            }
+        }
+    }
+    let mut allocations = Allocations {
+        state,
+        found: false,
+    };
+    falcon_syntax::cst::visit::Visitor::visit_expr(&mut allocations, expression);
+    allocations.found && !ConstContexts::of(program).contains(&expression.span())
 }
 
 struct Collector<'a> {

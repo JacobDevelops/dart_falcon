@@ -40,3 +40,14 @@ class B {
   final first = 1;
   static final second = 1;
 }
+int current = 0;
+final firstSnapshot = current;
+final secondSnapshot = current;
+class LazySnapshots {
+  static final first = current;
+  static final second = current;
+  static final incremented = current + 1;
+  static final incrementedAgain = current + 1;
+  static final text = 'value: $current';
+  static final textAgain = 'value: $current';
+}

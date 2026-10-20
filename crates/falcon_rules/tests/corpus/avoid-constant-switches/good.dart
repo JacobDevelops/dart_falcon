@@ -95,3 +95,16 @@ extension NamedFlag on List<int> {
     }
   }
 }
+
+class FreshValue { const FreshValue(); }
+void freshAllocationSwitches() {
+  switch (<int>[] == <int>[]) { case true: break; default: break; }
+  switch (<int>{} != <int>{}) { case true: break; default: break; }
+  switch (identical(<int, int>{}, <int, int>{})) { case true: break; default: break; }
+  switch (FreshValue() == FreshValue()) { case true: break; default: break; }
+  final result = switch (identical((<int>[],), (<int>[],))) { true => 1, _ => 2 };
+  print(result);
+}
+void nestedRecordSwitch() {
+  switch ((<int>[],) == (<int>[],)) { case true: break; default: break; }
+}

@@ -1,6 +1,6 @@
 //! Flags repeated field or index assignment targets within one cascade.
 //! Calls are not assumed redundant. Different right-hand sides still overwrite
-//! the same target; targets involving calls or mutation are conservatively skipped.
+//! the same target; calls or mutation between assignments prevent comparison.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -35,7 +35,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let cst::Expr::Cascade(cascade) = node {
             let mut barrier = 0;
             for (index, section) in cascade.sections().enumerate() {
-                if section.syntax().descendants().filter_map(cst::Expr::cast).any(|expr| matches!(expr, cst::Expr::Call(_) | cst::Expr::New(_) | cst::Expr::Await(_)))
+                if section.syntax().descendants().filter_map(cst::Expr::cast).any(|expr| {
+                    matches!(expr, cst::Expr::Call(_) | cst::Expr::New(_) | cst::Expr::Await(_) | cst::Expr::Assign(_) | cst::Expr::PostfixIncDec(_) | cst::Expr::Cascade(_))
+                        || matches!(expr, cst::Expr::Unary(unary) if matches!(unary.op(), cst::UnaryOp::PlusPlus | cst::UnaryOp::MinusMinus))
+                })
                     || section.ops().any(|op| matches!(op, cst::CascadeOp::Call(_) | cst::CascadeOp::Invoke(_)))
                 {
                     barrier = index + 1;
@@ -75,7 +78,7 @@ fn assignment_target(section: cst::CascadeSection<'_>) -> Option<cst::Span> {
     };
     if section.ops().any(|op| matches!(op, cst::CascadeOp::Call(_) | cst::CascadeOp::Invoke(_)))
         || target.syntax().descendants().filter_map(cst::Expr::cast).any(|expr| {
-            matches!(expr, cst::Expr::Call(_) | cst::Expr::New(_) | cst::Expr::Assign(_) | cst::Expr::PostfixIncDec(_) | cst::Expr::Await(_))
+            matches!(expr, cst::Expr::Call(_) | cst::Expr::New(_) | cst::Expr::Assign(_) | cst::Expr::PostfixIncDec(_) | cst::Expr::Await(_) | cst::Expr::Cascade(_))
                 || matches!(expr, cst::Expr::Unary(unary) if matches!(unary.op(), cst::UnaryOp::PlusPlus | cst::UnaryOp::MinusMinus))
         })
     {

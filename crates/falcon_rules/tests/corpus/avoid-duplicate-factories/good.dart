@@ -53,3 +53,27 @@ abstract class Q {
   factory Q.b() = R;
 }
 class R implements Q { const R(); }
+class ConditionalBinding {
+  static int value = 7;
+  final int result;
+  ConditionalBinding._(this.result);
+  factory ConditionalBinding.a(bool flag, int value) =>
+      ConditionalBinding._(flag ? value : 0);
+  factory ConditionalBinding.b(bool flag, int other) =>
+      ConditionalBinding._(flag ? value : 0);
+}
+class NamedLabels {
+  NamedLabels._({int value = 0, int other = 0});
+  factory NamedLabels.a(int value) => NamedLabels._(value: value);
+  factory NamedLabels.b(int other) => NamedLabels._(other: other);
+}
+class RecordLabels {
+  RecordLabels._(Object value);
+  factory RecordLabels.a(int value) => RecordLabels._((value: value));
+  factory RecordLabels.b(int other) => RecordLabels._((other: other));
+}
+class RecordTypes {
+  RecordTypes._(Object value);
+  factory RecordTypes.a(Object value) => RecordTypes._(value as ({int value}));
+  factory RecordTypes.b(Object other) => RecordTypes._(other as ({int other}));
+}

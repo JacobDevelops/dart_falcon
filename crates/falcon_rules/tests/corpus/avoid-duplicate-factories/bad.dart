@@ -28,3 +28,25 @@ class F {
   factory F.second() = G; /* expect: avoid-duplicate-factories */
 }
 class G implements F { G(); }
+class ConditionalBinding {
+  final int result;
+  ConditionalBinding._(this.result);
+  factory ConditionalBinding.a(bool flag, int value) =>
+      ConditionalBinding._(flag ? value : 0);
+  factory ConditionalBinding.b(bool flag, int other) => ConditionalBinding._(flag ? other : 0); /* expect: avoid-duplicate-factories */
+}
+class MapKeys {
+  MapKeys._(Map<int, int> values);
+  factory MapKeys.a(int value) => MapKeys._({value: 0});
+  factory MapKeys.b(int other) => MapKeys._({other: 0}); /* expect: avoid-duplicate-factories */
+}
+class RecordValues {
+  RecordValues._(Object value);
+  factory RecordValues.a(int value) => RecordValues._((result: value));
+  factory RecordValues.b(int other) => RecordValues._((result: other)); /* expect: avoid-duplicate-factories */
+}
+class RecordTypes {
+  RecordTypes._(Object value);
+  factory RecordTypes.a(Object value) => RecordTypes._(value as ({int value}));
+  factory RecordTypes.b(Object other) => RecordTypes._(other as ({int value})); /* expect: avoid-duplicate-factories */
+}

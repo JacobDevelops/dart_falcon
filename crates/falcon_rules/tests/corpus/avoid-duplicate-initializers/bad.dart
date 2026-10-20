@@ -22,3 +22,19 @@ class B {
   static const first = true;
   static const second = true; /* expect: avoid-duplicate-initializers */
 }
+class LazyConstants {
+  static final first = 1 + 2;
+  static final second = 1 + 2; /* expect: avoid-duplicate-initializers */
+}
+class InstanceSnapshots {
+  final first = current;
+  final second = current; /* expect: avoid-duplicate-initializers */
+}
+int current = 0;
+class MixedSnapshots {
+  final first = 1;
+  static const firstConst = 2;
+  static final snapshot = current;
+  final second = 1; /* expect: avoid-duplicate-initializers */
+  static const secondConst = 2; /* expect: avoid-duplicate-initializers */
+}

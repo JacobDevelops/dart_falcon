@@ -19,3 +19,5 @@ Object? nested(bool flag) { /* expect: function-always-returns-null */
 class Example {
   Object? method() => null; /* expect: function-always-returns-null */
 }
+
+Object? constListEquality() => const <int>[] == const <int>[] ? null : 1; /* expect: function-always-returns-null */

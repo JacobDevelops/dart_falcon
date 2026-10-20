@@ -64,3 +64,15 @@ extension NamedFlag on List<int> {
     assert(extensionFlag);
   }
 }
+
+class FreshValue { const FreshValue(); }
+void freshAllocationAssertions() {
+  assert(<int>[] == <int>[]);
+  assert(<int>{} != <int>{});
+  assert(identical(<int, int>{}, <int, int>{}));
+  assert(FreshValue() == FreshValue());
+  assert(identical((<int>[],), (<int>[],)));
+}
+void nestedRecordAssertion() {
+  assert((<int>[],) == (<int>[],));
+}

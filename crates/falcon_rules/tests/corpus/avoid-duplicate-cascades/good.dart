@@ -13,3 +13,24 @@ void stateful(dynamic writer, dynamic value, int i) {
   value..[++i] = 1..[++i] = 2;
   value..[--i] = 1..[--i] = 2;
 }
+
+void rhsMutations(List<int> xs) {
+  var i = 0;
+  xs..[i] = i++..[i] = 9;
+  xs..[i] = i--..[i] = 9;
+  xs..[i] = ++i..[i] = 9;
+  xs..[i] = --i..[i] = 9;
+  xs..[i] = (i = 1)..[i] = 9;
+  xs..[i] = (i += 1)..[i] = 9;
+}
+
+class Counter {
+  int i = 0;
+  void increment() => i++;
+}
+
+void nestedMutations(List<int> xs, Counter counter) {
+  xs..[counter.i] = (counter..i = 1).i..[counter.i] = 9;
+  xs..[counter.i] = (counter..increment()).i..[counter.i] = 9;
+  xs..[(counter..i += 1).i] = 1..[(counter..i += 1).i] = 2;
+}
