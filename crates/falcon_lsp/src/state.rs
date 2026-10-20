@@ -188,6 +188,20 @@ struct CrossFileExternalCache {
     indexes: Option<ExternalIndexCache>,
 }
 
+impl CrossFileExternalCache {
+    /// Whether `path` is a watched source this cache loaded or tried to load.
+    fn loaded(&self, path: &Path) -> bool {
+        self.libraries
+            .libraries()
+            .iter()
+            .flat_map(|library| library.files.iter())
+            .map(|file| file.path.as_path())
+            .chain(self.libraries.attempted_project_paths())
+            .chain(self.libraries.project_companions())
+            .any(|loaded| watched_path(loaded) == *path)
+    }
+}
+
 /// Resolver facts for the exact Dart sources admitted by the cross-file view.
 struct CrossFileIndexCache {
     files: Vec<ProjectFile>,
@@ -345,27 +359,18 @@ impl LspState {
             .environment_stamps
             .as_ref()
             .is_some_and(|key| paths.iter().any(|path| key.affected_by(path)));
-        let dependency_changed = paths.iter().any(|path| {
-            !self
-                .documents
+        let open = |path: &PathBuf| {
+            self.documents
                 .values()
                 .any(|document| document.path == *path)
+        };
+        let dependency_changed = paths.iter().any(|path| {
+            !open(path)
                 && (self.watched_local_paths.binary_search(path).is_ok()
                     || self
                         .cross_file_external_cache
                         .as_ref()
-                        .is_some_and(|cache| {
-                            cache.libraries.libraries().iter().any(|library| {
-                                library
-                                    .files
-                                    .iter()
-                                    .any(|file| watched_path(&file.path) == *path)
-                            }) || cache
-                                .libraries
-                                .attempted_project_paths()
-                                .chain(cache.libraries.project_companions())
-                                .any(|loaded| watched_path(loaded) == *path)
-                        })
+                        .is_some_and(|cache| cache.loaded(path))
                     || (self
                         .environment
                         .watched_dependency_roots()
@@ -376,13 +381,9 @@ impl LspState {
                             .is_some_and(|snapshot| snapshot.by_path.contains_key(path))
                         && !self.watched_project_source(path)))
         });
-        let project_changed = paths.iter().any(|path| {
-            path.starts_with(&self.workspace_root)
-                && !self
-                    .documents
-                    .values()
-                    .any(|document| document.path == *path)
-        });
+        let project_changed = paths
+            .iter()
+            .any(|path| path.starts_with(&self.workspace_root) && !open(path));
         if !inputs_changed && !dependency_changed && !project_changed && !rules_changed {
             return Vec::new();
         }
@@ -861,32 +862,19 @@ impl LspState {
         // Semantic views include unsaved buffers; cross-file views include manifests.
         // Reuse facts only when Dart revisions and package identities agree exactly.
         let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {
-            let mut dart_files = files.iter().filter(|file| {
-                file.path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    == Some("dart")
-            });
+            let mut dart_files = files.iter().filter(|file| is_dart_file(&file.path));
             let same_files = dart_files.clone().count() == snapshot.files.len()
                 && dart_files.all(|file| {
-                    snapshot.by_path.get(&file.path).is_some_and(|&index| {
-                        let cached = &snapshot.files[index];
-                        cached.source() == file.source()
-                            && cached.has_parse_errors == file.has_parse_errors
-                    })
+                    snapshot
+                        .by_path
+                        .get(&file.path)
+                        .is_some_and(|&index| same_revision(&snapshot.files[index], file))
                 });
             if !same_files {
                 return None;
             }
             let packages = package_identities(files.iter().map(|file| file.path.as_path()));
-            let same_packages = packages.len() == snapshot.packages.len()
-                && packages
-                    .iter()
-                    .zip(&snapshot.packages)
-                    .all(|(current, cached)| {
-                        current.name == cached.name && current.lib_root == cached.lib_root
-                    });
-            same_packages.then_some(&snapshot.indexes)
+            same_packages(&packages, &snapshot.packages).then_some(&snapshot.indexes)
         });
         let reuse_snapshot = indexes.is_some();
         if !reuse_snapshot && self.cross_file_resolve_semantics {
@@ -929,29 +917,14 @@ impl LspState {
     }
 
     fn ensure_cross_file_indexes(&mut self, files: &[ProjectFile]) {
-        let dart_files = || {
-            files.iter().filter(|file| {
-                file.path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    == Some("dart")
-            })
-        };
+        let dart_files = || files.iter().filter(|file| is_dart_file(&file.path));
         let packages = package_identities(files.iter().map(|file| file.path.as_path()));
         if self.cross_file_index_cache.as_ref().is_some_and(|cache| {
             dart_files().count() == cache.files.len()
-                && packages.len() == cache.packages.len()
-                && packages
-                    .iter()
-                    .zip(&cache.packages)
-                    .all(|(current, cached)| {
-                        current.name == cached.name && current.lib_root == cached.lib_root
-                    })
-                && dart_files().zip(&cache.files).all(|(file, cached)| {
-                    file.path == cached.path
-                        && file.source() == cached.source()
-                        && file.has_parse_errors == cached.has_parse_errors
-                })
+                && same_packages(&packages, &cache.packages)
+                && dart_files()
+                    .zip(&cache.files)
+                    .all(|(file, cached)| file.path == cached.path && same_revision(file, cached))
         }) {
             return;
         }
@@ -975,12 +948,7 @@ impl LspState {
     fn cross_file_indexes(&mut self, files: &[ProjectFile]) -> SemanticIndexes {
         let files: Vec<_> = files
             .iter()
-            .filter(|file| {
-                file.path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    == Some("dart")
-            })
+            .filter(|file| is_dart_file(&file.path))
             .collect();
         let paths: HashSet<_> = files.iter().map(|file| file.path.as_path()).collect();
         // The external layer excludes semantic project files. URI imports of
@@ -988,11 +956,10 @@ impl LspState {
         let cache = self.external_indexes.as_ref().filter(|_| {
             self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
                 files.iter().all(|file| {
-                    snapshot.by_path.get(&file.path).is_some_and(|&index| {
-                        let cached = &snapshot.files[index];
-                        cached.source() == file.source()
-                            && cached.has_parse_errors == file.has_parse_errors
-                    })
+                    snapshot
+                        .by_path
+                        .get(&file.path)
+                        .is_some_and(|&index| same_revision(&snapshot.files[index], file))
                 }) && snapshot.files.iter().enumerate().all(|(index, file)| {
                     paths.contains(file.path.as_path())
                         || (!files.iter().any(|retained| {
@@ -1360,8 +1327,7 @@ impl LspState {
     }
 
     fn admits_project_dart(&self, path: &Path) -> bool {
-        path.extension().and_then(|extension| extension.to_str()) == Some("dart")
-            && self.config.files.includes.admits(&path.to_string_lossy())
+        is_dart_file(path) && self.config.files.includes.admits(&path.to_string_lossy())
     }
 
     /// Stable ownership while a debounced edit has dropped the snapshot.
@@ -1397,7 +1363,7 @@ impl LspState {
                 }
             };
             let path = entry.path();
-            let is_dart = path.extension().and_then(|e| e.to_str()) == Some("dart");
+            let is_dart = is_dart_file(path);
             let is_manifest = matches!(view, ProjectView::CrossFile)
                 && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
             if !is_dart && !is_manifest {
@@ -1728,6 +1694,22 @@ fn load_from(path: Option<&Path>) -> FalconConfig {
     // falcon.json files keep resolving.
     falcon_rules::meta::canonicalize_config(&mut config);
     config
+}
+
+fn is_dart_file(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some("dart")
+}
+
+/// Whether two parses of one path carry the same source and recovery state.
+fn same_revision(file: &ProjectFile, other: &ProjectFile) -> bool {
+    file.source() == other.source() && file.has_parse_errors == other.has_parse_errors
+}
+
+fn same_packages(current: &[PackageIdentity], cached: &[PackageIdentity]) -> bool {
+    current.len() == cached.len()
+        && current.iter().zip(cached).all(|(current, cached)| {
+            current.name == cached.name && current.lib_root == cached.lib_root
+        })
 }
 
 fn watched_path(path: &Path) -> PathBuf {

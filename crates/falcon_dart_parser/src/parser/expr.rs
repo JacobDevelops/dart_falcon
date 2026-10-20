@@ -807,9 +807,7 @@ impl<'src> Parser<'src> {
                     TokenKind::LParen => {
                         if p.looks_like_function_expr() {
                             let marker = p.start_at(start);
-                            p.parse_formal_param_list();
-                            let async_marker = p.parse_async_marker();
-                            p.finish_function_expr(marker, async_marker)
+                            p.parse_function_expr(marker)
                         } else {
                             p.parse_paren_or_record(start)
                         }
@@ -825,7 +823,7 @@ impl<'src> Parser<'src> {
                             {
                                 return None;
                             }
-                            Some(p.parse_function_expr_with_type_params(marker))
+                            Some(p.parse_function_expr(marker))
                         })
                         .unwrap_or_else(|| {
                             let marker = p.start_at(start);
@@ -954,17 +952,9 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_function_expr_with_type_params(&mut self, marker: Marker) -> CompletedMarker {
+    fn parse_function_expr(&mut self, marker: Marker) -> CompletedMarker {
         self.parse_formal_param_list();
         let async_marker = self.parse_async_marker();
-        self.finish_function_expr(marker, async_marker)
-    }
-
-    fn finish_function_expr(
-        &mut self,
-        marker: Marker,
-        async_marker: AsyncMarker,
-    ) -> CompletedMarker {
         // Closure arrows leave the enclosing declaration's semicolon untouched.
         self.with_body(async_marker, |p| match p.cur().kind {
             TokenKind::Arrow => {

@@ -109,9 +109,6 @@ impl<'a> AnalyzeContext<'a> {
     pub fn parsed(&self) -> &'a Arc<ParsedFile> {
         self.parsed
     }
-    pub fn config(&self) -> &'a FalconConfig {
-        self.config
-    }
     pub fn types(&self) -> Option<&'a TypeIndex> {
         self.types
     }

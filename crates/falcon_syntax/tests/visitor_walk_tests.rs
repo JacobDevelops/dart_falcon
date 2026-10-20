@@ -702,12 +702,17 @@ fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
             types: usize,
             last_offset: Option<usize>,
         }
+        impl Counter {
+            fn advance(&mut self, start: usize) {
+                if let Some(previous) = self.last_offset {
+                    assert!(previous < start);
+                }
+                self.last_offset = Some(start);
+            }
+        }
         impl<'a> Visitor<'a> for Counter {
             fn visit_identifier(&mut self, node: Identifier<'a>) {
-                if let Some(previous) = self.last_offset {
-                    assert!(previous < node.span().start);
-                }
-                self.last_offset = Some(node.span().start);
+                self.advance(node.span().start);
                 self.identifiers += 1;
             }
 
@@ -717,10 +722,7 @@ fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
 
             fn visit_dart_type(&mut self, node: DartType<'a>) {
                 assert!(matches!(node, DartType::Dynamic(_)));
-                if let Some(previous) = self.last_offset {
-                    assert!(previous < node.span().start);
-                }
-                self.last_offset = Some(node.span().start);
+                self.advance(node.span().start);
                 self.types += 1;
             }
         }

@@ -88,8 +88,8 @@ pub fn build_registry(config: &FalconConfig) -> RuleRegistry {
 
 pub fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry {
     let mut registry = CrossFileRuleRegistry::new();
-    for rule in resolve_cross_file_rules(config) {
-        registry.register(rule);
+    for (make, _) in enabled_cross_file_rules(config) {
+        registry.register(make());
     }
     registry
 }
@@ -287,12 +287,6 @@ pub fn all_cross_file_rules() -> Vec<(&'static str, Box<dyn CrossFileRule>)> {
             RuleKind::File { .. } => None,
         })
         .collect()
-}
-
-fn resolve_cross_file_rules(
-    config: &FalconConfig,
-) -> impl Iterator<Item = Box<dyn CrossFileRule>> + '_ {
-    enabled_cross_file_rules(config).map(|(make, _)| make())
 }
 
 fn enabled_cross_file_rules(
