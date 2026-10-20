@@ -20,12 +20,12 @@ impl Rule for AvoidUnnecessaryStatefulWidgets {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             signatures,
             widgets: Vec::new(),
             states: Vec::new(),
@@ -60,7 +60,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         let Some(base) = class.extends() else { return StructuralTraversal::SkipChildren; };
         let base = self.model.resolve_type(base);
-        if !matches!(&base, ResolvedType::Interface { identity, .. } if self.ctx.identities.is_some_and(|index| index.is_package_declaration(identity, "flutter", "State"))) || !class.with_clause().is_empty() {
+        if !matches!(&base, ResolvedType::Interface { identity, .. } if self.ctx.identities().is_some_and(|index| index.is_package_declaration(identity, "flutter", "State"))) || !class.with_clause().is_empty() {
             return StructuralTraversal::SkipChildren;
         }
         let Some(ResolvedType::Interface { identity, .. }) = base.type_argument(0) else { return StructuralTraversal::SkipChildren; };

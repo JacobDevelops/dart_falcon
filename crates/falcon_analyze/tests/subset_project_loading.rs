@@ -76,9 +76,10 @@ fn assert_subset_visibility(include_library: bool, configured: bool) {
             .resolve_name(name)
             .unwrap_or_else(|| panic!("missing {name}"));
         assert!(
-            matches!(&identity, DeclarationIdentity::Project { .. }),
+            matches!(&identity, DeclarationIdentity::Library { .. }),
             "{identity:?}",
         );
+        assert!(indexes.identities.is_project(&identity));
         assert_eq!(
             indexes.types.member_lookup_identity(&identity, method),
             MemberResult::Found(MemberKind::Method),

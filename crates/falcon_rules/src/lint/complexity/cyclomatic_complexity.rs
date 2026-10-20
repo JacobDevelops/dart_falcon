@@ -72,7 +72,7 @@ impl<'a> StructuralRuleVisitor<'a> for DecisionPoints<'a> {
     }
 
     fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
-        self.name = falcon_syntax::cst::visit::declared_member_name(node, self.ctx.source);
+        self.name = falcon_syntax::cst::visit::declared_member_name(node, self.ctx.source());
         if self.name.is_some() { StructuralTraversal::Continue } else { StructuralTraversal::SkipChildren }
     }
 

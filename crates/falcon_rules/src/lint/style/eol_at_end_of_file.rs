@@ -25,7 +25,7 @@ impl Rule for EolAtEndOfFile {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let source = ctx.source;
+        let source = ctx.source();
         if source.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }

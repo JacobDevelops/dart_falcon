@@ -158,7 +158,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.shortcut_lengths.push(self.field_shortcuts.len());
         if let Pattern::Object(object) = node {
             for field in object.fields() {
-                if self.ctx.source.as_bytes().get(field.span().start) == Some(&b':') {
+                if self.ctx.source().as_bytes().get(field.span().start) == Some(&b':') {
                     self.field_shortcuts.push(field.name().span().start);
                 }
             }

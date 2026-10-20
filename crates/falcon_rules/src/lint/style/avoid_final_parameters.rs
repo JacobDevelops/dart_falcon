@@ -66,7 +66,7 @@ impl Collector<'_> {
         if let Some(token) = self
             .ctx
             .tree()
-            .keywords_in(self.ctx.source, Span::new(start, end), TokenKind::Final)
+            .keywords_in(self.ctx.source(), Span::new(start, end), TokenKind::Final)
             .next()
         {
             self.diags.push(self.ctx.diagnostic(
@@ -82,7 +82,7 @@ impl Collector<'_> {
     fn check_setter(&mut self, setter: SetterDecl<'_>) {
         let mut tokens = significant_tokens_in(
             self.ctx.tree(),
-            self.ctx.source,
+            self.ctx.source(),
             Span::new(setter.name().span().end, setter.span().end),
         );
         if tokens.next().map(|token| token.kind()) != Some(TokenKind::LParen) {

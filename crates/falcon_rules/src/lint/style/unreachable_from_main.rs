@@ -123,14 +123,7 @@ impl<'a> Reachability<'a> {
             let bound = locally_bound_identifiers(unit.program);
             let mut sibling_types = ExpressionTypes::default();
             // A sibling needs its own parsed backing and per-file semantic caches.
-            let sibling_ctx = (index != 0).then(|| {
-                let mut sibling = AnalyzeContext::new(unit.path, ctx.config, unit.parsed)
-                    .with_environment(ctx.environment);
-                sibling.identities = ctx.identities;
-                sibling.types = ctx.types;
-                sibling.signatures = ctx.signatures;
-                sibling
-            });
+            let sibling_ctx = (index != 0).then(|| ctx.for_file(unit.path, unit.parsed));
             let sibling_state = sibling_ctx
                 .as_ref()
                 .and_then(|ctx| SemanticState::new(unit.program, ctx))
@@ -204,16 +197,19 @@ struct Unit<'a> {
 fn library_units<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Option<Vec<Unit<'a>>> {
     let current = Unit {
         program,
-        parsed: ctx.parsed,
-        path: ctx.file_path,
+        parsed: ctx.parsed(),
+        path: ctx.file_path(),
     };
     if ctx
-        .library
+        .library()
         .is_some_and(|library| library.has_unresolved_parts())
     {
         return None;
     }
-    let Some(library) = ctx.library.filter(|library| !library.siblings().is_empty()) else {
+    let Some(library) = ctx
+        .library()
+        .filter(|library| !library.siblings().is_empty())
+    else {
         let standalone =
             program.part_of_directive().is_none() && program.part_directives().is_empty();
         return standalone.then(|| vec![current]);
@@ -386,10 +382,15 @@ impl<'a> Tables<'a> {
                 );
             }
         }
-        let model = ctx.identities.map(|identities| {
-            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+        let model = ctx.identities().map(|identities| {
+            falcon_analyze::SemanticModel::new(
+                ctx.file_path(),
+                ctx.parsed(),
+                identities,
+                ctx.types(),
+            )
         });
-        let semantic = model.as_ref().zip(ctx.signatures);
+        let semantic = model.as_ref().zip(ctx.signatures());
         if let Some((model, signatures)) = semantic {
             tables.container_identities.reserve(tables.containers.len());
             for (container, declaration) in tables.containers.iter().enumerate() {
@@ -929,10 +930,10 @@ impl<'a> Tables<'a> {
     }
 
     fn find_entry_points(&mut self, units: &[Unit<'a>], ctx: &AnalyzeContext) {
-        let library = ctx.identities.and_then(|identities| {
+        let library = ctx.identities().and_then(|identities| {
             Some((
                 identities,
-                identities.library(identities.file(ctx.file_path)?),
+                identities.library(identities.file(ctx.file_path())?),
             ))
         });
         for (unit, source) in units.iter().enumerate() {

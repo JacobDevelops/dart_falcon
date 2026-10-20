@@ -72,10 +72,14 @@ pub(crate) fn constant_value(
             return None;
         }
     }
-    if has_runtime_allocation(expression, state, ctx.parsed.program()) {
+    if has_runtime_allocation(expression, state, ctx.parsed().program()) {
         return None;
     }
-    if !constant_in_context(expression, &deferred_prefixes(ctx.parsed.program()), state) {
+    if !constant_in_context(
+        expression,
+        &deferred_prefixes(ctx.parsed().program()),
+        state,
+    ) {
         return None;
     }
     evaluate_stable_constant_with_local_values(

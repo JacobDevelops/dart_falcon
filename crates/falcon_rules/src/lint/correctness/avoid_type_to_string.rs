@@ -40,11 +40,15 @@ impl Rule for AvoidTypeToString {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model =
-            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = falcon_analyze::SemanticModel::new(
+            ctx.file_path(),
+            ctx.parsed(),
+            identities,
+            ctx.types(),
+        );
         let stale_this = program
             .declarations()
             .filter_map(|declaration| {

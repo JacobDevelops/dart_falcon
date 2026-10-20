@@ -61,7 +61,7 @@ impl Rule for DirectivesOrdering {
                 span: export.span(),
             })
             .collect();
-        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source, ctx.tree())
+        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source(), ctx.tree())
             .map(|import| Namespace {
                 uri: uri_value(import.literal.cast()),
                 span: import.span,

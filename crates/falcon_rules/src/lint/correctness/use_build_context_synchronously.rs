@@ -1,3 +1,5 @@
+//! Flags BuildContext use after an asynchronous gap without a mounted guard.
+//!
 //! Port of Dart SDK 3.13.5's ancestor-relative `AsyncStateVisitor`.
 //! Mounted guards compare getter declarations, not receiver objects; function
 //! bodies are boundaries, except callbacks of the SDK's protected async APIs.
@@ -18,7 +20,7 @@ use crate::lint::declarations::in_test_directory as is_test_file;
 mod semantics;
 
 pub(crate) use semantics::{
-    Semantics as AsyncFacts, constant_bool, mounted_kind, mounted_receiver_kind,
+    Semantics as AsyncFacts, constant_bool, equality_operands, mounted_kind, mounted_receiver_kind,
 };
 
 #[derive(Default)]
@@ -30,7 +32,7 @@ impl Rule for UseBuildContextSynchronously {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if is_test_file(ctx.file_path) {
+        if is_test_file(ctx.file_path()) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let Some(semantics) = semantics::prepare(program, ctx) else {

@@ -47,11 +47,15 @@ impl<'a> SemanticRuleVisitor<'a> for Usage<'a> {
         let program = self.program;
         let ctx = self.ctx;
 
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return Vec::new();
         };
-        let model =
-            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = falcon_analyze::SemanticModel::new(
+            ctx.file_path(),
+            ctx.parsed(),
+            identities,
+            ctx.types(),
+        );
         let usage = &mut *self;
         let mut type_usage = TypeUsage {
             model: &model,

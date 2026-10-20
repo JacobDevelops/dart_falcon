@@ -19,12 +19,14 @@ pub(crate) fn documented_node_span<'a>(
     ctx: &AnalyzeContext,
 ) -> Span {
     let documentation_before = |start: usize| {
-        let gap_start =
-            preceding_trivia(ctx.tree().tokens_in(ctx.source, Span::new(0, start)), start)
-                .last()
-                .map_or(start, |token| token.offset());
+        let gap_start = preceding_trivia(
+            ctx.tree().tokens_in(ctx.source(), Span::new(0, start)),
+            start,
+        )
+        .last()
+        .map_or(start, |token| token.offset());
         ctx.tree()
-            .documentation_start(ctx.source, Span::new(gap_start, start))
+            .documentation_start(ctx.source(), Span::new(gap_start, start))
     };
     let body_start = annotations
         .clone()
@@ -32,7 +34,7 @@ pub(crate) fn documented_node_span<'a>(
         .map_or(span.start, |annotation| {
             significant_tokens_in(
                 ctx.tree(),
-                ctx.source,
+                ctx.source(),
                 Span::new(annotation.span().end, span.end),
             )
             .next()

@@ -53,7 +53,7 @@ impl Rule for RequireTrailingCommas {
         }
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            tokens: ctx.tree().significant_tokens(ctx.source).collect(),
+            tokens: ctx.tree().significant_tokens(ctx.source()).collect(),
             diags: Vec::new(),
         }))
     }
@@ -97,11 +97,11 @@ impl Collector<'_, '_> {
         let paired = if opening {
             self.ctx
                 .tree()
-                .closing_delimiter(self.ctx.source, token.id())?
+                .closing_delimiter(self.ctx.source(), token.id())?
         } else {
             self.ctx
                 .tree()
-                .opening_delimiter(self.ctx.source, token.id())?
+                .opening_delimiter(self.ctx.source(), token.id())?
         };
         let offset = paired.offset();
         self.tokens
@@ -119,7 +119,7 @@ impl Collector<'_, '_> {
     }
 
     fn same_line(&self, start: usize, end: usize) -> bool {
-        !self.ctx.source[start..end.max(start)].contains('\n')
+        !self.ctx.source()[start..end.max(start)].contains('\n')
     }
 
     fn report(&mut self, index: usize) {

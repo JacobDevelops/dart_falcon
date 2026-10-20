@@ -40,7 +40,7 @@ impl Rule for FlutterStyleTodos {
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(
             ctx.tree()
-                .comment_tokens(ctx.source)
+                .comment_tokens(ctx.source())
                 .filter(|token| {
                     matches!(token.kind(), TokenKind::LineComment | TokenKind::DocComment)
                 })

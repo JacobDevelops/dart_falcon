@@ -2546,9 +2546,13 @@ impl<'a> SemanticModel<'a> {
         self.owns_declaration(name.name())
     }
 
-    /// The `package:` URI of the library declaring a project `identity`.
+    pub fn identities(&self) -> &'a IdentityIndex {
+        self.identities
+    }
+
+    /// The `package:` URI of the library declaring an identity.
     pub fn declaration_uri(&self, identity: &DeclarationIdentity) -> Option<&'a str> {
-        let DeclarationIdentity::Project { library, .. } = identity else {
+        let DeclarationIdentity::Library { library, .. } = identity else {
             return None;
         };
         self.identities.library_uri(*library)
@@ -5291,7 +5295,7 @@ impl SignatureIndex {
                 let implemented = self.resolved_owner_through(&receiver, name, InstanceAccess::Read, false, &private_scope)
                     .and_then(|owner| match owner {
                         ResolvedType::Interface { identity: owner, .. } => {
-                            let same_library = matches!(&owner, DeclarationIdentity::Project { library: owner_library, .. } if *owner_library == library);
+                            let same_library = matches!(&owner, DeclarationIdentity::Library { library: owner_library, .. } if *owner_library == library);
                             Some(same_library && self.member_entry(&owner, name).is_some_and(|entry|
                                 entry.facts.iter().any(|fact| !fact.is_static && !fact.is_abstract)))
                         }
@@ -5323,7 +5327,7 @@ impl SignatureIndex {
         if !visited.insert(identity.clone()) {
             return;
         }
-        if let DeclarationIdentity::Project { library, .. } = identity
+        if let DeclarationIdentity::Library { library, .. } = identity
             && let Some(entries) = self.member_entries.get(identity)
         {
             for (name, entry) in entries {
@@ -6584,7 +6588,7 @@ impl SignatureIndex {
         let mut marked = Vec::new();
         let mut visited = HashSet::new();
         for subtype in self.superclasses.local.keys() {
-            let DeclarationIdentity::Project { library, .. } = subtype else {
+            let DeclarationIdentity::Library { library, .. } = subtype else {
                 continue;
             };
             visited.clear();
@@ -6594,7 +6598,7 @@ impl SignatureIndex {
                 if !visited.insert(identity) {
                     break;
                 }
-                if matches!(identity, DeclarationIdentity::Project { library: other, .. } if other == library)
+                if matches!(identity, DeclarationIdentity::Library { library: other, .. } if other == library)
                 {
                     marked.push(identity.clone());
                 }
@@ -7313,7 +7317,7 @@ impl SignatureIndex {
                     primary_signature,
                 );
         }
-        if let DeclarationIdentity::Project { library, .. } = identity
+        if let DeclarationIdentity::Library { library, .. } = identity
             && !is_extension
         {
             for (name, entry) in entries {
@@ -8552,7 +8556,7 @@ impl SignatureIndex {
         let external_beyond = |exact: &[ResolvedType], inexact: &[ResolvedType]| {
             exact.iter().any(|ty| match ty {
                 ResolvedType::Interface { identity, .. } => {
-                    !matches!(identity, DeclarationIdentity::Project { .. })
+                    !matches!(identity, DeclarationIdentity::Library { .. })
                         && *identity != DeclarationIdentity::OBJECT
                         && !lists(inexact, identity)
                 }
@@ -8593,7 +8597,7 @@ impl SignatureIndex {
     /// declaration known only from the curated tables is listed but not
     /// expanded, and an enum's implicit superclass may be unrecorded, so
     /// either makes the set inexact. `None` for an extension type, a cyclic
-    /// hierarchy, an unknown type argument, a project declaration without
+    /// hierarchy, an unknown type argument, a library declaration without
     /// indexed source, or supertypes unrecorded, unresolved or instantiated twice.
     fn superinterfaces(
         &self,
@@ -8651,7 +8655,7 @@ impl SignatureIndex {
                                 .map(|supertype| model.substitute(supertype, &substitutions)),
                         );
                     }
-                    None if matches!(identity, DeclarationIdentity::Project { .. }) => {
+                    None if matches!(identity, DeclarationIdentity::Library { .. }) => {
                         return None;
                     }
                     None => exact = false,
@@ -8710,7 +8714,7 @@ impl SignatureIndex {
     ///
     /// `Yes` when any declared supertype path reaches the target. `No` only when
     /// every reachable edge resolved to a declaration whose own supertype list is
-    /// recorded (project declarations and the curated `SDK_HIERARCHY`);
+    /// recorded (indexed declarations and the curated `SDK_HIERARCHY`);
     /// anything else — unresolved supertypes, unlisted SDK or package types,
     /// non-interface types — is `Unknown`. An extension type implements what
     /// its `implements` clause reaches, as the analyzer's `allSupertypes`.
@@ -9480,7 +9484,7 @@ impl SignatureIndex {
         {
             return false;
         }
-        let DeclarationIdentity::Project { library, .. } = identity else {
+        let DeclarationIdentity::Library { library, .. } = identity else {
             return false;
         };
         !self
@@ -10038,8 +10042,8 @@ fn same_library(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool
     matches!(
         (left, right),
         (
-            DeclarationIdentity::Project { library: left, .. },
-            DeclarationIdentity::Project { library: right, .. }
+            DeclarationIdentity::Library { library: left, .. },
+            DeclarationIdentity::Library { library: right, .. }
         ) if left == right
     ) || matches!(
         (left, right),
@@ -15833,9 +15837,9 @@ final partial = [first, unresolved];
                 signatures.flow_writes[&model.file].region_writes[&start],
                 HashSet::from([name.to_owned()]),
             );
-            let mut context = crate::AnalyzeContext::new(&paths[index], &config, &parsed[index]);
-            context.identities = Some(&identities);
-            context.signatures = Some(&signatures);
+            let context = crate::AnalyzeContext::new(&paths[index], &config, &parsed[index])
+                .with_identities(&identities)
+                .with_signatures(&signatures);
             assert!(std::ptr::eq(
                 context.flow_writes(programs[index]),
                 signatures
@@ -19625,7 +19629,7 @@ final integer = integers.first;
                 assert!(matches!(
                     model.resolve_type(function.return_type().unwrap()),
                     ResolvedType::Interface {
-                        identity: DeclarationIdentity::Project { .. },
+                        identity: DeclarationIdentity::Library { .. },
                         ..
                     }
                 ));
@@ -19740,7 +19744,7 @@ final integer = integers.first;
                     panic!()
                 };
                 assert!(
-                    matches!(identity, DeclarationIdentity::Project { name, .. } if name == "Box")
+                    matches!(identity, DeclarationIdentity::Library { name, .. } if name == "Box")
                 );
                 assert!(arguments[0].nullable());
 

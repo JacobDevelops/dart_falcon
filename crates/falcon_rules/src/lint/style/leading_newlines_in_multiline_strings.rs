@@ -57,7 +57,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             }
             let spans_lines = self
                 .ctx
-                .source
+                .source()
                 .get(span.start..span.end)
                 .is_some_and(|text| text.contains(['\n', '\r']));
             if spans_lines {

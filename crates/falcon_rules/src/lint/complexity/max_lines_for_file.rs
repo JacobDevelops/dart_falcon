@@ -35,7 +35,7 @@ impl Rule for MaxLinesForFile {
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
-        let line_count = ctx.source.lines().count();
+        let line_count = ctx.source().lines().count();
         let threshold = max_lines_option(ctx);
 
         if line_count > threshold {

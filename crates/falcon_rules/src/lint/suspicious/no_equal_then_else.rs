@@ -39,7 +39,7 @@ pub(crate) fn normalize<'a>(
 
     let mut line_comment = false;
     ctx.tree()
-        .tokens_in(ctx.source, span)
+        .tokens_in(ctx.source(), span)
         .flat_map(move |token| {
             let mut text = token.text();
             let in_literal = token.parent().ancestors().any(|node| {

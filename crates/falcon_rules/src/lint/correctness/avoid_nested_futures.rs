@@ -36,13 +36,13 @@ pub(super) fn prepare_nested<'a>(
     ctx: &'a AnalyzeContext<'a>,
     nesting: Nesting,
 ) -> RulePreparation<'a> {
-    let Some(identities) = ctx.identities else {
+    let Some(identities) = ctx.identities() else {
         return RulePreparation::Diagnostics(Vec::new());
     };
     RulePreparation::Structural(Box::new(Collector {
         ctx,
         nesting,
-        model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+        model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
         parameters: TypeParameterScope::default(),
         diagnostics: Vec::new(),
     }))

@@ -38,7 +38,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ["useEffect", "useMemoized", "useCallback"]
                 .iter()
                 .any(|name| {
-                    self.ctx.identities.is_some_and(|identities| {
+                    self.ctx.identities().is_some_and(|identities| {
                         identities.is_package_declaration(&identity, "flutter_hooks", name)
                     })
                 })

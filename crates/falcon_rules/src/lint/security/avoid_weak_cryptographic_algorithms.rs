@@ -148,7 +148,7 @@ impl WeakCrypto<'_> {
             "RC4" => "simple_rc4",
             _ => return false,
         };
-        self.ctx.identities.is_some_and(|identities| {
+        self.ctx.identities().is_some_and(|identities| {
             identities.is_package_declaration(identity, package, identity.name())
         })
     }

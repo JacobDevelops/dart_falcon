@@ -48,12 +48,12 @@ pub(crate) fn prepare_disposal<'a>(
     ctx: &'a AnalyzeContext<'a>,
     kind: DisposalKind,
 ) -> RulePreparation<'a> {
-    let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+    let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
         return RulePreparation::Diagnostics(Vec::new());
     };
     RulePreparation::Structural(Box::new(Collector {
         ctx,
-        model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+        model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
         signatures,
         diagnostics: Vec::new(),
         fields: HashSet::new(),

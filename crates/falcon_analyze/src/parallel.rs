@@ -45,11 +45,8 @@ fn analyze_file(
         source: source.into(),
         tree,
     });
-    let ctx = AnalyzeContext {
-        environment: workspace.environment,
-        package_language_version: package_version,
-        ..AnalyzeContext::new(path, config, &parsed)
-    };
+    let ctx = AnalyzeContext::new(path, config, &parsed)
+        .with_package_environment(workspace.environment, package_version);
     let mut diagnostics = syntax_error_diagnostics(path, &parse_errors);
     diagnostics.extend(registry.run_all(parsed.program(), &ctx));
     info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");

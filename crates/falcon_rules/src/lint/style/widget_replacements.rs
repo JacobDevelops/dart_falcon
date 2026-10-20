@@ -49,14 +49,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Some(ResolvedType::Interface { identity, .. }) = state.expected()
             && self
                 .ctx
-                .identities
+                .identities()
                 .is_some_and(|index| index.is_package_declaration(identity, "flutter", "Container"))
         {
             return;
         }
         if let Some((identity, "new", _)) =
             crate::lint::flutter::scoped_constructor_invocation(node, state)
-            && self.ctx.identities.is_some_and(|index| {
+            && self.ctx.identities().is_some_and(|index| {
                 index.is_package_declaration(&identity, "flutter", self.widget)
             })
         {
@@ -95,7 +95,7 @@ pub(super) fn only_property(
                 crate::lint::semantic_type_operations::nullability(
                     &state.infer(value),
                     &state.signatures,
-                    ctx.types,
+                    ctx.types(),
                 ) == Truth::No
             })
         })

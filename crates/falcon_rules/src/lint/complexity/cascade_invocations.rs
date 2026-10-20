@@ -80,7 +80,7 @@ impl Rule for CascadeInvocations {
 /// The library a top-level declaration belongs to.
 #[derive(Clone, PartialEq, Eq)]
 enum Library {
-    Project(LibraryId),
+    Source(LibraryId),
     Sdk(falcon_analyze::InternedString),
     Package(falcon_analyze::InternedString),
 }
@@ -88,7 +88,7 @@ enum Library {
 impl Library {
     fn of(identity: &DeclarationIdentity) -> Self {
         match identity {
-            DeclarationIdentity::Project { library, .. } => Self::Project(*library),
+            DeclarationIdentity::Library { library, .. } => Self::Source(*library),
             DeclarationIdentity::Sdk { library, .. } => Self::Sdk(library.clone()),
             DeclarationIdentity::Package { package, .. } => Self::Package(package.clone()),
         }

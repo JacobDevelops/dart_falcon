@@ -67,7 +67,7 @@ where
 ///
 /// `Unknown` covers potentially nullable types that are neither (an unbounded
 /// type parameter, an extension type without superinterfaces) as well as anything falcon cannot prove:
-/// `dynamic`, `void`, unresolved types, and project names that may be type
+/// `dynamic`, `void`, unresolved types, and library names that may be type
 /// aliases. Callers that need the analyzer's `isNullable(dynamic)` must check
 /// [`ResolvedType::Dynamic`] themselves.
 pub(crate) fn nullability(
@@ -131,9 +131,9 @@ pub(crate) fn nullability(
                     })
                 }
                 DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => Truth::No,
-                // A project name may be a (possibly nullable) type alias; only a
+                // A library name may be a (possibly nullable) type alias; only a
                 // known class-like declaration proves non-nullability.
-                DeclarationIdentity::Project { .. } => {
+                DeclarationIdentity::Library { .. } => {
                     let class_like = signatures
                         .declaration(identity)
                         .is_some_and(|facts| facts.extension_representation.is_none())

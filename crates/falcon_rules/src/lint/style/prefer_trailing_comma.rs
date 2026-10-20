@@ -40,7 +40,8 @@ impl<'a> Collector<'a> {
         if args.positional().is_empty() && args.named().is_empty() {
             return;
         }
-        let mut tokens = significant_tokens_in(self.ctx.tree(), self.ctx.source, args.span()).rev();
+        let mut tokens =
+            significant_tokens_in(self.ctx.tree(), self.ctx.source(), args.span()).rev();
         let Some(close) = tokens
             .next()
             .filter(|token| token.kind() == TokenKind::RParen)
@@ -49,7 +50,7 @@ impl<'a> Collector<'a> {
         };
         let Some(last) = tokens.next() else { return };
         if last.kind() == TokenKind::Comma
-            || !self.ctx.source[last.offset() + last.len()..close.offset()].contains('\n')
+            || !self.ctx.source()[last.offset() + last.len()..close.offset()].contains('\n')
         {
             return;
         }

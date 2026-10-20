@@ -50,7 +50,7 @@ const MESSAGE: &str = "Missing type annotation.";
 pub(crate) fn setter_parameter_span(node: SetterDecl<'_>, ctx: &AnalyzeContext) -> Span {
     let start = significant_tokens_in(
         ctx.tree(),
-        ctx.source,
+        ctx.source(),
         Span::new(node.name().span().end, node.param().span().end),
     )
     .skip_while(|token| token.kind() != TokenKind::LParen)
@@ -137,7 +137,7 @@ pub(crate) fn known_type_arity(identity: &DeclarationIdentity) -> Option<usize> 
         DeclarationIdentity::Package { package, name, .. } => Some(usize::from(
             package.as_str() == "flutter" && name.as_str() == "State",
         )),
-        DeclarationIdentity::Project { .. } => None,
+        DeclarationIdentity::Library { .. } => None,
     }
 }
 
@@ -185,7 +185,7 @@ impl<'a> Collector<'a> {
     }
 
     fn first_token(&self, span: Span) -> Span {
-        significant_tokens_in(self.ctx.tree(), self.ctx.source, span)
+        significant_tokens_in(self.ctx.tree(), self.ctx.source(), span)
             .next()
             .map_or(span, |token| {
                 Span::new(token.offset(), token.offset() + token.len())
@@ -295,7 +295,7 @@ impl<'a> Collector<'a> {
     fn keyword(&self, start: usize, end: usize) -> Option<Span> {
         self.ctx
             .tree()
-            .tokens_in(self.ctx.source, Span::new(start, end))
+            .tokens_in(self.ctx.source(), Span::new(start, end))
             .find(|token| {
                 matches!(
                     token.kind(),
@@ -338,7 +338,7 @@ impl<'a> Collector<'a> {
             .or_else(|| {
                 self.ctx
                     .tree()
-                    .token_at(self.ctx.source, name.syntax().span().start)
+                    .token_at(self.ctx.source(), name.syntax().span().start)
             })
             .and_then(|token| token.prev_significant())
             .filter(|token| matches!(token.kind(), TokenKind::Var | TokenKind::Final))

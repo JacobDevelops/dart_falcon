@@ -19,14 +19,18 @@ impl Rule for AvoidPrint {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if !ctx.source.contains("print") {
+        if !ctx.source().contains("print") {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model =
-            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = falcon_analyze::SemanticModel::new(
+            ctx.file_path(),
+            ctx.parsed(),
+            identities,
+            ctx.types(),
+        );
         if !model
             .resolve_sdk_member("print")
             .is_some_and(|identity| identity.is_sdk("dart:core", "print"))
@@ -72,7 +76,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .model
             .resolve_value(identifier.name())
             .is_some_and(|identity| {
-                self.ctx.identities.and_then(|identities| {
+                self.ctx.identities().and_then(|identities| {
                     identities
                         .declaration_library(&identity)
                         .and_then(|library| identities.library_uri(library))

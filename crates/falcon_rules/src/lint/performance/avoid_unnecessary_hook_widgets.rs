@@ -32,10 +32,10 @@ impl Rule for AvoidUnnecessaryHookWidgets {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         let mut candidates = Vec::new();
         for declaration in program.declarations() {
             let TopLevelDecl::Class(class) = declaration else {
@@ -57,7 +57,7 @@ impl Rule for AvoidUnnecessaryHookWidgets {
                 continue;
             };
             let programs = std::iter::once(program).chain(
-                ctx.library
+                ctx.library()
                     .into_iter()
                     .flat_map(|library| library.siblings().iter().copied()),
             );

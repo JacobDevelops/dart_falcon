@@ -70,7 +70,7 @@ impl Rule for PreferCommentingAnalyzerIgnores {
                 .unwrap_or(true);
         let mut previous_comment = None::<SyntaxToken<'a>>;
         let mut previous_line_comment = None::<SyntaxToken<'a>>;
-        for token in ctx.tree().tokens(ctx.source) {
+        for token in ctx.tree().tokens(ctx.source()) {
             if matches!(token.kind(), TokenKind::Whitespace | TokenKind::Newline) {
                 continue;
             }
@@ -79,7 +79,7 @@ impl Rule for PreferCommentingAnalyzerIgnores {
                 previous_line_comment = None;
                 continue;
             }
-            let current_line_start = ctx.source[..token.span().start]
+            let current_line_start = ctx.source()[..token.span().start]
                 .rfind('\n')
                 .map_or(0, |index| index + 1);
             if previous_comment.is_some_and(|previous| previous.span().end <= current_line_start) {
@@ -96,13 +96,13 @@ impl Rule for PreferCommentingAnalyzerIgnores {
             {
                 let inline_explanation = inline_explanation(rest);
                 let preceding_explanation = previous_line_comment.is_some_and(|previous| {
-                    let gap = &ctx.source[previous.span().end..current_line_start];
-                    let line_start = ctx.source[..previous.span().start]
+                    let gap = &ctx.source()[previous.span().end..current_line_start];
+                    let line_start = ctx.source()[..previous.span().start]
                         .rfind('\n')
                         .map_or(0, |index| index + 1);
                     gap.trim().is_empty()
                         && gap.bytes().filter(|byte| *byte == b'\n').count() == 1
-                        && ctx.source[line_start..previous.span().start]
+                        && ctx.source()[line_start..previous.span().start]
                             .trim()
                             .is_empty()
                         && explanation(previous.text())

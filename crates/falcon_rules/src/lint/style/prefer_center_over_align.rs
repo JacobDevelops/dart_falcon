@@ -46,7 +46,7 @@ fn centered(value: Expr<'_>, state: &SemanticState<'_>, ctx: &AnalyzeContext<'_>
         && let Some(head) = segments.first()
         && !crate::lint::flutter::value_name_is_shadowed(head, state)
         && let Some(identity) = state.model.resolve_dotted(&segments)
-        && ctx.identities.is_some_and(|index| {
+        && ctx.identities().is_some_and(|index| {
             index.is_package_declaration(&state.model.unaliased(identity), "flutter", "Alignment")
         })
     {
@@ -55,7 +55,7 @@ fn centered(value: Expr<'_>, state: &SemanticState<'_>, ctx: &AnalyzeContext<'_>
     if let Some((identity, "new", args)) =
         crate::lint::flutter::scoped_constructor_invocation(value, state)
         && ctx
-            .identities
+            .identities()
             .is_some_and(|index| index.is_package_declaration(&identity, "flutter", "Alignment"))
         && args.named().next().is_none()
     {

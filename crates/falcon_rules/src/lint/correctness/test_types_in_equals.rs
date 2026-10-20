@@ -78,7 +78,7 @@ impl<'a> StructuralRuleVisitor<'a> for ParameterCasts<'a> {
             TopLevelDecl::Mixin(node) => node.name().name(),
             TopLevelDecl::Extension(node) => {
                 let span = node.on_type().span();
-                self.ctx.source.get(span.start..span.end).unwrap_or("unknown")
+                self.ctx.source().get(span.start..span.end).unwrap_or("unknown")
             }
             _ => "unknown",
         };

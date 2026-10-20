@@ -20,13 +20,13 @@ impl Rule for ValidRegexps {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
         };
         RulePreparation::Structural(Box::new(collector))
     }

@@ -53,7 +53,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 if let Some(target) = assignment_target(section)
                     && cascade.sections().rev().skip(count - index).take(index - barrier).find_map(|earlier_section| {
                         let earlier = assignment_target(earlier_section)?;
-                        let tokens = |span| self.ctx.tree().tokens_in(self.ctx.source, span)
+                        let tokens = |span| self.ctx.tree().tokens_in(self.ctx.source(), span)
                             .filter(|token| !token.is_trivia())
                             .skip_while(|token| matches!(token.kind(), falcon_syntax::TokenKind::DotDot | falcon_syntax::TokenKind::DotDotQmark))
                             .map(|token| (token.kind(), token.text()));

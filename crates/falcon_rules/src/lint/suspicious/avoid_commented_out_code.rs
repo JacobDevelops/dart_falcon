@@ -21,7 +21,7 @@ impl Rule for AvoidCommentedOutCode {
     ) -> RulePreparation<'a> {
         let mut diagnostics = Vec::<Diagnostic>::new();
         let mut fenced = false;
-        for token in ctx.tree().root(ctx.source).tokens() {
+        for token in ctx.tree().root(ctx.source()).tokens() {
             if !token.kind().is_comment() {
                 if !token.is_trivia() {
                     fenced = false;

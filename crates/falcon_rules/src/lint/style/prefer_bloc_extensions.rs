@@ -55,7 +55,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if !["BlocProvider", "RepositoryProvider"].iter().any(|name| {
             self.ctx
-                .identities
+                .identities()
                 .is_some_and(|index| index.is_package_declaration(&identity, "flutter_bloc", name))
         }) {
             return;

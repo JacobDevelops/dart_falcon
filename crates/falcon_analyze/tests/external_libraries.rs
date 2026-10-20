@@ -1100,7 +1100,6 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
     });
     let ctx = falcon_analyze::AnalyzeContext::new(&file, &config, &parsed)
         .with_environment(Some(&environment));
-    assert_eq!(ctx.package_language_version, Some(package_version));
     assert_eq!(ctx.language_version(), package_version);
 
     let source = "// @dart = 2.12\nvoid main() {}";
@@ -1110,7 +1109,6 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
     });
     let overridden = falcon_analyze::AnalyzeContext::new(&file, &config, &overridden_parsed)
         .with_environment(Some(&environment));
-    assert_eq!(overridden.package_language_version, Some(package_version));
     assert_eq!(overridden.language_version(), LanguageVersion::new(2, 12));
 }
 
@@ -2654,7 +2652,7 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
                 }
                 let outside = SemanticModel::new(&paths[0], &parseds[0], &identities, None);
                 let identity = outside.resolve_name("Shared").unwrap();
-                assert!(matches!(&identity, DeclarationIdentity::Project { .. }));
+                assert!(matches!(&identity, DeclarationIdentity::Library { .. }));
                 let library = identities.declaration_library(&identity).unwrap();
                 assert_eq!(identities.library_uri(library), None);
             }

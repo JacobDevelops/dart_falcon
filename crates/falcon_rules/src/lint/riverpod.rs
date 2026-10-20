@@ -54,13 +54,13 @@ pub(crate) fn is_identity(
         .iter()
         .any(|package| {
             names.iter().any(|name| {
-                ctx.identities.is_some_and(|identities| {
+                ctx.identities().is_some_and(|identities| {
                     identities.is_package_declaration(identity, package, name)
                 })
             })
         })
         || names.contains(&"StateNotifier")
-            && ctx.identities.is_some_and(|identities| {
+            && ctx.identities().is_some_and(|identities| {
                 identities.is_package_declaration(identity, "state_notifier", "StateNotifier")
             })
 }
@@ -70,7 +70,7 @@ fn is_build_callback(
     identity: &DeclarationIdentity,
     constructor: &str,
 ) -> bool {
-    let Some(identities) = ctx.identities else {
+    let Some(identities) = ctx.identities() else {
         return false;
     };
     if identities.is_package_declaration(identity, "flutter_hooks", "HookBuilder") {

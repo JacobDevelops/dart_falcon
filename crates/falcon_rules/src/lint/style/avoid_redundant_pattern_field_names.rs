@@ -75,7 +75,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 fn is_redundant_field(ctx: &AnalyzeContext, span: Span) -> bool {
     let mut tokens = ctx
         .tree()
-        .tokens_in(ctx.source, span)
+        .tokens_in(ctx.source(), span)
         .filter(|token| !matches!(token.kind(), TokenKind::Whitespace | TokenKind::Newline));
     let (Some(left), Some(colon), Some(right)) = (tokens.next(), tokens.next(), tokens.next())
     else {

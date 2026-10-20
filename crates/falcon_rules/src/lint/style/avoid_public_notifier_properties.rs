@@ -37,10 +37,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             TopLevelDecl::MixinClass(class) => (class.name().name(), class.members()),
             _ => return StructuralTraversal::SkipChildren,
         };
-        let (Some(identities), Some(signatures)) = (self.ctx.identities, self.ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (self.ctx.identities(), self.ctx.signatures()) else {
             return StructuralTraversal::SkipChildren;
         };
-        let model = SemanticModel::new(self.ctx.file_path, self.ctx.parsed, identities, self.ctx.types);
+        let model = SemanticModel::new(self.ctx.file_path(), self.ctx.parsed(), identities, self.ctx.types());
         let Some(identity) = model.resolve_name(name) else {
             return StructuralTraversal::SkipChildren;
         };

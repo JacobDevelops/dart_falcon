@@ -68,7 +68,7 @@ impl Collector<'_, '_> {
             return;
         };
         let control_end = control.offset() + control.len();
-        if self.ctx.source[control_end.min(first)..first].contains('\n') {
+        if self.ctx.source()[control_end.min(first)..first].contains('\n') {
             return;
         }
         let begin_len = self

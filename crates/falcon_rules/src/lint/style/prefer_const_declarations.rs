@@ -42,7 +42,7 @@ impl Rule for PreferConstDeclarations {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if ctx.identities.is_none() {
+        if ctx.identities().is_none() {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let mut declarations = Declarations::default();
@@ -163,7 +163,7 @@ impl<'a> SemanticRuleVisitor<'a> for Checker<'a> {
                     let mut preceding_late = None;
                     for token in significant_tokens_in(
                         ctx.tree(),
-                        ctx.source,
+                        ctx.source(),
                         Span::new(group.span.start, group.first_name),
                     ) {
                         if token.kind() == TokenKind::Final {

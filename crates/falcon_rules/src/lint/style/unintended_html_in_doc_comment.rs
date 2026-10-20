@@ -28,7 +28,7 @@ impl Rule for UnintendedHtmlInDocComment {
         // Iterate with `split_inclusive` so the offset advances by the real chunk
         // length: `lines()` drops a full `\r\n` but only one byte would be added
         // back, drifting every span in a CRLF file.
-        for chunk in ctx.source.split_inclusive('\n') {
+        for chunk in ctx.source().split_inclusive('\n') {
             let line = chunk.trim_end_matches(['\r', '\n']);
             let indent = line.len() - line.trim_start().len();
             let trimmed = &line[indent..];

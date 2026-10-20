@@ -46,13 +46,18 @@ impl LeakRule {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> Option<Box<dyn SemanticRuleVisitor<'a> + 'a>> {
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, ctx.identities?, ctx.types);
+        let model = SemanticModel::new(
+            ctx.file_path(),
+            ctx.parsed(),
+            ctx.identities()?,
+            ctx.types(),
+        );
         Some(Box::new(LocalCandidates {
             rule: *self,
             program,
             ctx,
             bodies: FunctionBodies::new(program),
-            references: References::new(program, ctx.source.len(), &model),
+            references: References::new(program, ctx.source().len(), &model),
             candidates: Vec::new(),
             excluded_calls: Vec::new(),
         }))
@@ -255,7 +260,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
         let mut fields = FieldCandidates {
             rule: &self.rule,
             state,
-            file: Span::new(0, self.ctx.source.len()),
+            file: Span::new(0, self.ctx.source().len()),
             candidates: std::mem::take(&mut self.candidates),
         };
         walk_program(&mut fields, self.program);

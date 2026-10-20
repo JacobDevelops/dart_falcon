@@ -67,12 +67,12 @@ fn check_args(args: ArgList<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
     let positional: Vec<(&str, Span)> = args
         .positional()
         .filter(|a| !is_literal(*a))
-        .map(|a| (expr_src(a, ctx.source), a.span()))
+        .map(|a| (expr_src(a, ctx.source()), a.span()))
         .collect();
     let named: Vec<(&str, Span)> = args
         .named()
         .filter(|n| !is_literal(n.value()))
-        .map(|n| (expr_src(n.value(), ctx.source), n.span()))
+        .map(|n| (expr_src(n.value(), ctx.source()), n.span()))
         .collect();
 
     for group in [&positional, &named] {

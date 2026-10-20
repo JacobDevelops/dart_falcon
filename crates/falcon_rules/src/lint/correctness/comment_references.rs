@@ -38,9 +38,9 @@ impl Rule for CommentReferences {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let sdk_loaded = ctx
-            .identities
+            .identities()
             .is_some_and(|identities| identities.has_sdk_sources());
-        let scopes = DocScopes::new(program, &state.model, ctx.source);
+        let scopes = DocScopes::new(program, &state.model, ctx.source());
         let resolver = DocResolver::new(
             program,
             &state.model,
@@ -59,7 +59,7 @@ impl Rule for CommentReferences {
                 },
             ));
         };
-        for block in ctx.tree().doc_blocks(ctx.source) {
+        for block in ctx.tree().doc_blocks(ctx.source()) {
             let Some(scope) = scopes.scope_for(&block) else {
                 continue;
             };

@@ -36,13 +36,12 @@ impl Rule for PreferAssertsInInitializerLists {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(model) = ctx
-            .identities
-            .map(|identities| SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types))
-        else {
+        let Some(model) = ctx.identities().map(|identities| {
+            SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
+        }) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let Some(signatures) = ctx.signatures else {
+        let Some(signatures) = ctx.signatures() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let constructors = constructor_parameters(program, &model);
@@ -106,7 +105,7 @@ impl<'a> Collector<'a> {
                     .unwrap_or("new");
                 self.constructors.get(superclass)?.get(invoked).copied()
             });
-        ConstructorScope::new(params, super_params, self.ctx.source)
+        ConstructorScope::new(params, super_params, self.ctx.source())
     }
 }
 
@@ -203,7 +202,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(facts) = &mut self.pending else {
             return StructuralTraversal::SkipChildren;
         };
-        facts.record(expression, self.ctx.source);
+        facts.record(expression, self.ctx.source());
         StructuralTraversal::Continue
     }
 

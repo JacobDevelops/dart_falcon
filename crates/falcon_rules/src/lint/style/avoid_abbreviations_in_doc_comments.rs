@@ -21,7 +21,7 @@ impl Rule for AvoidAbbreviationsInDocComments {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        scan_source(ctx.source, &mut diags, ctx);
+        scan_source(ctx.source(), &mut diags, ctx);
         RulePreparation::Diagnostics(diags)
     }
 }

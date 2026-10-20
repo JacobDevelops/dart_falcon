@@ -12,8 +12,8 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationIdentity, ResolvedType, Truth, evaluate_constant,
-    expression_segments, resolve_call_constructor,
+    AnalyzeContext, ConstantCache, ConstantValue, DeclarationIdentity, ResolvedType, Truth,
+    evaluate_constant_cached, expression_segments, resolve_call_constructor,
 };
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
@@ -302,7 +302,13 @@ fn context_type_kind(
         .flatten()
 }
 
-pub(crate) fn constant_bool<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Option<bool> {
+/// Folds `expression` to a boolean through the file's shared constant cache,
+/// so repeated references to one library constant evaluate it once.
+pub(crate) fn constant_bool<'a>(
+    expression: Expr<'a>,
+    state: &SemanticState<'a>,
+    cache: &ConstantCache,
+) -> Option<bool> {
     if let Expr::BoolLit(literal) = expression.unparenthesized() {
         return Some(literal.value());
     }
@@ -335,14 +341,23 @@ pub(crate) fn constant_bool<'a>(expression: Expr<'a>, state: &SemanticState<'a>)
     if names.found {
         return None;
     }
-    match evaluate_constant(
-        expression,
-        None,
-        &HashMap::new(),
-        &state.model,
-        &state.signatures,
-    ) {
+    match evaluate_constant_cached(expression, &state.model, &state.signatures, cache) {
         Some(ConstantValue::Bool(value)) => Some(value),
+        _ => None,
+    }
+}
+
+/// The operands of an `==` or `!=` comparison, the only expressions whose
+/// constant value async-gap analysis consults.
+///
+/// Collectors fold just these operands. Folding every visited expression
+/// re-evaluates a library constant's initializer chain at each reference,
+/// which is quadratic in the length of `const` alias chains.
+pub(crate) fn equality_operands(expression: Expr<'_>) -> Option<[Expr<'_>; 2]> {
+    match expression {
+        Expr::Binary(binary) if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) => {
+            Some([binary.left(), binary.right()])
+        }
         _ => None,
     }
 }
@@ -518,8 +533,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             self.semantics.never.insert(key(expression));
         }
-        if let Some(value) = constant_bool(expression, state) {
-            self.semantics.constants.insert(key(expression), value);
+        // Parenthesized operands are skipped like every other parenthesis.
+        for operand in equality_operands(expression).into_iter().flatten() {
+            if !matches!(operand, Expr::Paren(_))
+                && let Some(value) = constant_bool(operand, state, self.ctx.constant_cache())
+            {
+                self.semantics.constants.insert(key(operand), value);
+            }
         }
         match expression {
             Expr::Ident(identifier)
@@ -751,6 +771,44 @@ void use(Holder holder, BuildContext context) {
         inference::analyze(
             &CheckCascadeCallbacks,
             Path::new("cascade_callbacks.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+    }
+
+    struct CheckEqualityConstants;
+
+    impl Rule for CheckEqualityConstants {
+        fn prepare<'a>(
+            &self,
+            program: Program<'a>,
+            ctx: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
+            // Comparison operands fold; alias initializers, the negation, the
+            // comparisons themselves and the shadowing parameter do not. The
+            // second walk reads the file's warm constant cache.
+            for _ in 0..2 {
+                let mut values: Vec<_> = collect(program, ctx).constants.into_values().collect();
+                values.sort_unstable();
+                assert_eq!(values, [false, true, true, true, true]);
+            }
+            RulePreparation::Diagnostics(Vec::new())
+        }
+    }
+
+    #[test]
+    fn constants_are_folded_only_for_equality_operands() {
+        let source = r"
+const base = false;
+const negated = !base;
+const aliased = negated;
+bool compare() => aliased == false;
+bool again() => aliased != true;
+bool shadowed(bool aliased) => aliased == true;
+";
+        inference::analyze(
+            &CheckEqualityConstants,
+            Path::new("equality_constants.dart"),
             source,
             &FalconConfig::default(),
         );

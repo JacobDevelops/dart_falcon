@@ -938,7 +938,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
                 self.name,
                 Severity::Warning,
                 "observed expression",
-                self.context.file_path.to_string_lossy().into_owned(),
+                self.context.file_path().to_string_lossy().into_owned(),
                 falcon_diagnostics::Span {
                     start: node.span().start,
                     end: node.span().end,

@@ -19,7 +19,7 @@ impl Rule for FileNames {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(file_name) = ctx.file_path.file_name().and_then(|name| name.to_str()) else {
+        let Some(file_name) = ctx.file_path().file_name().and_then(|name| name.to_str()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         if valid_file_name(file_name) {

@@ -148,8 +148,8 @@ fn check_members<'a>(
                         _ => return false,
                     };
                     matches!((owner.as_ref(), &fact.declaring_type),
-                        (Some(DeclarationIdentity::Project { library: own_library, .. }),
-                         DeclarationIdentity::Project { library, name: declaring_name })
+                        (Some(DeclarationIdentity::Library { library: own_library, .. }),
+                         DeclarationIdentity::Library { library, name: declaring_name })
                             if own_library == library && declaring_name == declared_name.name())
                         && declared_members.any(|member| matches!(member,
                             ClassMember::Getter(getter) if getter.name().name() == name && getter.body().is_none()))

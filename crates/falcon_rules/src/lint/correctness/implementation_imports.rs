@@ -20,7 +20,7 @@ impl Rule for ImplementationImports {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(own_package) = source_package(ctx.file_path) else {
+        let Some(own_package) = source_package(ctx.file_path()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let mut diags = Vec::new();

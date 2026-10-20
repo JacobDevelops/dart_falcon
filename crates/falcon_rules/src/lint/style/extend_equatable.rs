@@ -30,7 +30,7 @@ impl Rule for ExtendEquatable {
             .and_then(|value| value.as_str())
             .and_then(|pattern| Regex::new(pattern).ok())
             .is_some_and(|pattern| {
-                ctx.file_path
+                ctx.file_path()
                     .file_name()
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| pattern.is_match(name))
@@ -64,10 +64,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if !self.file_matches && !self.class_pattern.as_ref().is_some_and(|pattern| pattern.is_match(name.name())) {
             return StructuralTraversal::SkipChildren;
         }
-        let (Some(identities), Some(signatures)) = (self.ctx.identities, self.ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (self.ctx.identities(), self.ctx.signatures()) else {
             return StructuralTraversal::SkipChildren;
         };
-        let model = SemanticModel::new(self.ctx.file_path, self.ctx.parsed, identities, self.ctx.types);
+        let model = SemanticModel::new(self.ctx.file_path(), self.ctx.parsed(), identities, self.ctx.types());
         let Some(identity) = model.resolve_name(name.name()) else {
             return StructuralTraversal::SkipChildren;
         };

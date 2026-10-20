@@ -76,7 +76,7 @@ impl<'a> Collector<'a> {
                     })
                 } else if matches!(field.object(), Expr::Ident(_)) {
                     Some(Reference {
-                        text: &self.ctx.source[expression.span().start..expression.span().end],
+                        text: &self.ctx.source()[expression.span().start..expression.span().end],
                         declaration: match field.object() {
                             Expr::Ident(identifier) => {
                                 state.environment.binding_declaration(identifier.name())

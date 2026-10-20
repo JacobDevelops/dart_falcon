@@ -34,7 +34,7 @@ pub(super) fn prepare_resources<'a>(
     ctx: &'a AnalyzeContext<'a>,
     provided_instances: bool,
 ) -> RulePreparation<'a> {
-    let enabled = ctx.identities.is_some()
+    let enabled = ctx.identities().is_some()
         && program
             .imports()
             .any(|import| riverpod_uri(&import.uri().value()));
@@ -234,7 +234,7 @@ impl<'a> Collector<'a> {
             && !["riverpod", "flutter_riverpod", "hooks_riverpod"]
                 .iter()
                 .any(|package| {
-                    self.ctx.identities.is_some_and(|identities| {
+                    self.ctx.identities().is_some_and(|identities| {
                         identities.is_package_declaration(&identity, package, identity.name())
                     })
                 })

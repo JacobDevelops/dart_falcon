@@ -32,10 +32,10 @@ impl Rule for AlwaysPassGlobalKey {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(index), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(index), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, index, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), index, ctx.types());
         let mut fields = Vec::new();
         // Index declaration headers only; the shared semantic walk observes uses.
         for declaration in program.declarations() {

@@ -42,7 +42,7 @@ fn check_border_radius_only_call(
         && field.field().name() == "only"
         && all_border_radii_equal(args)
     {
-        let source = ctx.source;
+        let source = ctx.source();
         let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
         let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 

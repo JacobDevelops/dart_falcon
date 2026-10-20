@@ -63,25 +63,26 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(package) = crate::cross_file::enclosing_package(ctx.file_path) else {
+        let Some(package) = crate::cross_file::enclosing_package(ctx.file_path()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let Some(state) = SemanticState::new(program, ctx) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         if ctx
-            .identities
+            .identities()
             .and_then(|identities| {
-                let (source, annotations) = identities.library_source_annotations(ctx.file_path)?;
+                let (source, annotations) =
+                    identities.library_source_annotations(ctx.file_path())?;
                 deprecation(
                     annotations.iter().map(|node| node.cast::<Annotation>()),
-                    SemanticModel::new(source, &annotations.first()?.file, identities, ctx.types),
-                    ctx.signatures,
+                    SemanticModel::new(source, &annotations.first()?.file, identities, ctx.types()),
+                    ctx.signatures(),
                 )
             })
             .is_some()
             || program.library_directive().is_some_and(|library| {
-                deprecation(library.annotations(), state.model, ctx.signatures).is_some()
+                deprecation(library.annotations(), state.model, ctx.signatures()).is_some()
             })
         {
             return RulePreparation::Diagnostics(Vec::new());
@@ -89,8 +90,8 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         let mut frontier = Frontier {
             ctx,
             model: state.model,
-            signatures: ctx.signatures,
-            identities: ctx.identities,
+            signatures: ctx.signatures(),
+            identities: ctx.identities(),
             owner: None,
             superclass: None,
             declaration: None,
@@ -144,14 +145,14 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         {
             let Some(crate::cross_file::ResolvedRef::Path(path)) =
                 crate::cross_file::resolve_directive_uri(
-                    ctx.file_path,
+                    ctx.file_path(),
                     &uri.value(),
                     Some(&package),
                 )
             else {
                 continue;
             };
-            let Some(identities) = ctx.identities else {
+            let Some(identities) = ctx.identities() else {
                 continue;
             };
             let Some(file) = identities.file(&path) else {
@@ -162,8 +163,8 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 && let Some(node) = annotations.first()
                 && let Some(message) = deprecation(
                     annotations.iter().map(|node| node.cast::<Annotation>()),
-                    SemanticModel::new(&path, &node.file, identities, ctx.types),
-                    ctx.signatures,
+                    SemanticModel::new(&path, &node.file, identities, ctx.types()),
+                    ctx.signatures(),
                 )
             {
                 let name = identities
@@ -188,9 +189,9 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             }
         }
         let sdk_loaded = ctx
-            .identities
+            .identities()
             .is_some_and(|identities| identities.has_sdk_sources());
-        let scopes = DocScopes::new(program, &state.model, ctx.source);
+        let scopes = DocScopes::new(program, &state.model, ctx.source());
         let resolver = DocResolver::new(
             program,
             &state.model,
@@ -198,7 +199,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             &scopes,
             sdk_loaded,
         );
-        for block in ctx.tree().doc_blocks(ctx.source) {
+        for block in ctx.tree().doc_blocks(ctx.source()) {
             let Some(scope) = scopes.scope_for(&block) else {
                 continue;
             };
@@ -990,7 +991,7 @@ impl<'ctx> Uses<'ctx> {
 
     /// Reports a deprecated target in this package outside deprecated declarations.
     fn emit(&mut self, target: &Target) {
-        let Some(identities) = self.ctx.identities else {
+        let Some(identities) = self.ctx.identities() else {
             return;
         };
         let Some((path, annotations)) = identities
@@ -1027,11 +1028,11 @@ impl<'ctx> Uses<'ctx> {
         let Some(annotation) = annotations.first() else {
             return;
         };
-        let model = SemanticModel::new(path, &annotation.file, identities, self.ctx.types);
+        let model = SemanticModel::new(path, &annotation.file, identities, self.ctx.types());
         let Some(message) = deprecation(
             annotations.iter().map(|node| node.cast::<Annotation>()),
             model,
-            self.ctx.signatures,
+            self.ctx.signatures(),
         ) else {
             return;
         };
@@ -1138,8 +1139,8 @@ impl<'ctx> Uses<'ctx> {
             .ctx
             .tree()
             .tokens_in(
-                self.ctx.source,
-                Span::new(index.span().end, self.ctx.source.len()),
+                self.ctx.source(),
+                Span::new(index.span().end, self.ctx.source().len()),
             )
             .find(|token| token.kind() == TokenKind::RBracket)
             .map_or(index.span().end, |token| token.span().end);
@@ -1148,10 +1149,10 @@ impl<'ctx> Uses<'ctx> {
 
     fn extension(&self, name: QualifiedName<'_>) -> Option<DeclarationIdentity> {
         SemanticModel::new(
-            self.ctx.file_path,
-            self.ctx.parsed,
-            self.ctx.identities?,
-            self.ctx.types,
+            self.ctx.file_path(),
+            self.ctx.parsed(),
+            self.ctx.identities()?,
+            self.ctx.types(),
         )
         .resolve_extension(name)
     }
@@ -1168,7 +1169,7 @@ impl<'ctx> Uses<'ctx> {
     {
         let selector = self
             .ctx
-            .identities?
+            .identities()?
             .static_member_selector(owner, name, write)?;
         Some(Target {
             owner: owner.clone(),
@@ -1290,7 +1291,7 @@ impl<'ctx> Uses<'ctx> {
                     let owner = owner.identity.clone()?;
                     let selector = if *is_static {
                         self.ctx
-                            .identities?
+                            .identities()?
                             .static_member_selector(&owner, id.name(), write)?
                             .into()
                     } else {
@@ -1329,7 +1330,7 @@ impl<'ctx> Uses<'ctx> {
                         owner: identity.clone(),
                         selector: self
                             .ctx
-                            .identities?
+                            .identities()?
                             .static_member_selector(identity, id.name(), write)?
                             .into(),
                         name: id.name().into(),
@@ -1444,7 +1445,7 @@ impl<'ctx> Uses<'ctx> {
                         let owner = state.model.unaliased(owner);
                         let selector = self
                             .ctx
-                            .identities?
+                            .identities()?
                             .static_member_selector(&owner, field.name(), write)?
                             .into();
                         return Some(Target {
@@ -1466,7 +1467,7 @@ impl<'ctx> Uses<'ctx> {
     }
 
     fn arguments(&mut self, target: &Target, args: ArgList<'_>) {
-        for parameter in parameter_targets(target, args, self.ctx.identities) {
+        for parameter in parameter_targets(target, args, self.ctx.identities()) {
             self.report(&parameter);
         }
     }
@@ -1839,7 +1840,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                                 .ctx
                                 .tree()
                                 .tokens_in(
-                                    self.ctx.source,
+                                    self.ctx.source(),
                                     Span::new(callee.span().start, args.span().start),
                                 )
                                 .rfind(|token| !token.is_trivia())

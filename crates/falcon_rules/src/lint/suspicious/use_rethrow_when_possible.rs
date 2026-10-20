@@ -60,7 +60,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_catch_clause(&mut self, node: CatchClause<'a>) -> StructuralTraversal {
         self.targets.push(self.target.take());
         self.target = node.exception_var()
-            .and_then(|var| self.ctx.tree().tokens_in(self.ctx.source, var.span()).next())
+            .and_then(|var| self.ctx.tree().tokens_in(self.ctx.source(), var.span()).next())
             .map(|token| token.text());
         StructuralTraversal::Continue
     }

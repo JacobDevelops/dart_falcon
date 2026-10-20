@@ -31,7 +31,7 @@ impl Rule for AlwaysErrorRule {
             "always_error",
             Severity::Error,
             "test error",
-            ctx.file_path.to_string_lossy().to_string(),
+            ctx.file_path().to_string_lossy().to_string(),
             Span { start: 0, end: 0 },
         )])
     }
@@ -143,9 +143,9 @@ fn test_analyze_context_fields() {
 
     let ctx = AnalyzeContext::new(path, &config, &parsed);
 
-    assert_eq!(ctx.file_path, path);
-    assert_eq!(ctx.source, source);
-    assert_eq!(ctx.file_path.to_string_lossy(), "test.dart");
+    assert_eq!(ctx.file_path(), path);
+    assert_eq!(ctx.source(), source);
+    assert_eq!(ctx.file_path().to_string_lossy(), "test.dart");
 }
 
 #[test]

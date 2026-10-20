@@ -38,9 +38,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             _ => None,
         };
         if let Some(superclass) = superclass
-            && let Some(identities) = self.ctx.identities
+            && let Some(identities) = self.ctx.identities()
             && let ResolvedType::Interface { identity, .. } =
-                SemanticModel::new(self.ctx.file_path, self.ctx.parsed, identities, self.ctx.types)
+                SemanticModel::new(self.ctx.file_path(), self.ctx.parsed(), identities, self.ctx.types())
                     .resolve_type(superclass)
             && identities.is_package_declaration(&identity, "equatable", "Equatable")
         {

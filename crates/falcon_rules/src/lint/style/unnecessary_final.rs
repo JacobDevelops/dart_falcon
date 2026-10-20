@@ -72,7 +72,7 @@ impl Collector<'_, '_> {
         if let Some(token) = self
             .ctx
             .tree()
-            .keywords_in(self.ctx.source, Span::new(start, end), TokenKind::Final)
+            .keywords_in(self.ctx.source(), Span::new(start, end), TokenKind::Final)
             .next()
         {
             self.report_final(Span::new(token.offset(), token.offset() + token.len()));
@@ -153,7 +153,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             && let Some(keyword) = self
                 .ctx
                 .tree()
-                .keywords_in(self.ctx.source, Span::new(variable.span().start, variable.name().span().start), TokenKind::Final)
+                .keywords_in(self.ctx.source(), Span::new(variable.span().start, variable.name().span().start), TokenKind::Final)
                 .next()
             && keyword.offset() == variable.span().start
         {

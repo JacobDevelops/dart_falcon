@@ -121,11 +121,11 @@ fn library_annotation_names<'a>(
     program: Program<'a>,
     ctx: &AnalyzeContext<'a>,
 ) -> HashSet<&'a str> {
-    if ctx.identities.is_some() && ctx.signatures.is_some() {
+    if ctx.identities().is_some() && ctx.signatures().is_some() {
         return HashSet::new();
     }
     let mut programs = vec![program];
-    if let Some(library) = ctx.library {
+    if let Some(library) = ctx.library() {
         programs.extend(library.siblings().iter().copied());
     }
     let annotation_types = programs
@@ -224,7 +224,7 @@ fn is_library_annotation(
     local_names: &HashSet<&str>,
     ctx: &AnalyzeContext,
 ) -> bool {
-    if ctx.identities.is_some() && ctx.signatures.is_some() {
+    if ctx.identities().is_some() && ctx.signatures().is_some() {
         return canonical_library_annotation(annotation, ctx);
     }
     let Some(last) = annotation.name().next_back() else {
@@ -246,10 +246,10 @@ fn is_library_annotation(
 }
 
 fn canonical_library_annotation(annotation: Annotation<'_>, ctx: &AnalyzeContext) -> bool {
-    let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+    let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
         return false;
     };
-    let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+    let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
     let Some(name) = QualifiedName::from_identifiers(annotation.name()) else {
         return false;
     };
@@ -278,7 +278,7 @@ fn import_exposes(import: ImportDirective<'_>, name: &str) -> bool {
 
 fn declared_names<'a>(program: Program<'a>, ctx: &AnalyzeContext<'a>) -> HashSet<&'a str> {
     let programs = std::iter::once(program).chain(
-        ctx.library
+        ctx.library()
             .into_iter()
             .flat_map(|library| library.siblings().iter().copied()),
     );
@@ -315,16 +315,16 @@ fn late_trust_pragma(
     declared_names: &HashSet<&str>,
     ctx: &AnalyzeContext,
 ) -> bool {
-    let canonical = ctx.identities.is_some_and(|identities| {
+    let canonical = ctx.identities().is_some_and(|identities| {
         QualifiedName::from_identifiers(annotation.name())
             .and_then(|name| {
-                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+                SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
                     .resolve_sdk_member(name)
             })
             .is_some_and(|identity| identity.is_sdk("dart:core", "pragma"))
     });
     (canonical
-        || (ctx.identities.is_none()
+        || (ctx.identities().is_none()
             && annotation.name().count() == 1
             && annotation.name().next().unwrap().name() == "pragma"
             && !declared_names.contains("pragma")))

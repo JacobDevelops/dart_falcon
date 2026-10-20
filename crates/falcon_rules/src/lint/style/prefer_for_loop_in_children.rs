@@ -48,7 +48,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         else {
             return;
         };
-        if !self.ctx.identities.is_some_and(|index| {
+        if !self.ctx.identities().is_some_and(|index| {
             index.is_package_declaration(&identity, "flutter", identity.name())
         }) {
             return;

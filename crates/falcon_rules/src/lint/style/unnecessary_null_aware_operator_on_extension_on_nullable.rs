@@ -140,7 +140,7 @@ impl<'a> Collector<'a> {
         else {
             return false;
         };
-        self.ctx.types.is_some_and(|types| {
+        self.ctx.types().is_some_and(|types| {
             matches!(
                 types.member_lookup_identity(identity, member),
                 MemberResult::Found(_)
@@ -152,7 +152,7 @@ impl<'a> Collector<'a> {
         let Some(token) = self
             .ctx
             .tree()
-            .tokens_in(self.ctx.source, Span::new(from, to))
+            .tokens_in(self.ctx.source(), Span::new(from, to))
             .find(|token| token.kind() == kind)
         else {
             return;
@@ -173,7 +173,7 @@ impl<'a> Collector<'a> {
             .ctx
             .tree()
             .tokens_in(
-                self.ctx.source,
+                self.ctx.source(),
                 Span::new(start.saturating_sub(1), start + 3),
             )
             .find(|token| {

@@ -134,7 +134,7 @@ fn boolean_expectation(
     ["test", "test_core", "test_api", "flutter_test", "matcher"]
         .iter()
         .any(|package| {
-            ctx.identities
+            ctx.identities()
                 .is_some_and(|index| index.is_package_declaration(&identity, package, name))
         })
         .then_some(value)
@@ -157,7 +157,7 @@ fn known_non_matcher(
                 ["matcher", "test", "test_core", "test_api", "flutter_test"]
                     .iter()
                     .any(|package| {
-                        ctx.identities.is_some_and(|index| {
+                        ctx.identities().is_some_and(|index| {
                             index.is_package_declaration(identity, package, "Matcher")
                         })
                     })

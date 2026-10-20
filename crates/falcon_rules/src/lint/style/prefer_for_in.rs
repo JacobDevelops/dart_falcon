@@ -84,7 +84,7 @@ impl<'a> Collector<'a> {
         let parent = self
             .ctx
             .tree()
-            .node(self.ctx.source, declaration)?
+            .node(self.ctx.source(), declaration)?
             .parent()?;
         let declared_type = if let Some(parameter) = FormalParam::cast(parent) {
             parameter.param_type()

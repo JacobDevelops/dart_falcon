@@ -79,9 +79,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 ),
                 _ => return StructuralTraversal::SkipChildren,
             };
-            let immutable = match (ctx.identities, ctx.signatures) {
+            let immutable = match (ctx.identities(), ctx.signatures()) {
                 (Some(identities), Some(signatures)) => {
-                    SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+                    SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
                         .resolve_name(name)
                         .map_or(Truth::Unknown, |identity| {
                             signatures.has_immutable_supertype(&identity, false)
@@ -105,7 +105,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     }
                     _ => continue,
                 };
-                let start = first_token_after_annotations(annotations, span, ctx.tree(), ctx.source);
+                let start = first_token_after_annotations(annotations, span, ctx.tree(), ctx.source());
                 self.diags.push(ctx.diagnostic(
             "avoid-equals-and-hash-code-on-mutable-classes",
             format!(
@@ -114,7 +114,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             Span::new(
                 start,
                 ctx.tree()
-                    .tokens_in(ctx.source, Span::new(start, span.end))
+                    .tokens_in(ctx.source(), Span::new(start, span.end))
                     .next()
                     .map_or(start, |token| token.offset() + token.len()),
             ),

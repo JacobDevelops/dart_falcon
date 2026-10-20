@@ -64,12 +64,12 @@ impl Rule for AvoidUnnecessarySuper {
         // libraries have been indexed completely.
         if program.part_of_directive().is_some() || program.part_directives().next().is_some() {
             closed.clear();
-        } else if let Some(identities) = ctx.identities {
+        } else if let Some(identities) = ctx.identities() {
             let model = falcon_analyze::SemanticModel::new(
-                ctx.file_path,
-                ctx.parsed,
+                ctx.file_path(),
+                ctx.parsed(),
                 identities,
-                ctx.types,
+                ctx.types(),
             );
             for declaration in program.declarations() {
                 let superclass = match declaration {

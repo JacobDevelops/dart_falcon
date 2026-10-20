@@ -37,7 +37,7 @@ impl Rule for UnnecessaryLibraryDirective {
         if !program.part_directives().is_empty() || !lib.annotations().is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        if has_doc_comment(ctx.tree(), ctx.source, lib.span().start) {
+        if has_doc_comment(ctx.tree(), ctx.source(), lib.span().start) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Diagnostics(vec![ctx.diagnostic(

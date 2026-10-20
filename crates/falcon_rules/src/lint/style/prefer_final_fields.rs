@@ -44,7 +44,7 @@ impl Rule for PreferFinalFields {
         // library, or part/part-of directives with no library context at all.
         let has_part_directives =
             !program.part_directives().is_empty() || program.part_of_directive().is_some();
-        match ctx.library {
+        match ctx.library() {
             Some(lib) if lib.has_unresolved_parts() => {
                 return RulePreparation::Diagnostics(Vec::new());
             }
@@ -57,7 +57,7 @@ impl Rule for PreferFinalFields {
         let mut written = Written {
             names: HashSet::new(),
         };
-        if let Some(lib) = ctx.library {
+        if let Some(lib) = ctx.library() {
             for sibling in lib.siblings() {
                 written.visit_program(*sibling);
             }
@@ -85,7 +85,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             // Initialization eligibility is local; write eligibility is known
             // only after every expression in this file has been observed.
-            check_class(members, self.ctx.source, &mut self.candidates);
+            check_class(members, self.ctx.source(), &mut self.candidates);
         }
         StructuralTraversal::Continue
     }
@@ -230,7 +230,7 @@ mod tests {
     use std::path::PathBuf;
 
     /// Run the rule over file `target`, building the real library grouping so
-    /// `ctx.library` mirrors production (owner + part siblings, unresolved flag).
+    /// `ctx.library()` mirrors production (owner + part siblings, unresolved flag).
     fn run_in_library(files: &[(&str, &str)], target: usize) -> usize {
         let parsed: Vec<_> = files
             .iter()

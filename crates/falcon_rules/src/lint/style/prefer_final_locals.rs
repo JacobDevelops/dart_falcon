@@ -349,7 +349,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
                 .ctx
                 .tree()
                 .keywords_in(
-                    self.ctx.source,
+                    self.ctx.source(),
                     Span::new(span.start, name.span().start),
                     TokenKind::Final,
                 )

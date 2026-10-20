@@ -26,7 +26,7 @@ pub(super) fn lacks_collection_member(
     {
         return false;
     }
-    let (Some(types), ResolvedType::Interface { identity, .. }) = (ctx.types, ty) else {
+    let (Some(types), ResolvedType::Interface { identity, .. }) = (ctx.types(), ty) else {
         return false;
     };
     // The identity index proves positive facts; TypeIndex still supplies negative proofs.

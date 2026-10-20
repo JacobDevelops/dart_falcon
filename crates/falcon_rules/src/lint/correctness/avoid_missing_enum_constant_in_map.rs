@@ -201,7 +201,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         let owner = match identity {
-            DeclarationIdentity::Project { library, name } => {
+            DeclarationIdentity::Library { library, name } => {
                 ConstantDeclaration::Project(*library, name.clone())
             }
             DeclarationIdentity::Sdk { library, name } => {

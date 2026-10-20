@@ -21,7 +21,7 @@ impl Rule for AvoidUnnecessaryGetter {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let ignore_upcast = crate::lint::options::for_rule(ctx, "avoid-unnecessary-getter")
@@ -30,7 +30,7 @@ impl Rule for AvoidUnnecessaryGetter {
             .unwrap_or(true);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             signatures,
             ignore_upcast,
             diagnostics: Vec::new(),

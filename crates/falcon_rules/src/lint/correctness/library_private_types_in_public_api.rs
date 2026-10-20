@@ -29,7 +29,7 @@ impl Rule for LibraryPrivateTypesInPublicApi {
     ) -> RulePreparation<'a> {
         if std::iter::once(program)
             .chain(
-                ctx.library
+                ctx.library()
                     .into_iter()
                     .flat_map(|library| library.siblings().iter().copied()),
             )
@@ -41,11 +41,15 @@ impl Rule for LibraryPrivateTypesInPublicApi {
         {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model =
-            falcon_analyze::SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = falcon_analyze::SemanticModel::new(
+            ctx.file_path(),
+            ctx.parsed(),
+            identities,
+            ctx.types(),
+        );
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,

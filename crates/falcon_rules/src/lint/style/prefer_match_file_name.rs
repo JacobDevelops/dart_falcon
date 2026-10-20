@@ -20,15 +20,15 @@ impl Rule for PreferMatchFileName {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let stem = ctx
-            .file_path
+            .file_path()
             .file_name()
             .and_then(|name| name.to_str())
             .and_then(|name| name.strip_suffix(".dart"));
         let Some(stem) = stem.filter(|stem| !stem.is_empty() && !stem.contains('.')) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        if crate::lint::declarations::has_test_file_suffix(ctx.file_path)
-            || crate::lint::declarations::in_test_directory(ctx.file_path)
+        if crate::lint::declarations::has_test_file_suffix(ctx.file_path())
+            || crate::lint::declarations::in_test_directory(ctx.file_path())
         {
             return RulePreparation::Diagnostics(Vec::new());
         }

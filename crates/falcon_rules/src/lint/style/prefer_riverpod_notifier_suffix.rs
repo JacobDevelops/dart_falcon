@@ -101,7 +101,7 @@ pub(super) fn prepare<'a>(
     ctx: &'a AnalyzeContext<'a>,
     naming: Naming,
 ) -> RulePreparation<'a> {
-    if falcon_analyze::resolve::is_generated_dart_file(ctx.file_path) {
+    if falcon_analyze::resolve::is_generated_dart_file(ctx.file_path()) {
         return RulePreparation::Diagnostics(Vec::new());
     }
     RulePreparation::Semantic(Box::new(Collector {
@@ -133,7 +133,7 @@ impl<'a> Collector<'a> {
             }
             let Some(stem) = self
                 .ctx
-                .file_path
+                .file_path()
                 .file_stem()
                 .and_then(|stem| stem.to_str())
             else {
@@ -185,7 +185,7 @@ impl<'a> Collector<'a> {
     }
 
     fn generated_provider(&mut self, function: FunctionDecl<'a>, state: &SemanticState<'a>) {
-        if let Some(identities) = self.ctx.identities
+        if let Some(identities) = self.ctx.identities()
             && function.annotations().any(|annotation| {
                 falcon_analyze::QualifiedName::from_identifiers(annotation.name())
                     .and_then(|name| state.model.resolve_annotation_before_generation(name))

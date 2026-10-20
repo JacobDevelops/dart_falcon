@@ -69,7 +69,7 @@ fn widget_kind(ty: &ResolvedType, state: &SemanticState<'_>) -> WidgetContext {
         }
         match state.signatures.superclass(identity) {
             Some(parent) => current = parent,
-            None if matches!(identity, DeclarationIdentity::Project { .. })
+            None if state.model.identities().is_project(identity)
                 && matches!(
                     state.signatures.type_kind(identity),
                     Some(TypeKind::Class | TypeKind::MixinClass | TypeKind::Enum)

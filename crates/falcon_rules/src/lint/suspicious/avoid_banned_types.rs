@@ -21,7 +21,7 @@ impl Rule for AvoidBannedTypes {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let entries = entries(ctx, "avoid-banned-types");
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         if entries.is_empty() {
@@ -30,7 +30,7 @@ impl Rule for AvoidBannedTypes {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             entries,
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             diagnostics: Vec::new(),
             ancestors: Vec::new(),
         }))

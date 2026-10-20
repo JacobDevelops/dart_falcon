@@ -109,7 +109,7 @@ impl<'a> Collector<'a> {
 fn same_pattern(left: Pattern<'_>, right: Pattern<'_>, ctx: &AnalyzeContext<'_>) -> bool {
     let tokens = |span| {
         ctx.tree()
-            .tokens_in(ctx.source, span)
+            .tokens_in(ctx.source(), span)
             .filter(|token| !token.is_trivia())
             .map(|token| (token.kind(), token.text()))
     };

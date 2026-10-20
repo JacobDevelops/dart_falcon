@@ -17,8 +17,8 @@ impl Rule for PreferCorrectTestFileName {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let in_test = in_test_runner_directory(ctx.file_path);
-        let correct_name = crate::lint::declarations::has_test_file_suffix(ctx.file_path);
+        let in_test = in_test_runner_directory(ctx.file_path());
+        let correct_name = crate::lint::declarations::has_test_file_suffix(ctx.file_path());
         if !in_test || correct_name {
             return RulePreparation::Diagnostics(Vec::new());
         }

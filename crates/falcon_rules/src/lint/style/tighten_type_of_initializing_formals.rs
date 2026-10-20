@@ -46,7 +46,7 @@ impl Rule for TightenTypeOfInitializingFormals {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if ctx.identities.is_none() {
+        if ctx.identities().is_none() {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let mut asserts = NonNullAsserts {
@@ -229,7 +229,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let ty = state.environment.lookup(identifier.name());
         let nullable = syntactically_nullable
             || matches!(ty, ResolvedType::Dynamic)
-            || nullability(&ty, &state.signatures, self.ctx.types) == Truth::Yes;
+            || nullability(&ty, &state.signatures, self.ctx.types()) == Truth::Yes;
         if nullable && self.reported.insert((param.start, param.end)) {
             self.diagnostics.push(self.ctx.diagnostic(
                 "tighten-type-of-initializing-formals",

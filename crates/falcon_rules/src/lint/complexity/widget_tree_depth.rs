@@ -87,7 +87,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             crate::lint::flutter::scoped_constructor_invocation(node, state).map_or(
                 (false, false),
                 |(identity, _, _)| {
-                    let ignored = self.ctx.identities.is_some_and(|index| {
+                    let ignored = self.ctx.identities().is_some_and(|index| {
                         index.is_package_declaration(&identity, "flutter", "SizedBox")
                     });
                     let widget = !ignored

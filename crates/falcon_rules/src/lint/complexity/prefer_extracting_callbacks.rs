@@ -37,15 +37,15 @@ impl Rule for PreferExtractingCallbacks {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(CallbackCollector {
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             signatures,
             widget: DeclarationIdentity::flutter("Widget"),
             cfg: cfg(ctx),
-            source: ctx.source,
+            source: ctx.source(),
             ctx,
             candidates: Vec::new(),
             pending: std::collections::HashMap::new(),

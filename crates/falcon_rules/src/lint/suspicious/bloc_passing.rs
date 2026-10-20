@@ -50,7 +50,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 return;
             }
             if matches!(self.passing, Passing::BlocToWidget)
-                && self.ctx.identities.is_some_and(|index| {
+                && self.ctx.identities().is_some_and(|index| {
                     [
                         "BlocProvider",
                         "RepositoryProvider",
@@ -192,7 +192,7 @@ impl<'a> Collector<'a> {
         state
             .signatures
             .declaration_identities()
-            .filter(|identity| matches!(identity, DeclarationIdentity::Project { .. }))
+            .filter(|identity| state.model.identities().is_project(identity))
             .filter_map(|identity| {
                 let bloc = state.signatures.instantiated_supertype_matching(
                     &ResolvedType::interface_identity(identity.clone()),
@@ -201,7 +201,7 @@ impl<'a> Collector<'a> {
                 )?;
                 match bloc.arguments().first()? {
                     ResolvedType::Interface { identity, .. }
-                        if matches!(identity, DeclarationIdentity::Project { .. }) =>
+                        if state.model.identities().is_project(identity) =>
                     {
                         Some(identity.clone())
                     }

@@ -19,10 +19,10 @@ impl Rule for NoDuplicateCaseValues {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         let collector = Collector {
             model,
             signatures,

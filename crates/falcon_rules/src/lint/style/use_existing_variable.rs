@@ -125,7 +125,7 @@ impl<'a> Collector<'a> {
         let tokens = |expr: Expr<'a>| {
             self.ctx
                 .tree()
-                .tokens_in(self.ctx.source, expr.span())
+                .tokens_in(self.ctx.source(), expr.span())
                 .filter(|token| !token.is_trivia() || token.kind().is_comment())
         };
         tokens(left).zip(tokens(right)).all(|(a, b)| {

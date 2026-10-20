@@ -416,12 +416,12 @@ pub(crate) fn prepare_models<'a>(
     requirement: ModelRequirement,
     rule: &'static str,
 ) -> RulePreparation<'a> {
-    let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+    let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
         return RulePreparation::Diagnostics(Vec::new());
     };
     RulePreparation::Structural(Box::new(ModelCollector {
         ctx,
-        model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+        model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
         signatures,
         types: BlocTypes::new(program),
         kind,
@@ -496,7 +496,7 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
                 None
             };
             if let Some(identity) = root
-                && matches!(identity, DeclarationIdentity::Project { .. })
+                && self.model.identities().is_project(&identity)
                 && !self.roots.contains(&identity)
             {
                 self.roots.push(identity);

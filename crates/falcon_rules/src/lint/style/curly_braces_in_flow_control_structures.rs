@@ -27,7 +27,7 @@ impl Rule for CurlyBracesInFlowControlStructures {
         let collector = Collector {
             diags: Vec::new(),
             ctx,
-            source: ctx.source,
+            source: ctx.source(),
         };
         RulePreparation::Structural(Box::new(collector))
     }

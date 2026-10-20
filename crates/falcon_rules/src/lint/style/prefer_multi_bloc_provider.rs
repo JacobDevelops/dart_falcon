@@ -62,7 +62,7 @@ fn provider_args<'a>(
         _ => crate::lint::flutter::scoped_constructor_invocation(expression, state)?,
     };
     (matches!(constructor, "new" | "value")
-        && ctx.identities.is_some_and(|index| {
+        && ctx.identities().is_some_and(|index| {
             index.is_package_declaration(&identity, "flutter_bloc", "BlocProvider")
         }))
     .then_some(args)

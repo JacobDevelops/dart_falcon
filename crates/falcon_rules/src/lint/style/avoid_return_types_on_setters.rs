@@ -76,7 +76,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
     }
 
     fn visit_setter_decl(&mut self, node: cst::SetterDecl<'_>) -> StructuralTraversal {
-        if setter_has_return_type(node, self.ctx.tree(), self.ctx.source) {
+        if setter_has_return_type(node, self.ctx.tree(), self.ctx.source()) {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
                 "Avoid return types on setters.",

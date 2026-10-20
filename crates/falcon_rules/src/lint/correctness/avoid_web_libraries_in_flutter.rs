@@ -19,7 +19,7 @@ impl Rule for AvoidWebLibrariesInFlutter {
         if !program
             .imports()
             .any(|import| is_web_library(&import.uri().value()))
-            || !checks_web_imports(ctx.file_path)
+            || !checks_web_imports(ctx.file_path())
         {
             return RulePreparation::Diagnostics(Vec::new());
         }

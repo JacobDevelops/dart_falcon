@@ -58,7 +58,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
     ) -> RulePreparation<'a> {
         let has_part_directives =
             !program.part_directives().is_empty() || program.part_of_directive().is_some();
-        match ctx.library {
+        match ctx.library() {
             Some(library) if library.has_unresolved_parts() => {
                 return RulePreparation::Diagnostics(Vec::new());
             }
@@ -75,7 +75,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
         let names: HashSet<&str> = candidates.iter().map(|candidate| candidate.name).collect();
 
         let mut scopes = DeclarationScopes::of(program, 0);
-        if let Some(library) = ctx.library {
+        if let Some(library) = ctx.library() {
             for (file, sibling) in library.siblings().iter().enumerate() {
                 scopes.extend(DeclarationScopes::of(*sibling, file + 1));
             }
@@ -92,22 +92,14 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             .collect();
         let mut disqualified = HashSet::new();
         check_doc_uses(program, ctx, &state, &names, &owners, &mut disqualified);
-        if let Some(library) = ctx.library {
+        if let Some(library) = ctx.library() {
             for (file, (sibling, parsed)) in library
                 .siblings()
                 .iter()
                 .zip(library.sibling_parsed())
                 .enumerate()
             {
-                let sibling_ctx = AnalyzeContext {
-                    types: ctx.types,
-                    identities: ctx.identities,
-                    signatures: ctx.signatures,
-                    library: ctx.library,
-                    environment: ctx.environment,
-                    package_language_version: ctx.package_language_version,
-                    ..AnalyzeContext::new(ctx.file_path, ctx.config, parsed)
-                };
+                let sibling_ctx = ctx.for_file(library.sibling_paths()[file], parsed);
                 if let Some(state) = SemanticState::new(*sibling, &sibling_ctx) {
                     check_uses(
                         file + 1,
@@ -129,7 +121,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             scopes,
             disqualified,
             safe: SafeUses {
-                types: ctx.types,
+                types: ctx.types(),
                 names: Cow::Owned(names),
                 owners: Cow::Owned(owners),
                 resolved_owners: HashMap::new(),
@@ -224,10 +216,10 @@ fn check_uses<'a, 'n>(
     owners: &HashMap<DeclarationIdentity, OwnerKey>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
-    let program = ctx.parsed.program();
+    let program = ctx.parsed().program();
     check_doc_uses(program, ctx, &state, names, owners, disqualified);
     let mut safe = SafeUses {
-        types: ctx.types,
+        types: ctx.types(),
         names: Cow::Borrowed(names),
         owners: Cow::Borrowed(owners),
         resolved_owners: HashMap::new(),
@@ -245,9 +237,9 @@ fn check_doc_uses<'a, 'n>(
     owners: &HashMap<DeclarationIdentity, OwnerKey>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
-    let doc_scopes = DocScopes::new(program, &state.model, ctx.source);
+    let doc_scopes = DocScopes::new(program, &state.model, ctx.source());
     let resolver = DocResolver::new(program, &state.model, &state.signatures, &doc_scopes, false);
-    for block in ctx.tree().doc_blocks(ctx.source) {
+    for block in ctx.tree().doc_blocks(ctx.source()) {
         let Some(scope) = doc_scopes.scope_for(&block) else {
             continue;
         };
@@ -444,9 +436,9 @@ fn potentially_nullable<'a>(
             ..
         } => {
             matches!(bound.as_ref(), ResolvedType::Dynamic)
-                || nullability(bound, &state.signatures, ctx.types) == Truth::Yes
+                || nullability(bound, &state.signatures, ctx.types()) == Truth::Yes
         }
-        _ => nullability(&ty, &state.signatures, ctx.types) == Truth::Yes,
+        _ => nullability(&ty, &state.signatures, ctx.types()) == Truth::Yes,
     }
 }
 

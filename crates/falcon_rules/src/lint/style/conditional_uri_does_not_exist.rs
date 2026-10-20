@@ -55,13 +55,13 @@ impl Rule for ConditionalUriDoesNotExist {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let config = ctx
-            .environment
-            .and_then(|environment| environment.package_config(ctx.file_path));
+            .environment()
+            .and_then(|environment| environment.package_config(ctx.file_path()));
         let resolver = Resolver {
-            file: ctx.file_path,
+            file: ctx.file_path(),
             config,
             sdk_library: &|uri| {
-                let sdk = ctx.environment?.sdk(ctx.file_path)?;
+                let sdk = ctx.environment()?.sdk(ctx.file_path())?;
                 Some(sdk.library(uri).is_some())
             },
         };

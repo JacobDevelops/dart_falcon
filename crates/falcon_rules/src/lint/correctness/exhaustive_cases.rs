@@ -148,7 +148,7 @@ impl Collector<'_> {
             .ctx
             .tree()
             .tokens_in(
-                self.ctx.source,
+                self.ctx.source(),
                 Span::new(node.subject().span().end, node.span().end),
             )
             .find(|token| !token.is_trivia())

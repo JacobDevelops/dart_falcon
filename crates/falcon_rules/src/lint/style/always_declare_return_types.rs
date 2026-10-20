@@ -37,7 +37,7 @@ impl Rule for AlwaysDeclareReturnTypes {
         let collector = Collector {
             ctx,
             diags: Vec::new(),
-            in_test_directory: in_test_directory(ctx.file_path),
+            in_test_directory: in_test_directory(ctx.file_path()),
         };
         RulePreparation::Structural(Box::new(collector))
     }

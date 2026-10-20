@@ -41,7 +41,7 @@ impl Rule for LinesLongerThan80Chars {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let source = ctx.source;
+        let source = ctx.source();
         let lines = Lines::new(source);
         let long_lines: Vec<(usize, usize)> = (0..lines.starts.len())
             .filter_map(|index| {
@@ -219,7 +219,7 @@ fn literal_contains_path<'a>(
 
 /// Allow comment lines, including comments inside interpolations.
 fn allow_comment_lines(ctx: &AnalyzeContext, lines: &Lines<'_>, allowed: &mut [bool]) {
-    for token in ctx.tree().comment_tokens(ctx.source) {
+    for token in ctx.tree().comment_tokens(ctx.source()) {
         let lexeme = token.text();
         let first = lines.line_of(token.offset());
         if let Some(text) = lexeme.strip_prefix("///") {

@@ -47,10 +47,10 @@ impl Rule for PreferConstConstructorsInImmutables {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             declarations: program.declarations(),
@@ -168,10 +168,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 constructor.annotations(),
                 constructor.span(),
                 self.ctx.tree(),
-                self.ctx.source,
+                self.ctx.source(),
             );
             let end = self.ctx.tree()
-                .tokens_in(self.ctx.source, Span::new(start, constructor.span().end))
+                .tokens_in(self.ctx.source(), Span::new(start, constructor.span().end))
                 .next()
                 .map_or(start, |token| token.offset() + token.len());
             self.diagnostics.push(self.ctx.diagnostic(

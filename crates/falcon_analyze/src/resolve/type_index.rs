@@ -319,7 +319,7 @@ impl TypeIndex {
     pub fn type_kind_identity(&self, identity: &DeclarationIdentity) -> Option<TypeKind> {
         if self.external.is_none()
             && self.declarations.is_empty()
-            && matches!(identity, DeclarationIdentity::Project { .. })
+            && matches!(identity, DeclarationIdentity::Library { .. })
         {
             return self.type_kind(identity.name());
         }
@@ -365,7 +365,7 @@ impl TypeIndex {
         mut matches: impl FnMut(&DeclarationIdentity) -> bool,
     ) -> Truth {
         let found = if self.declarations.is_empty() && !self.types.is_empty() {
-            let DeclarationIdentity::Project { library, .. } = sub else {
+            let DeclarationIdentity::Library { library, .. } = sub else {
                 return Truth::Unknown;
             };
             self.walk_ancestors(sub.name(), |name, resolved| {
@@ -373,9 +373,9 @@ impl TypeIndex {
                     Some((name, _)) if matches!(resolved, Some(Resolved::Core(_))) => {
                         DeclarationIdentity::sdk("dart:core", name)
                     }
-                    _ => DeclarationIdentity::Project {
+                    _ => DeclarationIdentity::Library {
                         library: *library,
-                        name: name.to_string(),
+                        name: crate::InternedString::Shared(name.into()),
                     },
                 };
                 matches(&identity).then_some(())
@@ -1581,7 +1581,7 @@ mod tests {
             )],
             &identities,
         );
-        let identity = DeclarationIdentity::Project {
+        let identity = DeclarationIdentity::Library {
             library: identities.library(identities.file(path).unwrap()),
             name: "Bad".into(),
         };
@@ -2070,7 +2070,7 @@ mod tests {
             let source_marker = identities
                 .resolve_value_declaration(library, QualifiedName::prefixed("f", "immutable"))
                 .unwrap();
-            assert!(matches!(source_marker, DeclarationIdentity::Project { .. }));
+            assert!(matches!(source_marker, DeclarationIdentity::Library { .. }));
             assert!(identities.is_package_declaration(&source_marker, "meta", "immutable"));
             let identity = identities.resolve_declaration(library, "C".into()).unwrap();
             assert_eq!(index.is_immutable_type_identity(&identity), Truth::Yes);

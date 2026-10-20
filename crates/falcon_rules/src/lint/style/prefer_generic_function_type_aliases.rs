@@ -47,7 +47,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(params) = alias.legacy_params() else {
             return StructuralTraversal::SkipChildren;
         };
-        if !significant_tokens_in(ctx.tree(), ctx.source, params.span())
+        if !significant_tokens_in(ctx.tree(), ctx.source(), params.span())
             .next()
             .is_some_and(|token| token.kind() == TokenKind::LParen)
         {
@@ -55,7 +55,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         if let Some(keyword) = ctx
             .tree()
-            .keywords_in(ctx.source, alias.span(), TokenKind::Typedef)
+            .keywords_in(ctx.source(), alias.span(), TokenKind::Typedef)
             .next()
         {
             self.diags.push(ctx.diagnostic(

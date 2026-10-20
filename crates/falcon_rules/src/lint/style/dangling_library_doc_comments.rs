@@ -18,7 +18,7 @@ impl Rule for DanglingLibraryDocComments {
         let limit = first_directive(program, ctx)
             .map(|(offset, _)| offset)
             .or_else(|| program.declarations().map(|decl| decl.span().start).min())
-            .unwrap_or(ctx.source.len());
+            .unwrap_or(ctx.source().len());
         let comments = documentation_blocks(ctx, limit);
         let starts = dangling_starts(program, ctx, &comments);
         RulePreparation::Diagnostics(starts
@@ -86,7 +86,7 @@ fn dangling_starts(
             )
     }) {
         let start_line = end_line
-            + ctx.source[scanned..token.offset()]
+            + ctx.source()[scanned..token.offset()]
                 .bytes()
                 .filter(|b| *b == b'\n')
                 .count();
@@ -95,13 +95,13 @@ fn dangling_starts(
         }
         scanned = token.offset() + token.len();
         end_line = start_line
-            + ctx.source[token.offset()..scanned]
+            + ctx.source()[token.offset()..scanned]
                 .bytes()
                 .filter(|b| *b == b'\n')
                 .count();
     }
     let declaration_line = end_line
-        + ctx.source[scanned..offset]
+        + ctx.source()[scanned..offset]
             .bytes()
             .filter(|b| *b == b'\n')
             .count();
@@ -148,7 +148,7 @@ fn first_directive(program: Program<'_>, ctx: &AnalyzeContext) -> Option<(usize,
             annotations,
             span,
             ctx.tree(),
-            ctx.source,
+            ctx.source(),
         )
     };
     let mut directives = Vec::new();
@@ -203,12 +203,12 @@ fn documentation_blocks(ctx: &AnalyzeContext, limit: usize) -> Vec<DocBlock> {
         }
         let end = token.offset() + token.len();
         let start_line = line
-            + ctx.source[scanned..token.offset()]
+            + ctx.source()[scanned..token.offset()]
                 .bytes()
                 .filter(|b| *b == b'\n')
                 .count();
         let end_line = start_line
-            + ctx.source[token.offset()..end]
+            + ctx.source()[token.offset()..end]
                 .bytes()
                 .filter(|b| *b == b'\n')
                 .count();
@@ -217,8 +217,8 @@ fn documentation_blocks(ctx: &AnalyzeContext, limit: usize) -> Vec<DocBlock> {
         if let Some(previous) = blocks.last_mut()
             && previous.start >= metadata_end
             // Analyzer groups line docs across whitespace and ordinary comments.
-            && ctx.source[previous.start..].starts_with("///")
-            && ctx.source[token.offset()..].starts_with("///")
+            && ctx.source()[previous.start..].starts_with("///")
+            && ctx.source()[token.offset()..].starts_with("///")
         {
             if start_line > previous.end_line + 1 && previous.gap_start.is_none() {
                 previous.gap_start = Some(last_doc_start);

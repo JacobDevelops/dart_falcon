@@ -514,7 +514,7 @@ impl Collector<'_> {
         let ResolvedType::Interface { identity, .. } = receiver else {
             return None;
         };
-        match self.ctx.types?.member_lookup_identity(identity, name) {
+        match self.ctx.types()?.member_lookup_identity(identity, name) {
             MemberResult::Found(kind) => Some(kind),
             MemberResult::Absent | MemberResult::Unknown => None,
         }

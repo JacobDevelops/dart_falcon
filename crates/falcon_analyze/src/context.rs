@@ -13,7 +13,7 @@ use crate::resolve::{
     TypeParameterScope,
 };
 
-use crate::ParsedFile;
+use crate::{ConstantCache, ParsedFile};
 
 /// Lazily computed facts shared by all rules analyzing one file.
 #[derive(Default)]
@@ -21,6 +21,7 @@ pub struct AnalysisCache<'a> {
     flow_writes: OnceLock<Arc<FlowWrites>>,
     local_writes: OnceLock<LocalWrites>,
     globals: OnceLock<HashMap<&'a str, ResolvedType>>,
+    constants: ConstantCache,
 }
 
 struct LocalWrites {
@@ -33,30 +34,30 @@ struct LocalWrites {
 /// Resolving drivers attach declaration identities, type facts, and signatures.
 /// Non-resolving callers leave those optional indexes absent.
 pub struct AnalyzeContext<'a> {
-    pub file_path: &'a std::path::Path,
-    pub source: &'a str,
-    pub parsed: &'a Arc<ParsedFile>,
-    pub config: &'a FalconConfig,
+    file_path: &'a std::path::Path,
+    source: &'a str,
+    parsed: &'a Arc<ParsedFile>,
+    config: &'a FalconConfig,
     /// Cross-file type facts, when resolving analysis is enabled.
-    pub types: Option<&'a TypeIndex>,
+    types: Option<&'a TypeIndex>,
     /// Project-wide declaration identity index for rules that must distinguish
     /// type literals from values. Absent outside resolving analysis.
-    pub identities: Option<&'a IdentityIndex>,
+    identities: Option<&'a IdentityIndex>,
     /// Project-wide generic signatures and instantiated supertype facts.
-    pub signatures: Option<&'a SignatureIndex>,
+    signatures: Option<&'a SignatureIndex>,
     /// This file's library context — its part/owner siblings and the flag for an
     /// unresolved part. `None` when resolution is off or the file stands alone.
-    pub library: Option<&'a LibraryUnit<'a>>,
+    library: Option<&'a LibraryUnit<'a>>,
     /// Package configurations, language versions and the SDK of the run.
     /// `None` means no package configuration or SDK is known.
-    pub environment: Option<&'a AnalysisEnvironment>,
+    environment: Option<&'a AnalysisEnvironment>,
     /// The file's package `languageVersion`, cached by
     /// [`Self::with_environment`]; `None` when no package configuration
     /// covers the file. [`Self::language_version`] prefers the file's
     /// `// @dart` override, then this, then the analyzer's default.
-    pub package_language_version: Option<LanguageVersion>,
-    /// Per-file facts; create a fresh cache when constructing a context for another file.
-    pub cache: AnalysisCache<'a>,
+    package_language_version: Option<LanguageVersion>,
+    /// Per-file facts; use [`Self::for_file`] when switching files.
+    cache: AnalysisCache<'a>,
 }
 
 impl<'a> AnalyzeContext<'a> {
@@ -79,6 +80,52 @@ impl<'a> AnalyzeContext<'a> {
             package_language_version: None,
             cache: AnalysisCache::default(),
         }
+    }
+
+    /// Rebind shared analysis indexes to another file with fresh per-file facts.
+    /// The library context is not carried over; attach the target's with [`Self::with_library`].
+    pub fn for_file<'b>(
+        &self,
+        file_path: &'b std::path::Path,
+        parsed: &'b Arc<ParsedFile>,
+    ) -> AnalyzeContext<'b>
+    where
+        'a: 'b,
+    {
+        AnalyzeContext {
+            types: self.types,
+            identities: self.identities,
+            signatures: self.signatures,
+            ..AnalyzeContext::new(file_path, self.config, parsed).with_environment(self.environment)
+        }
+    }
+
+    pub fn file_path(&self) -> &'a std::path::Path {
+        self.file_path
+    }
+    pub fn source(&self) -> &'a str {
+        self.source
+    }
+    pub fn parsed(&self) -> &'a Arc<ParsedFile> {
+        self.parsed
+    }
+    pub fn config(&self) -> &'a FalconConfig {
+        self.config
+    }
+    pub fn types(&self) -> Option<&'a TypeIndex> {
+        self.types
+    }
+    pub fn identities(&self) -> Option<&'a IdentityIndex> {
+        self.identities
+    }
+    pub fn signatures(&self) -> Option<&'a SignatureIndex> {
+        self.signatures
+    }
+    pub fn library(&self) -> Option<&'a LibraryUnit<'a>> {
+        self.library
+    }
+    pub fn environment(&self) -> Option<&'a AnalysisEnvironment> {
+        self.environment
     }
 
     pub fn tree(&self) -> &'a SyntaxTree {
@@ -151,6 +198,11 @@ impl<'a> AnalyzeContext<'a> {
         })
     }
 
+    /// Library constant values shared by every rule evaluating this file.
+    pub fn constant_cache(&self) -> &ConstantCache {
+        &self.cache.constants
+    }
+
     /// Retained source tokens outside interpolation bodies, including trivia.
     pub fn tokens(&self) -> impl DoubleEndedIterator<Item = SyntaxToken<'a>> + Clone {
         self.tree().top_level_tokens(self.source)
@@ -167,10 +219,19 @@ impl<'a> AnalyzeContext<'a> {
 
     /// Attach the run's analysis environment and cache the file's package
     /// language version from it.
-    pub fn with_environment(mut self, environment: Option<&'a AnalysisEnvironment>) -> Self {
-        self.environment = environment;
-        self.package_language_version = environment
+    pub fn with_environment(self, environment: Option<&'a AnalysisEnvironment>) -> Self {
+        let package_version = environment
             .and_then(|environment| environment.package_language_version(self.file_path));
+        self.with_package_environment(environment, package_version)
+    }
+
+    pub(crate) fn with_package_environment(
+        mut self,
+        environment: Option<&'a AnalysisEnvironment>,
+        package_version: Option<LanguageVersion>,
+    ) -> Self {
+        self.environment = environment;
+        self.package_language_version = package_version;
         self
     }
 

@@ -30,11 +30,11 @@ impl Rule for UnnecessaryOverrides {
 
 pub(crate) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, state_only: bool) -> RulePreparation<'a> {
     let diags = Vec::new();
-    let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+    let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
         return RulePreparation::Diagnostics(diags);
     };
-    let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
-    let docs = ctx.tree().doc_blocks(ctx.source).collect::<Vec<_>>();
+    let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
+    let docs = ctx.tree().doc_blocks(ctx.source()).collect::<Vec<_>>();
     RulePreparation::Structural(Box::new(Collector {
         ctx,
         model,

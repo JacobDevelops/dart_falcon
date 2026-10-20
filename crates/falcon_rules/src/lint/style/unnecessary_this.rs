@@ -24,8 +24,8 @@ impl Rule for UnnecessaryThis {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             program,
-            model: ctx.identities.map(|identities| {
-                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            model: ctx.identities().map(|identities| {
+                SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
             }),
             diagnostics: Vec::new(),
             names: HashSet::new(),

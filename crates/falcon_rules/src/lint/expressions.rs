@@ -45,7 +45,7 @@ pub(crate) fn equivalent(
 fn equivalent_spans(left: Span, right: Span, ctx: &falcon_analyze::AnalyzeContext) -> bool {
     let tokens = |span: Span| {
         ctx.tree()
-            .tokens_in(ctx.source, span)
+            .tokens_in(ctx.source(), span)
             .filter(|token| !token.is_trivia() || token.kind().is_comment())
     };
     let mut left = tokens(left);
@@ -82,14 +82,14 @@ pub(crate) fn is_parenthesized(expr: Expr<'_>) -> bool {
 }
 
 pub(crate) fn normalized(ctx: &falcon_analyze::AnalyzeContext, span: &Span) -> Option<String> {
-    ctx.source.get(span.start..span.end)?;
+    ctx.source().get(span.start..span.end)?;
     let mut text = String::new();
     append_normalized(ctx, *span, &mut text);
     Some(text)
 }
 
 fn append_normalized(ctx: &falcon_analyze::AnalyzeContext, span: Span, text: &mut String) {
-    for token in ctx.tree().tokens_in(ctx.source, span) {
+    for token in ctx.tree().tokens_in(ctx.source(), span) {
         if matches!(
             token.kind(),
             falcon_syntax::TokenKind::StringLit | falcon_syntax::TokenKind::StringPart

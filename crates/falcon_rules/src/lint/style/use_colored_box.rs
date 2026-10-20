@@ -50,7 +50,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::constructor_invocation(node, &state.model)
-            && self.ctx.identities.is_some_and(|index| {
+            && self.ctx.identities().is_some_and(|index| {
                 index.is_package_declaration(&identity, "flutter", "Container")
             })
             && only_colors_child(args, state)

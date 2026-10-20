@@ -121,7 +121,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         let callee = call.callee().span();
-        let spelling = &self.ctx.source[callee.start..callee.end];
+        let spelling = &self.ctx.source()[callee.start..callee.end];
         if self.additional.contains(&spelling) {
             self.assertions.push(call.span());
         }

@@ -48,7 +48,7 @@ impl Rule for PreferFinalParameters {
         let mutated = ctx.mutated_declarations(program);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            docs: ctx.tree().doc_blocks(ctx.source).collect(),
+            docs: ctx.tree().doc_blocks(ctx.source()).collect(),
             mutated,
             wildcards: version.supports(Feature::WildcardVariables),
             diagnostics: Vec::new(),
@@ -120,13 +120,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             .or_else(|| node.param_type().map(|ty| ty.span().start))
             .unwrap_or(name.span().start);
         let open = self.ctx.tree()
-            .tokens_in(self.ctx.source, Span::new(0, anchor))
+            .tokens_in(self.ctx.source(), Span::new(0, anchor))
             .rev()
             .find(|token| token.kind() == TokenKind::LParen)
             .map_or(anchor, |token| token.span().end);
         let mut parameter_tokens = significant_tokens_in(
             self.ctx.tree(),
-            self.ctx.source,
+            self.ctx.source(),
             Span::new(open, name.span().start),
         );
         if !parameter_tokens.clone().any(|token| token.kind() == TokenKind::Final)

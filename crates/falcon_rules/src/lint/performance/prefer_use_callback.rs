@@ -32,7 +32,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
         let Expr::Call(call) = expression else { return };
         if !crate::lint::flutter_hooks::call_identity(expression, state).is_some_and(|identity| {
-            self.ctx.identities.is_some_and(|identities| {
+            self.ctx.identities().is_some_and(|identities| {
                 identities.is_package_declaration(&identity, "flutter_hooks", "useMemoized")
             })
         }) {

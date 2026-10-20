@@ -52,7 +52,7 @@ impl Rule for AvoidRedundantArgumentValues {
         program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if ctx.identities.is_none() {
+        if ctx.identities().is_none() {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Semantic(Box::new(Collector {

@@ -75,7 +75,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 "Align",
             ]
             .contains(&identity.name())
-            && self.ctx.identities.is_some_and(|index| {
+            && self.ctx.identities().is_some_and(|index| {
                 index.is_package_declaration(identity, "flutter", identity.name())
             })
         {
@@ -103,7 +103,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && crate::lint::semantic_type_operations::nullability(
                 &state.infer(expression),
                 &state.signatures,
-                self.ctx.types,
+                self.ctx.types(),
             ) == falcon_analyze::Truth::No
         {
             self.covered = starts;
@@ -128,7 +128,7 @@ fn layout_stage<'a>(
     else {
         return None;
     };
-    let index = ctx.identities?;
+    let index = ctx.identities()?;
     let (stage, property, extra) =
         if index.is_package_declaration(&identity, "flutter", "Transform") {
             (0, "transform", Some("alignment"))

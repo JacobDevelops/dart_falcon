@@ -24,12 +24,12 @@ pub(super) fn prepare<'a>(
     ctx: &'a AnalyzeContext<'a>,
     methods: bool,
 ) -> RulePreparation<'a> {
-    let Some(identities) = ctx.identities else {
+    let Some(identities) = ctx.identities() else {
         return RulePreparation::Diagnostics(Vec::new());
     };
     RulePreparation::Structural(Box::new(Collector {
         ctx,
-        model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+        model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
         types: BlocTypes::new(program),
         methods,
         diagnostics: Vec::new(),
@@ -48,14 +48,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let TopLevelDecl::Class(class) = declaration else { return StructuralTraversal::SkipChildren; };
         // Cubits intentionally expose methods as their command interface.
         let applicable = if self.methods {
-            self.types.is_event_bloc_class(class, &self.model, self.ctx.signatures)
+            self.types.is_event_bloc_class(class, &self.model, self.ctx.signatures())
         } else {
-            self.types.is_bloc_class(class, &self.model, self.ctx.signatures)
+            self.types.is_bloc_class(class, &self.model, self.ctx.signatures())
         };
         if !applicable { return StructuralTraversal::SkipChildren; }
         let owner = self.model.resolve_name(class.name().name());
         let inherited = |name: &str, kind| owner.as_ref().is_some_and(|owner| {
-            self.ctx.signatures.is_some_and(|signatures| signatures.has_combined_inherited_member(owner, name, kind, &self.model))
+            self.ctx.signatures().is_some_and(|signatures| signatures.has_combined_inherited_member(owner, name, kind, &self.model))
         });
         for member in class.members() {
             if self.methods {

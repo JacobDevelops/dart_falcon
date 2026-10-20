@@ -35,16 +35,16 @@ impl Rule for PreferMovingToVariable {
             ctx,
             threshold: allowed_duplicated_chains(ctx),
             late: LateDeclarations {
-                source: ctx.source,
+                source: ctx.source(),
                 bindings: Vec::new(),
                 has_deferred_effects: false,
                 scope: Span {
                     start: 0,
-                    end: ctx.source.len(),
+                    end: ctx.source().len(),
                 },
             },
-            model: ctx.identities.map(|identities| {
-                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            model: ctx.identities().map(|identities| {
+                SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
             }),
             lists: Vec::new(),
             scopes: Vec::new(),
@@ -116,7 +116,7 @@ impl Collector<'_> {
                         || matches!(init.unparenthesized(), Expr::Call(call)
                         if matches!(call.callee().unparenthesized(), Expr::Field(_)));
                     let calls = eligible
-                        .then(|| chain_calls(init, self.model.as_ref(), self.ctx.signatures))
+                        .then(|| chain_calls(init, self.model.as_ref(), self.ctx.signatures()))
                         .flatten();
                     let pure = matches!(
                         init.unparenthesized(),
@@ -248,7 +248,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     let start = self.read_spans.partition_point(|(initializer, _)| initializer.start < span.start);
                     let end = self.read_spans.partition_point(|(initializer, _)| initializer.start <= span.start);
                     self.read_spans[start..end].iter().any(|(_, read)| {
-                    let name = &self.ctx.source[read.start..read.end];
+                    let name = &self.ctx.source()[read.start..read.end];
                     self.late.bindings.iter().filter(|binding| {
                         binding.name == name && binding.scope.start <= read.start
                             && read.end <= binding.scope.end && binding.start <= read.start
@@ -261,7 +261,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     continue;
                 }
                 if let Some(has_call) = calls {
-                    let source = &self.ctx.source[span.start..span.end.min(self.ctx.source.len())];
+                    let source = &self.ctx.source()[span.start..span.end.min(self.ctx.source().len())];
                     if *has_call {
                         counts.retain(|previous, _| *previous == source);
                     }

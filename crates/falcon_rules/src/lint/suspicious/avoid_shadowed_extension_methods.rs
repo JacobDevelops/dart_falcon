@@ -30,12 +30,12 @@ impl Rule for AvoidShadowedExtensionMethods {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         let signatures = ctx
-            .signatures
+            .signatures()
             .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)));
         RulePreparation::Structural(Box::new(Collector {

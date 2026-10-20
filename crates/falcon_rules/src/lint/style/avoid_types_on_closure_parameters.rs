@@ -42,10 +42,10 @@ impl Rule for AvoidTypesOnClosureParameters {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         let mut returns = ReturnedClosures {
             model: &model,
             frames: Vec::new(),

@@ -46,8 +46,8 @@ impl Rule for ImplicitReopen {
         RulePreparation::Structural(Box::new(Collector {
             program,
             ctx,
-            model: ctx.identities.map(|identities| {
-                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            model: ctx.identities().map(|identities| {
+                SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
             }),
             diags: Vec::new(),
         }))
@@ -65,7 +65,7 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         let ctx = self.ctx;
-        let siblings = ctx.library.map_or(&[][..], |library| library.siblings());
+        let siblings = ctx.library().map_or(&[][..], |library| library.siblings());
         let library = || std::iter::once(self.program).chain(siblings.iter().copied());
         let model = &self.model;
             let (name, mut annotations, modifiers, superclass) = match decl {
@@ -119,7 +119,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     let induced =
                         model
                             .as_ref()
-                            .zip(ctx.signatures)
+                            .zip(ctx.signatures())
                             .and_then(|(model, signatures)| {
                                 signatures
                                     .effective_restriction(&model.resolve_name(super_name.name())?)

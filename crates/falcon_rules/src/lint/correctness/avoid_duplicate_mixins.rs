@@ -47,7 +47,7 @@ impl<'a> Collector<'a> {
         };
         let siblings = self
             .ctx
-            .library
+            .library()
             .map_or(&[][..], |library| library.siblings());
         let mut found = std::iter::once(self.program)
             .chain(siblings.iter().copied())
@@ -96,7 +96,7 @@ impl<'a> Collector<'a> {
     ) -> bool {
         let siblings = self
             .ctx
-            .library
+            .library()
             .map_or(&[][..], |library| library.siblings());
         let limit = std::iter::once(self.program)
             .chain(siblings.iter().copied())

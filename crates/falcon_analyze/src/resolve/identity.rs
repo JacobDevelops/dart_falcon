@@ -176,9 +176,9 @@ enum Combinators {
 /// Without loaded external sources, index resolution falls back to allowlists.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeclarationIdentity {
-    Project {
+    Library {
         library: LibraryId,
-        name: String,
+        name: InternedString,
     },
     Sdk {
         library: InternedString,
@@ -217,7 +217,7 @@ impl DeclarationIdentity {
 
     pub fn name(&self) -> &str {
         match self {
-            Self::Project { name, .. } => name,
+            Self::Library { name, .. } => name,
             Self::Sdk { name, .. } | Self::Package { name, .. } => name,
         }
     }
@@ -623,7 +623,7 @@ impl IdentityIndex {
             alias.library.0 |= EXTERNAL_ID;
         }
         let external_identity = |mut identity: DeclarationIdentity| {
-            if let DeclarationIdentity::Project { library, .. } = &mut identity {
+            if let DeclarationIdentity::Library { library, .. } = &mut identity {
                 library.0 |= EXTERNAL_ID;
             }
             identity
@@ -999,14 +999,14 @@ impl IdentityIndex {
             for (name, (kind, _)) in &library.declarations {
                 if *kind != NameIdentity::Unknown
                     && let Some(identity) = index.declared(library_id, name)
-                    && !matches!(identity, DeclarationIdentity::Project { .. })
+                    && !matches!(identity, DeclarationIdentity::Library { .. })
                 {
                     index.declaration_libraries.insert(identity, library_id);
                 }
             }
             for name in &library.extensions {
                 if let Some(identity) = index.declared(library_id, name)
-                    && !matches!(identity, DeclarationIdentity::Project { .. })
+                    && !matches!(identity, DeclarationIdentity::Library { .. })
                 {
                     index.declaration_libraries.insert(identity, library_id);
                 }
@@ -1049,10 +1049,16 @@ impl IdentityIndex {
     /// The identity of a declaration, retaining its library when its name
     /// is not unique within the external package.
     fn declared(&self, library: LibraryId, name: &str) -> Option<DeclarationIdentity> {
+        let name = self
+            .get(library)
+            .declarations
+            .get_key_value(name)
+            .map(|(name, _)| name)
+            .or_else(|| self.get(library).extensions.get(name))?;
         match &self.get(library).origin {
-            None => Some(DeclarationIdentity::Project {
+            None => Some(DeclarationIdentity::Library {
                 library,
-                name: name.to_string(),
+                name: name.clone(),
             }),
             Some(origin) => {
                 let copy = self.get(library).copy;
@@ -1064,17 +1070,11 @@ impl IdentityIndex {
                         .is_some_and(|names| names.contains(name))
                 };
                 if collides(self) || self.external.as_deref().is_some_and(collides) {
-                    return Some(DeclarationIdentity::Project {
+                    return Some(DeclarationIdentity::Library {
                         library,
-                        name: name.to_owned(),
+                        name: name.clone(),
                     });
                 }
-                let name = self
-                    .get(library)
-                    .declarations
-                    .get_key_value(name)
-                    .map(|(name, _)| name)
-                    .or_else(|| self.get(library).extensions.get(name))?;
                 Some(match origin {
                     ExternalOrigin::Sdk(library) => DeclarationIdentity::Sdk {
                         library: library.clone(),
@@ -1085,12 +1085,26 @@ impl IdentityIndex {
                         name: name.clone(),
                         copy: self.get(library).copy,
                     },
-                    ExternalOrigin::Project => DeclarationIdentity::Project {
+                    ExternalOrigin::Project => DeclarationIdentity::Library {
                         library,
-                        name: name.to_string(),
+                        name: name.clone(),
                     },
                 })
             }
+        }
+    }
+
+    /// Whether a library-scoped declaration was loaded from user project code.
+    /// SDK and package-wide identities do not carry project provenance.
+    pub fn is_project(&self, identity: &DeclarationIdentity) -> bool {
+        match identity {
+            DeclarationIdentity::Library { library, .. } => {
+                matches!(
+                    self.get(*library).origin,
+                    None | Some(ExternalOrigin::Project)
+                )
+            }
+            DeclarationIdentity::Package { .. } | DeclarationIdentity::Sdk { .. } => false,
         }
     }
 
@@ -1105,7 +1119,7 @@ impl IdentityIndex {
         if identity.is_package(package, name) {
             return true;
         }
-        let DeclarationIdentity::Project {
+        let DeclarationIdentity::Library {
             library,
             name: found_name,
         } = identity
@@ -1236,9 +1250,9 @@ impl IdentityIndex {
     pub fn library_source_annotations(&self, path: &Path) -> Option<(&Path, &[NodeRef])> {
         let library = self.library(self.file(path)?);
         self.source_annotations(
-            &DeclarationIdentity::Project {
+            &DeclarationIdentity::Library {
                 library,
-                name: String::new(),
+                name: "".into(),
             },
             MemberSelector::DECLARATION.into(),
         )
@@ -1277,7 +1291,7 @@ impl IdentityIndex {
 
     pub fn declaration_library(&self, identity: &DeclarationIdentity) -> Option<LibraryId> {
         match identity {
-            DeclarationIdentity::Project { library, .. } => Some(*library),
+            DeclarationIdentity::Library { library, .. } => Some(*library),
             _ => self
                 .declaration_libraries
                 .get(identity)
@@ -1853,10 +1867,10 @@ impl IdentityIndex {
                     ImportTarget::Unknown => None,
                 });
         match unique_declaration(candidates)? {
-            DeclarationIdentity::Project { library, name } => {
+            DeclarationIdentity::Library { library, name } => {
                 let unit = self.get(library);
                 if unit.origin.is_some() {
-                    return Some(DeclarationIdentity::Project { library, name });
+                    return Some(DeclarationIdentity::Library { library, name });
                 }
                 let (package, _) = unit
                     .uri
@@ -3194,8 +3208,8 @@ mod tests {
                     };
                     let split = resolve("split");
                     let sibling = resolve("sibling");
-                    assert!(matches!(split, DeclarationIdentity::Project { .. }));
-                    assert!(matches!(sibling, DeclarationIdentity::Project { .. }));
+                    assert!(matches!(split, DeclarationIdentity::Library { .. }));
+                    assert!(matches!(sibling, DeclarationIdentity::Library { .. }));
                     assert_ne!(split, sibling);
                 }
             }
@@ -3363,8 +3377,10 @@ mod tests {
                 let second = index
                     .resolve_declaration(library, QualifiedName::prefixed("other", "Marker"))
                     .unwrap();
-                assert!(matches!(first, DeclarationIdentity::Project { .. }));
-                assert!(matches!(second, DeclarationIdentity::Project { .. }));
+                assert!(matches!(first, DeclarationIdentity::Library { .. }));
+                assert!(matches!(second, DeclarationIdentity::Library { .. }));
+                assert!(!index.is_project(&first));
+                assert!(!index.is_project(&second));
                 assert_ne!(first, second);
                 let first = index
                     .resolve_imported_member(library, "annotation".into())
@@ -3375,8 +3391,10 @@ mod tests {
                         QualifiedName::prefixed("other", "annotation"),
                     )
                     .unwrap();
-                assert!(matches!(first, DeclarationIdentity::Project { .. }));
-                assert!(matches!(second, DeclarationIdentity::Project { .. }));
+                assert!(matches!(first, DeclarationIdentity::Library { .. }));
+                assert!(matches!(second, DeclarationIdentity::Library { .. }));
+                assert!(!index.is_project(&first));
+                assert!(!index.is_project(&second));
                 assert_ne!(first, second);
             }
         }
@@ -3717,6 +3735,11 @@ mod tests {
         assert_eq!(
             index.resolve_imported_member(main, QualifiedName::prefixed("direct", "immutable")),
             Some(DeclarationIdentity::package("meta", "immutable"))
+        );
+        assert!(!index.is_project(&DeclarationIdentity::package("meta", "immutable")));
+        assert_eq!(
+            index.declaration_library(&DeclarationIdentity::package("meta", "immutable")),
+            None
         );
         assert_eq!(
             index.resolve_imported_member(main, QualifiedName::prefixed("ambiguous", "immutable")),
@@ -4458,9 +4481,9 @@ mod tests {
                 Some(external_library)
             );
             assert!(overlay.is_package_declaration(
-                &DeclarationIdentity::Project {
+                &DeclarationIdentity::Library {
                     library: external_library,
-                    name: "_limit".to_string()
+                    name: "_limit".into()
                 },
                 "dep",
                 "_limit",

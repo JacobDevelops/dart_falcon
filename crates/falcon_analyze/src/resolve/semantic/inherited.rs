@@ -425,7 +425,7 @@ impl SignatureIndex {
         }
         let visible = !name.starts_with('_')
             || match identity {
-                DeclarationIdentity::Project { library, .. } => model.library == Some(*library),
+                DeclarationIdentity::Library { library, .. } => model.library == Some(*library),
                 _ => false,
             };
         if visible
@@ -704,7 +704,7 @@ impl SignatureIndex {
         let mut members = Vec::new();
         let visible = !name.starts_with('_')
             || match identity {
-                DeclarationIdentity::Project { library, .. } => model.library == Some(*library),
+                DeclarationIdentity::Library { library, .. } => model.library == Some(*library),
                 _ => false,
             };
         if visible {

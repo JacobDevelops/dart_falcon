@@ -44,7 +44,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
         // literals parsed during error recovery.
         if let Some((name, args, span)) = crate::lint::flutter::widget_construction(node)
             && matches!(name, "Column" | "Row" | "Flex")
-            && self.ctx.tree().tokens_in(self.ctx.source, span).last()
+            && self.ctx.tree().tokens_in(self.ctx.source(), span).last()
                 .is_some_and(|token| token.kind() == falcon_syntax::TokenKind::RParen)
         {
             for named in args.named() {

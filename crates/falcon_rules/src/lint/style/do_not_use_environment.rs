@@ -26,7 +26,7 @@ impl Rule for DoNotUseEnvironment {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if !ctx.source.contains("Environment") {
+        if !ctx.source().contains("Environment") {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Semantic(Box::new(Collector {

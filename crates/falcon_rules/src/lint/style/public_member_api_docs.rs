@@ -275,12 +275,12 @@ impl Rule for PublicMemberApiDocs {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if crate::cross_file::lib_dir_package(ctx.file_path).is_none() {
+        if crate::cross_file::lib_dir_package(ctx.file_path()).is_none() {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let model = ctx
-            .identities
-            .map(|identities| SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types));
+        let model = ctx.identities().map(|identities| {
+            SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
+        });
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -329,7 +329,7 @@ impl Collector<'_> {
         if !d.is_static
             && let (Some(owner), Some(kind)) = (d.owner, d.kind)
         {
-            let (Some(model), Some(signatures)) = (model, ctx.signatures) else {
+            let (Some(model), Some(signatures)) = (model, ctx.signatures()) else {
                 return false;
             };
             let Some(identity) = model.resolve_name(owner) else {
@@ -369,7 +369,7 @@ impl Collector<'_> {
     fn record(&mut self, d: &ApiDeclaration<'_>) {
         if self.missing(d) {
             self.pending.push(PendingDoc {
-                name: &self.ctx.source[d.span.start..d.span.end],
+                name: &self.ctx.source()[d.span.start..d.span.end],
                 owner: d
                     .owner
                     .map(|_| self.owner.as_ref().expect("member owner").name),
@@ -388,7 +388,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         declaration_candidates(decl, model.as_ref(), |declaration| {
             if declaration.owner.is_none() {
                 self.owner = Some(Owner {
-                    name: &self.ctx.source[declaration.span.start..declaration.span.end],
+                    name: &self.ctx.source()[declaration.span.start..declaration.span.end],
                     internal: declaration.internal,
                     closed: match decl {
                         TopLevelDecl::Class(n) => match n.modifiers().restriction {

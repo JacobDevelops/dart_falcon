@@ -43,12 +43,12 @@ impl Rule for DeprecatedConsistency {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let visitor = Declarations {
             ctx,
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             diagnostics: Vec::new(),
             deprecated: false,
             fields: Vec::new(),

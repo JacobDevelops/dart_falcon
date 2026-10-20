@@ -128,10 +128,10 @@ pub struct SemanticState<'a> {
 
 impl<'a> SemanticState<'a> {
     pub fn new(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Option<Self> {
-        let identities = ctx.identities?;
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let identities = ctx.identities()?;
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         let signatures = ctx
-            .signatures
+            .signatures()
             .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)));
         let private_field_promotion = ctx

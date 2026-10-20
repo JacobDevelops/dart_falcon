@@ -46,7 +46,7 @@ impl Rule for AvoidPrivateTypedefFunctions {
 
         let has_parts =
             !program.part_directives().is_empty() || program.part_of_directive().is_some();
-        let siblings: &[Program<'a>] = match ctx.library {
+        let siblings: &[Program<'a>] = match ctx.library() {
             Some(library) if !library.has_unresolved_parts() => library.siblings(),
             _ if has_parts => return RulePreparation::Diagnostics(Vec::new()),
             _ => &[],

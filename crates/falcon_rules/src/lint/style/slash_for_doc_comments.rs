@@ -21,7 +21,7 @@ impl Rule for SlashForDocComments {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        for start in doc_block_comment_starts(ctx.source) {
+        for start in doc_block_comment_starts(ctx.source()) {
             diags.push(ctx.diagnostic(
                 "slash-for-doc-comments",
                 "Use the end-of-line form ('///') for doc comments.",

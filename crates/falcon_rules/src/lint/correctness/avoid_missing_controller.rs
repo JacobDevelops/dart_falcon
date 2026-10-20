@@ -44,7 +44,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         else {
             return;
         };
-        let Some(index) = self.ctx.identities else {
+        let Some(index) = self.ctx.identities() else {
             return;
         };
         let form = index.is_package_declaration(&identity, "flutter", "TextFormField");

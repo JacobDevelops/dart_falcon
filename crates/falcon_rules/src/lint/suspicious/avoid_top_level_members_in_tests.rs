@@ -18,7 +18,7 @@ impl Rule for AvoidTopLevelMembersInTests {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if !crate::lint::declarations::has_test_file_suffix(ctx.file_path) {
+        if !crate::lint::declarations::has_test_file_suffix(ctx.file_path()) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Structural(Box::new(Collector {

@@ -38,10 +38,10 @@ impl Rule for PreferConstructorsOverStaticMethods {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(identities) = ctx.identities else {
+        let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,
@@ -77,7 +77,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 Some(
                     node.primary_constructor()
                         .constructor_name()
-                        .map_or("new", |name| &self.ctx.source[name.span().start..name.span().end]),
+                        .map_or("new", |name| &self.ctx.source()[name.span().start..name.span().end]),
                 ),
             ),
             _ => return StructuralTraversal::SkipChildren,
@@ -96,7 +96,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     ClassMember::Constructor(constructor) => Some(
                         constructor
                             .constructor_name()
-                            .map_or("new", |name| &self.ctx.source[name.span().start..name.span().end]),
+                            .map_or("new", |name| &self.ctx.source()[name.span().start..name.span().end]),
                     ),
                     _ => None,
                 })

@@ -60,7 +60,7 @@ impl<'a> Collector<'_, 'a> {
             let start = self
                 .ctx
                 .tree()
-                .top_level_token_at(self.ctx.source, guard.span().start)
+                .top_level_token_at(self.ctx.source(), guard.span().start)
                 .and_then(SyntaxToken::prev_significant)
                 .filter(|token| token.kind() == falcon_syntax::TokenKind::When)
                 .map_or(guard.span().start, |token| token.offset());

@@ -49,7 +49,7 @@ impl Collector<'_, '_> {
             let mut preceding = self
                 .ctx
                 .tree()
-                .tokens_in(self.ctx.source, Span::new(0, block.span().start))
+                .tokens_in(self.ctx.source(), Span::new(0, block.span().start))
                 .rev()
                 .filter(|token| !token.is_trivia());
             let mut start = block.span().start;

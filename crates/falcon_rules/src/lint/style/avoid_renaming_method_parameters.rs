@@ -36,16 +36,16 @@ impl Rule for AvoidRenamingMethodParameters {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        if !is_in_lib_dir(ctx.file_path) {
+        if !is_in_lib_dir(ctx.file_path()) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             tokens: ctx.tokens().collect(),
-            model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             signatures,
             owner: None,
             wildcards: ctx.language_version().supports(Feature::WildcardVariables),

@@ -515,7 +515,7 @@ fn report_span<'a>(expr: Expr<'a>, state: &SemanticState<'a>, ctx: &AnalyzeConte
                 let end = ctx
                     .tree()
                     .tokens_in(
-                        ctx.source,
+                        ctx.source(),
                         Span::new(callee.span().start, call.args().span().start),
                     )
                     .rfind(|token| !token.is_trivia())

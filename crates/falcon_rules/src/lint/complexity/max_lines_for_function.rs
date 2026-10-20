@@ -72,8 +72,8 @@ fn max_lines_option(ctx: &AnalyzeContext) -> usize {
 }
 
 fn check_function_lines(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let start_line = line_of(ctx.source, span.start);
-    let end_line = line_of(ctx.source, span.end);
+    let start_line = line_of(ctx.source(), span.start);
+    let end_line = line_of(ctx.source(), span.end);
     let lines = end_line - start_line + 1;
     let threshold = max_lines_option(ctx);
 

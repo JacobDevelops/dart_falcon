@@ -17,9 +17,7 @@
 //!
 //! Adopted from the official `avoid_catches_without_on_clauses` lint.
 
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
-};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr, walk_stmt};
@@ -79,7 +77,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let span = self
                 .ctx
                 .tree()
-                .keywords_in(self.ctx.source, catch.span(), TokenKind::Catch)
+                .keywords_in(self.ctx.source(), catch.span(), TokenKind::Catch)
                 .next()
                 .map_or(catch.span(), |token| {
                     Span::new(token.offset(), token.offset() + token.len())
@@ -136,10 +134,13 @@ impl<'s, 'a> ValidUse<'s, 'a> {
                 other => other,
             };
             if let Expr::Ident(target) = class.unparenthesized() {
-                let is_class = |name: &str| target.name() == name && !self.is_project_name(name);
-                if (field.field().name() == "error" && is_class("Future"))
+                let is_class = |name: &str, library: &str| {
+                    target.name() == name && self.is_sdk_name(name, library)
+                };
+                if (field.field().name() == "error" && is_class("Future", "dart:async"))
                     || (field.field().name() == "reportError" && target.name() == "FlutterError")
-                    || (field.field().name() == "throwWithStackTrace" && is_class("Error"))
+                    || (field.field().name() == "throwWithStackTrace"
+                        && is_class("Error", "dart:core"))
                 {
                     return true;
                 }
@@ -162,12 +163,13 @@ impl<'s, 'a> ValidUse<'s, 'a> {
             .is_some_and(|return_type| matches!(return_type, ResolvedType::Never))
     }
 
-    fn is_project_name(&self, name: &str) -> bool {
-        self.state.environment.is_bound(name)
-            || matches!(
-                self.state.model.resolve_name(name),
-                Some(DeclarationIdentity::Project { .. })
-            )
+    fn is_sdk_name(&self, name: &str, library: &str) -> bool {
+        !self.state.environment.is_bound(name)
+            && self
+                .state
+                .model
+                .resolve_name(name)
+                .is_none_or(|identity| identity.is_sdk(library, name))
     }
 }
 
@@ -214,7 +216,7 @@ impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
                 if matches!(new.constructor_name(), Some(constructor) if constructor.name() == "error")
                     && matches!(new.dart_type(), DartType::Named(named)
                         if matches!(named.segments().last(), Some(name) if name.name() == "Future"))
-                    && !self.is_project_name("Future") =>
+                    && self.is_sdk_name("Future", "dart:async") =>
             {
                 self.check_arguments(new.args());
             }

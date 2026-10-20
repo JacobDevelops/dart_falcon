@@ -18,8 +18,8 @@ impl Rule for AvoidTypesAsParameterNames {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let Some((identities, file)) = ctx
-            .identities
-            .and_then(|identities| Some((identities, identities.file(ctx.file_path)?)))
+            .identities()
+            .and_then(|identities| Some((identities, identities.file(ctx.file_path())?)))
         else {
             return RulePreparation::Diagnostics(Vec::new());
         };
@@ -71,9 +71,9 @@ impl<'a> Collector<'a> {
                 .resolve_declaration(self.library, name.into())
                 .and_then(|identity| {
                     self.ctx
-                        .signatures
+                        .signatures()
                         .and_then(|signatures| signatures.type_kind(&identity))
-                        .or_else(|| self.ctx.types?.type_kind_identity(&identity))
+                        .or_else(|| self.ctx.types()?.type_kind_identity(&identity))
                 })
                 .is_some_and(|kind| {
                     matches!(

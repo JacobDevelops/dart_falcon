@@ -64,8 +64,8 @@ impl Rule for UnnecessaryParenthesis {
     ) -> RulePreparation<'a> {
         let collector = Collector {
             ctx,
-            model: ctx.identities.map(|identities| {
-                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            model: ctx.identities().map(|identities| {
+                SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
             }),
             nullable_extension_members: nullable_extension_members(program),
             field_init_values: HashSet::new(),
@@ -287,7 +287,7 @@ impl<'a> Collector<'a> {
                 }
             ) && let Some(model) = self.model.as_ref()
                 && let Some((identity, name)) = resolve_call_constructor(expression, model, true)
-                && self.ctx.signatures.is_none_or(|signatures| {
+                && self.ctx.signatures().is_none_or(|signatures| {
                     let identity = model.unaliased(identity);
                     signatures.member(&identity, name).is_none()
                         && signatures.declared_member_facts(&identity, name).is_empty()

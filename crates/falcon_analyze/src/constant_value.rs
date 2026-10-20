@@ -10,7 +10,8 @@
 //! Constructor type tests and casts resolve instantiated owner type parameters.
 //! Indexed initializers and constructors retain parsed sources through the signature index.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use falcon_syntax::cst::*;
 
@@ -49,7 +50,7 @@ pub enum ConstantValue {
 /// Structural declaration identity, independent of display/debug formatting.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ConstantDeclaration {
-    Project(crate::LibraryId, String),
+    Project(crate::LibraryId, crate::InternedString),
     Sdk(crate::InternedString, crate::InternedString),
     Package(crate::InternedString, crate::InternedString, Option<u32>),
 }
@@ -102,6 +103,72 @@ pub fn evaluate_constant(
     signatures: &SignatureIndex,
 ) -> Option<ConstantValue> {
     ConstEvaluator::new(owner, fields, model, signatures).evaluate(expression)
+}
+
+/// Reuses declaration values across constant queries for one analysis file.
+#[derive(Default)]
+pub struct ConstantCache {
+    values: Mutex<SharedConstants>,
+}
+
+struct SharedConstants {
+    values: HashMap<SharedConstantKey, CachedConstant>,
+    retained: HashSet<usize>,
+    remaining_bytes: usize,
+}
+
+impl Default for SharedConstants {
+    fn default() -> Self {
+        Self {
+            values: HashMap::new(),
+            retained: HashSet::new(),
+            remaining_bytes: 1024 * 1024,
+        }
+    }
+}
+
+impl SharedConstants {
+    fn insert(&mut self, key: SharedConstantKey, cached: CachedConstant) {
+        if self.values.contains_key(&key) {
+            return;
+        }
+        if let Some(value) = &cached.value {
+            let pointer = Arc::as_ptr(value) as usize;
+            if !self.retained.contains(&pointer) {
+                let Some(bytes) = value_size(value, self.remaining_bytes) else {
+                    return;
+                };
+                self.remaining_bytes -= bytes;
+                self.retained.insert(pointer);
+            }
+        }
+        self.values.insert(key, cached);
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum SharedConstantKey {
+    TopLevel(DeclarationIdentity),
+    Static(DeclarationIdentity, String),
+}
+
+#[derive(Clone)]
+struct CachedConstant {
+    value: Option<Arc<ConstantValue>>,
+    failed: bool,
+}
+
+/// Evaluates a constant while sharing declaration results across file queries.
+pub fn evaluate_constant_cached(
+    expression: Expr<'_>,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+    cache: &ConstantCache,
+) -> Option<ConstantValue> {
+    let fields = HashMap::new();
+    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+    evaluator.shared_cache = Some(cache);
+    evaluator.evaluate(expression)
 }
 
 /// Evaluates literal and constant patterns without synthesizing expression nodes.
@@ -349,9 +416,22 @@ enum ConstantKey<'a> {
     Static(DeclarationIdentity, &'a str),
 }
 
+// Visit every eager operand even when a missing dependency defers evaluation.
+fn collect_eager<T>(values: impl Iterator<Item = Option<T>>) -> Option<Vec<T>> {
+    let mut result = Some(Vec::new());
+    for value in values {
+        if let (Some(values), Some(value)) = (&mut result, value) {
+            values.push(value);
+        } else {
+            result = None;
+        }
+    }
+    result
+}
+
 enum ConstantState {
     Evaluating,
-    Evaluated(Option<ConstantValue>),
+    Evaluated(CachedConstant),
 }
 
 struct ConstEvaluator<'a, 'model> {
@@ -369,10 +449,16 @@ struct ConstEvaluator<'a, 'model> {
     static_scope: Option<DeclarationIdentity>,
     signatures: &'a SignatureIndex,
     constants: HashMap<ConstantKey<'a>, ConstantState>,
+    shared_cache: Option<&'a ConstantCache>,
     /// Parameters of the constant constructor being run; `None` values are
     /// arguments that could not be evaluated.
     parameters: Vec<HashMap<String, Option<ConstantValue>>>,
     parameter_types: HashMap<String, ResolvedType>,
+    constructor_depth: usize,
+    dependency_worklist: bool,
+    pending_constants: Vec<(ConstantKey<'a>, SemanticModel<'model>)>,
+    // Charge expanded values cumulatively, including discarded materialization work.
+    remaining_bytes: usize,
     type_parameters: TypeParameterScope,
     /// Set once evaluation proves a constant-evaluation error: a failing
     /// assertion.
@@ -400,8 +486,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             static_scope: None,
             signatures,
             constants: HashMap::new(),
+            shared_cache: None,
             parameters: Vec::new(),
             parameter_types: HashMap::new(),
+            constructor_depth: 0,
+            dependency_worklist: false,
+            pending_constants: Vec::new(),
+            remaining_bytes: 1024 * 1024,
             type_parameters: TypeParameterScope::default(),
             failed: false,
         }
@@ -412,6 +503,43 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     }
 
     fn evaluate_with_context(
+        &mut self,
+        expression: Expr<'_>,
+        expected: Option<&ResolvedType>,
+    ) -> Option<ConstantValue> {
+        let value = match expression {
+            Expr::Ident(identifier) => {
+                let value = self.resolve_name_shared(&[identifier.name()])?;
+                let bytes = value_size(&value, self.remaining_bytes)?;
+                self.remaining_bytes -= bytes;
+                return Some(Arc::unwrap_or_clone(value));
+            }
+            Expr::Paren(paren) => return self.evaluate_with_context(paren.expr(), expected),
+            _ => self.evaluate_inner(expression, expected)?,
+        };
+        let bytes = value_size(&value, self.remaining_bytes)?;
+        self.remaining_bytes -= bytes;
+        Some(value)
+    }
+
+    fn evaluate_shared(
+        &mut self,
+        expression: Expr<'_>,
+        expected: Option<&ResolvedType>,
+    ) -> Option<Arc<ConstantValue>> {
+        if self.remaining_bytes == 0 {
+            return None;
+        }
+        match expression {
+            Expr::Ident(identifier) => return self.resolve_name_shared(&[identifier.name()]),
+            Expr::Paren(paren) => return self.evaluate_shared(paren.expr(), expected),
+            _ => {}
+        }
+        self.evaluate_with_context(expression, expected)
+            .map(Arc::new)
+    }
+
+    fn evaluate_inner(
         &mut self,
         expression: Expr<'_>,
         expected: Option<&ResolvedType>,
@@ -440,7 +568,8 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let is_null_safe = field_expr.is_null_safe();
                 if !is_null_safe
                     && field.name() == "length"
-                    && let Some(ConstantValue::String(value)) = self.evaluate(object)
+                    && let Some(value) = self.evaluate_shared(object, None)
+                    && let ConstantValue::String(value) = value.as_ref()
                 {
                     return Some(ConstantValue::Number(Number::Int(
                         value.encode_utf16().count() as i128,
@@ -454,72 +583,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let value = self.evaluate_with_context(operand, expected)?;
                 eval_unary(&op, value)
             }
-            Expr::Binary(binary) => {
-                let op = binary.op();
-                let left = binary.left();
-                let right = binary.right();
-                let left = self.evaluate(left)?;
-                if matches!(op, BinaryOp::NullCoalesce) {
-                    return if left == ConstantValue::Null {
-                        self.evaluate(right)
-                    } else {
-                        Some(left)
-                    };
-                }
-                if matches!(
-                    (op, &left),
-                    (BinaryOp::And, ConstantValue::Bool(false))
-                        | (BinaryOp::Or, ConstantValue::Bool(true))
-                ) {
-                    return Some(left);
-                }
-                let right = self.evaluate(right)?;
-                if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq)
-                    && left != ConstantValue::Null
-                    && right != ConstantValue::Null
-                {
-                    let ConstantValue::Instance(class, ..) = &left else {
-                        return eval_binary(&op, left, right);
-                    };
-                    let identity = match class {
-                        ConstantDeclaration::Project(library, name) => {
-                            DeclarationIdentity::Project {
-                                library: *library,
-                                name: name.clone(),
-                            }
-                        }
-                        ConstantDeclaration::Sdk(library, name) => DeclarationIdentity::Sdk {
-                            library: library.clone(),
-                            name: name.clone(),
-                        },
-                        ConstantDeclaration::Package(package, name, copy) => {
-                            DeclarationIdentity::Package {
-                                package: package.clone(),
-                                name: name.clone(),
-                                copy: *copy,
-                            }
-                        }
-                    };
-                    let custom = |fact: &crate::MemberFacts| {
-                        !fact.is_static
-                            && !fact.is_abstract
-                            && fact.declaring_type != DeclarationIdentity::OBJECT
-                    };
-                    if self
-                        .signatures
-                        .declared_member_facts(&identity, "==")
-                        .iter()
-                        .any(custom)
-                        || self
-                            .signatures
-                            .inherited_member_facts(&identity, "==")
-                            .is_none_or(|facts| facts.iter().any(custom))
-                    {
-                        return None;
-                    }
-                }
-                eval_binary(&op, left, right)
-            }
+            Expr::Binary(binary) => self.evaluate_binary(binary),
             Expr::Conditional(conditional) => match self.evaluate(conditional.condition())? {
                 ConstantValue::Bool(true) => {
                     self.evaluate_with_context(conditional.then_expr(), expected)
@@ -563,30 +627,26 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let elements = map.elements();
                 let arguments = self.collection_arguments(expression, expected)?;
                 let types = arguments.iter().map(constant_type).collect::<Option<_>>()?;
-                let mut values = elements
-                    .map(|element| {
-                        let MapElement::Entry(entry) = element else {
-                            return None;
-                        };
-                        Some((
-                            self.evaluate_with_context(entry.key(), arguments.first())?,
-                            self.evaluate_with_context(entry.value(), arguments.get(1))?,
-                        ))
-                    })
-                    .collect::<Option<Vec<_>>>()?;
+                let mut values = collect_eager(elements.map(|element| {
+                    let MapElement::Entry(entry) = element else {
+                        return None;
+                    };
+                    Some((
+                        self.evaluate_with_context(entry.key(), arguments.first())?,
+                        self.evaluate_with_context(entry.value(), arguments.get(1))?,
+                    ))
+                }))?;
                 values.sort();
                 Some(ConstantValue::Map(types, values))
             }
             Expr::Record(record) => {
                 let values = record.fields();
-                let mut values = values
-                    .map(|field| {
-                        Some((
-                            field.name().map(|name| name.name().to_owned()),
-                            self.evaluate(field.value())?,
-                        ))
-                    })
-                    .collect::<Option<Vec<_>>>()?;
+                let mut values = collect_eager(values.map(|field| {
+                    Some((
+                        field.name().map(|name| name.name().to_owned()),
+                        self.evaluate(field.value())?,
+                    ))
+                }))?;
                 let positional = values.iter().take_while(|(name, _)| name.is_none()).count();
                 values[positional..].sort();
                 Some(ConstantValue::Record(values))
@@ -599,7 +659,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let expr = test.expr();
                 let dart_type = test.dart_type();
                 let negated = test.negated();
-                let value = self.evaluate(expr)?;
+                let value = self.evaluate_shared(expr, None)?;
                 let target = self.model.resolve_type_in(dart_type, &self.type_parameters);
                 Some(ConstantValue::Bool(
                     self.cast_accepts(&value, &target)? != negated,
@@ -637,6 +697,96 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             | Expr::GenericInstantiation(_)
             | Expr::Error(_) => None,
         }
+    }
+
+    fn evaluate_binary(&mut self, binary: BinaryExpr<'_>) -> Option<ConstantValue> {
+        let op = binary.op();
+        let left = binary.left();
+        let right = binary.right();
+        let Some(left) = self.evaluate_shared(left, None) else {
+            if !self.pending_constants.is_empty()
+                && !matches!(op, BinaryOp::NullCoalesce | BinaryOp::And | BinaryOp::Or)
+            {
+                let _ = self.evaluate_shared(right, None);
+            }
+            return None;
+        };
+        if matches!(op, BinaryOp::NullCoalesce) {
+            return if *left == ConstantValue::Null {
+                self.evaluate(right)
+            } else {
+                Some(Arc::unwrap_or_clone(left))
+            };
+        }
+        if matches!(
+            (op, left.as_ref()),
+            (BinaryOp::And, ConstantValue::Bool(false)) | (BinaryOp::Or, ConstantValue::Bool(true))
+        ) {
+            return Some(Arc::unwrap_or_clone(left));
+        }
+        let right = self.evaluate_shared(right, None)?;
+        if matches!(op, BinaryOp::Add)
+            && let (ConstantValue::String(left), ConstantValue::String(right)) =
+                (left.as_ref(), right.as_ref())
+        {
+            if left.len().checked_add(right.len())? > self.remaining_bytes {
+                return None;
+            }
+            return Some(ConstantValue::String(format!("{left}{right}")));
+        }
+        if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq)
+            && *left != ConstantValue::Null
+            && *right != ConstantValue::Null
+        {
+            let ConstantValue::Instance(class, ..) = left.as_ref() else {
+                return Some(eval_equality(&op, &left, &right));
+            };
+            let identity = match class {
+                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Library {
+                    library: *library,
+                    name: name.clone(),
+                },
+                ConstantDeclaration::Sdk(library, name) => DeclarationIdentity::Sdk {
+                    library: library.clone(),
+                    name: name.clone(),
+                },
+                ConstantDeclaration::Package(package, name, copy) => DeclarationIdentity::Package {
+                    package: package.clone(),
+                    name: name.clone(),
+                    copy: *copy,
+                },
+            };
+            let custom = |fact: &crate::MemberFacts| {
+                !fact.is_static
+                    && !fact.is_abstract
+                    && fact.declaring_type != DeclarationIdentity::OBJECT
+            };
+            if self
+                .signatures
+                .declared_member_facts(&identity, "==")
+                .iter()
+                .any(custom)
+                || self
+                    .signatures
+                    .inherited_member_facts(&identity, "==")
+                    .is_none_or(|facts| facts.iter().any(custom))
+            {
+                return None;
+            }
+        }
+        if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq) {
+            return Some(eval_equality(&op, &left, &right));
+        }
+        if !matches!(
+            left.as_ref(),
+            ConstantValue::Bool(_) | ConstantValue::Number(_)
+        ) || !matches!(
+            right.as_ref(),
+            ConstantValue::Bool(_) | ConstantValue::Number(_)
+        ) {
+            return None;
+        }
+        eval_binary(&op, Arc::unwrap_or_clone(left), Arc::unwrap_or_clone(right))
     }
 
     fn cast_accepts(&self, value: &ConstantValue, target: &ResolvedType) -> Option<bool> {
@@ -720,7 +870,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let source = ResolvedType::Interface {
             occurrence: Default::default(),
             identity: match class {
-                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Project {
+                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Library {
                     library: *library,
                     name: name.clone(),
                 },
@@ -761,6 +911,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     }
 
     fn resolve_name(&mut self, names: &[&str]) -> Option<ConstantValue> {
+        self.resolve_name_shared(names).map(Arc::unwrap_or_clone)
+    }
+
+    fn resolve_name_shared(&mut self, names: &[&str]) -> Option<Arc<ConstantValue>> {
         let local_name = names.last()?;
         if names.len() == 1
             && let Some(value) = self
@@ -768,7 +922,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 .last()
                 .and_then(|parameters| parameters.get(*local_name))
         {
-            return value.clone();
+            let value = value.as_ref()?;
+            let bytes = value_size(value, self.remaining_bytes)?;
+            self.remaining_bytes -= bytes;
+            return Some(Arc::new(value.clone()));
         }
         if names.len() == 1
             && self.parameters.is_empty()
@@ -779,7 +936,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             return if self.stable_evaluation {
                 None
             } else {
-                (**value).clone()
+                let value = (*value).as_ref()?;
+                let bytes = value_size(value, self.remaining_bytes)?;
+                self.remaining_bytes -= bytes;
+                Some(Arc::new(value.clone()))
             };
         }
         let local_owner = if names.len() == 1 {
@@ -792,16 +952,8 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     == Some(owner)
             })
         };
-        if local_owner && let Some((&name, &expression)) = self.fields.get_key_value(*local_name) {
-            let expected = self
-                .owner
-                .and_then(|owner| self.signatures.field(owner, name).map(|(_, ty)| ty));
-            return self.initializer(
-                ConstantKey::Field(name),
-                expression,
-                self.owner_model,
-                expected,
-            );
+        if local_owner && let Some((&name, _)) = self.fields.get_key_value(*local_name) {
+            return self.initializer(ConstantKey::Field(name));
         }
         if names.len() == 1 {
             let scope = if self.unqualified_fields {
@@ -856,22 +1008,20 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 return None;
             }
             return constant_type(&self.signatures.instantiate_to_bounds(&ty))
-                .map(ConstantValue::Type);
+                .map(ConstantValue::Type)
+                .map(Arc::new);
         };
         if self.stable_evaluation && self.model.configurable_constant_path(&identity) {
             return None;
         }
         if let Some(signature) = self.signatures.function(&identity) {
-            return Some(ConstantValue::TearOff(
+            return Some(Arc::new(ConstantValue::TearOff(
                 declaration_key(&identity),
                 String::new(),
                 constant_type(&signature.function_type())?,
-            ));
+            )));
         }
-        let expression = self.signatures.constant_initializer(&identity)?;
-        let model = self.model.for_declaration(&identity)?;
-        let expected = self.signatures.value_type(&identity);
-        self.initializer(ConstantKey::TopLevel(identity), expression, model, expected)
+        self.initializer(ConstantKey::TopLevel(identity))
     }
 
     /// The value of `owner`'s enum value or static constant `name`; `None`
@@ -881,12 +1031,12 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         owner: DeclarationIdentity,
         name: &str,
         include_constructors: bool,
-    ) -> Option<Option<ConstantValue>> {
+    ) -> Option<Option<Arc<ConstantValue>>> {
         if self.signatures.is_enum_value(&owner, name) {
-            return Some(Some(ConstantValue::EnumValue(
+            return Some(Some(Arc::new(ConstantValue::EnumValue(
                 declaration_key(&owner),
                 name.to_owned(),
-            )));
+            ))));
         }
         if include_constructors
             && let Some(ty) = self
@@ -900,11 +1050,11 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let ConstantType::Interface(identity, ..) = result.as_ref() else {
                     return None;
                 };
-                Some(ConstantValue::TearOff(
+                Some(Arc::new(ConstantValue::TearOff(
                     identity.clone(),
                     name.to_owned(),
                     ty,
-                ))
+                )))
             }));
         }
         if self
@@ -914,8 +1064,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .any(|fact| fact.is_static && fact.kind == crate::MemberKind::Method)
         {
             return Some(self.signatures.member(&owner, name).and_then(|signature| {
-                constant_type(&signature.function_type())
-                    .map(|ty| ConstantValue::TearOff(declaration_key(&owner), name.to_owned(), ty))
+                constant_type(&signature.function_type()).map(|ty| {
+                    Arc::new(ConstantValue::TearOff(
+                        declaration_key(&owner),
+                        name.to_owned(),
+                        ty,
+                    ))
+                })
             }));
         }
         let signatures = self.signatures;
@@ -924,33 +1079,129 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .static_consts
             .iter()
             .find(|constant| constant.name == name)?;
-        let Some(model) = self.model.for_declaration(&owner) else {
-            return Some(None);
-        };
-        let value = self.initializer(
-            ConstantKey::Static(owner, &constant.name),
-            constant.initializer.expr(),
-            model,
-            Some(&constant.ty),
-        );
-        Some(value)
+        Some(self.initializer(ConstantKey::Static(owner, &constant.name)))
     }
 
-    fn initializer(
-        &mut self,
-        key: ConstantKey<'a>,
-        expression: Expr<'_>,
-        model: SemanticModel<'model>,
-        expected: Option<&ResolvedType>,
-    ) -> Option<ConstantValue> {
+    fn initializer(&mut self, key: ConstantKey<'a>) -> Option<Arc<ConstantValue>> {
         if let Some(state) = self.constants.get(&key) {
             return match state {
                 ConstantState::Evaluating => None,
-                ConstantState::Evaluated(value) => value.clone(),
+                ConstantState::Evaluated(cached) => {
+                    self.failed |= cached.failed;
+                    cached.value.clone()
+                }
             };
         }
-        self.constants
-            .insert(key.clone(), ConstantState::Evaluating);
+        if let Some(cached) = self.cached_initializer(&key) {
+            self.failed |= cached.failed;
+            self.constants
+                .insert(key, ConstantState::Evaluated(cached.clone()));
+            return cached.value;
+        }
+        if self.dependency_worklist {
+            self.pending_constants.push((key, self.model));
+            return None;
+        }
+        self.dependency_worklist = true;
+        let depth = self.constructor_depth;
+        let mut worklist = vec![(key.clone(), self.model)];
+        while let Some((current, model)) = worklist.last().cloned() {
+            if matches!(
+                self.constants.get(&current),
+                Some(ConstantState::Evaluated(_))
+            ) {
+                worklist.pop();
+                continue;
+            }
+            self.constructor_depth = 0;
+            self.constants
+                .insert(current.clone(), ConstantState::Evaluating);
+            let previous_failure = std::mem::take(&mut self.failed);
+            let value = self.evaluate_initializer(&current, model);
+            let failed = self.failed;
+            self.failed |= previous_failure;
+            if self.pending_constants.is_empty() {
+                let cached = CachedConstant { value, failed };
+                if let Some(cache) = self.shared_cache
+                    && let Some(key) = Self::shared_key(&current)
+                {
+                    cache
+                        .values
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(key, cached.clone());
+                }
+                self.constants
+                    .insert(current, ConstantState::Evaluated(cached));
+                worklist.pop();
+            } else {
+                worklist.append(&mut self.pending_constants);
+            }
+        }
+        self.constructor_depth = depth;
+        self.dependency_worklist = false;
+        match self.constants.get(&key)? {
+            ConstantState::Evaluated(cached) => {
+                self.failed |= cached.failed;
+                cached.value.clone()
+            }
+            ConstantState::Evaluating => None,
+        }
+    }
+
+    fn shared_key(key: &ConstantKey<'_>) -> Option<SharedConstantKey> {
+        match key {
+            ConstantKey::Field(_) => None,
+            ConstantKey::TopLevel(owner) => Some(SharedConstantKey::TopLevel(owner.clone())),
+            ConstantKey::Static(owner, name) => {
+                Some(SharedConstantKey::Static(owner.clone(), (*name).to_owned()))
+            }
+        }
+    }
+
+    fn cached_initializer(&self, key: &ConstantKey<'_>) -> Option<CachedConstant> {
+        let cache = self.shared_cache?;
+        let key = Self::shared_key(key)?;
+        cache
+            .values
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values
+            .get(&key)
+            .cloned()
+    }
+
+    fn evaluate_initializer(
+        &mut self,
+        key: &ConstantKey<'a>,
+        model: SemanticModel<'model>,
+    ) -> Option<Arc<ConstantValue>> {
+        let (expression, model, expected) = match key {
+            ConstantKey::Field(name) => (
+                *self.fields.get(name)?,
+                self.owner_model,
+                self.owner
+                    .and_then(|owner| self.signatures.field(owner, name).map(|(_, ty)| ty)),
+            ),
+            ConstantKey::TopLevel(identity) => (
+                self.signatures.constant_initializer(identity)?,
+                model.for_declaration(identity)?,
+                self.signatures.value_type(identity),
+            ),
+            ConstantKey::Static(owner, name) => {
+                let constant = self
+                    .signatures
+                    .declaration(owner)?
+                    .static_consts
+                    .iter()
+                    .find(|constant| constant.name == *name)?;
+                (
+                    constant.initializer.expr(),
+                    model.for_declaration(owner)?,
+                    Some(&constant.ty),
+                )
+            }
+        };
         let previous_model = std::mem::replace(&mut self.model, model);
         let previous_fields = std::mem::replace(
             &mut self.unqualified_fields,
@@ -968,15 +1219,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         self.parameters.push(HashMap::new());
         let previous_parameter_types = std::mem::take(&mut self.parameter_types);
         let previous_type_parameters = std::mem::take(&mut self.type_parameters);
-        let value = self.evaluate_with_context(expression, expected);
+        let value = self.evaluate_shared(expression, expected);
         self.parameters.pop();
         self.parameter_types = previous_parameter_types;
         self.type_parameters = previous_type_parameters;
         self.model = previous_model;
         self.unqualified_fields = previous_fields;
         self.static_scope = previous_scope;
-        self.constants
-            .insert(key, ConstantState::Evaluated(value.clone()));
         value
     }
 
@@ -985,14 +1234,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         elements: AstChildren<'_, CollectionElement<'_>>,
         expected: Option<&ResolvedType>,
     ) -> Option<Vec<ConstantValue>> {
-        elements
-            .map(|element| match element {
-                CollectionElement::Expr(expression) => {
-                    self.evaluate_with_context(expression, expected)
-                }
-                _ => None,
-            })
-            .collect()
+        collect_eager(elements.map(|element| match element {
+            CollectionElement::Expr(expression) => self.evaluate_with_context(expression, expected),
+            _ => None,
+        }))
     }
 
     fn collection_arguments(
@@ -1377,13 +1622,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     ) -> Option<ConstantValue> {
         const MAX_DEPTH: usize = 32;
         let signatures = self.signatures;
-        if self.parameters.len() >= MAX_DEPTH
+        if self.constructor_depth >= MAX_DEPTH
             || !signatures.is_const_constructor(&identity, constructor)
         {
             return None;
         }
         let body = signatures.const_constructor(&identity, constructor)?;
         let model = self.model.for_declaration(&identity)?;
+        self.constructor_depth += 1;
         let previous_model = std::mem::replace(&mut self.model, model);
         let previous_fields = std::mem::replace(&mut self.unqualified_fields, false);
         let previous_scope = self.static_scope.replace(identity.clone());
@@ -1403,6 +1649,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let value =
             self.run_constructor(&identity, constructor, body, type_args, positional, named);
         self.parameters.pop();
+        self.constructor_depth -= 1;
         self.parameter_types = previous_parameter_types;
         self.type_parameters = previous_type_parameters;
         self.model = previous_model;
@@ -1787,6 +2034,91 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     }
 }
 
+fn type_size(ty: &ConstantType, limit: usize) -> Option<usize> {
+    let mut remaining = limit.checked_sub(std::mem::size_of::<ConstantType>())?;
+    let (positional, named) = match ty {
+        ConstantType::Interface(_, arguments, _) => (arguments.as_slice(), &[][..]),
+        ConstantType::Function(result, positional, named, _, _, parameters) => {
+            remaining = remaining.checked_sub(type_size(result, remaining)?)?;
+            if let Some(parameters) = parameters {
+                for name in parameters {
+                    remaining = remaining
+                        .checked_sub(std::mem::size_of::<String>())?
+                        .checked_sub(name.len())?;
+                }
+            }
+            (positional.as_slice(), named.as_slice())
+        }
+        ConstantType::Record(positional, named, _) => (positional.as_slice(), named.as_slice()),
+        _ => (&[][..], &[][..]),
+    };
+    for ty in positional {
+        remaining = remaining.checked_sub(type_size(ty, remaining)?)?;
+    }
+    for (name, ty) in named {
+        remaining = remaining
+            .checked_sub(std::mem::size_of::<String>())?
+            .checked_sub(name.len())?;
+        remaining = remaining.checked_sub(type_size(ty, remaining)?)?;
+    }
+    Some(limit - remaining)
+}
+
+fn value_size(value: &ConstantValue, limit: usize) -> Option<usize> {
+    let mut remaining = limit.checked_sub(std::mem::size_of::<ConstantValue>())?;
+    let types = match value {
+        ConstantValue::List(types, _)
+        | ConstantValue::Set(types, _)
+        | ConstantValue::Map(types, _)
+        | ConstantValue::Instance(_, types, _) => types.as_slice(),
+        _ => &[],
+    };
+    for ty in types {
+        remaining = remaining.checked_sub(type_size(ty, remaining)?)?;
+    }
+    match value {
+        ConstantValue::String(value) => remaining = remaining.checked_sub(value.len())?,
+        ConstantValue::List(_, values) | ConstantValue::Set(_, values) => {
+            for value in values {
+                remaining = remaining.checked_sub(value_size(value, remaining)?)?;
+            }
+        }
+        ConstantValue::Map(_, values) => {
+            for (key, value) in values {
+                remaining = remaining.checked_sub(value_size(key, remaining)?)?;
+                remaining = remaining.checked_sub(value_size(value, remaining)?)?;
+            }
+        }
+        ConstantValue::Record(values) => {
+            for (name, value) in values {
+                remaining = remaining
+                    .checked_sub(std::mem::size_of::<Option<String>>())?
+                    .checked_sub(name.as_ref().map_or(0, String::len))?;
+                remaining = remaining.checked_sub(value_size(value, remaining)?)?;
+            }
+        }
+        ConstantValue::Instance(_, _, values) => {
+            for (_, name, value) in values {
+                remaining = remaining
+                    .checked_sub(std::mem::size_of::<ConstantDeclaration>())?
+                    .checked_sub(std::mem::size_of::<String>())?
+                    .checked_sub(name.len())?;
+                remaining = remaining.checked_sub(value_size(value, remaining)?)?;
+            }
+        }
+        ConstantValue::EnumValue(_, name) => {
+            remaining = remaining.checked_sub(name.len())?;
+        }
+        ConstantValue::TearOff(_, name, ty) => {
+            remaining = remaining.checked_sub(name.len())?;
+            remaining = remaining.checked_sub(type_size(ty, remaining)?)?;
+        }
+        ConstantValue::Type(ty) => remaining = remaining.checked_sub(type_size(ty, remaining)?)?,
+        _ => {}
+    }
+    Some(limit - remaining)
+}
+
 /// The runtime type of a constant value, when its type is exact.
 fn value_type(value: &ConstantValue) -> Option<ConstantType> {
     let core = |name, arguments: &[ConstantType]| {
@@ -1962,7 +2294,7 @@ fn decode_string_content(
 
 fn declaration_key(identity: &DeclarationIdentity) -> ConstantDeclaration {
     match identity {
-        DeclarationIdentity::Project { library, name } => {
+        DeclarationIdentity::Library { library, name } => {
             ConstantDeclaration::Project(*library, name.clone())
         }
         DeclarationIdentity::Sdk { library, name } => {
@@ -2046,7 +2378,7 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
         ConstantType::Interface(declaration, arguments, nullable) => ResolvedType::Interface {
             occurrence: Default::default(),
             identity: match declaration {
-                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Project {
+                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Library {
                     library: *library,
                     name: name.clone(),
                 },
@@ -2110,25 +2442,26 @@ fn eval_unary(op: &UnaryOp, value: ConstantValue) -> Option<ConstantValue> {
     }
 }
 
+fn eval_equality(op: &BinaryOp, left: &ConstantValue, right: &ConstantValue) -> ConstantValue {
+    let equal = match (left, right) {
+        (ConstantValue::Number(Number::Int(left)), ConstantValue::Number(Number::Int(right))) => {
+            left == right
+        }
+        (ConstantValue::Number(left), ConstantValue::Number(right)) => {
+            left.float() == right.float()
+        }
+        _ => left == right,
+    };
+    ConstantValue::Bool(if matches!(op, BinaryOp::EqEq) {
+        equal
+    } else {
+        !equal
+    })
+}
+
 fn eval_binary(op: &BinaryOp, left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
     match op {
-        BinaryOp::EqEq | BinaryOp::NotEq => {
-            let equal = match (&left, &right) {
-                (
-                    ConstantValue::Number(Number::Int(left)),
-                    ConstantValue::Number(Number::Int(right)),
-                ) => left == right,
-                (ConstantValue::Number(left), ConstantValue::Number(right)) => {
-                    left.float() == right.float()
-                }
-                _ => left == right,
-            };
-            return Some(ConstantValue::Bool(if matches!(op, BinaryOp::EqEq) {
-                equal
-            } else {
-                !equal
-            }));
-        }
+        BinaryOp::EqEq | BinaryOp::NotEq => return Some(eval_equality(op, &left, &right)),
         BinaryOp::And => return bool_pair(left, right).map(|(l, r)| ConstantValue::Bool(l && r)),
         BinaryOp::Or => return bool_pair(left, right).map(|(l, r)| ConstantValue::Bool(l || r)),
         BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
@@ -2257,6 +2590,40 @@ mod tests {
 
     use super::*;
     use crate::{IdentityIndex, IdentitySource, ParsedFile, QualifiedName, TypeIndex};
+
+    #[test]
+    fn constant_declarations_share_interned_library_names() {
+        with_constants(|_, model, _| {
+            let identity = model.resolve_name("ConstBox").unwrap();
+            let DeclarationIdentity::Library {
+                name: crate::InternedString::Shared(name),
+                ..
+            } = &identity
+            else {
+                panic!("expected a shared library name");
+            };
+            let declaration = declaration_key(&identity);
+            let ConstantDeclaration::Project(_, crate::InternedString::Shared(stored)) =
+                &declaration
+            else {
+                panic!("expected a shared library name");
+            };
+            assert!(Arc::ptr_eq(name, stored));
+            let constant = ConstantType::Interface(declaration, vec![], false);
+            let ResolvedType::Interface {
+                identity:
+                    DeclarationIdentity::Library {
+                        name: crate::InternedString::Shared(restored),
+                        ..
+                    },
+                ..
+            } = resolved_constant_type(&constant)
+            else {
+                panic!("expected a shared library name");
+            };
+            assert!(Arc::ptr_eq(name, &restored));
+        });
+    }
 
     #[test]
     fn string_decoding_rejects_unterminated_or_unsegmented_literals() {
@@ -2487,6 +2854,13 @@ const nullableCast = null as int?;
 const nonNullableCast = null as int;
 const futureOrCast = null as FutureOr<int?>;
 "#;
+        with_source(source, test);
+    }
+
+    fn with_source(
+        source: &str,
+        test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
+    ) {
         let path = PathBuf::from("/project/lib/main.dart");
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
@@ -2530,6 +2904,311 @@ const futureOrCast = null as FutureOr<int?>;
             model,
             signatures,
         )
+    }
+
+    #[test]
+    fn exponential_constants_exhaust_size_budget() {
+        use std::fmt::Write;
+
+        let mut source = String::from("const s0 = 'x'; const l0 = [0];\n");
+        for index in 1..=64 {
+            let previous = index - 1;
+            writeln!(source, "const s{index} = s{previous} + s{previous};").unwrap();
+            writeln!(source, "const l{index} = [l{previous}, l{previous}];").unwrap();
+        }
+        with_source(&source, |program, model, signatures| {
+            assert_eq!(
+                evaluate_named(program, model, signatures, "s8"),
+                Some(ConstantValue::String("x".repeat(256)))
+            );
+            assert!(evaluate_named(program, model, signatures, "l4").is_some());
+            for name in ["s24", "s64", "l24", "l64"] {
+                assert_eq!(
+                    evaluate_named(program, model, signatures, name),
+                    None,
+                    "{name}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn failed_dependencies_are_cached_in_diamond_chains() {
+        use std::fmt::Write;
+
+        let mut source = String::from(
+            "class Pair { final Object a, b; const Pair(this.a, this.b); }\nconst f0 = #unknown;\n",
+        );
+        for index in 1..=24 {
+            writeln!(
+                source,
+                "const f{index} = Pair(f{}, f{});",
+                index - 1,
+                index - 1
+            )
+            .unwrap();
+        }
+        crate::with_rules_stack(|| {
+            with_source(&source, |_, model, signatures| {
+                let fields = HashMap::new();
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                assert!(evaluator.resolve_name_shared(&["f24"]).is_none());
+                assert!(evaluator.pending_constants.is_empty());
+                assert!(
+                    evaluator
+                        .constants
+                        .values()
+                        .all(|state| matches!(state, ConstantState::Evaluated(_)))
+                );
+            });
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn wide_constant_dependencies_are_evaluated_before_materialization() {
+        use std::fmt::Write;
+
+        let mut source = String::new();
+        for index in 0..1_000 {
+            writeln!(source, "const c{index} = {index};").unwrap();
+        }
+        source.push_str("const all = <int>[");
+        for index in 0..1_000 {
+            write!(source, "c{index},").unwrap();
+        }
+        source.push_str("]; const alias = all;");
+        with_source(&source, |_, model, signatures| {
+            let fields = HashMap::new();
+            let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+            let ConstantValue::List(_, values) = evaluator.resolve_name(&["alias"]).unwrap() else {
+                panic!();
+            };
+            assert_eq!(values.len(), 1_000);
+            assert_eq!(values[999], ConstantValue::Number(Number::Int(999)));
+        });
+    }
+
+    #[test]
+    fn strict_binary_dependencies_are_evaluated_eagerly() {
+        use std::fmt::Write;
+
+        let mut source = String::new();
+        for index in 0..200 {
+            writeln!(source, "const c{index} = 1;").unwrap();
+        }
+        source.push_str("const value = c0");
+        for index in 1..200 {
+            write!(source, " | c{index}").unwrap();
+        }
+        source.push(';');
+        crate::with_rules_stack(|| {
+            with_source(&source, |_, model, signatures| {
+                let fields = HashMap::new();
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                assert_eq!(
+                    evaluator.resolve_name(&["value"]),
+                    Some(ConstantValue::Number(Number::Int(1)))
+                );
+            });
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn deferred_materialization_still_consumes_the_work_budget() {
+        use std::fmt::Write;
+
+        let mut source = format!("const big = '{}';\n", "x".repeat(512));
+        for index in 0..32 {
+            writeln!(source, "const n{index} = null;").unwrap();
+        }
+        source.push_str("const value = [big, ");
+        for index in 0..32 {
+            write!(source, "n{index} ?? ").unwrap();
+        }
+        source.push_str("0];");
+        with_source(&source, |_, model, signatures| {
+            let fields = HashMap::new();
+            let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+            evaluator.remaining_bytes = 8192;
+            assert!(evaluator.resolve_name_shared(&["value"]).is_none());
+            assert!(evaluator.pending_constants.is_empty());
+            let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+            assert!(evaluator.resolve_name_shared(&["value"]).is_some());
+        });
+    }
+
+    #[test]
+    fn deferred_constants_have_independent_constructor_depth() {
+        let source = "class Leaf { final Object x; const Leaf(int n): x = n == 0 ? 0 : Leaf(n - 1); }\n\
+            class Ignore { const Ignore(Object? ignored); }\n\
+            class D { final Object c; const D(int n): c = n == 0 ? Ignore(leaf) : D(n - 1); }\n\
+            const leaf = Leaf(1); const deep = D(30);\n\
+            const first = [leaf, deep]; const second = [deep, leaf];";
+        crate::with_rules_stack(|| {
+            with_source(source, |_, model, signatures| {
+                for name in ["first", "second"] {
+                    let fields = HashMap::new();
+                    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                    assert!(evaluator.resolve_name_shared(&[name]).is_some(), "{name}");
+                }
+            });
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn file_cache_reuses_alias_values_across_independent_evaluators() {
+        use std::fmt::Write;
+
+        let mut source = String::from("const a0 = true;\n");
+        for index in 1..=1000 {
+            writeln!(source, "const a{index} = a{};", index - 1).unwrap();
+        }
+        with_source(&source, |_, model, signatures| {
+            let cache = ConstantCache::default();
+            let fields = HashMap::new();
+            let mut first = ConstEvaluator::new(None, &fields, model, signatures);
+            first.shared_cache = Some(&cache);
+            let value = first.resolve_name_shared(&["a1000"]).unwrap();
+            assert_eq!(first.constants.len(), 1001);
+            assert_eq!(cache.values.lock().unwrap().values.len(), 1001);
+            assert_eq!(
+                cache.values.lock().unwrap().remaining_bytes,
+                1024 * 1024 - value_size(&value, usize::MAX).unwrap()
+            );
+            for _ in 0..1000 {
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                evaluator.shared_cache = Some(&cache);
+                let cached = evaluator.resolve_name_shared(&["a1000"]).unwrap();
+                assert!(Arc::ptr_eq(&value, &cached));
+                assert_eq!(evaluator.constants.len(), 1);
+            }
+        });
+    }
+
+    #[test]
+    fn file_cache_bounds_distinct_materialized_values_without_changing_results() {
+        use std::fmt::Write;
+
+        let mut source = format!("const base = '{}';\n", "x".repeat(4096));
+        for index in 0..512 {
+            writeln!(source, "const value{index} = [base, {index}];").unwrap();
+        }
+        with_source(&source, |_, model, signatures| {
+            let cache = ConstantCache::default();
+            let fields = HashMap::new();
+            for index in 0..512 {
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                evaluator.shared_cache = Some(&cache);
+                assert!(
+                    evaluator
+                        .resolve_name_shared(&[&format!("value{index}")])
+                        .is_some()
+                );
+            }
+            let cached = cache.values.lock().unwrap();
+            assert!(cached.remaining_bytes < 4096);
+            assert!(cached.values.len() < 512);
+            assert_eq!(cached.retained.len(), cached.values.len());
+        });
+    }
+
+    #[test]
+    fn file_cache_preserves_cycles_and_constructor_assertion_failures() {
+        let source = "class Bad { const Bad(): assert(false); }\n\
+            class Ignore { const Ignore(Object? ignored); }\n\
+            const bad = Bad(); const ignored = Ignore(bad);\n\
+            const cycle = other; const other = cycle; const good = true;";
+        crate::with_rules_stack(|| {
+            with_source(source, |_, model, signatures| {
+                let cache = ConstantCache::default();
+                let fields = HashMap::new();
+                for name in ["bad", "ignored", "cycle", "other", "bad", "ignored", "good"] {
+                    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                    evaluator.shared_cache = Some(&cache);
+                    let value = evaluator.resolve_name_shared(&[name]);
+                    if name == "good" {
+                        assert_eq!(value.as_deref(), Some(&ConstantValue::Bool(true)));
+                        assert!(!evaluator.failed);
+                    } else {
+                        assert!(value.is_none(), "{name}");
+                        if matches!(name, "bad" | "ignored") {
+                            assert!(evaluator.failed);
+                        }
+                    }
+                }
+            });
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn aliases_share_cached_values_and_have_independent_depth_limits() {
+        use std::fmt::Write;
+
+        let mut source = String::from(
+            "const a0 = 0;\nclass Node {\nfinal Object child;\n\
+             const Node(int n): child = n == 0 ? a110 : Node(n - 1);\n}\n\
+             const nested32 = Node(31);\nconst nested33 = Node(32);\n",
+        );
+        for index in 1..=512 {
+            writeln!(source, "const a{index} = a{};", index - 1).unwrap();
+        }
+        crate::with_rules_stack(|| {
+            with_source(&source, |program, model, signatures| {
+                assert_eq!(
+                    evaluate_named(program, model, signatures, "a110"),
+                    Some(ConstantValue::Number(Number::Int(0)))
+                );
+                assert_eq!(
+                    evaluate_named(program, model, signatures, "a512"),
+                    Some(ConstantValue::Number(Number::Int(0)))
+                );
+                assert!(evaluate_named(program, model, signatures, "nested32").is_some());
+                assert_eq!(evaluate_named(program, model, signatures, "nested33"), None);
+                let fields = HashMap::new();
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                assert!(evaluator.resolve_name_shared(&["a512"]).is_some());
+                let first = evaluator.resolve_name_shared(&["a110"]).unwrap();
+                let second = evaluator.resolve_name_shared(&["a109"]).unwrap();
+                assert!(Arc::ptr_eq(&first, &second));
+            })
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn hundred_thousand_aliases_use_a_dependency_worklist() {
+        use std::fmt::Write;
+
+        let mut source = String::with_capacity(3_000_000);
+        source.push_str("const a0 = 0;\n");
+        for index in 1..=100_000 {
+            writeln!(source, "const a{index} = a{};", index - 1).unwrap();
+        }
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty());
+        let fields: HashMap<_, _> = parsed
+            .tree
+            .program(&source)
+            .declarations()
+            .filter_map(|declaration| match declaration {
+                TopLevelDecl::Variable(variable) => Some(variable),
+                _ => None,
+            })
+            .flat_map(|variable| variable.declarators())
+            .map(|declarator| (declarator.name().name(), declarator.initializer().unwrap()))
+            .collect();
+        with_source("", |_, model, signatures| {
+            let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+            assert_eq!(
+                evaluator.resolve_name(&["a100000"]),
+                Some(ConstantValue::Number(Number::Int(0)))
+            );
+            assert_eq!(evaluator.constants.len(), 100_001);
+        });
     }
 
     #[test]

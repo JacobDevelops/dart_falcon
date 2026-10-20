@@ -57,7 +57,7 @@ impl Rule for FormatComment {
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         let cfg = comment_cfg(ctx);
-        let tokens = collect_comment_tokens(ctx.source);
+        let tokens = collect_comment_tokens(ctx.source());
         for group in group_comments(&tokens) {
             check_group(group, &mut diags, ctx, &cfg);
         }

@@ -278,7 +278,7 @@ fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<Constructo
 fn same_type(ctx: &AnalyzeContext, a: DartType<'_>, b: DartType<'_>) -> bool {
     let text = |ty: DartType<'_>| {
         ctx.tree()
-            .tokens_in(ctx.source, ty.span())
+            .tokens_in(ctx.source(), ty.span())
             .flat_map(move |token| token.text().chars())
             .filter(|character| !character.is_whitespace())
     };

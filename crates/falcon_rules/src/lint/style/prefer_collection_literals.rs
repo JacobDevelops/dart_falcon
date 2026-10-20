@@ -79,9 +79,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             return StructuralTraversal::Continue;
         }
         if let Some((span, name)) = default_collection_ctor(node) {
-            let user_shadow = match self.ctx.identities {
+            let user_shadow = match self.ctx.identities() {
                 Some(identities) => identities
-                    .file(self.ctx.file_path)
+                    .file(self.ctx.file_path())
                     .and_then(|file| {
                         identities.resolve_declaration(identities.library(file), name.into())
                     })

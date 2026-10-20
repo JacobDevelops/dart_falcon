@@ -5,7 +5,7 @@ use falcon_analyze::{AnalyzeContext, QualifiedName};
 use falcon_syntax::cst::*;
 
 pub(crate) fn enabled(program: Program<'_>, ctx: &AnalyzeContext<'_>) -> bool {
-    crate::lint::declarations::has_test_file_suffix(ctx.file_path)
+    crate::lint::declarations::has_test_file_suffix(ctx.file_path())
         && program.imports().any(|import| {
             let uri = import.uri().value();
             uri.starts_with("package:test/") || uri.starts_with("package:flutter_test/")

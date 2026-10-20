@@ -43,7 +43,7 @@ fn check_edge_insets_only_call(
     {
         let should_flag = should_use_better_constructor(args);
         if should_flag {
-            let source = ctx.source;
+            let source = ctx.source();
             let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
             let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 

@@ -6,7 +6,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::correctness::use_build_context_synchronously::{
-    AsyncFacts, async_gap_spans, constant_bool, mounted_kind, mounted_receiver_kind,
+    AsyncFacts, async_gap_spans, constant_bool, equality_operands, mounted_kind,
+    mounted_receiver_kind,
 };
 use crate::lint::riverpod::is_exact_type;
 
@@ -104,8 +105,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             self.facts.never.insert(id);
         }
-        if let Some(value) = constant_bool(expression, state) {
-            self.facts.constants.insert(id, value);
+        for operand in equality_operands(expression).into_iter().flatten() {
+            if let Some(value) = constant_bool(operand, state, self.ctx.constant_cache()) {
+                self.facts.constants.insert(operand.syntax().id(), value);
+            }
         }
         match self.target {
             Target::WidgetRead => {

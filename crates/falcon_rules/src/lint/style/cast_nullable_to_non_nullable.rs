@@ -56,10 +56,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let target = state
             .model
             .resolve_type_in(cast.dart_type(), &state.type_parameters);
-        if nullability(&target, &state.signatures, self.ctx.types) != Truth::No {
+        if nullability(&target, &state.signatures, self.ctx.types()) != Truth::No {
             return;
         }
-        if nullability(&state.infer(cast.expr()), &state.signatures, self.ctx.types) != Truth::Yes {
+        if nullability(
+            &state.infer(cast.expr()),
+            &state.signatures,
+            self.ctx.types(),
+        ) != Truth::Yes
+        {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(

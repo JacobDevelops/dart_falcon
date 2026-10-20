@@ -43,8 +43,8 @@ impl Rule for AvoidClassesWithOnlyStaticMembers {
             program,
             ctx,
             diags: Vec::new(),
-            model: ctx.identities.map(|identities| {
-                SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types)
+            model: ctx.identities().map(|identities| {
+                SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types())
             }),
         }))
     }
@@ -118,7 +118,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         || !with_clause.is_empty()
                         || !implements.is_empty();
                     if has_supertypes {
-                        let inherits = match (model, ctx.signatures) {
+                        let inherits = match (model, ctx.signatures()) {
                             (Some(model), Some(signatures)) => model
                                 .resolve_name(name.name())
                                 .map_or(Truth::Unknown, |identity| {

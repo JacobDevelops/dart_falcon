@@ -51,7 +51,7 @@ impl Collector<'_> {
     fn is_enum_or_enum_like(&self, identity: &DeclarationIdentity, state: &SemanticState) -> bool {
         if self
             .ctx
-            .types
+            .types()
             .is_some_and(|types| types.type_kind_identity(identity) == Some(TypeKind::Enum))
         {
             return true;
@@ -83,7 +83,7 @@ impl Collector<'_> {
             .ctx
             .tree()
             .keywords_in(
-                self.ctx.source,
+                self.ctx.source(),
                 Span::new(from, case.span().end),
                 TokenKind::Default,
             )
@@ -100,7 +100,7 @@ impl Collector<'_> {
         } else {
             self.ctx
                 .tree()
-                .tokens_in(self.ctx.source, Span::new(keyword, case.span().end))
+                .tokens_in(self.ctx.source(), Span::new(keyword, case.span().end))
                 .find(|token| token.kind() == TokenKind::Colon)
                 .map_or(keyword + "default:".len(), |token| {
                     token.offset() + token.len()

@@ -77,8 +77,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             (call.span().start, call.span().end),
             (
                 name,
-                &self.ctx.source[actual.start..actual.end],
-                &self.ctx.source[matcher.start..matcher.end],
+                &self.ctx.source()[actual.start..actual.end],
+                &self.ctx.source()[matcher.start..matcher.end],
             ),
         );
     }

@@ -647,7 +647,7 @@ impl<'a> Collector<'a> {
                 ParamKind::Named { required: true } => true,
                 ParamKind::Named { required: false } => shape.iter().any(|(span, kind)| {
                     matches!(kind, ParamKind::Named { required: false })
-                        && self.ctx.source.get(span.start..span.end) == Some(param.name().name())
+                        && self.ctx.source().get(span.start..span.end) == Some(param.name().name())
                 }),
                 kind => {
                     let target = positional.next();

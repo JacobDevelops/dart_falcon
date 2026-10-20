@@ -59,10 +59,10 @@ impl Rule for DiagnosticDescribeAllProperties {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let model = SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types);
+        let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         RulePreparation::Structural(Box::new(Collector {
             checker: Checker {
                 model,
@@ -92,7 +92,7 @@ impl Checker<'_> {
         };
         let diagnosticable = |supertype: &DeclarationIdentity| {
             supertype.name() == "Diagnosticable"
-                && self.ctx.identities.is_some_and(|identities| {
+                && self.ctx.identities().is_some_and(|identities| {
                     identities.identity_is_in_unnamed_library(supertype) == Some(true)
                 })
         };
@@ -223,9 +223,11 @@ impl Checker<'_> {
                     DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => {
                         Some(false)
                     }
-                    DeclarationIdentity::Project { .. } => {
+                    DeclarationIdentity::Library { .. } => {
                         let widget = |supertype: &DeclarationIdentity| match supertype {
-                            DeclarationIdentity::Project { name, .. } => name == "Widget",
+                            _ if self.model.identities().is_project(supertype) => {
+                                supertype.name() == "Widget"
+                            }
                             other => other.is_package("flutter", "Widget"),
                         };
                         match self.signatures.supertype_matches(identity, &widget) {
@@ -233,7 +235,7 @@ impl Checker<'_> {
                             Truth::No => Some(false),
                             Truth::Unknown => self
                                 .ctx
-                                .types
+                                .types()
                                 .is_some_and(|types| {
                                     types.supertype_matches_identity(identity, widget) == Truth::No
                                 })

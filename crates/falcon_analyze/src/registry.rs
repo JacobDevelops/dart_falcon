@@ -76,7 +76,7 @@ impl RuleRegistry {
         ctx: &'a AnalyzeContext<'a>,
     ) -> Vec<Diagnostic> {
         with_rules_stack(|| self.run_all_inner(program, ctx))
-            .unwrap_or_else(|error| vec![rules_thread_diagnostic(ctx.file_path, &error)])
+            .unwrap_or_else(|error| vec![rules_thread_diagnostic(ctx.file_path(), &error)])
     }
 
     fn run_all_inner<'a>(
@@ -128,8 +128,8 @@ impl RuleRegistry {
         // Parse even without rule diagnostics so malformed suppressions are surfaced.
         let mut diagnostics = diagnostics;
         let suppressions = FileSuppressions::parse(
-            ctx.source,
-            &ctx.file_path.to_string_lossy(),
+            ctx.source(),
+            &ctx.file_path().to_string_lossy(),
             self.lookup,
             ctx.tree(),
         );

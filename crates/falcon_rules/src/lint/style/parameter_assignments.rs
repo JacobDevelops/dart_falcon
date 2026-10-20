@@ -88,7 +88,7 @@ impl<'a> Collector<'a> {
         let declaration_start = self
             .ctx
             .tree()
-            .node(self.ctx.source, write.declaration)
+            .node(self.ctx.source(), write.declaration)
             .unwrap()
             .span()
             .start;
@@ -140,7 +140,7 @@ impl<'a> Collector<'a> {
                     RULE,
                     format!(
                         "Invalid assignment to the parameter '{}'.",
-                        &self.ctx.source[name.start..name.end]
+                        &self.ctx.source()[name.start..name.end]
                     ),
                     write.span,
                 ));

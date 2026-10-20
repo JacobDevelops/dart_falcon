@@ -99,7 +99,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
             let keyword_span = self
                 .ctx
                 .tree()
-                .tokens_in(self.ctx.source, operator.span())
+                .tokens_in(self.ctx.source(), operator.span())
                 .find(|token| token.kind() == falcon_syntax::TokenKind::Operator)
                 .map_or(operator.span(), |token| token.span());
             self.check(
