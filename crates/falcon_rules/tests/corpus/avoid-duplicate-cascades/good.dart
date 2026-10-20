@@ -34,3 +34,13 @@ void nestedMutations(List<int> xs, Counter counter) {
   xs..[counter.i] = (counter..increment()).i..[counter.i] = 9;
   xs..[(counter..i += 1).i] = 1..[(counter..i += 1).i] = 2;
 }
+
+void replacedReceivers(dynamic value, dynamic other, int i) {
+  value..child.name = 'a'..child = other..child.name = 'b';
+  value..[i].name = 'a'..[i] = other..[i].name = 'b';
+  value..child[i].name = 'a'..child[i] = other..child[i].name = 'b';
+  value..child.name = 'a'..child += other..child.name = 'b';
+  value..[i].name = 'a'..[i] += other..[i].name = 'b';
+  value..[0].name = 'a'..[i] = other..[0].name = 'b';
+  value..child[0].name = 'a'..child[i] = other..child[0].name = 'b';
+}

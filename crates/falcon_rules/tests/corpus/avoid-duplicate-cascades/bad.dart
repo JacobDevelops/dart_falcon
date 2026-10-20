@@ -5,4 +5,5 @@ void f(dynamic value) {
   value..child.name = 'a'..child.name = 'b'; /* expect: avoid-duplicate-cascades */
   value..name = 'a'..other = 'b'..name = 'c'; /* expect: avoid-duplicate-cascades */
   value..[1 + 2] = 0..[1+2] = 1; /* expect: avoid-duplicate-cascades */
+  value..child = value..child.name = 'a'..child.name = 'b'; /* expect: avoid-duplicate-cascades */
 }

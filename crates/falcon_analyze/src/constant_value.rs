@@ -212,11 +212,25 @@ pub fn evaluate_stable_constant_with_local_values(
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> Option<ConstantValue> {
+    evaluate_stable_constant_with_local_values_in_context(
+        expression, owner, locals, model, signatures, None,
+    )
+}
+
+/// Evaluates build-independent lexical constants in their declared type context.
+pub fn evaluate_stable_constant_with_local_values_in_context(
+    expression: Expr<'_>,
+    owner: Option<&DeclarationIdentity>,
+    locals: &LocalConstants<'_>,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+    expected: Option<&ResolvedType>,
+) -> Option<ConstantValue> {
     let fields = HashMap::new();
     let mut evaluator = ConstEvaluator::new(owner, &fields, model, signatures);
     evaluator.local_constants = Some(locals);
     evaluator.stable_evaluation = true;
-    evaluator.evaluate(expression)
+    evaluator.evaluate_with_context(expression, expected)
 }
 
 /// Evaluates a constant name without manufacturing an expression node.

@@ -1,12 +1,13 @@
 //! Require enum-keyed map literals to include every declared enum value.
 //!
 //! Key types and constant identities come from resolution, including contextual
-//! types, imported enums, aliases and dot shorthands. Constant branches and
-//! statically known spreads contribute keys; unknown coverage disables the check.
+//! types, imported enums, aliases and dot shorthands. Build-independent constant
+//! branches and statically known spreads contribute keys; unknown coverage disables the check.
 
+use super::avoid_constant_conditions::constant_value;
 use std::collections::HashSet;
 
-use falcon_analyze::constant_value::evaluate_constant_with_local_values_in_context;
+use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values_in_context;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, ConstantDeclaration, ConstantValue, DeclarationIdentity, ResolvedType, Rule,
@@ -41,7 +42,24 @@ fn constant(
     expected: Option<&ResolvedType>,
     state: &SemanticState<'_>,
 ) -> Option<ConstantValue> {
-    evaluate_constant_with_local_values_in_context(
+    // Captured local values discard build provenance; evaluate their source instead.
+    let expression = if let Expr::Ident(identifier) = expression.unparenthesized()
+        && let Some(initializer) = state.local_constant(identifier.name())
+    {
+        // Local reads may have been shadowed since declaration; don't rebind them.
+        let mut local_reference = false;
+        falcon_syntax::cst::visit::for_each_expr(initializer, &mut |node| {
+            local_reference |= matches!(node, Expr::Ident(name)
+                if state.environment.is_bound(name.name()));
+        });
+        if local_reference {
+            return None;
+        }
+        initializer
+    } else {
+        expression
+    };
+    evaluate_stable_constant_with_local_values_in_context(
         expression,
         state.constant_owner.as_ref(),
         &state.visible_local_constants(),
@@ -73,6 +91,7 @@ fn cover_element(
     key_type: &ResolvedType,
     owner: &ConstantDeclaration,
     state: &SemanticState<'_>,
+    ctx: &AnalyzeContext<'_>,
     covered: &mut HashSet<String>,
 ) -> bool {
     match element {
@@ -88,7 +107,7 @@ fn cover_element(
             if let Expr::Map(map) = spread.expr().unparenthesized() {
                 return map
                     .elements()
-                    .all(|element| cover_element(element, key_type, owner, state, covered));
+                    .all(|element| cover_element(element, key_type, owner, state, ctx, covered));
             }
             match constant(spread.expr(), None, state) {
                 Some(ConstantValue::Map(_, entries)) => entries
@@ -114,13 +133,13 @@ fn cover_element(
             let IfCondition::Expr(condition) = branch.condition() else {
                 return false;
             };
-            match constant(condition, None, state) {
+            match constant_value(condition, state, ctx) {
                 Some(ConstantValue::Bool(true)) => {
-                    cover_element(branch.then_entry(), key_type, owner, state, covered)
+                    cover_element(branch.then_entry(), key_type, owner, state, ctx, covered)
                 }
-                Some(ConstantValue::Bool(false)) => branch
-                    .else_entry()
-                    .is_none_or(|element| cover_element(element, key_type, owner, state, covered)),
+                Some(ConstantValue::Bool(false)) => branch.else_entry().is_none_or(|element| {
+                    cover_element(element, key_type, owner, state, ctx, covered)
+                }),
                 None
                 | Some(
                     ConstantValue::Null
@@ -197,7 +216,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let mut covered = HashSet::new();
         if !map
             .elements()
-            .all(|element| cover_element(element, key_type, &owner, state, &mut covered))
+            .all(|element| cover_element(element, key_type, &owner, state, self.ctx, &mut covered))
         {
             return;
         }
