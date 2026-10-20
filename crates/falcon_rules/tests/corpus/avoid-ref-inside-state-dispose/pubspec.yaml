@@ -1,0 +1,3 @@
+name: avoid_ref_inside_state_dispose_fixture
+environment:
+  sdk: ">=3.0.0 <4.0.0"

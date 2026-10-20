@@ -1,0 +1,1 @@
+{"linter":{"rules":{"style":{"extend-equatable":{"level":"warn","options":{"class_name_pattern":"State$","file_name_pattern":"\\.model\\.dart$"}}}}}}

@@ -1,0 +1,29 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "equatable",
+      "rootUri": "../packages/equatable",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "riverpod",
+      "rootUri": "../packages/riverpod",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "flutter_riverpod",
+      "rootUri": "../packages/flutter_riverpod",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "meta",
+      "rootUri": "../packages/meta",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    }
+  ]
+}

@@ -7599,6 +7599,72 @@
   },
   {
     "crossFile": false,
+    "description": "Rejects Riverpod widget references used during State.dispose.",
+    "diagnostics": [
+      {
+        "column": 5,
+        "file": null,
+        "line": 4,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 5,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 6,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 7,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 8,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 17,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 18,
+        "message": "Do not use a widget ref during dispose; cache the required resource before disposal."
+      }
+    ],
+    "docs": "Rejects Riverpod widget references used during State.dispose.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nabstract class First extends ConsumerState<Object> {\n  void dispose() {\n    ref.read(Object());\n    this.ref.read(Object());\n    final cached = ref;\n    use(ref);\n    (() { ref.read(Object()); })();\n    super.dispose();\n  }\n}\nvoid use(WidgetRef value) {}\n\nmixin DisposeMixin<W extends Object> on ConsumerState<W> {\n  @override\n  void dispose() {\n    ref.read(Object());\n    this.ref.read(Object());\n    super.dispose();\n  }\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nabstract class Good extends ConsumerState<Object> {\n  void initState() { ref.read(Object()); }\n  void build() { this.ref.read(Object()); }\n  void dispose() {\n    final ref = FakeRef();\n    ref.read(Object());\n    super.dispose();\n  }\n  static void disposeOther(WidgetRef ref) { ref.read(Object()); }\n}\nclass FakeRef { void read(Object value) {} }\nclass Other { WidgetRef? ref; void dispose() { ref?.read(Object()); } }\nvoid dispose(WidgetRef ref) { ref.read(Object()); }\n\nmixin BuildMixin<W extends Object> on ConsumerState<W> {\n  void build() { ref.read(Object()); }\n  @override\n  void dispose() {\n    final ref = FakeRef();\n    ref.read(Object());\n    super.dispose();\n  }\n}\nmixin OtherMixin {\n  WidgetRef get ref;\n  void dispose() { ref.read(Object()); }\n}"
+    },
+    "group": "correctness",
+    "name": "avoid-ref-inside-state-dispose",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags one-time Riverpod reads of provider state during widget build.",
     "diagnostics": [
       {
@@ -13113,6 +13179,54 @@
   },
   {
     "crossFile": false,
+    "description": "Requires stable value equality for freshly created Riverpod family keys.",
+    "diagnostics": [
+      {
+        "column": 10,
+        "file": null,
+        "line": 8,
+        "message": "Use a provider family argument with stable value equality."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 9,
+        "message": "Use a provider family argument with stable value equality."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 10,
+        "message": "Use a provider family argument with stable value equality."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 12,
+        "message": "Use a provider family argument with stable value equality."
+      }
+    ],
+    "docs": "Requires stable value equality for freshly created Riverpod family keys.\n\nChecks package-resolved Riverpod family objects, including subclasses and\naliases. Non-constant collections, closures, and fresh instances inheriting\nObject's equality are rejected. Records are checked recursively; existing\nvalues, constants, and unresolved equality implementations are accepted.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\nclass Mutable { int value = 0; }\nfinal family = ProviderFamily<int, Mutable>();\nfinal future = FutureProviderFamily<int, Mutable>();\nfinal automatic = AutoDisposeProviderFamily<int, Mutable>();\nvoid bad(Mutable mutable) {\n  family(mutable);\n  family(Mutable());\n  future(Mutable());\n  automatic(Mutable());\n  final alias = family;\n  alias(Mutable());\n}",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart' as rp;\nimport 'package:meta/meta.dart';\n@immutable\nclass Key { final int value; const Key(this.value); }\nfinal integer = rp.ProviderFamily<int, int>();\nfinal string = rp.ProviderFamily<int, String>();\nfinal boolean = rp.ProviderFamily<int, bool>();\nfinal key = rp.ProviderFamily<int, Key>();\nfinal unknown = rp.ProviderFamily<int, dynamic>();\nclass ProviderFamily { void call(Object argument) {} }\nclass Mutable { int value = 0; }\nvoid good(dynamic value) {\n  integer(1);\n  string('key');\n  boolean(true);\n  key(const Key(1));\n  unknown(value);\n  ProviderFamily()(Mutable());\n}"
+    },
+    "group": "correctness",
+    "name": "prefer-immutable-provider-arguments",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Flags void method actions on a listening Provider lookup during build.",
     "diagnostics": [
       {
@@ -17070,6 +17184,114 @@
   },
   {
     "crossFile": false,
+    "description": "Prefer `useCallback` for synchronous memoized function literals.",
+    "diagnostics": [
+      {
+        "column": 3,
+        "file": null,
+        "line": 5,
+        "message": "Prefer 'useCallback' instead of 'useMemoized' for function expressions."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 6,
+        "message": "Prefer 'useCallback' instead of 'useMemoized' for function expressions."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 7,
+        "message": "Prefer 'useCallback' instead of 'useMemoized' for function expressions."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 8,
+        "message": "Prefer 'useCallback' instead of 'useMemoized' for function expressions."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 9,
+        "message": "Prefer 'useCallback' instead of 'useMemoized' for function expressions."
+      }
+    ],
+    "docs": "Prefer `useCallback` for synchronous memoized function literals.\nOnly resolved flutter_hooks calls with a zero-argument, single-expression\nbuilder are checked; asynchronous and side-effectful builders are preserved.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nvoid example() {\n  useMemoized(() => () {});\n  hooks.useMemoized(() => (int value) => value + 1);\n  useMemoized(() { return () {}; });\n  useMemoized<void Function()>(() => () {});\n  useMemoized(() => (() {}), [1]);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\n\nvoid example() {\n  useCallback(() {});\n  useMemoized(() => 42);\n  useMemoized(() async => () {});\n  useMemoized(() { print('creation'); return () {}; });\n  useMemoized(() => existing);\n  void local(dynamic useMemoized) { useMemoized(() => () {}); }\n  void prefix(dynamic hooks) { hooks.useMemoized(() => () {}); }\n}\nvoid existing() {}\nclass Local {\n  dynamic useMemoized(dynamic callback) => callback();\n  void build() { useMemoized(() => () {}); }\n}"
+    },
+    "group": "performance",
+    "name": "prefer-use-callback",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer memoizing freshly allocated collection values used as hook keys.",
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": null,
+        "line": 4,
+        "message": "Memoize this collection with 'useMemoized' before using it as a hook dependency key."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 5,
+        "message": "Memoize this collection with 'useMemoized' before using it as a hook dependency key."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 6,
+        "message": "Memoize this collection with 'useMemoized' before using it as a hook dependency key."
+      },
+      {
+        "column": 35,
+        "file": null,
+        "line": 7,
+        "message": "Memoize this collection with 'useMemoized' before using it as a hook dependency key."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 8,
+        "message": "Memoize this collection with 'useMemoized' before using it as a hook dependency key."
+      }
+    ],
+    "docs": "Prefer memoizing freshly allocated collection values used as hook keys.\nFlutter Hooks compares individual keys with ==; Dart collection literals use\nidentity equality, so allocating a key again invalidates the memo every build.\nOnly direct non-const collection literals in an explicit dependency list of\nresolved useEffect/useMemoized/useCallback calls are checked. This deliberately\ndoes not guess whether arbitrary build computations are expensive or stable.",
+    "domains": [
+      "flutter_hooks"
+    ],
+    "examples": {
+      "bad": "import 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nvoid example(int value) {\n  useEffect(() {}, [[value]]);\n  useMemoized(() => value, [{value}]);\n  useCallback(() {}, [{'value': value}]);\n  hooks.useMemoized(() => value, [(<int>[value])]);\n  hooks.useEffect(() {}, [<String, int>{'value': value}]);\n}",
+      "crossFile": null,
+      "good": "import 'package:flutter_hooks/flutter_hooks.dart';\nimport 'package:flutter_hooks/flutter_hooks.dart' as hooks;\nvoid example(int value) {\n  useEffect(() {}, [value]);\n  useMemoized(() => value, [const [1]]);\n  useCallback(() {}, [const {1}]);\n  useEffect(() {}, [const {'value': 1}]);\n  useMemoized(() => value, const [[1], {2}, {'value': 3}]);\n  final memo = useMemoized(() => [value], [value]);\n  useEffect(() {}, [memo]);\n  void shadow(dynamic useEffect) { useEffect(() {}, [[value]]); }\n  void prefix(dynamic hooks) { hooks.useEffect(() {}, [[value]]); }\n}\nclass Local {\n  dynamic useEffect(dynamic fn, dynamic keys) {}\n  void example() { useEffect(() {}, [[1]]); }\n}"
+    },
+    "group": "performance",
+    "name": "prefer-use-memo",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Suggests considering ListView for a SingleChildScrollView containing a plain Flutter Column with at least two unconditional children in a list literal.",
     "diagnostics": [
       {
@@ -20217,6 +20439,66 @@
       "label": "Dart lints",
       "upstreamId": "avoid_private_typedef_functions",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/avoid_private_typedef_functions"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Keeps notifier state behind Riverpod's observable state property.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "Expose notifier data through state rather than a public property."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 4,
+        "message": "Expose notifier data through state rather than a public property."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 5,
+        "message": "Expose notifier data through state rather than a public property."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Expose notifier data through state rather than a public property."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Expose notifier data through state rather than a public property."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 12,
+        "message": "Expose notifier data through state rather than a public property."
+      }
+    ],
+    "docs": "Keeps notifier state behind Riverpod's observable state property.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\nabstract class Counter extends Notifier<int> {\n  int count = 0;\n  final int initial = 0;\n  int get current => count;\n  set current(int value) { count = value; }\n}\nabstract class AsyncCounter extends AsyncNotifier<int> {\n  int cached = 0;\n}\nabstract class Derived extends Counter {\n  int extra = 0;\n}",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart' as rp;\nabstract class Good extends rp.Notifier<int> {\n  int _count = 0;\n  int get _current => _count;\n  set _current(int value) { _count = value; }\n  static int cache = 0;\n  int build() => _count;\n  void increment() { state = state + 1; }\n}\nclass Notifier<T> {}\nclass Unrelated extends Notifier<int> { int publicValue = 0; }\nclass Plain { int value = 0; int get other => value; }"
+    },
+    "group": "style",
+    "name": "avoid-public-notifier-properties",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -23524,6 +23806,60 @@
       "label": "Dart lints",
       "upstreamId": "eol_at_end_of_file",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/eol_at_end_of_file"
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Require Equatable semantics for configured class/file name patterns.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 3,
+        "message": "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 4,
+        "message": "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'."
+      }
+    ],
+    "docs": "Require Equatable semantics for configured class/file name patterns.\nConfigure `class_name_pattern` or `file_name_pattern`; without either option,\nthis rule reports no diagnostics. Already equatable subtypes (including\nEquatableMixin users) and unresolved inheritance are conservatively skipped.",
+    "domains": [
+      "equatable"
+    ],
+    "examples": {
+      "bad": "import 'package:equatable/equatable.dart';\nclass FirstState {}\nclass SecondState {}\nabstract class ThirdState {}\nclass FourthState extends Base {}\nclass FifthState with Other {}\nclass Base {}\nmixin Other {}",
+      "crossFile": null,
+      "good": "import 'package:equatable/equatable.dart';\nimport 'package:equatable/equatable.dart' as eq;\nclass FirstState extends Equatable {}\nclass SecondState with EquatableMixin {}\nclass ThirdState extends FirstState {}\nclass FourthState extends eq.Equatable {}\nclass FifthState with eq.EquatableMixin {}\nclass NotConfigured {}\nclass UnknownState extends Missing {}\nclass InterfaceState implements Equatable {}\nmixin class ViewState {}"
+    },
+    "group": "style",
+    "name": "extend-equatable",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
     }
   },
   {
@@ -27916,6 +28252,66 @@
   },
   {
     "crossFile": false,
+    "description": "Requires snake_case file names ending in _notifier.dart for resolved Riverpod notifier classes.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Name files containing Riverpod notifiers using snake_case ending in '_notifier.dart'."
+      }
+    ],
+    "docs": "Requires snake_case file names ending in _notifier.dart for resolved Riverpod notifier classes.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart' as rp;\nclass CounterNotifier extends rp.Notifier<int> {}",
+      "crossFile": null,
+      "good": "class Notifier<T> {}\nclass Counter extends Notifier<int> {}\nclass AsyncNotifier<T> {}\nclass AsyncCounter extends AsyncNotifier<int> {}\nclass Ordinary {}"
+    },
+    "group": "style",
+    "name": "prefer-correct-notifier-file-name",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including annotated generator functions.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 2,
+        "message": "Name files containing Riverpod providers using snake_case ending in '_provider.dart'."
+      }
+    ],
+    "docs": "Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including annotated generator functions.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart' as rp;\nfinal countProvider = rp.Provider<int>((ref) => 0);",
+      "crossFile": null,
+      "good": "class Provider<T> { Provider(T Function(Object) create); }\nfinal count = Provider<int>((ref) => 0);\nfinal ordinary = 0;"
+    },
+    "group": "style",
+    "name": "prefer-correct-provider-file-name",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
     "description": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.",
     "diagnostics": [],
     "docs": "Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.\n\nFiles without main are test support libraries and do not need the suffix.",
@@ -28300,6 +28696,60 @@
     },
     "group": "style",
     "name": "prefer-early-return",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Prefer EquatableMixin to directly extending package:equatable's Equatable.",
+    "diagnostics": [
+      {
+        "column": 21,
+        "file": null,
+        "line": 3,
+        "message": "Prefer mixing in 'EquatableMixin' instead of extending 'Equatable'."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 4,
+        "message": "Prefer mixing in 'EquatableMixin' instead of extending 'Equatable'."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 5,
+        "message": "Prefer mixing in 'EquatableMixin' instead of extending 'Equatable'."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 6,
+        "message": "Prefer mixing in 'EquatableMixin' instead of extending 'Equatable'."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 7,
+        "message": "Prefer mixing in 'EquatableMixin' instead of extending 'Equatable'."
+      }
+    ],
+    "docs": "Prefer EquatableMixin to directly extending package:equatable's Equatable.",
+    "domains": [
+      "equatable"
+    ],
+    "examples": {
+      "bad": "import 'package:equatable/equatable.dart';\nimport 'package:equatable/equatable.dart' as eq;\nclass First extends Equatable {}\nclass Second extends eq.Equatable {}\nabstract class Third extends Equatable {}\nclass Fourth extends Equatable {}\nclass Fifth extends eq.Equatable {}",
+      "crossFile": null,
+      "good": "import 'package:equatable/equatable.dart' as eq;\nclass First with eq.EquatableMixin {}\nclass Second extends First {}\nclass Third implements eq.Equatable {}\nclass Fourth {}\nclass Equatable {}\nclass Local extends Equatable {}\nclass Unknown extends Missing {}\nmixin NeedsEquatable on eq.Equatable {}\nclass Constrained extends eq.Equatable with NeedsEquatable {}\nclass ConstrainedAlias = eq.Equatable with NeedsEquatable;"
+    },
+    "group": "style",
+    "name": "prefer-equatable-mixin",
     "recommended": false,
     "source": {
       "kind": "Falcon",
@@ -30530,6 +30980,156 @@
     },
     "group": "style",
     "name": "prefer-returning-condition",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 11,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 13,
+        "message": "Name Riverpod notifiers with a 'Notifier' suffix."
+      }
+    ],
+    "docs": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.\nPackage identities, including inherited identities and re-exports, distinguish\nRiverpod notifiers from lookalikes. Generated Dart files are ignored.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart' as flutter;\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nimport 'package:state_notifier/state_notifier.dart';\nclass Counter extends Notifier<int> {}\nclass AsyncCounter extends AsyncNotifier<int> {}\nclass StreamCounter extends StreamNotifier<int> {}\nclass AutoCounter extends AutoDisposeNotifier<int> {}\nclass FlutterCounter extends flutter.Notifier<int> {}\nclass HookCounter extends hooks.Notifier<int> {}\nclass LegacyCounter extends StateNotifier<int> {}\nclass BaseNotifier extends Notifier<int> {}\nclass Child extends BaseNotifier {}",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart' as rp;\nclass CounterNotifier extends rp.Notifier<int> {}\nclass AsyncCounterNotifier extends rp.AsyncNotifier<int> {}\nclass StreamCounterNotifier extends rp.StreamNotifier<int> {}\nclass AutoCounterNotifier extends rp.AutoDisposeNotifier<int> {}\nclass ChildNotifier extends CounterNotifier {}\nclass _PrivateNotifier extends rp.Notifier<int> {}\nclass Notifier<T> {}\nclass Unrelated extends Notifier<int> {}\nclass AsyncNotifier<T> {}\nclass UnrelatedAsync extends AsyncNotifier<int> {}\nclass Ordinary {}\nclass Missing extends UnknownNotifier<int> {}"
+    },
+    "group": "style",
+    "name": "prefer-riverpod-notifier-suffix",
+    "recommended": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    }
+  },
+  {
+    "crossFile": false,
+    "description": "Requires a Provider suffix on resolved Riverpod top-level providers and static fields.",
+    "diagnostics": [
+      {
+        "column": 7,
+        "file": null,
+        "line": 4,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 5,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 6,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 7,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 8,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 9,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 10,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 11,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 13,
+        "message": "Name Riverpod providers with a 'Provider' suffix."
+      }
+    ],
+    "docs": "Requires a Provider suffix on resolved Riverpod top-level providers and static fields.",
+    "domains": [
+      "riverpod"
+    ],
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart' as flutter;\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nfinal count = Provider<int>((ref) => 0);\nfinal future = FutureProvider<int>((ref) => 0);\nfinal stream = StreamProvider<int>((ref) => 0);\nfinal family = ProviderFamily<int, int>((ref, arg) => arg);\nfinal disposed = AutoDisposeProvider<int>((ref) => 0);\nfinal flutterCount = flutter.Provider<int>((ref) => 0);\nfinal hooksCount = hooks.Provider<int>((ref) => 0);\nProvider<int>? typed;\nclass Providers {\n  static final count = Provider<int>((ref) => 0);\n}",
+      "crossFile": null,
+      "good": "import 'package:riverpod/riverpod.dart' as rp;\nfinal countProvider = rp.Provider<int>((ref) => 0);\nfinal futureProvider = rp.FutureProvider<int>((ref) => 0);\nfinal streamProvider = rp.StreamProvider<int>((ref) => 0);\nfinal familyProvider = rp.ProviderFamily<int, int>((ref, arg) => arg);\nfinal autoProvider = rp.AutoDisposeProvider<int>((ref) => 0);\nclass Providers {\n  static final countProvider = rp.Provider<int>((ref) => 0);\n  final instance = rp.Provider<int>((ref) => 0);\n}\nvoid localValues() { final local = rp.Provider<int>((ref) => 0); }\nclass Provider<T> { Provider(T Function(Object) create); }\nfinal unrelated = Provider<int>((ref) => 0);\nfinal ordinary = 0;"
+    },
+    "group": "style",
+    "name": "prefer-riverpod-provider-suffix",
     "recommended": false,
     "source": {
       "kind": "Falcon",

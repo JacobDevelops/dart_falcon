@@ -14,8 +14,8 @@ pub use identity::{
     QualifiedName, SourceSelector, doc_imports, import_path, library_doc_imports,
 };
 pub use library::{
-    LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, lexical_normalize,
-    library_unit,
+    LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, is_generated_dart_file,
+    lexical_normalize, library_unit,
 };
 pub use semantic::{
     ConstConstructorBody, DeclarationFacts, DefaultSyntaxKey, FunctionTypeAlias, FunctionTypeShape,

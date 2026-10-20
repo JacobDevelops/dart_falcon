@@ -134,6 +134,7 @@ struct Library {
     configurable: bool,
     incomplete: bool,
     missing_parts_only: bool,
+    missing_generated_parts_only: bool,
     implicit_core: bool,
     /// `None` for project libraries.
     origin: Option<ExternalOrigin>,
@@ -687,6 +688,7 @@ impl IdentityIndex {
                         configurable: false,
                         incomplete: grouping.is_unresolved(i),
                         missing_parts_only: grouping.is_unresolved(i),
+                        missing_generated_parts_only: grouping.missing_generated_parts_only(i),
                         implicit_core: true,
                         origin: None,
                         doc_imports: Vec::new(),
@@ -727,6 +729,7 @@ impl IdentityIndex {
                 configurable: false,
                 incomplete: library.has_unresolved_parts,
                 missing_parts_only: false,
+                missing_generated_parts_only: false,
                 implicit_core: true,
                 origin: (!matches!(library.origin, ExternalOrigin::Project))
                     .then(|| library.origin.clone()),
@@ -811,6 +814,7 @@ impl IdentityIndex {
                     .exports()
                     .any(|node| node.configurable_uris().next().is_some());
             library.missing_parts_only &= !has_parse_errors;
+            library.missing_generated_parts_only &= !has_parse_errors;
             library.named |= program
                 .library_directive()
                 .is_some_and(|directive| directive.name().next().is_some());
@@ -1808,9 +1812,29 @@ impl IdentityIndex {
     pub fn resolve_imported_member(
         &self,
         library: LibraryId,
+        name: QualifiedName<'_>,
+    ) -> Option<DeclarationIdentity> {
+        self.imported_member(self.complete(library)?, name)
+    }
+
+    /// Resolve imported annotations before generation when only generated parts are missing.
+    pub fn resolve_annotation_before_generation(
+        &self,
+        library: LibraryId,
+        name: QualifiedName<'_>,
+    ) -> Option<DeclarationIdentity> {
+        let unit = self.get(library);
+        if unit.incomplete && !unit.missing_generated_parts_only {
+            return None;
+        }
+        self.imported_member(unit, name)
+    }
+
+    fn imported_member(
+        &self,
+        unit: &Library,
         QualifiedName { prefix, name }: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
-        let unit = self.complete(library)?;
         if prefix.is_none() && unit.declarations.contains_key(name) {
             return None;
         }
@@ -3697,6 +3721,89 @@ mod tests {
         assert_eq!(
             index.resolve_imported_member(main, QualifiedName::prefixed("ambiguous", "immutable")),
             None
+        );
+    }
+
+    #[test]
+    fn annotation_resolution_only_tolerates_missing_generated_parts() {
+        for (body, expected) in [
+            ("part 'main.g.dart';", true),
+            ("part 'main.freezed.dart';", true),
+            ("part 'main.gr.dart';", true),
+            ("part 'main.config.dart';", true),
+            ("part 'main.mocks.dart';", true),
+            ("part 'main.chopper.dart';", true),
+            ("part 'main.mapper.dart';", true),
+            ("part 'main.helpers.dart';", false),
+            ("part './main.g.dart';", true),
+            ("part 'other.shared.dart';", false),
+            ("part 'sub/main.g.dart';", false),
+            ("part 'main.extra.g.dart';", false),
+            ("part 'main..dart';", false),
+            ("part 'manual.dart';", false),
+            ("part 'main.g.dart'; part 'manual.dart';", false),
+            ("part 'main.g.txt';", false),
+            ("part 'main.g.dart'; const immutable = 0;", false),
+            ("import 'other.dart'; part 'main.g.dart';", false),
+        ] {
+            let source = format!("import 'package:meta/meta.dart'; {body}");
+            let index = index(
+                &[
+                    ("/app/lib/main.dart", &source),
+                    ("/app/lib/other.dart", "const immutable = 0;"),
+                ],
+                &[],
+            );
+            let main = library(&index, "/app/lib/main.dart");
+            assert_eq!(
+                index.resolve_imported_member(main, "immutable".into()),
+                None
+            );
+            assert_eq!(
+                index.resolve_annotation_before_generation(main, "immutable".into()),
+                expected.then(|| DeclarationIdentity::package("meta", "immutable")),
+                "{source}",
+            );
+        }
+    }
+
+    #[test]
+    fn annotation_resolution_rejects_missing_owners_and_parse_errors() {
+        let index = index(
+            &[
+                (
+                    "/app/lib/main.dart",
+                    "import 'package:meta/meta.dart'; part 'main.g.dart'; part 'other.dart';",
+                ),
+                ("/app/lib/other.dart", "part of 'missing.dart';"),
+            ],
+            &[],
+        );
+        let main = library(&index, "/app/lib/main.dart");
+        assert_eq!(
+            index.resolve_annotation_before_generation(main, "immutable".into()),
+            None,
+        );
+
+        let source = "import 'package:meta/meta.dart'; part 'main.g.dart'; class";
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        assert!(!errors.is_empty());
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let index = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path: Path::new("/app/lib/main.dart"),
+                parsed: &parsed,
+                has_parse_errors: true,
+            }],
+            &[],
+        );
+        let main = library(&index, "/app/lib/main.dart");
+        assert_eq!(
+            index.resolve_annotation_before_generation(main, "immutable".into()),
+            None,
         );
     }
 

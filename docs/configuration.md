@@ -6,7 +6,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 of 489 shipped
+If no config is found, falcon enables its own recommended set: 215 of 500 shipped
 rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
@@ -216,6 +216,21 @@ not construction. Ban `Client.new` or `Client.named` to target its constructors.
 | `no-magic-string` | `allow_only_once` | `false` | Allow a string value that occurs only once in the file. |
 | `no-magic-string` | `ignored_invocations` | `["print", "debugPrint"]` | Invocation names whose direct string arguments are exempt. |
 | `avoid-referencing-subclasses` | `ignored_annotations` | `["freezed", "Freezed", "unfreezed"]` | Replaces the defaults; exempt classes by exact, case-sensitive final annotation name segment. |
+
+### Equatable selection
+
+`extend-equatable` (`style`, `equatable` domain) does nothing until configured.
+Set `class_name_pattern` and/or `file_name_pattern` to regular expressions selecting
+value classes that should extend Equatable. Either matching pattern selects a
+class; file patterns match the file basename, not its full path. Missing or invalid
+patterns select nothing. For example:
+
+```json
+"extend-equatable": {
+  "level": "warn",
+  "options": { "class_name_pattern": "State$" }
+}
+```
 
 ### Metric thresholds (group `complexity`)
 

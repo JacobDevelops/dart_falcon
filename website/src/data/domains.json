@@ -114,12 +114,19 @@
     "name": "riverpod",
     "rules": [
       "avoid-calling-notifier-members-inside-build",
+      "avoid-public-notifier-properties",
+      "avoid-ref-inside-state-dispose",
       "avoid-ref-read-inside-build",
       "avoid-ref-watch-outside-build",
       "avoid-unnecessary-consumer-widgets",
       "dispose-provided-instances",
       "dispose-provider-resources",
+      "prefer-correct-notifier-file-name",
+      "prefer-correct-provider-file-name",
+      "prefer-immutable-provider-arguments",
       "prefer-ref-read-for-methods",
+      "prefer-riverpod-notifier-suffix",
+      "prefer-riverpod-provider-suffix",
       "use-ref-and-state-synchronously",
       "use-ref-read-synchronously"
     ]
@@ -142,7 +149,9 @@
       "avoid-conditional-hooks",
       "avoid-hooks-outside-build",
       "avoid-misused-hooks",
-      "avoid-unnecessary-hook-widgets"
+      "avoid-unnecessary-hook-widgets",
+      "prefer-use-callback",
+      "prefer-use-memo"
     ]
   },
   {
@@ -150,7 +159,9 @@
     "rules": [
       "add-equatable-props",
       "avoid-mutable-equatable-subclass-fields",
-      "list-all-equatable-fields"
+      "extend-equatable",
+      "list-all-equatable-fields",
+      "prefer-equatable-mixin"
     ]
   }
 ]

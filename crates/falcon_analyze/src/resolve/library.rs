@@ -64,6 +64,7 @@ pub struct LibraryGrouping {
     siblings: Vec<Vec<usize>>,
     /// Per file: whether its library has an unresolved part.
     unresolved: Vec<bool>,
+    missing_generated_parts_only: Vec<bool>,
 }
 
 impl LibraryGrouping {
@@ -75,6 +76,10 @@ impl LibraryGrouping {
     /// Whether file `i`'s library has an unresolved part.
     pub fn is_unresolved(&self, i: usize) -> bool {
         self.unresolved[i]
+    }
+
+    pub(crate) fn missing_generated_parts_only(&self, i: usize) -> bool {
+        self.missing_generated_parts_only[i]
     }
 
     pub fn len(&self) -> usize {
@@ -93,6 +98,7 @@ pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
     let n = files.len();
     let mut uf = UnionFind::new(n);
     let mut unresolved = vec![false; n];
+    let mut missing_generated_parts_only = vec![true; n];
     let canonical_paths: Vec<_> = files
         .iter()
         .map(|(path, _)| canonical_or_lexical(path))
@@ -125,7 +131,10 @@ pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
                 .and_then(|p| by_path.get(p.as_path()).copied())
             {
                 Some(j) => uf.union(i, j),
-                None => unresolved[i] = true,
+                None => {
+                    unresolved[i] = true;
+                    missing_generated_parts_only[i] &= is_generated_part(path, &part.uri().value());
+                }
             }
         }
 
@@ -140,13 +149,30 @@ pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
             };
             match owner {
                 Some(j) => uf.union(i, j),
-                None => unresolved[i] = true,
+                None => {
+                    unresolved[i] = true;
+                    missing_generated_parts_only[i] = false;
+                }
             }
         }
     }
     drop(by_path);
 
-    // Collect group membership and propagate the unresolved flag to every member.
+    collect_groups(
+        uf,
+        canonical_paths,
+        &unresolved,
+        missing_generated_parts_only,
+    )
+}
+
+fn collect_groups(
+    mut uf: UnionFind,
+    paths: Vec<PathBuf>,
+    unresolved: &[bool],
+    mut missing_generated_parts_only: Vec<bool>,
+) -> LibraryGrouping {
+    let n = paths.len();
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..n {
         groups.entry(uf.find(i)).or_default().push(i);
@@ -155,17 +181,51 @@ pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
     let mut final_unresolved = vec![false; n];
     for members in groups.values() {
         let group_unresolved = members.iter().any(|&m| unresolved[m]);
+        let generated_only =
+            group_unresolved && members.iter().all(|&m| missing_generated_parts_only[m]);
         for &m in members {
             final_unresolved[m] = group_unresolved;
+            missing_generated_parts_only[m] = generated_only;
             siblings[m] = members.iter().copied().filter(|&x| x != m).collect();
         }
     }
 
     LibraryGrouping {
-        paths: canonical_paths,
+        paths,
         siblings,
         unresolved: final_unresolved,
+        missing_generated_parts_only,
     }
+}
+
+fn is_generated_part(owner: &Path, uri: &str) -> bool {
+    let generated = Path::new(uri);
+    generated
+        .parent()
+        .is_some_and(|parent| parent.as_os_str().is_empty() || parent == Path::new("."))
+        && is_generated_dart_file(generated)
+        && owner
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|owner| {
+                generated
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .and_then(|stem| stem.strip_prefix(owner))
+                    .and_then(|suffix| suffix.strip_prefix('.'))
+                    .is_some_and(|suffix| !suffix.is_empty() && !suffix.contains('.'))
+            })
+}
+
+/// Recognize Dart generator outputs by their conventional filename suffix.
+pub fn is_generated_dart_file(path: &Path) -> bool {
+    const SUFFIXES: &[&str] = &["g", "freezed", "gr", "config", "mocks", "chopper", "mapper"];
+    path.extension().is_some_and(|ext| ext == "dart")
+        && path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.rsplit_once('.'))
+            .is_some_and(|(stem, suffix)| !stem.is_empty() && SUFFIXES.contains(&suffix))
 }
 
 /// Build the [`LibraryUnit`] for file `i` from a grouping and the retained

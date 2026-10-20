@@ -15,6 +15,8 @@ pub mod prefer_correct_edge_insets_constructor;
 pub mod prefer_declaring_const_constructor;
 pub mod prefer_foreach;
 pub mod prefer_single_setstate;
+pub mod prefer_use_callback;
+pub mod prefer_use_memo;
 pub mod prefer_using_list_view;
 pub mod sized_box_for_whitespace;
 pub mod unnecessary_to_list_in_spreads;
