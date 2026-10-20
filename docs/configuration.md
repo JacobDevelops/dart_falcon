@@ -6,8 +6,8 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 of 513 shipped
-rules, at their default severity (warning), chosen independently of upstream presets.
+If no config is found, falcon enables its own recommended set: 215 recommended
+rules out of 513 shipped rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
 a message and exits non-zero rather than silently falling back to defaults. This
@@ -34,7 +34,7 @@ Point the top-level `$schema` at the published JSON schema to get rule-name
 autocomplete and validation in editors:
 
 ```json
-"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json"
+"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.3/schema/falcon.schema.json"
 ```
 
 The VS Code extension enables the [published schema](../schema/falcon.schema.json) automatically for files named `falcon.json`.
@@ -43,7 +43,7 @@ The VS Code extension enables the [published schema](../schema/falcon.schema.jso
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
+  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.3/schema/falcon.schema.json",
   "files": {
     "includes": ["**", "!.dart_tool/**", "!build/**", "!**/*.g.dart", "!**/*.freezed.dart"]
   },
@@ -257,6 +257,25 @@ patterns select nothing. For example:
 ### Test registration helpers
 
 `avoid-empty-test-groups` (`correctness`) and `prefer-unique-test-names` (`suspicious`) accept `include_methods` (array of strings, default `[]`). List custom test registration helper names, for example `"include_methods": ["testCase"]`, to count these calls as tests in addition to canonical test-framework registrations.
+
+### Additional test assertions
+
+`missing-test-assertion` (`correctness`, `test` domain) accepts
+`include_assertions` (array of strings, default `[]`). These names extend the
+built-in framework expectations and mock verification calls with trusted project
+assertion helpers, including local functions. Names match their exact call-site
+spelling; include the prefix for prefixed calls.
+
+```json
+"missing-test-assertion": {
+  "level": "warn",
+  "options": { "include_assertions": ["assertResult", "helpers.verifyState"] }
+}
+```
+
+Only `_test.dart` files importing `test` or `flutter_test` are checked, and the
+test registration must resolve to a framework package. Assertions in nested
+tests or unused local closures and functions do not satisfy the enclosing test.
 
 ### Identifier and naming rules
 

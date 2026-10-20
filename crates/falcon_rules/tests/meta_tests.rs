@@ -4,13 +4,88 @@ use std::collections::HashSet;
 
 use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
+const RULE_COUNT_DOCUMENTS: &[&str] = &[
+    "README.md",
+    "ROADMAP.md",
+    "docs/getting-started.md",
+    "docs/installation.md",
+    "docs/configuration.md",
+];
+
+fn assert_documented_rule_count(expected: usize, following_words: &[&str]) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for document in RULE_COUNT_DOCUMENTS {
+        let contents = std::fs::read_to_string(root.join(document))
+            .unwrap_or_else(|error| panic!("{document}: {error}"));
+        let words: Vec<_> = contents
+            .split_whitespace()
+            .map(|word| word.trim_matches(|c: char| !c.is_ascii_alphanumeric()))
+            .collect();
+        let mut found = false;
+        for phrase in words.windows(following_words.len() + 1) {
+            if phrase[1..] == *following_words
+                && let Ok(count) = phrase[0].parse::<usize>()
+            {
+                assert_eq!(count, expected, "stale rule count in {document}");
+                found = true;
+            }
+        }
+        assert!(found, "missing documented rule count in {document}");
+    }
+}
+
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 513);
-    assert_eq!(
+    assert_documented_rule_count(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
-        215
+        &["recommended"],
     );
+}
+
+#[test]
+fn total_rules_match_documented_count() {
+    assert_documented_rule_count(RULE_METADATA.len(), &["shipped", "rules"]);
+}
+
+#[test]
+fn rule_named_changesets_mention_rule_ids() {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.changeset");
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("cannot read {}: {error}", directory.display()),
+    };
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|extension| extension != "md") {
+            continue;
+        }
+        let filename = path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('_', "-");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let body = contents
+            .strip_prefix("---\n")
+            .and_then(|contents| contents.split_once("\n---"))
+            .map_or(contents.as_str(), |(_, body)| body);
+        for rule in RULE_METADATA {
+            if filename.match_indices(rule.name).any(|(start, _)| {
+                (start == 0 || filename.as_bytes()[start - 1] == b'-')
+                    && (start + rule.name.len() == filename.len()
+                        || filename.as_bytes()[start + rule.name.len()] == b'-')
+            }) {
+                assert!(
+                    body.contains(rule.name),
+                    "{} must mention rule id `{}`",
+                    path.display(),
+                    rule.name
+                );
+            }
+        }
+    }
 }
 
 #[test]
