@@ -2571,6 +2571,14 @@ impl<'a> SemanticModel<'a> {
         })
     }
 
+    pub(crate) fn configurable_constant_path(&self, identity: &DeclarationIdentity) -> bool {
+        self.library
+            .zip(self.identities.declaration_library(identity))
+            .is_some_and(|(source, target)| {
+                self.identities.configurable_constant_path(source, target)
+            })
+    }
+
     /// Views names from a declaring library without inventing a declaration.
     pub fn for_library(&self, library: LibraryId) -> Self {
         Self {
@@ -7379,6 +7387,11 @@ impl SignatureIndex {
     /// Whether `identity` is a project enum.
     pub fn is_enum(&self, identity: &DeclarationIdentity) -> bool {
         self.enum_values.contains_key(identity)
+    }
+
+    /// Names of the declared values of an indexed enum, in declaration order.
+    pub fn enum_value_names(&self, identity: &DeclarationIdentity) -> Option<&[String]> {
+        self.enum_values.get(identity).map(Vec::as_slice)
     }
 
     /// The explicit `extends` type of an indexed class or mixin class.

@@ -131,6 +131,7 @@ struct Library {
     declarations: FxHashMap<InternedString, (NameIdentity, FileId)>,
     imports: Vec<Import>,
     exports: Vec<Export>,
+    configurable: bool,
     incomplete: bool,
     missing_parts_only: bool,
     implicit_core: bool,
@@ -683,6 +684,7 @@ impl IdentityIndex {
                         declarations: FxHashMap::default(),
                         imports: Vec::new(),
                         exports: Vec::new(),
+                        configurable: false,
                         incomplete: grouping.is_unresolved(i),
                         missing_parts_only: grouping.is_unresolved(i),
                         implicit_core: true,
@@ -722,6 +724,7 @@ impl IdentityIndex {
                 declarations: FxHashMap::default(),
                 imports: Vec::new(),
                 exports: Vec::new(),
+                configurable: false,
                 incomplete: library.has_unresolved_parts,
                 missing_parts_only: false,
                 implicit_core: true,
@@ -801,6 +804,12 @@ impl IdentityIndex {
             let library_id = library;
             let library = &mut libraries[library.0];
             library.incomplete |= has_parse_errors;
+            library.configurable |= program
+                .imports()
+                .any(|node| node.configurable_uris().next().is_some())
+                || program
+                    .exports()
+                    .any(|node| node.configurable_uris().next().is_some());
             library.missing_parts_only &= !has_parse_errors;
             library.named |= program
                 .library_directive()
@@ -1302,6 +1311,51 @@ impl IdentityIndex {
             return external.get(library);
         }
         &self.libraries[library.0 & !EXTERNAL_ID]
+    }
+
+    pub(crate) fn has_configurable_directives(&self, library: LibraryId) -> bool {
+        self.get(library).configurable
+    }
+
+    /// Conditional selection along direct imports and their re-export paths.
+    pub(crate) fn configurable_constant_path(&self, source: LibraryId, target: LibraryId) -> bool {
+        fn visit(
+            index: &IdentityIndex,
+            library: LibraryId,
+            target: LibraryId,
+            conditional: bool,
+            visited: &mut FxHashSet<(LibraryId, bool)>,
+        ) -> bool {
+            let unit = index.get(library);
+            let conditional = conditional || unit.configurable;
+            if !visited.insert((library, conditional)) {
+                return false;
+            }
+            if library == target {
+                return conditional;
+            }
+            unit.exports.iter().any(|export| {
+                matches!(export.target, ImportTarget::Library(next)
+                    if visit(index, next, target, conditional, visited))
+            })
+        }
+        if source == target {
+            return self.has_configurable_directives(source);
+        }
+        let source = self.get(source);
+        if source.configurable {
+            return true;
+        }
+        let mut visited = FxHashSet::default();
+        source
+            .imports
+            .iter()
+            .map(|import| &import.target)
+            .chain(source.exports.iter().map(|export| &export.target))
+            .any(|edge| {
+                matches!(edge, ImportTarget::Library(library)
+                if visit(self, *library, target, false, &mut visited))
+            })
     }
 
     fn complete(&self, library: LibraryId) -> Option<&Library> {

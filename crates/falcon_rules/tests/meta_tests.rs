@@ -6,7 +6,7 @@ use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn recommended_rules_match_documented_count() {
-    assert_eq!(RULE_METADATA.len(), 476);
+    assert_eq!(RULE_METADATA.len(), 489);
     assert_eq!(
         RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
         215
@@ -319,6 +319,14 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         (
             "avoid-double-slash-imports",
             "Import directive URI path segments.",
+        ),
+        (
+            "avoid-duplicate-exports",
+            "Export URI and visibility comparison.",
+        ),
+        (
+            "avoid-duplicate-named-imports",
+            "Import URI and prefix comparison.",
         ),
         (
             "avoid-duplicate-test-assertions",

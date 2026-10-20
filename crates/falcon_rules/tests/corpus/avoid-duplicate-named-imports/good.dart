@@ -1,0 +1,14 @@
+import 'a.dart' as same;
+import 'b.dart' as same;
+import 'c.dart' as c show A;
+import 'c.dart' as otherC show B;
+import 'd.dart' as d hide A;
+import 'd.dart' as otherD hide B;
+import 'e.dart' as e;
+import 'e.dart' deferred as otherE;
+import 'f.dart' if (dart.library.io) 'io.dart' as f;
+import 'f.dart' if (dart.library.html) 'html.dart' as otherF;
+import 'g.dart' if (dart.library.io) 'one.dart' as g;
+import 'g.dart' if (dart.library.io) 'two.dart' as otherG;
+import 'plain.dart';
+import 'plain.dart';

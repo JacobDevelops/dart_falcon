@@ -466,6 +466,45 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::PyramidLint("max_parameters_for_function"),
     ),
+    RuleMeta::resolved::<lint::correctness::avoid_constant_conditions::AvoidConstantConditions>(
+        "avoid-constant-conditions", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_constant_assert_conditions::AvoidConstantAssertConditions>(
+        "avoid-constant-assert-conditions", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_constant_switches::AvoidConstantSwitches>(
+        "avoid-constant-switches", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_cascades::AvoidDuplicateCascades>(
+        "avoid-duplicate-cascades", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_exports::AvoidDuplicateExports>(
+        "avoid-duplicate-exports", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_named_imports::AvoidDuplicateNamedImports>(
+        "avoid-duplicate-named-imports", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_mixins::AvoidDuplicateMixins>(
+        "avoid-duplicate-mixins", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_factories::AvoidDuplicateFactories>(
+        "avoid-duplicate-factories", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::file::<lint::correctness::avoid_duplicate_initializers::AvoidDuplicateInitializers>(
+        "avoid-duplicate-initializers", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::function_always_returns_null::FunctionAlwaysReturnsNull>(
+        "function-always-returns-null", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::function_always_returns_same_value::FunctionAlwaysReturnsSameValue>(
+        "function-always-returns-same-value", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_unsafe_reduce::AvoidUnsafeReduce>(
+        "avoid-unsafe-reduce", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
+    RuleMeta::resolved::<lint::correctness::avoid_missing_enum_constant_in_map::AvoidMissingEnumConstantInMap>(
+        "avoid-missing-enum-constant-in-map", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
+    ),
     RuleMeta::resolved::<lint::correctness::avoid_duplicate_collection_elements::AvoidDuplicateCollectionElements>(
         "avoid-duplicate-collection-elements", RuleGroup::Correctness, NONE, false, RuleSource::Falcon,
     ),
