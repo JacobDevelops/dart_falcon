@@ -22,6 +22,10 @@ Configure rules, severities, options, and per-path overrides in `falcon.json`. C
 > config surface are still moving. Expect breaking changes before 1.0 (see the
 > [roadmap](./ROADMAP.md)). Pin a revision if you depend on stable behaviour.
 
+## Performance
+
+With cold analyzer state, falcon runs **3.9–6.0× faster than `dart analyze` across all four measured corpora**; with warm state, `dart analyze` is faster on three. Cold state is relevant to fresh CI runs, not CI systems retaining analyzer caches. Dart also performs full type checking, and diagnostic counts differ. See the [results, limitations, and reproduction instructions](https://dart-falcon.jacobdevelops.com/benchmarks).
+
 ## Installation
 
 falcon ships as a single binary.

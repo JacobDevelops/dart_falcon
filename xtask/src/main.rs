@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod bench_compare;
+
 #[path = "../../crates/falcon_rules/tests/support/corpus.rs"]
 mod corpus;
 use corpus::{Expectation, cross_file_project_roots, parse_expectations};
@@ -30,6 +32,8 @@ enum Task {
     ValidateRules(ValidateRules),
     /// Enforce the performance budget on the jfit mobile library.
     PerfLock(PerfLock),
+    /// Compare release falcon with dart analyze on pinned public projects.
+    BenchCompare(bench_compare::Options),
     /// Generate the configuration schema.
     Schema {
         #[arg(long)]
@@ -105,6 +109,12 @@ fn main() {
         } => codegen(group, name),
         Task::ValidateRules(options) => validate_rules(options),
         Task::PerfLock(options) => perf_lock(options),
+        Task::BenchCompare(options) => {
+            if let Err(error) = bench_compare::run(&options) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
         Task::Schema { check } => schema(check),
         Task::Docgen => docgen(),
         Task::Version { version } => set_version(&version),

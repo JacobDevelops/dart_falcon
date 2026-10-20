@@ -51,6 +51,13 @@ The benchmark in `benches/jfit_mobile_bench.rs` optionally uses a private corpus
 outside the repository. Set `JFIT_PATH` to opt in; there is no machine-specific
 fallback path. The corpus is not required to contribute or run the test suite.
 
+Public-project comparisons against Dart 3.13.5 run with `cargo xtask bench-compare`
+(or `makers bench_compare`). Install Flutter 3.47.7-stable with mise first;
+hyperfine is pinned in `mise.toml`. The command builds release falcon, resolves
+dependencies outside timing, and writes the website's benchmark data. See
+[the benchmark methodology](docs/benchmarks.md) for scenarios, pinned projects,
+cache handling, limitations, and reproduction options.
+
 ## The golden corpus
 
 Every rule is validated against fixtures under

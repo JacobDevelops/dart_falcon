@@ -2,7 +2,7 @@
 
 wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
 
-# Rust comes from rustup via rust-toolchain.toml; mise installs every other tool at latest.
+# Rust comes from rustup via rust-toolchain.toml; mise installs the other tools.
 [tools]
 bun           = "latest"
 dart          = "latest"
@@ -12,6 +12,7 @@ taplo         = "latest"
 cargo-nextest = { version = "latest", version_prefix = "cargo-nextest-" }
 cargo-watch   = "latest"
 knope         = "latest"
+hyperfine     = "2.0.0"
 
 [tool_alias]
 cargo-nextest = "github:nextest-rs/nextest"

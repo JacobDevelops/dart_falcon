@@ -90,6 +90,10 @@ args    = [ "xtask", "version", "${@}" ]
 command = "${CARGO_CMD}"
 args    = [ "bench", "--locked", "--workspace", "${@}" ]
 
+[tasks.bench_compare]
+command = "${CARGO_CMD}"
+args    = [ "xtask", "bench-compare", "${@}" ]
+
 [tasks.bench_check]
 command = "${CARGO_CMD}"
 args    = [ "build", "--locked", "--workspace", "--bench", "*" ]
