@@ -3,7 +3,8 @@
 //! Only plain singleton lists/sets and semantically resolved SDK receivers are
 //! checked. Collection control flow, spreads, maps, dynamic/custom APIs and named
 //! arguments are excluded. Future.wait is checked only for a discarded awaited
-//! result, because replacing it changes List<T> to T.
+//! result, because replacing it changes List<T> to T. Singleton Future.any
+//! wrappers can use the single Future directly, without requiring an await.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, expression_segments};
@@ -40,7 +41,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 "fromIterable" => "Stream.value",
                 _ => return,
             };
-            (args, replacement)
+            (args, Some(replacement))
         } else {
             let Expr::Call(call) = node else {
                 return;
@@ -57,9 +58,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 || receiver.interface("dart:core", "Set"))
                 && method == "addAll"
             {
-                "add"
+                Some("add")
             } else if receiver.interface("dart:core", "Set") && method == "containsAll" {
-                "contains"
+                Some("contains")
             } else {
                 let Some(segments) = expression_segments(field.object(), false) else {
                     return;
@@ -82,7 +83,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 {
                     return;
                 }
-                "await the single Future directly"
+                None
             };
             (call.args(), replacement)
         };
@@ -105,9 +106,16 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if !ty.interface("dart:core", "List") && !ty.interface("dart:core", "Set") {
             return;
         }
+        let message = match replacement {
+            Some(replacement) => format!(
+                "This singleton collection is unnecessary. Use {replacement} with its single element instead."
+            ),
+            None => "Use the single Future directly instead of wrapping it in Future.wait/any."
+                .to_owned(),
+        };
         self.diagnostics.push(self.ctx.diagnostic(
             "avoid-unnecessary-collections",
-            format!("This singleton collection is unnecessary. Use {replacement} with its single element instead."),
+            message,
             argument.span(),
         ));
     }

@@ -50,7 +50,7 @@ struct Collector<'a> {
     is_part: bool,
 }
 
-/// Preserve acronym runs (`HTTPClient` -> `http_client`) and digit suffixes.
+/// Preserve acronym runs (`HTTPClient` -> `http_client`) and digit suffixes (`Point3D` -> `point3d`).
 fn file_stem(name: &str) -> String {
     let name = name.trim_start_matches('_');
     let mut stem = String::with_capacity(name.len());
@@ -60,8 +60,7 @@ fn file_stem(name: &str) -> String {
         if character.is_uppercase()
             && previous.is_some_and(|previous| {
                 previous.is_lowercase()
-                    || previous.is_ascii_digit()
-                    || (previous.is_uppercase()
+                    || ((previous.is_ascii_digit() || previous.is_uppercase())
                         && chars.peek().is_some_and(|next| next.is_lowercase()))
             })
         {
@@ -127,4 +126,21 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         )]
     }
 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_stem;
+
+    #[test]
+    fn preserves_digit_suffixes_and_word_boundaries() {
+        for (name, expected) in [
+            ("Point3D", "point3d"),
+            ("Base64Encoder", "base64_encoder"),
+            ("HTTPClient", "http_client"),
+            ("Vector2DList", "vector2d_list"),
+        ] {
+            assert_eq!(file_stem(name), expected, "{name}");
+        }
+    }
 }
