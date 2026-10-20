@@ -2352,14 +2352,24 @@ impl ResolvedType {
         }
     }
 
-    /// Whether this type excludes null, including its type parameter bound.
+    /// Whether this type provably excludes null without declaration context.
+    /// Extension types require `SignatureIndex::is_non_nullable`.
     pub fn is_non_nullable(&self) -> bool {
+        unrelated::non_nullable(self) == Truth::Yes
+    }
+
+    // Extension types expose their own members even when their values may be null.
+    fn has_instance_members(&self) -> bool {
         match self {
-            Self::Dynamic | Self::Unknown | Self::Void | Self::Null => false,
             Self::TypeParameter {
                 bound, nullable, ..
-            } => !nullable && bound.is_non_nullable(),
-            other => !other.nullable(),
+            } => !nullable && bound.has_instance_members(),
+            Self::Interface {
+                extension_type: true,
+                nullable,
+                ..
+            } => !nullable,
+            ty => ty.is_non_nullable(),
         }
     }
 
@@ -6889,6 +6899,11 @@ impl SignatureIndex {
                         };
                     sdk(super_library, super_name, arguments)
                 })
+                .chain(
+                    supertypes
+                        .is_empty()
+                        .then(|| sdk("dart:core", "Object", Vec::new())),
+                )
                 .collect();
             self.supertypes
                 .entry(DeclarationIdentity::sdk(library, name))
@@ -9234,7 +9249,7 @@ impl SignatureIndex {
         access: InstanceAccess,
         model: &SemanticModel<'_>,
     ) -> Option<ResolvedType> {
-        if !receiver.is_non_nullable() {
+        if !receiver.has_instance_members() {
             return self
                 .has_instance_declaration(&DeclarationIdentity::OBJECT, name, access)
                 .then(|| model.core_type("Object", false));
@@ -9270,7 +9285,7 @@ impl SignatureIndex {
         ) -> Option<ResolvedType> {
             // Nullable receivers expose Object's members, not the members of
             // their non-null branch. Object is handled by the caller.
-            if !receiver.is_non_nullable() {
+            if !receiver.has_instance_members() {
                 return None;
             }
             if let ResolvedType::TypeParameter { bound, .. } = receiver {
@@ -12878,8 +12893,8 @@ type SdkHierarchyEntry = (
 /// Curated SDK supertype graph: `(library, name, arity, supertypes)`.
 ///
 /// Each entry lists every public supertype of its declaration other than
-/// `Object`, so [`SignatureIndex::implements_sdk`] may prove a negative through
-/// it. Generic supertypes with the same arity receive the declaration's own
+/// `Object`; `add_sdk_hierarchy` supplies that implicit root for leaf entries.
+/// Generic supertypes with the same arity receive the declaration's own
 /// type parameters; others are recorded raw.
 const SDK_HIERARCHY: &[SdkHierarchyEntry] = &[
     ("dart:core", "Function", 0, &[]),
@@ -16549,6 +16564,52 @@ class SetterChild extends SetterApplication {
                         assert_eq!(erased, Some(model.core_type("int", false)));
                     } else {
                         assert_eq!(erased, None);
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn non_nullable_respects_future_or_bounds_and_extension_interfaces() {
+        with_model(
+            "import 'dart:async'; \
+             extension type NullableBox(Object? value) {} \
+             extension type IntBox(int value) { int next() => value + 1; } \
+             extension type ObjectBox(Object value) implements Object {} \
+             extension type GenericBox<T extends Object>(T value) implements Object {} \
+             extension type Meters(int value) implements int {} \
+             FutureOr<int?> nullableFuture() => throw 0; \
+             FutureOr<T> unboundedFuture<T>() => throw 0; \
+             FutureOr<T> boundedFuture<T extends Object>() => throw 0; \
+             NullableBox nullableExtension() => throw 0; \
+             IntBox intExtension() => throw 0; \
+             T boundedExtension<T extends IntBox>() => throw 0; \
+             Meters sdkExtension() => throw 0; \
+             ObjectBox objectExtension() => throw 0; \
+             GenericBox<int> genericExtension() => throw 0; \
+             ObjectBox? nullableObjectExtension() => throw 0;",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                for declaration in program.declarations() {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        continue;
+                    };
+                    let name = function.name().name();
+                    let identity = model.resolve_value(name).unwrap();
+                    let ty = &signatures.function(&identity).unwrap().return_type;
+                    let expected = matches!(
+                        name,
+                        "boundedFuture" | "objectExtension" | "genericExtension" | "sdkExtension"
+                    );
+                    assert_eq!(signatures.is_non_nullable(ty), expected, "{name}: {ty:?}");
+                    if name.ends_with("Future") {
+                        assert_eq!(ty.is_non_nullable(), expected, "{name}: {ty:?}");
+                    } else {
+                        assert!(!ty.is_non_nullable(), "{name}: {ty:?}");
+                    }
+                    if matches!(name, "intExtension" | "boundedExtension") {
+                        assert!(signatures.resolved_member(ty, "next", model).is_some());
                     }
                 }
             },

@@ -14533,6 +14533,30 @@
         "file": "bad/service.dart",
         "line": 60,
         "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 32,
+        "file": "bad-nullability/main.dart",
+        "line": 5,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 52,
+        "file": "bad-nullability/main.dart",
+        "line": 6,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 34,
+        "file": "bad-nullability/main.dart",
+        "line": 7,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
+      },
+      {
+        "column": 57,
+        "file": "bad-nullability/main.dart",
+        "line": 8,
+        "message": "Parameter 'value' is never null at any call site; the '?' is unnecessary"
       }
     ],
     "docs": "Report nullable parameters of private declarations that never receive null.\n\nFlags a nullable parameter (`T?`) of a private (`_`-prefixed) function or\nmethod when every call site passes a proven non-null value, and its body\nonly assigns proven non-null values to it. Because the declaration is private, every\none of its call sites is visible in the analyzed set, which is what makes the\nconclusion sound; the `?` then widens the type for a value that is always\nnon-null, so callers and the body carry null handling that can never trigger.\nAn argument or write counts as non-null only when proven so, including type\nparameter bounds and the element types of for-in writes. Calls use the\ndeclared return types resolved by the cross-file index. Anything uncertain\n(an ambiguous name, a tear-off reference, an argument that might be\nnull) suppresses the report. This is a cross-file rule: it runs in the\ncross-file pass over the whole analyzed file set and is configured under the\ntop-level `cross-file` section rather than `linter`.",
@@ -14549,6 +14573,14 @@
           "path": "bad/service.dart"
         },
         {
+          "content": "import 'dart:async';\n\nimport 'types.dart';\n\nvoid _futureInt(FutureOr<int>? value) {}\nvoid _futureBounded<T extends Object>(FutureOr<T>? value) {}\nvoid _extensionObject(ObjectBox? value) {}\nvoid _extensionGeneric<T extends Object>(GenericBox<T>? value) {}\n\nvoid call<T extends Object>(FutureOr<int> integer, FutureOr<T> bounded,\n    ObjectBox box, GenericBox<T> generic) {\n  _futureInt(integer);\n  _futureBounded<T>(bounded);\n  _extensionObject(box);\n  _extensionGeneric<T>(generic);\n}",
+          "path": "bad-nullability/main.dart"
+        },
+        {
+          "content": "extension type ObjectBox(Object value) implements Object {}\nextension type GenericBox<T extends Object>(T value) implements Object {}",
+          "path": "bad-nullability/types.dart"
+        },
+        {
           "content": "import 'service.dart';\n\nvoid driver() {\n  Service().acceptsNull(null);\n}",
           "path": "good/caller.dart"
         },
@@ -14563,6 +14595,14 @@
         {
           "content": "part 'caller.dart';\n\nvoid accept(void Function(int?) callback) { callback(null); }\n\nclass Service {\n  void _qualified(int? value) {}\n  void _bare(int? value) {}\n  void _cascade(int? value) {}\n  void _cascadeField(int? value) {}\n\n  void exercise() {\n    _qualified(1);\n    _bare(1);\n    _cascade(1);\n    _cascadeField(1);\n    accept(this._qualified);\n    accept(_bare);\n    this.._cascade.call(null);\n    this.._cascadeField;\n  }\n}\n\nint? maybeNull() => null;\n\nvoid _writeCall(int? value) { value = maybeNull(); }\nvoid _writeVariable(int? value) { int? other = maybeNull(); value = other; }\nvoid _writeConditional(int? value) { value = value == 1 ? 1 : null; }\nvoid _nullableArgument(int? value) {}\n\nvoid _writePattern(int? value) { [value] = <int?>[null]; }\nvoid _writeLoop(int? value) { for (value in <int?>[null]) {} }\nvoid _writeCollectionLoop(int? value) {\n  final values = [for (value in <int?>[null]) value];\n}\nconst int? none = null;\nvoid _optionalDefault([int? value = none]) {}\nvoid _namedDefault({int? value = none}) {}\nvoid _orderedArguments(int first, int? second) {}\n\nclass Factory {\n  static Factory _make(int? value) => Factory();\n  static void exercise() {\n    Factory instance = ._make(null);\n    _make(1);\n  }\n}\n\nvoid _writeExpression(int? value) {\n  final result = ([value] = <int?>[null]);\n}\nvoid _writeMapLoop(int? value) {\n  final values = {for (value in <int?>[null]) 1: 1};\n}\n\nvoid _genericArgument(Object? value) {}\nvoid _genericWrite<T>(Object? value, T other) { value = other; }\nvoid _genericLoop<T>(Object? value, Iterable<T> values) {\n  for (value in values) {}\n}\nvoid _unknownLoop(int? value, dynamic values) {\n  for (value in values) {}\n}",
           "path": "good-escapes/service.dart"
+        },
+        {
+          "content": "import 'dart:async';\n\nimport 'types.dart';\n\nvoid _futureNullable(FutureOr<int?>? value) {}\nvoid _futureUnbounded<T>(FutureOr<T>? value) {}\nvoid _extensionNullable(NullableBox? value) {}\nvoid _extensionUnbounded<T>(UnboundedBox<T>? value) {}\nvoid _extensionWithoutObject(IntBox? value) {}\n\nvoid call<T>(FutureOr<int?> nullable, FutureOr<T> unbounded,\n    NullableBox box, UnboundedBox<T> generic, IntBox integer) {\n  _futureNullable(nullable);\n  _futureUnbounded<T>(unbounded);\n  _extensionNullable(box);\n  _extensionUnbounded<T>(generic);\n  _extensionWithoutObject(integer);\n}",
+          "path": "good-nullability/main.dart"
+        },
+        {
+          "content": "extension type NullableBox(Object? value) {}\nextension type UnboundedBox<T>(T value) {}\nextension type IntBox(int value) {}",
+          "path": "good-nullability/types.dart"
         }
       ],
       "good": null

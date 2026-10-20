@@ -384,7 +384,7 @@ impl<'a> ArgumentNullability<'a> {
         }
         self.values.insert(
             (span.start, span.end),
-            shadow.found || !state.infer(expr).is_non_nullable(),
+            shadow.found || !state.signatures.is_non_nullable(&state.infer(expr)),
         );
     }
 
@@ -397,6 +397,13 @@ impl<'a> ArgumentNullability<'a> {
             self.loops
                 .insert((span.start, span.end), (target, is_await));
             self.values.insert((target.start, target.end), true);
+        }
+    }
+
+    fn record_arguments(&mut self, args: ArgList<'a>) {
+        for value in args.positional().chain(args.named().map(|arg| arg.value())) {
+            let span = value.span();
+            self.values.insert((span.start, span.end), true);
         }
     }
 }
@@ -438,26 +445,12 @@ impl<'a> Visitor<'a> for ArgumentNullability<'a> {
         };
         match expression {
             Expr::Assign(assignment) => add(assignment.value()),
-            Expr::Call(call) => {
-                for value in call
-                    .args()
-                    .positional()
-                    .chain(call.args().named().map(|arg| arg.value()))
-                {
-                    add(value);
-                }
-            }
+            Expr::Call(call) => self.record_arguments(call.args()),
             Expr::Cascade(cascade) => {
                 for section in cascade.sections() {
                     for operation in section.ops() {
                         if let CascadeOp::Call(call) = operation {
-                            for value in call
-                                .args()
-                                .positional()
-                                .chain(call.args().named().map(|arg| arg.value()))
-                            {
-                                add(value);
-                            }
+                            self.record_arguments(call.args());
                         }
                     }
                 }
@@ -524,8 +517,10 @@ impl<'a> SemanticRuleVisitor<'a> for ArgumentNullability<'a> {
                 field_promotions: false,
             }
             .iterable_element(&state.infer(expr), is_await);
-            self.values
-                .insert((target.start, target.end), !element.is_non_nullable());
+            self.values.insert(
+                (target.start, target.end),
+                !state.signatures.is_non_nullable(&element),
+            );
         }
     }
 }

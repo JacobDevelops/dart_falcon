@@ -63,6 +63,25 @@ impl SignatureIndex {
         self.erase(ty, model)
     }
 
+    /// Whether a type excludes null, including extension types implementing Object.
+    pub fn is_non_nullable(&self, ty: &ResolvedType) -> bool {
+        match ty {
+            ResolvedType::TypeParameter {
+                bound, nullable, ..
+            } => !nullable && self.is_non_nullable(bound),
+            ResolvedType::Interface {
+                extension_type: true,
+                nullable: false,
+                ..
+            } => self.implements_sdk(ty, "dart:core", "Object") == Truth::Yes,
+            ty if !ty.nullable() => future_or_argument(ty).map_or_else(
+                || ty.is_non_nullable(),
+                |argument| self.is_non_nullable(argument),
+            ),
+            _ => false,
+        }
+    }
+
     /// The linter's `typesAreUnrelated`: `Yes` when the types are proven
     /// unrelated, `No` when they might be related, `Unknown` when falcon cannot
     /// tell.
@@ -848,13 +867,17 @@ fn promote_non_null(ty: &ResolvedType) -> ResolvedType {
 }
 
 /// The analyzer's `isNonNullable`.
-fn non_nullable(ty: &ResolvedType) -> Truth {
+pub(super) fn non_nullable(ty: &ResolvedType) -> Truth {
     match ty {
         ResolvedType::Unknown => Truth::Unknown,
         ResolvedType::Never => Truth::Yes,
         ResolvedType::Dynamic | ResolvedType::Void | ResolvedType::Null => Truth::No,
         ty if ty.nullable() => Truth::No,
         ResolvedType::TypeParameter { bound, .. } => non_nullable(bound),
+        ResolvedType::Interface {
+            extension_type: true,
+            ..
+        } => Truth::Unknown,
         ty => match future_or_argument(ty) {
             Some(argument) => non_nullable(argument),
             None => Truth::Yes,

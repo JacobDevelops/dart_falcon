@@ -114,7 +114,6 @@ Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that
 - [ ] **One relation API.** Seven overlapping subtype queries and three `unrelated` variants; `is_subtype_of` returns `Truth` but never `No`.
 - [ ] **Hide `ResolvedType` internals.** 7 rule sites build `Interface { occurrence: Default::default(), … }` and 328 match its variants. Add constructors and views, make metadata fields crate-private.
 - [ ] **Liveness-safe memo keys.** Memo caches key on raw pointers guarded only by comments; wrap them in a borrowed-key newtype or intern types.
-- [ ] **Sound `is_non_nullable`.** `ResolvedType::is_non_nullable()` answers yes for `FutureOr<T?>` and for extension types that don't implement `Object`, so `unnecessary-nullable` still flags arguments of those types as non-null.
 
 #### 17. Scoping and flow
 

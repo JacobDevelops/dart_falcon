@@ -154,12 +154,12 @@ impl FlowContext<'_, '_> {
             {
                 self.compatible(value, target)
             }
-            // A type parameter that may be instantiated with a nullable type
-            // reaches a non-nullable type only through itself.
+            // A potentially nullable bound proves subtyping only when the
+            // bound itself fits the target; stripping its `?` would lose null.
             (ResolvedType::TypeParameter { bound, .. }, _)
-                if !target.nullable() && !bound.is_non_nullable() =>
+                if !target.nullable() && !self.signatures.is_non_nullable(bound) =>
             {
-                !value.nullable() && same_shape(value, target)
+                !value.nullable() && (same_shape(value, target) || self.subtype(bound, target))
             }
             _ => {
                 self.compatible(value, target)
@@ -1137,6 +1137,36 @@ mod tests {
                 &nullable_future,
                 &async_type("FutureOr", int.with_nullable(true)),
             ));
+        });
+    }
+
+    #[test]
+    fn parameter_is_subtype_of_its_potentially_nullable_extension_bound() {
+        use crate::resolve::{ParameterOwner, ResolvedType, TypeParameterId};
+
+        with_flow_context(|context| {
+            let bound = ResolvedType::Interface {
+                occurrence: Default::default(),
+                identity: super::DeclarationIdentity::sdk("test", "IntBox"),
+                arguments: Default::default(),
+                nullable: false,
+                extension_type: true,
+            };
+            let parameter = |bound: ResolvedType| ResolvedType::TypeParameter {
+                id: TypeParameterId {
+                    owner: ParameterOwner::Sdk("test"),
+                    ordinal: 0,
+                    name: "T".into(),
+                },
+                bound: bound.into(),
+                nullable: false,
+            };
+            let exact = parameter(bound.clone());
+            assert!(context.subtype(&exact, &bound));
+            assert_eq!(context.factor(&exact, &bound), ResolvedType::Never);
+            let nullable = parameter(bound.with_nullable(true));
+            assert!(!context.subtype(&nullable, &bound));
+            assert_eq!(context.factor(&nullable, &bound), nullable);
         });
     }
 

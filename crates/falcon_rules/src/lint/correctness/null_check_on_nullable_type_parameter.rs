@@ -434,10 +434,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 // An inferred `T & Object` stands for its demoted `T`.
                 let expected = match expected {
                     ResolvedType::TypeParameter { id, .. } => {
-                        Some((id, !expected.is_non_nullable()))
+                        Some((id, !state.signatures.is_non_nullable(expected)))
                     }
                     ResolvedType::NonNullTypeParameter { id, bound } => {
-                        Some((id, !bound.is_non_nullable()))
+                        Some((id, !state.signatures.is_non_nullable(bound)))
                     }
                     _ => None,
                 };
