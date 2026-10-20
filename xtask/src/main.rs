@@ -138,7 +138,7 @@ fn schema(check: bool) {
     println!("wrote {}", path.display());
 }
 
-/// Markdown docs plus the site's CLI data: every file that pins the falcon version.
+/// Docs, CLI data, and launcher sources: every file that pins the falcon version.
 fn versioned_files(root: &Path) -> Vec<PathBuf> {
     let changelog = root.join("CHANGELOG.md");
     let mut files: Vec<PathBuf> = [root.to_path_buf(), root.join("docs")]
@@ -148,15 +148,19 @@ fn versioned_files(root: &Path) -> Vec<PathBuf> {
         .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
         .filter(|path| *path != changelog)
         .collect();
-    files.push(root.join("website/src/data/cli.json"));
+    files.extend([
+        root.join("website/src/data/cli.json"),
+        root.join("packages/falcon/pubspec.yaml"),
+        root.join("packages/falcon/lib/src/version.dart"),
+    ]);
     files
 }
 
 /// `text` with every pinned falcon version (release tag, archive name, mise pin,
-/// cli.json `version`) replaced by `version`.
+/// cli.json `version`, launcher YAML version and Dart const) replaced by `version`.
 fn with_version_references(text: &str, version: &str) -> String {
     Regex::new(
-        r#"(releases/download/v|falcon-|dart_falcon" = \{ version = "|"version": ")\d+\.\d+\.\d+"#,
+        r#"(?m)(releases/download/v|falcon-|dart_falcon" = \{ version = "|"version": "|^version: |^const version = ')\d+\.\d+\.\d+"#,
     )
     .unwrap()
     .replace_all(text, format!("${{1}}{version}"))
@@ -1827,16 +1831,49 @@ mod tests {
     }
 
     #[test]
+    fn launcher_version_references_rewrite_actual_files() {
+        let version = env!("CARGO_PKG_VERSION");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let files = versioned_files(root);
+        for (relative, prefix, suffix) in [
+            ("packages/falcon/pubspec.yaml", "version: ", ""),
+            (
+                "packages/falcon/lib/src/version.dart",
+                "const version = '",
+                "';",
+            ),
+        ] {
+            let path = root.join(relative);
+            assert!(files.contains(&path), "{relative} must be versioned");
+            let text = std::fs::read_to_string(path).unwrap();
+            let current = format!("{prefix}{version}{suffix}");
+            assert!(text.lines().any(|line| line == current));
+            let bumped = with_version_references(&text, "99.0.0");
+            assert_eq!(
+                bumped,
+                text.replace(&current, &format!("{prefix}99.0.0{suffix}"))
+            );
+            assert_ne!(bumped, text);
+        }
+    }
+
+    #[test]
     fn version_references_rewrite_pins_and_nothing_else() {
         let text = r#"releases/download/v0.4.1/falcon-0.4.1-x86_64-linux.tar.gz
 "github:JacobDevelops/dart_falcon" = { version = "0.4.1", matching = "falcon-" }
 "version": "0.4.1"
+version: 0.4.1
+const version = '0.4.1';
+  sdk: ^3.13.0
 releases/latest/download/falcon-x86_64-linux.tar.gz regex 0.4.17"#;
         assert_eq!(
             with_version_references(text, "0.5.0"),
             r#"releases/download/v0.5.0/falcon-0.5.0-x86_64-linux.tar.gz
 "github:JacobDevelops/dart_falcon" = { version = "0.5.0", matching = "falcon-" }
 "version": "0.5.0"
+version: 0.5.0
+const version = '0.5.0';
+  sdk: ^3.13.0
 releases/latest/download/falcon-x86_64-linux.tar.gz regex 0.4.17"#
         );
     }

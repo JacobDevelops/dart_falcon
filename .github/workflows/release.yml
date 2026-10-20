@@ -89,6 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
       id-token: write
       attestations: write
     env:
@@ -128,3 +129,8 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
           fail_on_unmatched_files: true
+      # pub.dev only accepts tokens from tag-scoped runs, and this run may come from the release PR merge.
+      - name: Dispatch package publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish.yml --ref "$RELEASE_TAG"

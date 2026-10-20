@@ -1,0 +1,94 @@
+import 'dart:convert';
+import 'dart:ffi';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
+import 'package:falcon/src/release.dart';
+import 'package:falcon/src/version.dart';
+
+Future<void> main(List<String> args) async {
+  try {
+    final platform = releasePlatform(Abi.current());
+    final home = Platform.environment['HOME'];
+    final xdgCache = Platform.environment['XDG_CACHE_HOME'];
+    final String cache;
+    if (Platform.isLinux && xdgCache != null && xdgCache.startsWith('/')) {
+      cache = xdgCache;
+    } else {
+      if (home == null || home.isEmpty) {
+        throw StateError('HOME is not set; cannot locate the falcon cache.');
+      }
+      cache = Platform.isMacOS ? '$home/Library/Caches' : '$home/.cache';
+    }
+    final directory = Directory('$cache/falcon/$version');
+    final binary = File('${directory.path}/falcon');
+    if (!await binary.exists()) {
+      await install(directory, binary, platform);
+    }
+    final process = await Process.start(
+      binary.path,
+      args,
+      mode: ProcessStartMode.inheritStdio,
+    );
+    exitCode = await process.exitCode;
+  } catch (error) {
+    stderr.writeln('falcon: $error');
+    exitCode = 1;
+  }
+}
+
+Future<void> install(Directory directory, File binary, String platform) async {
+  await directory.create(recursive: true);
+  final temporary = await directory.createTemp('.download-');
+  final client = HttpClient();
+  try {
+    final asset = 'falcon-$version-$platform.tar.gz';
+    final base =
+        'https://github.com/JacobDevelops/dart_falcon/releases/download/v$version';
+    final archive = File('${temporary.path}/$asset');
+    final response = await download(client, '$base/$asset');
+    await response.pipe(archive.openWrite());
+    final sums = await (await download(
+      client,
+      '$base/SHA256SUMS',
+    ))
+        .transform(utf8.decoder)
+        .join();
+    final expected = checksumFor(sums, asset);
+    final actual = (await sha256.bind(archive.openRead()).first).toString();
+    if (actual != expected) {
+      throw StateError('SHA256 checksum mismatch for $asset.');
+    }
+    final extracted = File('${temporary.path}/falcon');
+    final extraction = await Process.run('tar', [
+      '-xzf',
+      archive.path,
+      '-C',
+      temporary.path,
+      'falcon',
+    ]);
+    if (extraction.exitCode != 0) {
+      throw StateError('Cannot extract $asset: ${extraction.stderr}');
+    }
+    final chmod = await Process.run('chmod', ['755', extracted.path]);
+    if (chmod.exitCode != 0) {
+      throw StateError('Cannot make falcon executable: ${chmod.stderr}');
+    }
+    // Renaming on the same filesystem exposes only a complete verified binary.
+    await extracted.rename(binary.path);
+  } finally {
+    client.close(force: true);
+    await temporary.delete(recursive: true);
+  }
+}
+
+Future<HttpClientResponse> download(HttpClient client, String url) async {
+  final response = await (await client.getUrl(Uri.parse(url))).close();
+  if (response.statusCode != HttpStatus.ok) {
+    throw HttpException(
+      'Download failed: HTTP ${response.statusCode}',
+      uri: Uri.parse(url),
+    );
+  }
+  return response;
+}

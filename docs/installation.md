@@ -42,6 +42,18 @@ gh attestation verify falcon-x86_64-linux.tar.gz --repo JacobDevelops/dart_falco
 
 The mise GitHub backend runs these checks automatically.
 
+## Dart pub
+
+On Linux and macOS, install falcon from pub.dev:
+
+```sh
+dart pub global activate falcon
+```
+
+The first invocation downloads the matching native binary for Linux or macOS
+on x86_64 or arm64. Make sure Dart's pub cache `bin` directory is on your
+`PATH` to run `falcon`.
+
 ## Build from source
 
 With a nightly Rust toolchain. On x86_64 GNU/Linux, building the bundled jemalloc

@@ -5,6 +5,7 @@ wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
 # Rust comes from rustup via rust-toolchain.toml; mise installs every other tool at latest.
 [tools]
 bun           = "latest"
+dart          = "latest"
 mr-boxington  = "latest"
 cargo-make    = "latest"
 taplo         = "latest"

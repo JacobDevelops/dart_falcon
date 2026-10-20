@@ -59,3 +59,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: ${{ steps.setup.outputs.key }}
+
+  dart:
+    name: Dart launcher
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/falcon
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      - run: dart test
