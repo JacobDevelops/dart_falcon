@@ -6,74 +6,13 @@ Every hardening item and rule row below must be resolved before falcon 1.0; ther
 
 Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
 
-### Stage 1: start now
+### Stage 2: start now
 
-These batches touch disjoint code. The first four fix crashes or wrong output reachable from ordinary source files.
-
-#### 1. Parser robustness
-
-Owns `crates/falcon_dart_parser` and its tests.
-
-- [ ] **Exponential map/set literal parse.** `map_literal_lookahead` (`parser/expr.rs:1069`) parses the first element, rolls back, then parses it again, so each nested `{` doubles the work. Measured on the release binary: 0.19 s at depth 20, 12.4 s at depth 26. Parse the element once and wrap it as a `MapEntry` when `:` follows.
-- [ ] **Exponential lambda fallback.** A failed lambda speculation (`expr.rs:810-823`) rejects on any error in the body and reparses the whole body. Decide lambda vs paren from the parameter list alone.
-- [ ] **Unguarded pattern and type recursion.** `pattern.rs` and `types.rs` never call `guarded`, so deeply nested patterns or type arguments overflow the stack and kill the LSP.
-- [ ] **Switch-expression arms can loop forever.** `parse_switch_expr_arms` (`expr.rs:96`) has no progress check at the depth limit. Break when an iteration consumes nothing, and audit the other `while !close` loops.
-- [ ] **Quadratic top-level annotation lookahead.** `peek_kind_after_annotations` rescans to EOF on unclosed `(` every iteration (`mod.rs:803-913`), and abandoned top-level markers leave orphan nodes under `Program`. Parse annotations once, then dispatch.
-- [ ] **Unbounded tree depth from left-associative chains.** Binary, postfix and `as`/`is` chains are built in loops, so parse depth is bounded but tree depth isn't, and the recursive default `Visitor` can overflow. Long chains are valid Dart (generated string concatenation), so don't count them toward the depth limit. Walk chains with an explicit stack in the default `Visitor` so any length is safe.
-- [ ] **Adversarial parser corpus.** `corpus_tests.rs` hard-codes `/home/jacob/...` and silently skips elsewhere. Check in the crash witnesses above, walk each tree and call the accessors; consolidate the cloned `parser_tests.rs` cases behind a macro.
-
-#### 2. Constant evaluator
-
-Owns `crates/falcon_analyze/src/constant_value.rs` evaluation internals.
-
-- [ ] **Constant evaluation has no size budget.** `const aN = aN-1 + aN-1;` chains grow exponentially: 560 MB RSS at N=24. Add a byte/node budget to `ConstEvaluator` and stop deep-cloning cached values.
-- [ ] **Constant reference chains recurse.** Each reference recurses through `resolve_name → initializer` and caches only after returning (`constant_value.rs:971-979`), so a long acyclic chain (`a1 = a0; a2 = a1; …`) overflows the stack: a cold evaluation of the last link resolves 20,000 links in 18 ms but aborts by 100,000 on the 256 MB rules stack. The chain also counts against the 32-deep constructor limit (`constant_value.rs:1378`). Cycles already stop through the `Evaluating` marker. Evaluate a constant's dependencies first with an explicit worklist, caching each one, so chains of any length resolve without recursion or a depth limit, and the constructor limit only counts constructors.
-- [ ] **Quadratic time on constant chains outside the evaluator.** `falcon check` on the same chains takes 0.6 s at 1,000 links, 2.3 s at 2,000, 9.7 s at 4,000 and 48 s at 8,000, while the evaluator alone is linear. Profile which pass re-walks the chain per declaration and make it linear.
-
-#### 3. `unnecessary-nullable` and cross-file resolution
-
-Owns `crates/falcon_rules/src/cross_file/unnecessary_nullable.rs`, `RuleKind::CrossFile`, and the resolution decision in `falcon_cli/src/analyze_pipeline.rs` and `falcon_lsp/src/state.rs`.
-
-- [ ] **`unnecessary-nullable` false positives.** It misses tear-offs (`this._m`, cascade fields) and any non-literal-null write to the parameter (`cross_file/unnecessary_nullable.rs:560-600`), so it tells users to remove a `?` the code needs.
-- [ ] **Cross-file rules can't request resolution.** `RuleKind::CrossFile` has no resolution flag, so `unnecessary-nullable` builds its own SDK-less indexes whenever no file rule needs resolution and its output depends on unrelated rules. Add the flag, compute resolution over both registries, delete the fallback builder.
-
-#### 4. Identity and analysis context
-
-Owns `crates/falcon_analyze/src/resolve/identity.rs`, `context.rs`, and the 13 rule sites matching `DeclarationIdentity::Project`.
-
-- [ ] **`DeclarationIdentity::Project` covers external names.** SDK/package names that collide across libraries get `Project` (`identity.rs:1051-1091`), and 13 rule sites read it as "user code". Rename to `Library` and add `IdentityIndex::is_project`.
-- [ ] **Intern project identity names.** `Project { name: String }` allocates on every clone, while SDK and package identities already use `InternedString`.
-- [ ] **Sibling context built with the owner's path.** `use_late_for_private_fields_and_variables.rs:102-110` pairs a sibling tree with the owner's `file_path`, so path-keyed facts come from the wrong file. Add `AnalyzeContext::for_file` and make the fields private.
-
-#### 5. Tooling and CI
-
-Owns `xtask/`, `.github/`, `Makefile.toml`, `.cargo/config.toml`, `extensions/` and `website/`.
-
-- [ ] **Docgen and website in CI.** Add `docgen --check`, a website typecheck/build job, and stop casting `rules.json` through `unknown`.
-- [ ] **Docgen fails on gaps.** Empty descriptions and zero-diagnostic fixtures only print; the temp config path is fixed and a write failure falls back silently.
-- [ ] **`validate-rules --rule <typo>` fails.** A filter matching nothing currently reports PASS.
-- [ ] **Honour `CARGO_TARGET_DIR`.** `validate-rules`, docgen and `makers validate_rules` hard-code `target/debug/falcon`.
-- [ ] **Release token exposure.** `prepare-release.yml` persists `RELEASE_PAT` in `.git/config` while dependency build scripts compile; the `cargo xtask` alias lacks `--locked`.
-- [ ] **Workflow hygiene.** Top-level `permissions: contents: read`, PR `concurrency` cancel, one version parser.
-- [ ] **Release-pinned schema URL.** `$schema` and the VS Code validation point at `main`, so released binaries validate against unreleased rule sets.
-- [ ] **Extensions in the gates.** `falcon-zed` is its own edition-2021 workspace outside fmt/clippy/build; the VS Code extension has no lockfile and both sit outside `xtask version`.
-- [ ] **Split xtask.** One 2,136-line `main.rs` doing six jobs, with `perf-lock` undocumented.
-
-#### 6. Docs and changesets
-
-Owns `.changeset/`, `README.md`, `ROADMAP.md`, `docs/` and the count assertions in `meta_tests.rs`.
-
-- [ ] **Readable changesets.** 137 of 178 per-rule changesets never name their rule, and patch changesets fix rules that were never released. Name each rule id, fold fixes into the add entry, and add a `meta_tests.rs` check that a changeset named after a rule mentions its id.
-- [ ] **Derived rule counts.** README, getting-started, installation and ROADMAP hard-code 513/215, and `recommended_rules_match_documented_count` never reads them.
-- [ ] **Stale docs.** ROADMAP's changelog plan and the undocumented `include_assertions` option.
-
-### Stage 2: after a stage 1 batch
-
-Each batch here edits files a stage 1 batch owns, so it starts once that batch lands.
+These batches can run in parallel unless a batch says otherwise.
 
 #### 7. Syntax model
 
-Owns `crates/falcon_syntax`, `crates/falcon_dart_parser`, and the feature-gate check in `falcon_analyze/src/environment/external.rs`. After batch 1.
+Owns `crates/falcon_syntax`, `crates/falcon_dart_parser`, and the feature-gate check in `falcon_analyze/src/environment/external.rs`.
 
 - [ ] **Generated syntax kind mapping.** `Expr::cast` ends in `_ => None` and the visitor schema test asserts hand counts. Generate `cast`/`syntax` from `expression_enum!` and test that the default walk reaches every node.
 - [ ] **One parameter-kind encoding.** Parameter kinds are encoded both as marker nodes and as tree-builder flags (`tree.rs:98-414`).
@@ -82,7 +21,7 @@ Owns `crates/falcon_syntax`, `crates/falcon_dart_parser`, and the feature-gate c
 
 #### 8. CLI and config behaviour
 
-Owns `crates/falcon_cli`, `crates/falcon_config`, `crates/falcon_diagnostics` output, and path matching in `falcon_lsp`. After batch 3, which owns the resolution decision in `analyze_pipeline.rs` and `state.rs`.
+Owns `crates/falcon_cli`, `crates/falcon_config`, `crates/falcon_diagnostics` output, and path matching in `falcon_lsp`.
 
 - [ ] **Relative globs don't match walked paths.** `falcon check .` yields `./build/…`, so the documented `"!build/**"` excludes nothing (reproduced). The LSP matches absolute paths, so CLI and editor select different files. Resolve every glob relative to the config file's directory before matching files, overrides and diagnostics. `*` stops matching at `/` and `**` crosses directories; that changes how some existing configs match, so it ships with a changeset and a migrate note.
 - [ ] **Exit code holes.** A missing path is skipped, no paths lints nothing, and `--max-errors 0` exits 0 because the code is computed after truncation (`analyze_pipeline.rs:142-148,243-282`). No paths lints the current directory. A missing path, or a run that processes no files, is an error diagnostic with a non-zero exit, with a `--no-errors-on-unmatched` flag for tools like lint-staged that may pass nothing. Pipeline failures exit 1 like lint errors. `--max-errors` only limits what's printed, so the exit code comes from every diagnostic.
@@ -95,7 +34,7 @@ Owns `crates/falcon_cli`, `crates/falcon_config`, `crates/falcon_diagnostics` ou
 
 #### 9. Fix model
 
-Owns `crates/falcon_diagnostics` and `AnalyzeContext`'s diagnostic API. After batch 4, which owns `context.rs`, and batch 8, which changes how `Diagnostic` serialises. Design only; rules adopt it in batch 10.
+Owns `crates/falcon_diagnostics` and `AnalyzeContext`'s diagnostic API. After batch 8, which changes how `Diagnostic` serialises. Design only; rules adopt it in batch 10.
 
 - [ ] **Fix model.** `Diagnostic` has no fix field today. Add a fix carrying text edits over the lossless CST and a kind, safe or unsafe, declared by the rule. A safe fix preserves the program's behaviour; a fix that changes behaviour is unsafe even when the diagnostic is correct. Add the rule-facing API to attach one, so the diagnostic API changes once together with batch 10.
 
@@ -146,7 +85,7 @@ Owns rule `#[cfg(test)]` modules, `crates/falcon_rules/tests/`, rule messages an
 
 #### 14. Shared analysis for rules
 
-Owns `AnalyzeContext` caches, `semantic_scope.rs` queries, `const_eval.rs`, `ConstantDeclaration` in `constant_value.rs`, the derives on `DeclarationIdentity`, `cross_file.rs` package helpers, and the rules migrated onto them. After batch 12; batches 2 and 4 have already landed by then.
+Owns `AnalyzeContext` caches, `semantic_scope.rs` queries, `const_eval.rs`, `ConstantDeclaration` in `constant_value.rs`, the derives on `DeclarationIdentity`, `cross_file.rs` package helpers, and the rules migrated onto them. After batch 12.
 
 - [ ] **Cache shared per-file facts.** `FunctionBodies`, const contexts and `local_declarations` are re-walked by 16-20 rules per file. Cache them on `AnalyzeContext`.
 - [ ] **One constant-context definition.** `const_eval.rs` has two `ConstContexts` that disagree; one is a linear scan per expression.
@@ -175,6 +114,7 @@ Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that
 - [ ] **One relation API.** Seven overlapping subtype queries and three `unrelated` variants; `is_subtype_of` returns `Truth` but never `No`.
 - [ ] **Hide `ResolvedType` internals.** 7 rule sites build `Interface { occurrence: Default::default(), … }` and 328 match its variants. Add constructors and views, make metadata fields crate-private.
 - [ ] **Liveness-safe memo keys.** Memo caches key on raw pointers guarded only by comments; wrap them in a borrowed-key newtype or intern types.
+- [ ] **Sound `is_non_nullable`.** `ResolvedType::is_non_nullable()` answers yes for `FutureOr<T?>` and for extension types that don't implement `Object`, so `unnecessary-nullable` still flags arguments of those types as non-null.
 
 #### 17. Scoping and flow
 
@@ -184,6 +124,8 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 - [ ] **Shared flow joins.** `ScopedWalker` and `ClosureReturns` both hand-roll if/switch/try/loop joins. Move them into `FlowContext`, and move `switch_is_exhaustive` back to `flow.rs`.
 - [ ] **Shared collection/map element visiting.** Eleven visitors duplicate `visit_collection_element`/`visit_map_element`. Add an element trait in `falcon_syntax`.
 - [ ] **Terminating fixpoint.** `converge`/`infer_programs` (`semantic.rs:4641-4695`) rescan every program, SDK included, each round, and only end if every pass makes monotone progress, which nothing enforces. Add a worklist that requeues only declarations whose inputs changed. Enforce at the type-map writes that a step only fills an unknown type or tightens a partial one, never replaces a concrete type. Keep a round cap as a backstop; hitting it is an internal error naming the declarations still changing, not silently half-inferred types.
+- [ ] **Long chains in overriding walkers.** The default `Visitor` walks expression chains with an explicit stack, but walkers that override `visit_expr` and recurse through `walk_expr` (`FlowWrites`, `for_each_stmt_list`), plus `SemanticScope::visit_expr` and `state.infer`, still recurse once per link: `falcon check` on a 100,000-operand `a + a + …` aborts with a stack overflow in `FlowWrites`. Give them an iterative chain walk too.
+- [ ] **Super-quadratic inference on binary chains.** Cost grows about 8× per doubling of `a + a + … + a`: `falcon check` takes 1.2 s at 250 operands, 10.4 s at 500, 79 s at 1,000 and over 120 s at 2,000 (same on 0.4.3). The profile is dominated by `TypeEnvironment::infer_non_call` and `SignatureIndex::interface_candidates`. Find the repeated work and make it linear.
 
 #### 18. Analyze infrastructure
 
@@ -198,7 +140,7 @@ Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports
 
 #### 19. Shared pipeline and incremental LSP
 
-Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. After batches 3 and 8.
+Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. After batch 8.
 
 - [ ] **One project pipeline.** The CLI and LSP load config, walk files, build `ProjectFile`s, build indexes and sort diagnostics differently. Share one pipeline and test that both produce the same diagnostics.
 - [ ] **Incremental LSP.** Every edit pause re-walks and re-parses the workspace twice on one thread, with `$/cancelRequest` ignored. Cache disk parses, invalidate via watched files, rebuild only what changed.
