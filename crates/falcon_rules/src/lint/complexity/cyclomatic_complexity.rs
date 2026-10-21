@@ -28,6 +28,7 @@ use falcon_syntax::cst::*;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Maximum cyclomatic complexity allowed for a function.
+    #[serde(deserialize_with = "crate::lint::options::integer")]
     max_complexity: usize,
 }
 

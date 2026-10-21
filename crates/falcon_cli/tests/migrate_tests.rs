@@ -1105,21 +1105,12 @@ fn yaml_discards_malformed_payloads_and_list_entries_before_strict_loading() {
 }
 
 #[test]
-fn upgrade_reports_discarded_root_payloads_and_keeps_outputs_loadable() {
+fn upgrade_refuses_malformed_root_payloads() {
     for input in ["null", "42", "[]", r#""not-an-object""#] {
-        let result = migrate_existing_config(input).unwrap();
-        assert_eq!(
-            serde_json::from_str::<Value>(&result.json).unwrap(),
-            serde_json::json!({})
-        );
         assert!(
-            result.warnings.iter().any(|warning| {
-                warning.contains(&format!("discarded value {input}")) && warning.contains("`$`")
-            }),
-            "{:?}",
-            result.warnings
+            migrate_existing_config(input).is_err(),
+            "malformed root must not become a default configuration: {input}"
         );
-        assert_migrated_config_loads(&result.json);
     }
 }
 
@@ -1464,4 +1455,594 @@ fn moved_alias_collisions_keep_canonical_options_even_when_alias_moves_first() {
     );
     assert_eq!(result.migrated_count, 1);
     assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_refuses_file_scopes_without_a_surviving_positive_glob() {
+    for includes in [
+        serde_json::json!([42, "!build/**"]),
+        serde_json::json!(["[", "!build/**"]),
+    ] {
+        let input = serde_json::json!({"files": {"includes": includes}});
+        let error = migrate_existing_config(&input.to_string())
+            .err()
+            .expect("dropping the only positive include must not widen file scope");
+        assert!(error.contains("files.includes"), "{error}");
+        assert!(error.contains("refusing to widen"), "{error}");
+    }
+}
+
+#[test]
+fn upgrade_drops_entire_override_without_a_surviving_positive_glob() {
+    for includes in [
+        serde_json::json!([42, "!build/**"]),
+        serde_json::json!(["[", "!build/**"]),
+    ] {
+        let input = serde_json::json!({
+            "linter": {"enabled": true},
+            "overrides": [{
+                "includes": includes,
+                "linter": {"enabled": false},
+                "cross-file": {"enabled": false}
+            }]
+        });
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(value["linter"]["enabled"], true);
+        assert_eq!(value["overrides"], serde_json::json!([]));
+        assert!(result.warnings.iter().any(|warning| {
+            warning.contains("overrides[0]") && warning.contains("refusing to widen")
+        }));
+        assert_migrated_config_loads(&result.json);
+    }
+}
+
+#[test]
+fn upgrade_refuses_malformed_or_unknown_top_level_file_scope() {
+    for files in [
+        Value::Null,
+        serde_json::json!(42),
+        serde_json::json!([]),
+        serde_json::json!("lib/**"),
+        serde_json::json!({"includes": ["lib/**"], "excludes": ["build/**"]}),
+    ] {
+        let input = serde_json::json!({
+            "files": files,
+            "linter": {"rules": {"suspicious": {"no_empty_block": "warn"}}}
+        });
+        assert!(
+            migrate_existing_config(&input.to_string()).is_err(),
+            "untranslatable file scope must fail rather than be removed: {input}"
+        );
+    }
+}
+
+#[test]
+fn upgrade_drops_entire_override_with_unknown_scope_sibling() {
+    for (key, scope) in [
+        ("excludes", serde_json::json!(["build/**"])),
+        ("files", serde_json::json!({"excludes": ["build/**"]})),
+        ("include", serde_json::json!(["test/**"])),
+        ("unknown-scope", serde_json::json!(["test/**"])),
+    ] {
+        let mut invalid = serde_json::json!({
+            "includes": ["lib/**"],
+            "linter": {"enabled": false},
+            "cross-file": {"enabled": false}
+        });
+        invalid[key] = scope;
+        let retained = serde_json::json!({
+            "includes": ["test/**"],
+            "linter": {"enabled": false}
+        });
+        let input = serde_json::json!({
+            "files": {"includes": ["**", "!build/**"]},
+            "overrides": [invalid, retained]
+        });
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(value["files"], input["files"]);
+        assert_eq!(value["overrides"], serde_json::json!([retained]));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| { warning.contains("overrides[0]") && warning.contains(key) })
+        );
+        assert_migrated_config_loads(&result.json);
+    }
+}
+
+#[test]
+fn upgrade_backtick_root_key_does_not_discard_valid_configuration() {
+    let input = serde_json::json!({
+        "unknown`key": 42,
+        "files": {"includes": ["lib/**", "!lib/generated/**"]},
+        "linter": {"rules": {"suspicious": {"no_empty_block": "error"}}},
+        "max-errors": 25
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert!(value.get("unknown`key").is_none());
+    assert_eq!(value["files"], input["files"]);
+    assert_eq!(value["max-errors"], 25);
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["no-empty-block"],
+        "error"
+    );
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unknown`key"))
+    );
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_backtick_unknown_option_removes_only_that_option() {
+    let input = serde_json::json!({
+        "files": {"includes": ["lib/**"]},
+        "linter": {"rules": {"complexity": {"max_lines_for_file": {
+            "level": "error",
+            "options": {"max_lines": 200, "unknown`option": 42}
+        }}}}
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(value["files"], input["files"]);
+    assert_eq!(
+        value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+        serde_json::json!({"level": "error", "options": {"max-lines": 200}})
+    );
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unknown`option"))
+    );
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_option_warning_keeps_original_index_after_dropping_first_override() {
+    let input = serde_json::json!({"overrides": [
+        {"includes": [42, "!build/**"], "linter": {"enabled": false}},
+        {"includes": ["test/**"], "linter": {"rules": {"complexity": {
+            "max_lines_for_file": {"level": "warn", "options": {
+                "max_lines": 200, "unknown-option": 42
+            }}
+        }}}}
+    ]});
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(value["overrides"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        value["overrides"][0]["includes"],
+        serde_json::json!(["test/**"])
+    );
+    assert_eq!(
+        value["overrides"][0]["linter"]["rules"]["complexity"]["max-lines-for-file"]["options"],
+        serde_json::json!({"max-lines": 200})
+    );
+    let warning = result
+        .warnings
+        .iter()
+        .find(|warning| warning.contains("unknown-option"))
+        .expect("discarded option is reported");
+    assert!(
+        warning.contains(
+            "overrides[1].linter.rules.complexity.max-lines-for-file.options.unknown-option"
+        ),
+        "{warning}"
+    );
+    assert!(!warning.contains("overrides[0]"), "{warning}");
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_legacy_flat_configuration_preserves_rules_and_file_scope() {
+    let input = serde_json::json!({
+        "files": {"includes": ["lib/**", "!lib/generated/**"]},
+        "rules": {
+            "avoid-late-keyword": {"enabled": true},
+            "max_lines_for_file": {"options": {"max_lines": 200}},
+            "no_empty_block": {"enabled": false}
+        },
+        "exclude_patterns": ["build/**"],
+        "severity_override": {"avoid-late-keyword": "error"},
+        "max_errors": 25
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    for key in [
+        "rules",
+        "exclude_patterns",
+        "severity_override",
+        "max_errors",
+    ] {
+        assert!(value.get(key).is_none(), "legacy key survived: {key}");
+    }
+    assert_eq!(
+        value["files"]["includes"],
+        serde_json::json!(["lib/**", "!lib/generated/**", "!build/**"])
+    );
+    assert_eq!(value["max-errors"], 25);
+    assert_eq!(
+        value["linter"]["rules"]["style"]["avoid-late-keyword"],
+        "error"
+    );
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["no-empty-block"],
+        "off"
+    );
+    assert_eq!(
+        value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+        serde_json::json!({"level": "warn", "options": {"max-lines": 200}})
+    );
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_refuses_unmappable_legacy_flat_keys() {
+    for input in [
+        serde_json::json!({"rules": {"unknown-rule": {"enabled": false}}}),
+        serde_json::json!({"severity_override": {"unknown-rule": "error"}}),
+        serde_json::json!({"exclude_patterns": [42]}),
+        serde_json::json!({"exclude_patterns": ["["]}),
+    ] {
+        assert!(
+            migrate_existing_config(&input.to_string()).is_err(),
+            "unmappable legacy settings must not be silently discarded: {input}"
+        );
+    }
+}
+
+#[test]
+fn yaml_rule_exclusion_emits_grouped_scoped_off_override() {
+    let result = migrate_yaml_to_config(
+        "dart_code_linter:\n  rules:\n    - avoid-late-keyword:\n        exclude: [test/**]\n",
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["style"]["avoid-late-keyword"],
+        "warn"
+    );
+    assert_eq!(
+        value["overrides"],
+        serde_json::json!([{
+            "includes": ["test/**"],
+            "linter": {"rules": {"style": {"avoid-late-keyword": "off"}}}
+        }])
+    );
+    assert!(result.unrecognized.is_empty());
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_refuses_malformed_whole_sections() {
+    for invalid in [Value::Null, serde_json::json!(42), serde_json::json!([])] {
+        for key in ["linter", "cross-file", "overrides"] {
+            let mut input = serde_json::json!({});
+            input[key] = if key == "overrides" && invalid.is_array() {
+                serde_json::json!({})
+            } else {
+                invalid.clone()
+            };
+            assert!(
+                migrate_existing_config(&input.to_string()).is_err(),
+                "malformed section must not become defaults: {input}"
+            );
+        }
+        for key in ["rules", "domains"] {
+            if key == "domains" && invalid.is_null() {
+                continue;
+            }
+            let mut input = serde_json::json!({"linter": {}});
+            input["linter"][key] = invalid.clone();
+            assert!(
+                migrate_existing_config(&input.to_string()).is_err(),
+                "malformed linter section must not become defaults: {input}"
+            );
+        }
+        let input = serde_json::json!({"linter": {"rules": {"style": invalid}}});
+        assert!(
+            migrate_existing_config(&input.to_string()).is_err(),
+            "malformed whole rule group must not be silently discarded: {input}"
+        );
+    }
+}
+
+#[test]
+fn upgrade_rejects_invalid_integer_options_without_losing_siblings() {
+    for invalid in ["null", "18446744073709551616"] {
+        let input = format!(
+            r#"{{"files":{{"includes":["lib/**"]}},"linter":{{"rules":{{"complexity":{{
+                "max_lines_for_file":{{"level":"error","options":{{"max_lines":{invalid}}}}}
+            }},"suspicious":{{"no_empty_block":"warn"}}}}}}}}"#
+        );
+        let result = migrate_existing_config(&input).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(value["files"]["includes"], serde_json::json!(["lib/**"]));
+        assert_eq!(
+            value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+            serde_json::json!({"level": "error", "options": {}})
+        );
+        assert_eq!(
+            value["linter"]["rules"]["suspicious"]["no-empty-block"],
+            "warn"
+        );
+        assert!(result.warnings.iter().any(|warning| {
+            warning.contains("max-lines-for-file.options.max-lines")
+                && warning.contains("discarded value")
+        }));
+        assert_migrated_config_loads(&result.json);
+    }
+}
+
+#[test]
+fn upgrade_preserves_integral_float_option_values() {
+    let input = serde_json::json!({
+        "files": {"includes": ["lib/**"]},
+        "linter": {"rules": {"complexity": {
+            "max_lines_for_file": {"level": "error", "options": {"max_lines": 1.0}}
+        }}}
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(value["files"], input["files"]);
+    let rule = &value["linter"]["rules"]["complexity"]["max-lines-for-file"];
+    assert_eq!(rule["level"], "error");
+    assert_eq!(rule["options"]["max-lines"].as_f64(), Some(1.0));
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("discarded value"))
+    );
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn yaml_empty_rule_exclusions_do_not_emit_an_unscoped_off_override() {
+    let result = migrate_yaml_to_config(
+        "dart_code_linter:\n  rules:\n    - avoid-late-keyword:\n        exclude: []\n",
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["style"]["avoid-late-keyword"],
+        "warn"
+    );
+    assert!(
+        value.get("overrides").is_none()
+            || value["overrides"].as_array().is_some_and(Vec::is_empty)
+    );
+    assert!(result.unrecognized.is_empty());
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn upgrade_legacy_severity_override_preserves_options_and_applies_downgrades() {
+    for severity in ["error", "info"] {
+        let input = serde_json::json!({
+            "rules": {"max_lines_for_file": {"options": {"max_lines": 200}}},
+            "severity_override": {"max_lines_for_file": severity}
+        });
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(
+            value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+            serde_json::json!({"level": severity, "options": {"max-lines": 200}})
+        );
+        assert!(value.get("rules").is_none());
+        assert!(value.get("severity_override").is_none());
+        assert_migrated_config_loads(&result.json);
+    }
+}
+
+#[test]
+fn upgrade_legacy_disabled_rule_retains_options_and_ignores_severity_enablement() {
+    for severity in [None, Some("error"), Some("info")] {
+        let mut input = serde_json::json!({
+            "rules": {"max_lines_for_file": {
+                "enabled": false,
+                "options": {"max_lines": 200}
+            }}
+        });
+        if let Some(severity) = severity {
+            input["severity_override"] = serde_json::json!({"max_lines_for_file": severity});
+        }
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(
+            value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+            serde_json::json!({"level": "off", "options": {"max-lines": 200}})
+        );
+        assert_migrated_config_loads(&result.json);
+    }
+}
+
+#[test]
+fn upgrade_refuses_invalid_legacy_severity_with_original_key() {
+    for severity in [
+        serde_json::json!("warning"),
+        serde_json::json!(42),
+        Value::Null,
+        serde_json::json!({"level": "error"}),
+    ] {
+        let input = serde_json::json!({
+            "severity_override": {"avoid-late-keyword": severity}
+        });
+        let error = migrate_existing_config(&input.to_string())
+            .err()
+            .expect("invalid legacy severity must fail rather than lose the rule");
+        assert!(
+            error.contains("severity_override.avoid-late-keyword"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn upgrade_legacy_flat_cross_file_rules_preserve_aliased_section_enablement() {
+    for alias in ["project", "cross_file"] {
+        let mut input = serde_json::json!({
+            "rules": {"unused-files": {"enabled": true}},
+            "files": {"includes": ["lib/**"]}
+        });
+        input[alias] = serde_json::json!({"enabled": false});
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert!(value.get(alias).is_none());
+        assert!(value.get("rules").is_none());
+        assert_eq!(value["cross-file"]["enabled"], false);
+        assert_eq!(
+            value["cross-file"]["rules"]["correctness"]["unused-files"],
+            "warn"
+        );
+        assert_eq!(value["files"], input["files"]);
+        assert_migrated_config_loads(&result.json);
+    }
+}
+
+#[test]
+fn yaml_exclusion_only_rule_excludes_warn_without_broad_off_override() {
+    let result = migrate_yaml_to_config(
+        "dart_code_linter:\n  rules:\n    - avoid-late-keyword:\n        exclude: ['!lib/keep.dart']\n",
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["style"]["avoid-late-keyword"],
+        "warn"
+    );
+    assert!(
+        value.get("overrides").is_none()
+            || value["overrides"].as_array().is_some_and(Vec::is_empty)
+    );
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|warning| { warning.contains("exclude") && warning.contains("!lib/keep.dart") })
+    );
+    assert_migrated_config_loads(&result.json);
+}
+
+#[test]
+fn run_migrate_recognizes_extensionless_legacy_flat_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("legacy-config");
+    let output = dir.path().join("converted.json");
+    std::fs::write(
+        &input,
+        r#"{"rules":{"avoid-late-keyword":{"enabled":true}},"exclude_patterns":["build/**"]}"#,
+    )
+    .unwrap();
+    assert_eq!(run_migrate(Some(input), true, Some(output.clone())), 0);
+    let json = std::fs::read_to_string(&output).unwrap();
+    let value: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["style"]["avoid-late-keyword"],
+        "warn"
+    );
+    let includes = value["files"]["includes"].as_array().unwrap();
+    assert!(includes.contains(&serde_json::json!("!build/**")));
+    assert!(value.get("rules").is_none());
+    falcon_rules::load_config(&output).expect("extensionless migration writes loadable config");
+}
+
+#[test]
+fn upgrade_invalid_rule_payloads_report_full_paths_and_preserve_valid_siblings() {
+    for in_override in [false, true] {
+        for invalid_level in [false, true] {
+            let broken = if invalid_level {
+                serde_json::json!({"level": "invalid", "options": {"max_lines": 200}})
+            } else {
+                serde_json::json!({"level": "error", "options": {"max_lines": "many"}})
+            };
+            let mut input = serde_json::json!({
+                "linter": {"rules": {
+                    "complexity": {"max_lines_for_file": broken},
+                    "suspicious": {"no_empty_block": "warn"}
+                }}
+            });
+            if in_override {
+                input["includes"] = serde_json::json!(["test/**", "!test/generated/**"]);
+                input = serde_json::json!({"overrides": [input]});
+            }
+            let result = migrate_existing_config(&input.to_string()).unwrap();
+            let value: Value = serde_json::from_str(&result.json).unwrap();
+            let (scope, prefix) = if in_override {
+                assert_eq!(
+                    value["overrides"][0]["includes"],
+                    input["overrides"][0]["includes"]
+                );
+                (&value["overrides"][0], "overrides[0].")
+            } else {
+                (&value, "")
+            };
+            assert_eq!(
+                scope["linter"]["rules"]["suspicious"]["no-empty-block"],
+                "warn"
+            );
+            if invalid_level {
+                assert!(
+                    scope["linter"]["rules"]["complexity"]
+                        .get("max-lines-for-file")
+                        .is_none()
+                );
+            } else {
+                assert_eq!(
+                    scope["linter"]["rules"]["complexity"]["max-lines-for-file"],
+                    serde_json::json!({"level": "error", "options": {}})
+                );
+            }
+            let suffix = if invalid_level {
+                "level"
+            } else {
+                "options.max-lines"
+            };
+            let path = format!("{prefix}linter.rules.complexity.max-lines-for-file.{suffix}");
+            assert!(
+                result
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains(&path)),
+                "{path}: {:?}",
+                result.warnings
+            );
+            assert_migrated_config_loads(&result.json);
+        }
+    }
+}
+
+#[test]
+fn upgrade_relocates_override_rules_into_nullable_sections_without_widening_scope() {
+    for (source, destination, group, rule) in [
+        ("linter", "cross-file", "correctness", "unused-files"),
+        ("cross-file", "linter", "suspicious", "no-empty-block"),
+    ] {
+        let includes = serde_json::json!(["lib/**", "!lib/generated/**"]);
+        let mut entry = serde_json::json!({"includes": includes});
+        entry[destination] = Value::Null;
+        entry[source] = serde_json::json!({"rules": {}});
+        entry[source]["rules"][group] = serde_json::json!({rule: "off"});
+        let input = serde_json::json!({"overrides": [entry]});
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(value["overrides"].as_array().unwrap().len(), 1);
+        let migrated = &value["overrides"][0];
+        assert_eq!(migrated["includes"], includes);
+        assert_eq!(migrated[destination]["rules"][group][rule], "off");
+        assert!(migrated[source]["rules"][group].get(rule).is_none());
+        assert!(result.warnings.iter().any(|warning| {
+            warning.contains("moved")
+                && warning.contains(&format!("overrides[0].{source}.rules.{group}.{rule}"))
+                && warning.contains(&format!("overrides[0].{destination}.rules.{group}.{rule}"))
+        }));
+        assert_migrated_config_loads(&result.json);
+    }
 }

@@ -5,9 +5,10 @@ edition.workspace = true
 description       = "falcon.json configuration schema and loader"
 
 [dependencies]
-glob.workspace       = true
-serde.workspace      = true
-serde_json.workspace = true
+glob.workspace                = true
+serde.workspace               = true
+serde_json.workspace          = true
+serde_path_to_error.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

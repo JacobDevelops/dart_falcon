@@ -22,6 +22,7 @@ pub struct PreferExtractingCallbacks;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Callback body line threshold; unset disables the length filter.
+    #[serde(deserialize_with = "crate::lint::options::optional_integer")]
     allowed_line_count: Option<usize>,
     /// Named widget-constructor arguments whose callbacks are ignored.
     ignored_named_arguments: Vec<String>,

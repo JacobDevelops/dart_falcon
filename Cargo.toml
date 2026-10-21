@@ -12,11 +12,12 @@ repository = "https://github.com/JacobDevelops/dart_falcon"
 
 [workspace.dependencies]
 # Diagnostics & reporting
-serde       = { version = "1", features = [ "derive" ] }
-serde_json  = { version = "1", features = [ "preserve_order" ] }
-serde_yaml  = "0.9"
-marked-yaml = "0.8"
-schemars    = "1.2"
+serde               = { version = "1", features = [ "derive" ] }
+serde_json          = { version = "1", features = [ "preserve_order" ] }
+serde_path_to_error = "0.1"
+serde_yaml          = "0.9"
+marked-yaml         = "0.8"
+schemars            = "1.2"
 
 # LSP
 lsp-server = "0.7"

@@ -12,6 +12,7 @@ use falcon_syntax::cst::*;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Maximum number of fields in a record.
+    #[serde(deserialize_with = "crate::lint::options::integer")]
     max_fields: usize,
 }
 

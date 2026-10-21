@@ -8,7 +8,7 @@ use tracing::{info, info_span};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse_for_package;
 use falcon_dart_parser::parser::ParseError;
-use falcon_diagnostics::{Diagnostic, Severity, Span};
+use falcon_diagnostics::{Diagnostic, SYNTAX_ERROR_DIAGNOSTIC_ID, Severity, Span};
 use falcon_syntax::cst::Program;
 use falcon_syntax::language_version::LanguageVersion;
 
@@ -68,7 +68,7 @@ pub fn syntax_error_diagnostics(path: &Path, errors: &[ParseError]) -> Vec<Diagn
         .iter()
         .map(|e| {
             Diagnostic::new(
-                "syntax-error",
+                SYNTAX_ERROR_DIAGNOSTIC_ID,
                 Severity::Error,
                 e.message.clone(),
                 path.to_string_lossy().into_owned(),
@@ -85,7 +85,7 @@ pub fn syntax_error_diagnostics(path: &Path, errors: &[ParseError]) -> Vec<Diagn
 pub fn source_size_diagnostic(path: &Path, bytes: u64) -> Option<Diagnostic> {
     let error = crate::source::check_source_size(bytes).err()?;
     Some(Diagnostic::new(
-        "syntax-error",
+        SYNTAX_ERROR_DIAGNOSTIC_ID,
         Severity::Error,
         error.to_string(),
         path.to_string_lossy().into_owned(),

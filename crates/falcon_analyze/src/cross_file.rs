@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use falcon_config::FalconConfig;
-use falcon_diagnostics::Diagnostic;
+use falcon_diagnostics::{CONFIG_DIAGNOSTIC_ID, Diagnostic};
 use falcon_syntax::cst::{AstNode, Expr, NodeId, Program, SyntaxNode, SyntaxTree};
 
 /// Shared project facts; callers may retain these after per-file analysis.
@@ -117,7 +117,7 @@ impl<T: CrossFileRule + ?Sized> CrossFileRuleAnalysis for T {
     ) -> Vec<Diagnostic> {
         let mut diagnostics = self.prepare_project(files, config, indexes);
         for diagnostic in &mut diagnostics {
-            if diagnostic.rule != "config" {
+            if diagnostic.rule != CONFIG_DIAGNOSTIC_ID {
                 diagnostic.rule = name;
             }
         }

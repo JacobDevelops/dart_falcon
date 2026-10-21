@@ -23,16 +23,18 @@ corpus/
 ### Rules
 - Each rule gets its own directory named after the rule identifier (e.g., `avoid-dynamic`, `camel-case-types`)
 - The rule name must match the rule ID defined in the rule implementation
-- At minimum, each rule directory must contain `bad.dart` and `good.dart`
+- Each file-rule directory must contain `bad.dart` and `good.dart`; cross-file
+  rules use the project layout below instead.
 - Additional variants (e.g., `bad_2.dart`, `good_2.dart`) are permitted for complex rules with multiple violation patterns
 - Coverage target (plan §5.7): ≥5 positive and ≥5 negative examples per rule; rules that emit at most one diagnostic per file (e.g., `max_lines_for_file`) approximate this with multiple fixture file variants
 - Codegen fixtures contain `// Placeholder…` markers. Replace all placeholders
   with real cases; the in-process coverage test rejects these markers.
-- Cross-file rules also require `cross-file/` fixtures with at least one
+- Cross-file rules require `cross-file/` fixtures with at least one
   expectation for that rule across the directory. Both corpus harnesses reject
-  expectation-free cross-file coverage. Use `bad*` and `good*` subproject
-  directories for positive and negative coverage; negative projects remain
-  annotation-free.
+  expectation-free cross-file coverage. Use `cross-file/bad/` (`main.dart` and
+  `support.dart`) and `cross-file/good/` (`main.dart`) as the scaffold layout;
+  additional `bad*` and `good*` subproject directories are allowed. Negative
+  projects remain annotation-free, and top-level Dart fixtures are not required.
 
 ### Per-Rule Config (`config.json`)
 

@@ -21,6 +21,7 @@ use falcon_syntax::cst::*;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Maximum number of non-default cases in a switch.
+    #[serde(deserialize_with = "crate::lint::options::integer")]
     max_cases: usize,
 }
 

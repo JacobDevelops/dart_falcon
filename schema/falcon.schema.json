@@ -7,7 +7,10 @@
   "additionalProperties": false,
   "properties": {
     "$schema": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors."
     },
     "files": {
@@ -35,7 +38,10 @@
           "description": "Master switch for the single-file linter. Set to false to disable all file rules. Defaults to true."
         },
         "domains": {
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "description": "Per-domain gating for domain-scoped rules (for example Flutter rules).",
           "properties": {
@@ -103,7 +109,10 @@
           "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
             "recommended": {
-              "type": "boolean",
+              "type": [
+                "boolean",
+                "null"
+              ],
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true."
             },
@@ -1682,7 +1691,10 @@
           "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
             "recommended": {
-              "type": "boolean",
+              "type": [
+                "boolean",
+                "null"
+              ],
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true."
             },
@@ -1784,10 +1796,24 @@
             "description": "Glob patterns relative to the configuration directory selecting the files this override applies to. Omitted patterns apply to every file."
           },
           "linter": {
-            "$ref": "#/definitions/overrideLinter"
+            "anyOf": [
+              {
+                "$ref": "#/definitions/overrideLinter"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cross-file": {
-            "$ref": "#/definitions/overrideCrossFile"
+            "anyOf": [
+              {
+                "$ref": "#/definitions/overrideCrossFile"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }
@@ -1819,7 +1845,10 @@
       "description": "Linter settings applied by an override to its matched files.",
       "properties": {
         "enabled": {
-          "type": "boolean",
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Master switch for the single-file linter within this override."
         },
         "rules": {
@@ -3392,7 +3421,10 @@
       "description": "Cross-file settings applied by an override to its matched files.",
       "properties": {
         "enabled": {
-          "type": "boolean",
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Master switch for cross-file analysis within this override."
         },
         "rules": {

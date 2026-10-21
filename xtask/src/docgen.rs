@@ -648,6 +648,22 @@ fn emit_rules_section(root: &Value, node: &Value, path: &str, out: &mut Vec<Valu
 /// items collapse to templated paths; everything else is a leaf.
 fn walk_config_schema(root: &Value, node: &Value, path: &str, out: &mut Vec<Value>) {
     let resolved = schema_resolve(root, node);
+    // Nullable sections still expose their object's keys in the reference.
+    if let Some(branches) = resolved
+        .get("anyOf")
+        .or_else(|| resolved.get("oneOf"))
+        .and_then(Value::as_array)
+        && branches.len() == 2
+        && branches
+            .iter()
+            .any(|branch| schema_resolve(root, branch)["type"] == "null")
+        && let Some(object) = branches
+            .iter()
+            .find(|branch| schema_resolve(root, branch)["properties"].is_object())
+    {
+        walk_config_schema(root, object, path, out);
+        return;
+    }
 
     if let Some(Value::Object(props)) = resolved.get("properties") {
         if path.ends_with(".rules") {
@@ -1224,6 +1240,33 @@ mod tests {
             ]
         });
         assert_eq!(schema_type_label(&schema, &schema), "null | string");
+    }
+
+    #[test]
+    fn nullable_object_sections_expose_referenced_keys() {
+        for union in ["anyOf", "oneOf"] {
+            let schema = json!({
+                "definitions": {
+                    "section": {
+                        "type": "object",
+                        "properties": {"enabled": {"type": ["boolean", "null"]}}
+                    }
+                },
+                "properties": {
+                    "section": {
+                        union: [
+                            {"type": "null"},
+                            {"$ref": "#/definitions/section"}
+                        ]
+                    }
+                }
+            });
+            let mut entries = Vec::new();
+            walk_config_schema(&schema, &schema, "", &mut entries);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0]["path"], "section.enabled");
+            assert_eq!(entries[0]["type"], "boolean | null");
+        }
     }
 
     #[test]

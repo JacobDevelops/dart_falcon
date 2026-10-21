@@ -178,6 +178,9 @@ An individual option field set to `null` is invalid unless that field explicitly
 accepts null. For compatibility, setting the entire `options` value to `null`
 is treated like omitting options and uses the rule defaults.
 
+Integer-valued rule options also accept whole-number JSON values such as `1.0`.
+Fractional, negative, and out-of-range values are rejected with the allowed range.
+
 ```json
 {
   "linter": {
@@ -480,6 +483,8 @@ accept `recommended`; set explicit rule levels or use `enabled` instead. Neither
 block accepts `domains`, nested `overrides`, or `files`. An override may carry
 either or both blocks. The legacy cross-file keys `project` and `cross_file`
 still load with deprecation warnings.
+Setting either override block to `null` is equivalent to omitting it. Optional
+sections such as base `linter.domains` likewise treat `null` as absent.
 
 - Each explicit rule entry (under its group) **replaces** the base resolution
   for that rule on matching files: `off` disables it; `on`/`info`/`warn`/`error`
@@ -653,6 +658,9 @@ Notes:
   `avoid_unused_parameters`) were unified into a single canonical rule each
   (`no-empty-block`, `no-magic-number`, `avoid-unused-parameters`); their upstream
   ids all still map to the surviving rule.
+- A rule-level YAML `exclude` list becomes an override disabling that rule for
+  those paths, preserving its declared group and section. An exclusion-only list
+  is skipped with a warning rather than disabling the rule outside those paths.
 
 ### Upgrading an existing falcon.json
 
@@ -673,10 +681,13 @@ above, and warnings name both paths.
 
 Migration converts a single string `includes` into a one-element array when it
 is a valid glob. Invalid include entries are dropped only while usable patterns
-remain. If none remain, the whole override is dropped with a warning rather than
-applying it to every file; for `files.includes`, migration fails instead of
-widening the analyzed file set. Intentionally empty or omitted includes remain
-unchanged.
+remain. If the original list had a positive pattern, at least one valid positive
+pattern must survive; exclusion-only leftovers cannot replace that scope.
+Invalid override scopes, including unsupported scope keys such as `excludes`,
+discard the whole override with a warning naming its original index. Invalid
+top-level `files` scope fails migration without writing. Intentionally empty or
+omitted includes remain unchanged. Migration also refuses repairs that would
+remove the root or a whole configuration section.
 
 Other supported settings remain unchanged, and the resulting configuration passes
 falcon's loader. Migration applies the loader's structural, rule-name, and options
@@ -698,8 +709,13 @@ falcon migrate --input falcon.json --write
 ## Migrating from the legacy flat schema
 
 The old flat schema (`rules`, `exclude_patterns`, `severity_override` at the top
-level) is no longer accepted. falcon reports an error rather than silently
-ignoring it. Migrate as follows:
+level) is no longer accepted by the loader. `falcon migrate --input falcon.json`
+translates these keys using the mapping below and each rule's declared group and
+section. Unmapped legacy rules or settings fail migration without writing,
+rather than discarding the old configuration.
+
+Severity overrides change the level without replacing rule options. Explicitly
+disabled rules remain disabled, and their supported options are preserved.
 
 | Legacy                                             | New                                                            |
 |----------------------------------------------------|----------------------------------------------------------------|

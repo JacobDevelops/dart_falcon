@@ -19,7 +19,7 @@ pub fn format_json(diagnostics: &[Diagnostic]) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_json;
-    use falcon_diagnostics::{Diagnostic, Severity, Span};
+    use falcon_diagnostics::{CONFIG_DIAGNOSTIC_ID, Diagnostic, Severity, Span};
 
     #[test]
     fn nonempty_json_output_contract() {
@@ -32,7 +32,7 @@ mod tests {
         );
         resolved.resolve_position("a\nprint('hi');");
         let unresolved = Diagnostic::new(
-            "config",
+            CONFIG_DIAGNOSTIC_ID,
             Severity::Error,
             "Cannot load configuration.",
             "falcon.json",

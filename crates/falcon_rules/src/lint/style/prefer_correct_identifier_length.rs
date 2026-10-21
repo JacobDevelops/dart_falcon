@@ -34,8 +34,10 @@ pub struct PreferCorrectIdentifierLength;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Shortest permitted identifier length, excluding one leading privacy underscore.
+    #[serde(deserialize_with = "crate::lint::options::integer")]
     min_length: usize,
     /// Longest permitted identifier length, excluding one leading privacy underscore.
+    #[serde(deserialize_with = "crate::lint::options::integer")]
     max_length: usize,
     /// Identifier names exempt from length checks, compared after removing one leading privacy underscore.
     #[schemars(with = "Vec<String>")]

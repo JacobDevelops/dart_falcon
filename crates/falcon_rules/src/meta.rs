@@ -215,6 +215,11 @@ impl RuleMeta {
         self.domain.map_or(&[], Domain::names)
     }
 
+    /// Whether this rule declares a configurable options payload.
+    pub const fn has_options(&self) -> bool {
+        self.options.is_some()
+    }
+
     pub const fn is_cross_file(&self) -> bool {
         matches!(self.kind, RuleKind::CrossFile { .. })
     }
@@ -392,12 +397,27 @@ pub fn suppression_lookup(name: &str) -> Option<(&'static str, &'static str, boo
 
 /// Canonicalize every configured rule map and return deprecation warnings.
 pub fn canonicalize_config(config: &mut FalconConfig) -> Vec<String> {
+    canonicalize_config_inner(config, true)
+}
+
+/// Canonicalize rule names after the loader has normalized and validated options.
+pub(crate) fn canonicalize_rule_names(config: &mut FalconConfig) -> Vec<String> {
+    canonicalize_config_inner(config, false)
+}
+
+fn canonicalize_config_inner(config: &mut FalconConfig, normalize_options: bool) -> Vec<String> {
     let mut warnings = Vec::new();
-    canonicalize_rules(&mut config.linter.rules, "linter.rules", &mut warnings);
+    canonicalize_rules(
+        &mut config.linter.rules,
+        "linter.rules",
+        &mut warnings,
+        normalize_options,
+    );
     canonicalize_rules(
         &mut config.cross_file.rules,
         "cross-file.rules",
         &mut warnings,
+        normalize_options,
     );
     for (index, ov) in config.overrides.iter_mut().enumerate() {
         if let Some(linter) = &mut ov.linter {
@@ -405,6 +425,7 @@ pub fn canonicalize_config(config: &mut FalconConfig) -> Vec<String> {
                 &mut linter.rules,
                 &format!("overrides[{index}].linter.rules"),
                 &mut warnings,
+                normalize_options,
             );
         }
         if let Some(cross_file) = &mut ov.cross_file {
@@ -412,13 +433,19 @@ pub fn canonicalize_config(config: &mut FalconConfig) -> Vec<String> {
                 &mut cross_file.rules,
                 &format!("overrides[{index}].cross-file.rules"),
                 &mut warnings,
+                normalize_options,
             );
         }
     }
     warnings
 }
 
-fn canonicalize_rules(rules: &mut Rules, path: &str, warnings: &mut Vec<String>) {
+fn canonicalize_rules(
+    rules: &mut Rules,
+    path: &str,
+    warnings: &mut Vec<String>,
+    normalize_options: bool,
+) {
     for (group, entries) in &mut rules.groups {
         let canonical = canonicalize_entries(
             std::mem::take(entries),
@@ -427,6 +454,9 @@ fn canonicalize_rules(rules: &mut Rules, path: &str, warnings: &mut Vec<String>)
             warnings,
         );
         entries.extend(canonical);
+        if !normalize_options {
+            continue;
+        }
         for (name, configuration) in entries {
             if let falcon_config::RuleConfiguration::WithOptions { options, .. } = configuration {
                 warnings.extend(crate::canonicalize_option_keys(
@@ -506,11 +536,7 @@ fn canonicalize_entries<T: serde::Serialize>(
                  run `falcon migrate` to update"
             ));
         }
-        let priority = (
-            rank(&value),
-            alias_index.is_none(),
-            std::cmp::Reverse(alias_index.unwrap_or(0)),
-        );
+        let priority = rule_priority(&name, rank(&value));
         if let Some(&index) = positions.get(canonical) {
             let discarded = if priority > priorities[index] {
                 &canonical_entries[index].1
@@ -544,6 +570,15 @@ fn canonicalize_entries<T: serde::Serialize>(
         }
     }
     canonical_entries
+}
+
+pub(crate) fn rule_priority(name: &str, severity: u8) -> (u8, bool, std::cmp::Reverse<usize>) {
+    let alias = RULE_ALIASES.iter().position(|(alias, _)| *alias == name);
+    (
+        severity,
+        alias.is_none(),
+        std::cmp::Reverse(alias.unwrap_or(0)),
+    )
 }
 
 /// Shared collision ordering: higher severity wins; `on` and `warn` tie.

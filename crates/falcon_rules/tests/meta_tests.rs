@@ -4,6 +4,79 @@ use std::collections::HashSet;
 
 use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
+#[test]
+fn file_rules_do_not_use_resolution_only_context() {
+    use falcon_rules::meta::RuleKind;
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lint");
+    let context_parameters = regex::Regex::new(
+        r"\b([a-zA-Z_][a-zA-Z_0-9]*)\s*:\s*&\s*(?:'[a-zA-Z_][a-zA-Z_0-9]*\s*)?(?:mut\s+)?(?:falcon_analyze::)?AnalyzeContext\b",
+    )
+    .unwrap();
+    for parameter in [
+        "pub ctx: &'a AnalyzeContext<'a>",
+        "mut ctx: &AnalyzeContext<'_>",
+        "ctx: &'a falcon_analyze::AnalyzeContext<'a>",
+    ] {
+        assert_eq!(&context_parameters.captures(parameter).unwrap()[1], "ctx");
+    }
+    for metadata in RULE_METADATA {
+        if !matches!(
+            metadata.kind,
+            RuleKind::File {
+                needs_resolution: false,
+                ..
+            }
+        ) {
+            continue;
+        }
+        let path = root
+            .join(metadata.group.as_str())
+            .join(format!("{}.rs", metadata.name.replace('-', "_")));
+        let source = std::fs::read_to_string(&path).unwrap();
+        let compact: String = source
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        let accesses = context_parameters
+            .captures_iter(&source)
+            .flat_map(|parameter| {
+                [
+                    "types",
+                    "identities",
+                    "signatures",
+                    "library",
+                    "globals",
+                    "flow_writes",
+                ]
+                .map(|method| format!("{}.{method}(", &parameter[1]))
+            })
+            .chain(
+                ["SemanticState::new(", "SemanticModel::new("]
+                    .into_iter()
+                    .map(str::to_owned),
+            );
+        for access in accesses {
+            assert!(
+                !compact.contains(&access),
+                "{} uses {access} but is not declared resolved",
+                metadata.name
+            );
+        }
+    }
+}
+
+#[test]
+fn rule_names_do_not_collide_with_internal_diagnostics() {
+    for metadata in RULE_METADATA {
+        assert!(
+            !falcon_diagnostics::RESERVED_DIAGNOSTIC_IDS.contains(&metadata.name),
+            "{} is reserved for internal diagnostics",
+            metadata.name
+        );
+    }
+}
+
 const RULE_COUNT_DOCUMENTS: &[&str] = &[
     "README.md",
     "docs/getting-started.md",

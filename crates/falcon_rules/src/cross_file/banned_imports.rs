@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use falcon_analyze::{CrossFileRule, PackageIdentity, ProjectFile};
 use falcon_config::FalconConfig;
-use falcon_diagnostics::{Diagnostic, Severity};
+use falcon_diagnostics::{CONFIG_DIAGNOSTIC_ID, Diagnostic, Severity};
 use falcon_syntax::cst::Span;
 use glob::MatchOptions;
 
@@ -82,7 +82,7 @@ impl CrossFileRule for BannedImports {
                 Ok(options) => &options.rules,
                 Err(error) => {
                     diagnostics.push(Diagnostic::new(
-                        "config",
+                        CONFIG_DIAGNOSTIC_ID,
                         Severity::Error,
                         error.to_string(),
                         file_path.as_ref(),

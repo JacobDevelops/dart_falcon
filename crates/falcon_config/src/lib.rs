@@ -467,8 +467,15 @@ pub struct LinterConfig {
     pub enabled: bool,
     /// Rule levels grouped by category, plus the `recommended` preset.
     pub rules: Rules,
-    /// Per-domain gating (e.g. `{"flutter": "recommended"}`).
+    /// Per-domain gating (e.g. `{"flutter": "recommended"}`). Null means absent.
+    #[serde(deserialize_with = "deserialize_domains")]
     pub domains: BTreeMap<String, DomainValue>,
+}
+
+fn deserialize_domains<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, DomainValue>, D::Error> {
+    Ok(Option::<BTreeMap<String, DomainValue>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 impl Default for LinterConfig {
@@ -785,7 +792,12 @@ impl FalconConfig {
     }
 
     /// Return the full configuration path of effective file-rule options.
-    pub fn rule_options_location_for(&self, path: &str, group: &str, rule_name: &str) -> String {
+    pub fn rule_options_location_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+    ) -> Vec<ConfigPathSegment> {
         self.options_location_for(path, group, rule_name, Section::Linter, "linter")
     }
 
@@ -795,7 +807,7 @@ impl FalconConfig {
         path: &str,
         group: &str,
         rule_name: &str,
-    ) -> String {
+    ) -> Vec<ConfigPathSegment> {
         self.options_location_for(path, group, rule_name, Section::CrossFile, "cross-file")
     }
 
@@ -806,10 +818,18 @@ impl FalconConfig {
         rule_name: &str,
         section: Section,
         key: &str,
-    ) -> String {
+    ) -> Vec<ConfigPathSegment> {
         let (_, index) = self.options_data_for(path, group, rule_name, section);
-        let prefix = index.map_or_else(String::new, |index| format!("overrides[{index}]."));
-        format!("{prefix}{key}.rules.{group}.{rule_name}.options")
+        let mut location = Vec::with_capacity(if index.is_some() { 7 } else { 5 });
+        if let Some(index) = index {
+            location.push(ConfigPathSegment::Key("overrides".to_owned()));
+            location.push(ConfigPathSegment::Index(index));
+        }
+        location.extend(
+            [key, "rules", group, rule_name, "options"]
+                .map(|key| ConfigPathSegment::Key(key.to_owned())),
+        );
+        location
     }
 
     fn options_data_for(
@@ -1026,9 +1046,48 @@ impl LinterConfig {
     }
 }
 
-/// Error type for configuration loading and parsing.
+/// One component of a configuration location, preserving literal object keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigPathSegment {
+    Key(String),
+    Index(usize),
+}
+
+/// Render a configuration location for diagnostics, never for navigation.
+pub fn format_config_path(path: &[ConfigPathSegment]) -> String {
+    let mut rendered = String::new();
+    for segment in path {
+        match segment {
+            ConfigPathSegment::Key(key) => {
+                if !rendered.is_empty() {
+                    rendered.push('.');
+                }
+                rendered.push_str(key);
+            }
+            ConfigPathSegment::Index(index) => {
+                use std::fmt::Write;
+                write!(rendered, "[{index}]").expect("writing to a String");
+            }
+        }
+    }
+    rendered
+}
+
+/// Error message and structured location for configuration loading and parsing.
 #[derive(Debug)]
-pub struct ConfigError(pub String);
+pub struct ConfigError(pub String, pub Vec<ConfigPathSegment>);
+
+impl ConfigError {
+    /// Construct an error at the configuration root.
+    pub fn new(message: String) -> Self {
+        Self(message, Vec::new())
+    }
+
+    /// Construct an error at its original configuration location.
+    pub fn at(message: String, path: Vec<ConfigPathSegment>) -> Self {
+        Self(message, path)
+    }
+}
 
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1038,73 +1097,26 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// Locate a deserialization failure within a JSON value, rooted at `path`.
-pub fn deserialize_error_path<T: DeserializeOwned>(value: &Value, path: &str) -> String {
-    let mut source = String::new();
-    let mut locations = Vec::new();
-    write_value_locations(value, path, &mut source, &mut locations);
-    let Err(error) = serde_json::from_str::<T>(&source) else {
+/// Locate a deserialization failure by tracking object keys and array indices.
+pub fn deserialize_error_path<T: DeserializeOwned>(
+    value: &Value,
+    path: &[ConfigPathSegment],
+) -> Vec<ConfigPathSegment> {
+    let Err(error) = serde_path_to_error::deserialize::<_, T>(value) else {
         return path.to_owned();
     };
-    let offset = error.column().saturating_sub(1);
-    // Missing-field errors consume the closing brace, not the last property's value.
-    let missing_field = error.to_string().starts_with("missing field ");
-    locations
-        .into_iter()
-        .rev()
-        .find(|(start, end, _)| {
-            *start <= offset
-                && if missing_field {
-                    offset < *end
-                } else {
-                    offset <= *end
-                }
-        })
-        .map_or_else(|| path.to_owned(), |(_, _, path)| path)
-}
-
-fn write_value_locations(
-    value: &Value,
-    path: &str,
-    source: &mut String,
-    locations: &mut Vec<(usize, usize, String)>,
-) {
-    let start = source.len();
-    let location = locations.len();
-    locations.push((start, start, path.to_owned()));
-    match value {
-        Value::Object(entries) => {
-            source.push('{');
-            for (index, (key, value)) in entries.iter().enumerate() {
-                if index > 0 {
-                    source.push(',');
-                }
-                let path = if path.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{path}.{key}")
-                };
-                let key_start = source.len();
-                source.push_str(&serde_json::to_string(key).expect("JSON key serializes"));
-                locations.push((key_start, source.len(), path.clone()));
-                source.push(':');
-                write_value_locations(value, &path, source, locations);
-            }
-            source.push('}');
+    let mut location = Vec::with_capacity(path.len() + error.path().iter().len());
+    location.extend_from_slice(path);
+    location.extend(error.path().iter().filter_map(|segment| match segment {
+        serde_path_to_error::Segment::Seq { index } => Some(ConfigPathSegment::Index(*index)),
+        serde_path_to_error::Segment::Map { key } => Some(ConfigPathSegment::Key(key.clone())),
+        serde_path_to_error::Segment::Enum { variant } => {
+            Some(ConfigPathSegment::Key(variant.clone()))
         }
-        Value::Array(entries) => {
-            source.push('[');
-            for (index, value) in entries.iter().enumerate() {
-                if index > 0 {
-                    source.push(',');
-                }
-                write_value_locations(value, &format!("{path}[{index}]"), source, locations);
-            }
-            source.push(']');
-        }
-        _ => source.push_str(&serde_json::to_string(value).expect("JSON value serializes")),
-    }
-    locations[location].1 = source.len();
+        // JSON object keys are always strings; there is no non-string key to navigate.
+        serde_path_to_error::Segment::Unknown => None,
+    }));
+    location
 }
 
 /// Canonical top-level keys of a falcon.json.
@@ -1171,39 +1183,53 @@ enum ConfigObject {
 
 fn validate_keys(
     value: &serde_json::Value,
-    path: &str,
+    path: &[ConfigPathSegment],
     kind: ConfigObject,
     warnings: &mut Vec<String>,
 ) -> Result<(), ConfigError> {
     if matches!(kind, ConfigObject::Rule) {
         let (level, level_path) = if let Some(object) = value.as_object() {
             let level = object.get("level").ok_or_else(|| {
-                ConfigError(format!(
-                    "invalid configuration `{path}`: missing field `level`"
-                ))
+                ConfigError::at(
+                    format!(
+                        "invalid configuration `{}`: missing field `level`",
+                        format_config_path(path)
+                    ),
+                    path.to_owned(),
+                )
             })?;
-            (level, format!("{path}.level"))
+            let mut level_path = path.to_owned();
+            level_path.push(ConfigPathSegment::Key("level".to_owned()));
+            (level, level_path)
         } else {
             (value, path.to_owned())
         };
         RulePlainConfiguration::deserialize(level).map_err(|error| {
-            ConfigError(format!("invalid configuration `{level_path}`: {error}"))
+            ConfigError::at(
+                format!(
+                    "invalid configuration `{}`: {error}",
+                    format_config_path(&level_path)
+                ),
+                level_path,
+            )
         })?;
     }
     if !matches!(kind, ConfigObject::Rule) && !value.is_object() {
-        return Err(ConfigError(format!(
-            "invalid configuration `{path}`: expected an object"
-        )));
+        return Err(ConfigError::at(
+            format!(
+                "invalid configuration `{}`: expected an object",
+                format_config_path(path)
+            ),
+            path.to_owned(),
+        ));
     }
     let Some(object) = value.as_object() else {
         return Ok(()); // Serde reports wrong value types.
     };
     for (key, value) in object {
-        let full_path = if path.is_empty() {
-            key.clone()
-        } else {
-            format!("{path}.{key}")
-        };
+        let mut full_path = Vec::with_capacity(path.len() + 1);
+        full_path.extend_from_slice(path);
+        full_path.push(ConfigPathSegment::Key(key.clone()));
         let canonical = if matches!(kind, ConfigObject::Root | ConfigObject::Override) {
             LEGACY_TOP_LEVEL_KEYS
                 .iter()
@@ -1218,8 +1244,9 @@ fn validate_keys(
         };
         if canonical != key {
             warnings.push(format!(
-                "falcon.json uses deprecated key `{full_path}` (`{key}`); \
-                 use `{canonical}`; run `falcon migrate` to update"
+                "falcon.json uses deprecated key `{}` (`{key}`); \
+                 use `{canonical}`; run `falcon migrate` to update",
+                format_config_path(&full_path)
             ));
         }
         use ConfigObject as Object;
@@ -1235,19 +1262,18 @@ fn validate_keys(
             (Object::Root, "overrides") => {
                 if let Some(entries) = value.as_array() {
                     for (index, entry) in entries.iter().enumerate() {
-                        validate_keys(
-                            entry,
-                            &format!("{full_path}[{index}]"),
-                            Object::Override,
-                            warnings,
-                        )?;
+                        let mut entry_path = full_path.clone();
+                        entry_path.push(ConfigPathSegment::Index(index));
+                        validate_keys(entry, &entry_path, Object::Override, warnings)?;
                     }
                 }
                 None
             }
+            (Object::Override, "linter" | "cross-file") if value.is_null() => None,
             (Object::Override, "linter" | "cross-file") => Some(Object::OverrideRules),
             (Object::Linter | Object::CrossFile, "rules") => Some(Object::Rules),
             (Object::OverrideRules, "rules") => Some(Object::OverrideRuleEntries),
+            (Object::Linter, "domains") if value.is_null() => None,
             (Object::Linter, "domains") => Some(Object::Domains),
             (Object::Rules | Object::OverrideRuleEntries, group)
                 if RULE_GROUPS.contains(&group) =>
@@ -1262,7 +1288,10 @@ fn validate_keys(
                 } else {
                     "unknown key"
                 };
-                return Err(ConfigError(format!("{description} `{full_path}`")));
+                return Err(ConfigError::at(
+                    format!("{description} `{}`", format_config_path(&full_path)),
+                    full_path,
+                ));
             }
         };
         if let Some(child) = child {
@@ -1283,9 +1312,9 @@ fn validate_keys(
 /// the legacy flat schema, and a zero `max-errors` value.
 pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
     let content = std::fs::read_to_string(path)
-        .map_err(|e| ConfigError(format!("failed to read config file: {}", e)))?;
+        .map_err(|e| ConfigError::new(format!("failed to read config file: {}", e)))?;
     let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
+        .map_err(|e| ConfigError::new(format!("failed to parse config JSON: {}", e)))?;
     deserialize_config_value(&value, path)
 }
 
@@ -1303,7 +1332,7 @@ pub fn deserialize_config_value(
             .iter()
             .any(|k| obj.contains_key(*k))
     {
-        return Err(ConfigError(
+        return Err(ConfigError::new(
             "falcon.json uses the legacy flat schema; migrate to the biome-style schema \
              (\"linter.rules\" grouped by category, \"files.includes\"). See docs/configuration.md"
                 .to_string(),
@@ -1311,25 +1340,39 @@ pub fn deserialize_config_value(
     }
 
     let mut warnings = Vec::new();
-    validate_keys(value, "", ConfigObject::Root, &mut warnings)?;
+    validate_keys(value, &[], ConfigObject::Root, &mut warnings)?;
 
     let mut config = FalconConfig::deserialize(value).map_err(|error| {
-        let path = deserialize_error_path::<FalconConfig>(value, "");
-        ConfigError(format!("invalid configuration `{path}`: {error}"))
+        let path = deserialize_error_path::<FalconConfig>(value, &[]);
+        ConfigError::at(
+            format!(
+                "invalid configuration `{}`: {error}",
+                format_config_path(&path)
+            ),
+            path,
+        )
     })?;
 
     if config.max_errors == Some(0) {
-        return Err(ConfigError(
+        return Err(ConfigError::at(
             "`max-errors` must be at least 1; use the CLI --max-errors 0 flag to hide output. \
              Omit it (or use null) for no limit."
                 .to_string(),
+            vec![ConfigPathSegment::Key(
+                if value.get("max-errors").is_some() {
+                    "max-errors"
+                } else {
+                    "max_errors"
+                }
+                .to_owned(),
+            )],
         ));
     }
 
     let cwd;
     let root = if is_home_config(path) {
         cwd = std::env::current_dir()
-            .map_err(|e| ConfigError(format!("failed to read current directory: {e}")))?;
+            .map_err(|e| ConfigError::new(format!("failed to read current directory: {e}")))?;
         cwd.as_path()
     } else {
         path.parent().unwrap_or(Path::new("."))
@@ -1539,7 +1582,7 @@ mod warning_tests {
                 "overrides[0].linter.rules.style.x.option",
             ),
         ] {
-            let error = validate_keys(&value, "", ConfigObject::Root, &mut Vec::new())
+            let error = validate_keys(&value, &[], ConfigObject::Root, &mut Vec::new())
                 .expect_err("unknown keys must fail");
             assert!(error.0.contains(path), "{error}: expected {path}");
         }
@@ -1555,7 +1598,7 @@ mod warning_tests {
             "overrides": [{ "cross_file": {} }]
         });
         let mut warnings = Vec::new();
-        validate_keys(&value, "", ConfigObject::Root, &mut warnings).unwrap();
+        validate_keys(&value, &[], ConfigObject::Root, &mut warnings).unwrap();
         assert_eq!(warnings.len(), 3);
         assert!(
             warnings
@@ -1648,6 +1691,7 @@ mod warning_tests {
                     super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
                         .unwrap_err();
                 let path = format!("{prefix}linter.rules.complexity.max-lines-for-file{suffix}");
+                assert_eq!(super::format_config_path(&error.1), path);
                 assert!(
                     error
                         .0
@@ -1655,6 +1699,168 @@ mod warning_tests {
                     "{error}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn null_optional_fields_are_absent() {
+        let value = json!({
+            "$schema": null,
+            "max-errors": null,
+            "linter": {"rules": {"recommended": null}, "domains": null},
+            "cross-file": {"rules": {"recommended": null}},
+            "overrides": [
+                {"linter": null, "cross-file": null},
+                {"project": null},
+                {"cross_file": null},
+                {"linter": {"enabled": null}, "cross-file": {"enabled": null}}
+            ]
+        });
+        let loaded =
+            super::deserialize_config_value(&value, std::path::Path::new("falcon.json")).unwrap();
+        assert!(loaded.config.schema.is_none());
+        assert!(loaded.config.max_errors.is_none());
+        assert!(loaded.config.linter.rules.recommended.is_none());
+        assert!(loaded.config.linter.domains.is_empty());
+        assert!(loaded.config.cross_file.rules.recommended.is_none());
+        for entry in &loaded.config.overrides[..3] {
+            assert!(entry.linter.is_none());
+            assert!(entry.cross_file.is_none());
+        }
+        let entry = &loaded.config.overrides[3];
+        assert!(entry.linter.as_ref().unwrap().enabled.is_none());
+        assert!(entry.cross_file.as_ref().unwrap().enabled.is_none());
+        assert_eq!(loaded.warnings.len(), 2);
+    }
+
+    #[test]
+    fn null_required_sections_still_fail_at_the_section() {
+        use super::ConfigPathSegment::Key;
+        for key in ["files", "linter", "cross-file", "overrides"] {
+            let value = json!({key: null});
+            let error =
+                super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+                    .unwrap_err();
+            assert_eq!(error.1, vec![Key(key.to_owned())]);
+        }
+    }
+
+    #[test]
+    fn structured_paths_preserve_backticks_dots_and_literal_indices() {
+        use super::ConfigPathSegment::{Index, Key};
+        let value = json!({"overrides": [
+            {},
+            {"linter": {"rules": {"style": {
+                "rule`.[2]": {"level": "warn", "unknown`.[4]": true}
+            }}}}
+        ]});
+        let error = super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+            .unwrap_err();
+        assert_eq!(
+            error.1,
+            vec![
+                Key("overrides".to_owned()),
+                Index(1),
+                Key("linter".to_owned()),
+                Key("rules".to_owned()),
+                Key("style".to_owned()),
+                Key("rule`.[2]".to_owned()),
+                Key("unknown`.[4]".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn deserialization_paths_preserve_literal_keys_and_nested_array_indices() {
+        use super::ConfigPathSegment::{Index, Key};
+        type Options = std::collections::BTreeMap<String, Vec<Vec<bool>>>;
+        let value = json!({"option`.[9]": [[true], [false, "invalid"]]});
+        let path = super::deserialize_error_path::<Options>(&value, &[Key("options".to_owned())]);
+        assert_eq!(
+            path,
+            vec![
+                Key("options".to_owned()),
+                Key("option`.[9]".to_owned()),
+                Index(1),
+                Index(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_fields_are_located_at_the_containing_object() {
+        #[derive(serde::Deserialize)]
+        struct Required {
+            #[serde(rename = "required")]
+            _required: bool,
+        }
+        type Options = std::collections::BTreeMap<String, Required>;
+        let value = json!({"option`.[9]": {}});
+        assert_eq!(
+            super::deserialize_error_path::<Options>(&value, &[]),
+            vec![super::ConfigPathSegment::Key("option`.[9]".to_owned())],
+        );
+    }
+
+    #[test]
+    fn container_type_errors_stay_at_the_field() {
+        use super::ConfigPathSegment::Key;
+        type Options = std::collections::BTreeMap<String, bool>;
+        for invalid in [json!([]), json!({}), json!([true])] {
+            let value = json!({"option`.[9]": invalid});
+            assert_eq!(
+                super::deserialize_error_path::<Options>(&value, &[]),
+                vec![Key("option`.[9]".to_owned())],
+            );
+        }
+    }
+
+    #[test]
+    fn custom_validation_errors_stay_at_the_last_field() {
+        #[derive(serde::Deserialize)]
+        struct Checked {
+            #[serde(rename = "limit", deserialize_with = "reject")]
+            _limit: u8,
+        }
+        fn reject<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
+            let _ = <u8 as serde::Deserialize>::deserialize(deserializer)?;
+            Err(serde::de::Error::custom("rejected after deserialization"))
+        }
+        type Options = std::collections::BTreeMap<String, Checked>;
+        let value = json!({"option`.[9]": {"limit": 1}});
+        assert_eq!(
+            super::deserialize_error_path::<Options>(&value, &[]),
+            vec![
+                super::ConfigPathSegment::Key("option`.[9]".to_owned()),
+                super::ConfigPathSegment::Key("limit".to_owned()),
+            ],
+        );
+    }
+
+    #[test]
+    fn scalar_errors_include_structured_array_paths() {
+        use super::ConfigPathSegment::{Index, Key};
+        let value = json!({"files": {"includes": ["lib/**", 4]}});
+        let error = super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+            .unwrap_err();
+        assert_eq!(
+            error.1,
+            vec![
+                Key("files".to_owned()),
+                Key("includes".to_owned()),
+                Index(1)
+            ],
+        );
+    }
+
+    #[test]
+    fn zero_max_errors_preserves_the_input_key_spelling() {
+        for key in ["max-errors", "max_errors"] {
+            let value = json!({key: 0});
+            let error =
+                super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+                    .unwrap_err();
+            assert_eq!(error.1, vec![super::ConfigPathSegment::Key(key.to_owned())],);
         }
     }
 }

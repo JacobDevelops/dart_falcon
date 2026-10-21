@@ -10,15 +10,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use falcon_config::{
-    KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, RuleOptions, RulePlainConfiguration,
-    deserialize_config_value,
+    ConfigPathSegment, KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, RulePlainConfiguration,
+    deserialize_config_value, format_config_path,
 };
 use falcon_rules::meta::{
     RULE_METADATA, RuleMeta, RuleSource, canonical_rule_name, canonicalize_rule_entries,
     canonicalize_rule_map, meta_for,
 };
 use falcon_rules::schema::SCHEMA_URL;
-use falcon_rules::{canonicalize_loaded_config, canonicalize_option_keys, validate_rule_options};
+use falcon_rules::{canonicalize_loaded_config, canonicalize_option_keys};
 use serde_json::{Map, Value, json};
 
 /// Upstream pyramid_lint ids whose rules were merged into a surviving
@@ -100,6 +100,7 @@ fn build_lookups() -> (RuleLookup, RuleLookup, RuleLookup) {
 struct Migration {
     linter_groups: BTreeMap<String, Vec<(String, Value)>>,
     cross_file_groups: BTreeMap<String, Vec<(String, Value)>>,
+    overrides: Vec<Value>,
     unrecognized: Vec<String>,
     migrated_count: usize,
     warnings: Vec<String>,
@@ -165,6 +166,44 @@ impl Migration {
             ));
             self.unrecognized.push(id);
             return;
+        };
+        let cfg = match cfg {
+            RuleConfig::Enabled(Some(mut options)) => {
+                if let Some(excludes) = options
+                    .as_object_mut()
+                    .and_then(|map| map.shift_remove("exclude"))
+                    && !excludes.as_array().is_some_and(Vec::is_empty)
+                {
+                    let has_positive = |pattern: &Value| {
+                        pattern.as_str().is_some_and(|text| !text.starts_with('!'))
+                    };
+                    if !has_positive(&excludes)
+                        && !excludes
+                            .as_array()
+                            .is_some_and(|patterns| patterns.iter().any(has_positive))
+                    {
+                        self.warnings.push(format!(
+                            "cannot migrate `{source}.rules.{id}.exclude` without a positive pattern; discarded value {excludes}; keeping the rule enabled"
+                        ));
+                    } else {
+                        let section = if meta.is_cross_file() {
+                            "cross-file"
+                        } else {
+                            "linter"
+                        };
+                        self.overrides.push(json!({
+                            "includes": excludes,
+                            section: { "rules": { meta.group.as_str(): { meta.name: "off" } } }
+                        }));
+                    }
+                }
+                if options.as_object().is_some_and(Map::is_empty) {
+                    RuleConfig::Enabled(None)
+                } else {
+                    RuleConfig::Enabled(Some(options))
+                }
+            }
+            cfg => cfg,
         };
         let target = if meta.is_cross_file() {
             &mut self.cross_file_groups
@@ -271,6 +310,12 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
             ),
         );
     }
+    if !migration.overrides.is_empty() {
+        root.insert(
+            "overrides".into(),
+            Value::Array(std::mem::take(&mut migration.overrides)),
+        );
+    }
 
     let json = serialize_config(Value::Object(root), &mut migration.warnings)?;
 
@@ -296,6 +341,7 @@ fn looks_like_falcon_json(content: &str) -> bool {
                 .iter()
                 .copied()
                 .chain(LEGACY_TOP_LEVEL_KEYS.iter().map(|(legacy, _)| *legacy))
+                .chain(["rules", "exclude_patterns", "severity_override"])
                 .filter(|key| !matches!(*key, "max-errors" | "max_errors"))
                 .any(|key| obj.contains_key(key))
         })
@@ -319,26 +365,17 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     let mut root: Value =
         serde_json::from_str(json).map_err(|e| format!("failed to parse falcon.json: {e}"))?;
     let mut report = Migration::default();
-    if let Some(object) = root.as_object_mut() {
-        for key in ["rules", "exclude_patterns", "severity_override"] {
-            if let Some(value) = object.shift_remove(key) {
-                report.warnings.push(format!(
-                    "unsupported legacy flat configuration `{key}`; discarded value {value}"
-                ));
-            }
-        }
-    }
-
     for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
         rename_key(&mut root, legacy, canonical, "", &mut report.warnings);
     }
+    migrate_flat_config(&mut root, &mut report)?;
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
         for (index, ov) in overrides.iter_mut().enumerate() {
             rename_cross_file_section(ov, &format!("overrides[{index}]"), &mut report.warnings);
         }
     }
 
-    relocate_rules(&mut root, "", &mut report);
+    relocate_rules(&mut root, "", &mut report)?;
     for section in ["linter", "cross-file"] {
         if let Some(s) = root.get_mut(section) {
             canonicalize_section_rules(s, section, &mut report);
@@ -346,7 +383,7 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
         for (index, ov) in overrides.iter_mut().enumerate() {
-            relocate_rules(ov, &format!("overrides[{index}]"), &mut report);
+            relocate_rules(ov, &format!("overrides[{index}]"), &mut report)?;
             for section in ["linter", "cross-file"] {
                 if let Some(s) = ov.get_mut(section) {
                     canonicalize_section_rules(
@@ -369,10 +406,193 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     })
 }
 
+fn migrate_flat_config(root: &mut Value, report: &mut Migration) -> Result<(), String> {
+    for key in ["rules", "severity_override"] {
+        let Some(entries) = root.get_mut(key).map(std::mem::take) else {
+            continue;
+        };
+        let Value::Object(mut entries) = entries else {
+            return Err(format!(
+                "cannot migrate legacy `{key}`: expected a rule object"
+            ));
+        };
+        if key == "severity_override" {
+            for (name, setting) in &entries {
+                let level = setting.as_str().ok_or_else(|| {
+                    format!("cannot migrate legacy `{key}.{name}`: expected a severity string")
+                })?;
+                falcon_config::level_from_str::<serde_json::Error>(level)
+                    .map_err(|error| format!("cannot migrate legacy `{key}.{name}`: {error}"))?;
+            }
+            let (canonical, warnings) = canonicalize_rule_entries(entries, key);
+            entries = canonical;
+            report.warnings.extend(warnings);
+        }
+        for (name, setting) in &entries {
+            let meta = meta_for(name)
+                .ok_or_else(|| format!("cannot migrate legacy `{key}.{name}`: no rule mapping"))?;
+            let config = if key == "severity_override" {
+                setting.clone()
+            } else {
+                let object = setting.as_object().ok_or_else(|| {
+                    format!("cannot migrate legacy `{key}.{name}`: expected an object")
+                })?;
+                if let Some(unknown) = object
+                    .keys()
+                    .find(|key| !matches!(key.as_str(), "enabled" | "options"))
+                {
+                    return Err(format!(
+                        "cannot migrate legacy `{key}.{name}.{unknown}`: no mapping"
+                    ));
+                }
+                let enabled = match object.get("enabled") {
+                    None | Some(Value::Bool(true)) => true,
+                    Some(Value::Bool(false)) => false,
+                    _ => {
+                        return Err(format!(
+                            "cannot migrate legacy `{key}.{name}.enabled`: expected a boolean"
+                        ));
+                    }
+                };
+                let level = if enabled { "warn" } else { "off" };
+                if let Some(options) = object.get("options") {
+                    json!({"level":level,"options":options})
+                } else {
+                    json!(level)
+                }
+            };
+            let section = if meta.is_cross_file() {
+                "cross-file"
+            } else {
+                "linter"
+            };
+            let mut target = &mut *root;
+            for part in [section, "rules", meta.group.as_str()] {
+                target = target
+                    .as_object_mut()
+                    .ok_or_else(|| {
+                        format!("cannot migrate legacy `{key}` into a non-object section")
+                    })?
+                    .entry(part)
+                    .or_insert_with(|| json!({}));
+            }
+            let entries = target
+                .as_object_mut()
+                .ok_or_else(|| format!("cannot migrate legacy `{key}` into a non-object group"))?;
+            let group_path = format!("{section}.rules.{}", meta.group.as_str());
+            if key == "severity_override" {
+                let (canonical, warnings) =
+                    canonicalize_rule_entries(std::mem::take(entries), &group_path);
+                *entries = canonical;
+                report.warnings.extend(warnings);
+                let existing = entries.get_mut(meta.name);
+                let disabled = existing.as_ref().is_some_and(|existing| {
+                    existing.as_str() == Some("off")
+                        || existing.get("level").and_then(Value::as_str) == Some("off")
+                });
+                if disabled {
+                    report.warnings.push(format!(
+                        "ignored legacy `{key}.{name}`: discarded value {config}; keeping the rule disabled"
+                    ));
+                } else {
+                    match existing {
+                        Some(Value::Object(existing)) => {
+                            existing.insert("level".into(), config);
+                        }
+                        Some(existing) => *existing = config,
+                        None => {
+                            entries.insert(meta.name.into(), config);
+                        }
+                    }
+                }
+            } else {
+                let (merged, warnings) = canonicalize_rule_entries(
+                    std::mem::take(entries)
+                        .into_iter()
+                        .chain(std::iter::once((name.clone(), config))),
+                    &group_path,
+                );
+                *entries = merged;
+                report.warnings.extend(warnings);
+            }
+            report.migrated_count += 1;
+        }
+        root.as_object_mut()
+            .expect("legacy key in object")
+            .shift_remove(key);
+    }
+    if let Some(excludes) = root.get_mut("exclude_patterns").map(std::mem::take) {
+        let excludes = excludes
+            .as_array()
+            .ok_or("cannot migrate legacy `exclude_patterns`: expected an array")?;
+        let patterns = excludes
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|pattern| {
+                        !pattern.starts_with('!')
+                            && falcon_config::PathFilter::from(vec![(*pattern).to_owned()])
+                                .warnings()
+                                .is_empty()
+                    })
+                    .map(|pattern| Value::String(format!("!{pattern}")))
+                    .ok_or_else(|| {
+                        format!("cannot migrate legacy `exclude_patterns`: invalid pattern {value}")
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let files = root
+            .as_object_mut()
+            .expect("legacy key in object")
+            .entry("files")
+            .or_insert_with(|| json!({}));
+        let files = files
+            .as_object_mut()
+            .ok_or("cannot migrate legacy `exclude_patterns` into non-object `files`")?;
+        let includes = files.entry("includes").or_insert_with(|| json!(["**"]));
+        if includes.is_string() {
+            *includes = json!([std::mem::take(includes)]);
+        }
+        includes
+            .as_array_mut()
+            .ok_or("cannot migrate legacy `exclude_patterns` into invalid `files.includes`")?
+            .extend(patterns);
+        root.as_object_mut()
+            .expect("legacy key in object")
+            .shift_remove("exclude_patterns");
+    }
+    Ok(())
+}
+
+fn is_section_path(path: &[ConfigPathSegment]) -> bool {
+    use ConfigPathSegment::{Index, Key};
+    let path = match path {
+        [Key(key), Index(_), rest @ ..] if key == "overrides" => rest,
+        path => path,
+    };
+    match path {
+        [] => true,
+        [Key(key)] => matches!(
+            key.as_str(),
+            "files" | "linter" | "cross-file" | "overrides"
+        ),
+        [Key(section), Key(key)] if section == "linter" || section == "cross-file" => {
+            key == "rules" || (section == "linter" && key == "domains")
+        }
+        [Key(section), Key(rules), Key(group)]
+            if section == "linter" || section == "cross-file" =>
+        {
+            rules == "rules" && falcon_config::RULE_GROUPS.contains(&group.as_str())
+        }
+        _ => false,
+    }
+}
+
 /// Repair invalid entries using the canonical loader before serializing.
 fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<String, String> {
-    repair_includes(&mut value, warnings)?;
     let mut removals = Vec::new();
+    repair_includes(&mut value, warnings, &mut removals)?;
     loop {
         let loaded = deserialize_config_value(&value, Path::new("falcon.json"))
             .and_then(canonicalize_loaded_config);
@@ -386,39 +606,84 @@ fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<Stri
                 break;
             }
             Err(error) => {
-                let path = error.0.split('`').nth(1).unwrap_or("");
-                let original_path = original_option_path(path, &removals);
-                let suffix = if path.is_empty() || path == "." {
-                    String::new()
-                } else {
-                    format!(".{path}")
-                };
-                let (discarded_path, discarded, array_entry) =
-                    discard_option(&mut value, &suffix, "")
-                        .unwrap_or_else(|| (String::new(), std::mem::take(&mut value), false));
-                let original_discarded_path = original_option_path(&discarded_path, &removals);
-                warnings.push(format!(
-                    "{}; discarded value {discarded} at `{}`",
-                    error.0.replace(path, &original_path),
-                    if original_discarded_path.is_empty() {
-                        "$"
-                    } else {
-                        &original_discarded_path
-                    }
-                ));
-                if array_entry {
-                    let (prefix, index) =
-                        discarded_path.rsplit_once('[').expect("array entry path");
-                    removals.push((
-                        prefix.to_owned(),
-                        index
-                            .trim_end_matches(']')
-                            .parse::<usize>()
-                            .expect("array entry index"),
+                let path = &error.1;
+                let original = original_path(path, &removals);
+                let original_display = format_config_path(&original);
+                let diagnostic = error
+                    .0
+                    .replace(&format_config_path(path), &original_display);
+                if matches!(path.first(), Some(ConfigPathSegment::Key(key)) if key == "files") {
+                    return Err(format!(
+                        "cannot repair `{original_display}`: {error}; refusing to widen the analyzed file set"
                     ));
                 }
-                if value.is_null() {
-                    value = Value::Object(Map::new());
+                let override_scope = match path.as_slice() {
+                    [
+                        ConfigPathSegment::Key(key),
+                        ConfigPathSegment::Index(_),
+                        rest @ ..,
+                    ] if key == "overrides" => {
+                        rest.is_empty()
+                            || !matches!(rest.first(), Some(ConfigPathSegment::Key(key)) if key == "linter" || key == "cross-file")
+                    }
+                    _ => false,
+                };
+                let target = if override_scope {
+                    &path[..2]
+                } else {
+                    path.as_slice()
+                };
+                if !override_scope && is_section_path(target) {
+                    return Err(format!(
+                        "cannot safely repair `{original_display}`: {error}"
+                    ));
+                }
+                let discarded = discard_at(&mut value, target).ok_or_else(|| {
+                    format!("cannot resolve configuration path `{original_display}`: {error}")
+                })?;
+                let discarded_display = format_config_path(&original_path(target, &removals));
+                warnings.push(if override_scope {
+                    format!("discarded override `{discarded_display}`: {diagnostic}; discarded value {discarded}; refusing to widen its scope")
+                } else {
+                    format!("invalid configuration at `{original_display}`: {diagnostic}; discarded value {discarded} at `{discarded_display}`")
+                });
+                if matches!(target.last(), Some(ConfigPathSegment::Index(_))) {
+                    removals.push(target.to_vec());
+                }
+                let rule_path = match target {
+                    [
+                        ConfigPathSegment::Key(key),
+                        ConfigPathSegment::Index(_),
+                        rest @ ..,
+                    ] if key == "overrides" => rest,
+                    path => path,
+                };
+                if let [
+                    ConfigPathSegment::Key(section),
+                    ConfigPathSegment::Key(rules),
+                    ConfigPathSegment::Key(group),
+                    ConfigPathSegment::Key(rule),
+                    ConfigPathSegment::Key(options),
+                    ConfigPathSegment::Key(_),
+                ] = rule_path
+                    && matches!(section.as_str(), "linter" | "cross-file")
+                    && rules == "rules"
+                    && falcon_config::RULE_GROUPS.contains(&group.as_str())
+                    && options == "options"
+                    && meta_for(rule).is_some_and(|meta| !meta.has_options())
+                    && let Some(rule) = target[..target.len() - 2]
+                        .iter()
+                        .try_fold(&mut value, |value, segment| match segment {
+                            ConfigPathSegment::Key(key) => value.get_mut(key),
+                            ConfigPathSegment::Index(index) => value.get_mut(*index),
+                        })
+                        .and_then(Value::as_object_mut)
+                    && rule
+                        .get("options")
+                        .and_then(Value::as_object)
+                        .is_some_and(Map::is_empty)
+                {
+                    rule.shift_remove("options");
                 }
             }
         }
@@ -429,7 +694,11 @@ fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<Stri
     Ok(json)
 }
 
-fn repair_includes(value: &mut Value, warnings: &mut Vec<String>) -> Result<(), String> {
+fn repair_includes(
+    value: &mut Value,
+    warnings: &mut Vec<String>,
+    removals: &mut Vec<Vec<ConfigPathSegment>>,
+) -> Result<(), String> {
     fn repair(includes: &mut Value, path: &str, warnings: &mut Vec<String>) -> bool {
         if includes.is_string() {
             *includes = Value::Array(vec![std::mem::take(includes)]);
@@ -438,7 +707,9 @@ fn repair_includes(value: &mut Value, warnings: &mut Vec<String>) -> Result<(), 
         let Some(patterns) = includes.as_array_mut() else {
             return false;
         };
-        let was_empty = patterns.is_empty();
+        let had_positive = patterns
+            .iter()
+            .any(|pattern| !pattern.as_str().is_some_and(|text| text.starts_with('!')));
         let mut index = 0;
         patterns.retain(|pattern| {
             let valid = pattern.as_str().is_some_and(|pattern| {
@@ -454,7 +725,10 @@ fn repair_includes(value: &mut Value, warnings: &mut Vec<String>) -> Result<(), 
             index += 1;
             valid
         });
-        was_empty || !patterns.is_empty()
+        !had_positive
+            || patterns
+                .iter()
+                .any(|pattern| pattern.as_str().is_some_and(|text| !text.starts_with('!')))
     }
 
     if let Some(includes) = value
@@ -462,29 +736,32 @@ fn repair_includes(value: &mut Value, warnings: &mut Vec<String>) -> Result<(), 
         .and_then(|files| files.get_mut("includes"))
         && !repair(includes, "files.includes", warnings)
     {
-        return Err("cannot repair `files.includes`: no valid include remains; refusing to widen the analyzed file set".into());
+        return Err("cannot repair `files.includes`: no valid positive include remains; refusing to widen the analyzed file set".into());
     }
     if let Some(overrides) = value.get_mut("overrides").and_then(Value::as_array_mut) {
         let mut index = 0;
-        overrides.retain_mut(|entry| {
-            let path = format!("overrides[{index}]");
-            index += 1;
-            let Some(includes) = entry.get_mut("includes") else {
-                return true;
-            };
-            if repair(includes, &format!("{path}.includes"), warnings) {
-                return true;
+        while index < overrides.len() {
+            let path = vec![
+                ConfigPathSegment::Key("overrides".into()),
+                ConfigPathSegment::Index(index),
+            ];
+            let display = format_config_path(&original_path(&path, removals));
+            let valid = overrides[index]
+                .get_mut("includes")
+                .is_none_or(|includes| repair(includes, &format!("{display}.includes"), warnings));
+            if valid {
+                index += 1;
+            } else {
+                warnings.push(format!("discarded override `{display}`: includes has no usable positive patterns; refusing to widen its scope"));
+                overrides.remove(index);
+                removals.push(path);
             }
-            warnings.push(format!(
-                "discarded override `{path}`: includes has no usable patterns; refusing to widen its scope"
-            ));
-            false
-        });
+        }
     }
     Ok(())
 }
 
-fn relocate_rules(value: &mut Value, prefix: &str, report: &mut Migration) {
+fn relocate_rules(value: &mut Value, prefix: &str, report: &mut Migration) -> Result<(), String> {
     let mut moves = BTreeMap::<_, Vec<_>>::new();
     for section in ["linter", "cross-file"] {
         let Some(groups) = value
@@ -540,11 +817,19 @@ fn relocate_rules(value: &mut Value, prefix: &str, report: &mut Migration) {
         let mut target = &mut *value;
         let mut target_path = prefix.to_owned();
         for key in [section, "rules", group] {
+            if key == section
+                && prefix.starts_with("overrides[")
+                && target.get(key).is_some_and(Value::is_null)
+            {
+                target
+                    .as_object_mut()
+                    .expect("override object")
+                    .insert(key.into(), json!({}));
+            }
             if !target.is_object() {
-                report.warnings.push(format!(
-                    "invalid configuration at `{target_path}`; discarded value {target}"
+                return Err(format!(
+                    "cannot migrate rules into invalid section `{target_path}`"
                 ));
-                *target = json!({});
             }
             target = target
                 .as_object_mut()
@@ -557,10 +842,7 @@ fn relocate_rules(value: &mut Value, prefix: &str, report: &mut Migration) {
             target_path.push_str(key);
         }
         if !target.is_object() {
-            report.warnings.push(format!(
-                "invalid configuration at `{path}`; discarded value {target}"
-            ));
-            *target = json!({});
+            return Err(format!("cannot migrate rules into invalid group `{path}`"));
         }
         let entries = target.as_object_mut().expect("object rule group");
         let (merged, warnings) =
@@ -568,6 +850,7 @@ fn relocate_rules(value: &mut Value, prefix: &str, report: &mut Migration) {
         *entries = merged;
         report.warnings.extend(warnings);
     }
+    Ok(())
 }
 
 fn rename_cross_file_section(value: &mut Value, path: &str, warnings: &mut Vec<String>) {
@@ -665,117 +948,44 @@ fn canonicalize_group_options(group: &mut Map<String, Value>, path: &str, report
                     .cloned(),
             );
             report.warnings.extend(warnings);
-            // Validation consumes a temporary wrapper, not a copy of the payload.
-            let mut data: RuleOptions = serde_json::from_value(std::mem::take(options))
-                .expect("any JSON value deserializes as a rule options payload");
-            let mut removals = Vec::new();
-            let mut optionless = false;
-            while let Err(error) = validate_rule_options(name, &data, &path) {
-                optionless |= error.0.contains("this rule has no options");
-                let invalid_path = error.0.split('`').nth(1).unwrap_or(&path);
-                let suffix = invalid_path.strip_prefix(&path).unwrap_or("");
-                let original_path = original_option_path(invalid_path, &removals);
-                let (discarded_path, discarded, array_entry) =
-                    discard_option(data.value_mut(), suffix, &path)
-                        .unwrap_or_else(|| (path.clone(), std::mem::take(data.value_mut()), false));
-                let original_discarded_path = original_option_path(&discarded_path, &removals);
-                report.warnings.push(format!(
-                    "{}; discarded value {discarded} at `{original_discarded_path}`",
-                    error.0.replace(invalid_path, &original_path)
-                ));
-                if array_entry {
-                    let (prefix, index) =
-                        discarded_path.rsplit_once('[').expect("array entry path");
-                    removals.push((
-                        prefix.to_owned(),
-                        index
-                            .trim_end_matches(']')
-                            .parse::<usize>()
-                            .expect("array entry index"),
-                    ));
-                }
-                if data.value().is_null() {
-                    break;
-                }
-            }
-            *options = std::mem::take(data.value_mut());
-            if options.is_null() || optionless {
-                config
-                    .as_object_mut()
-                    .expect("options belongs to an object")
-                    .shift_remove("options");
-            }
         }
     }
 }
 
-fn original_option_path(path: &str, removals: &[(String, usize)]) -> String {
-    let mut path = path.to_owned();
-    for (prefix, removed) in removals.iter().rev() {
-        let Some(suffix) = path
-            .strip_prefix(prefix)
-            .and_then(|suffix| suffix.strip_prefix('['))
-        else {
+fn original_path(
+    path: &[ConfigPathSegment],
+    removals: &[Vec<ConfigPathSegment>],
+) -> Vec<ConfigPathSegment> {
+    let mut path = path.to_vec();
+    for removed in removals.iter().rev() {
+        let Some((ConfigPathSegment::Index(removed_index), prefix)) = removed.split_last() else {
             continue;
         };
-        let Some((index, rest)) = suffix.split_once(']') else {
-            continue;
-        };
-        let Ok(index) = index.parse::<usize>() else {
-            continue;
-        };
-        if index >= *removed {
-            path = format!("{prefix}[{}]{rest}", index + 1);
+        if path.starts_with(prefix)
+            && let Some(ConfigPathSegment::Index(index)) = path.get_mut(prefix.len())
+            && *index >= *removed_index
+        {
+            *index += 1;
         }
     }
     path
 }
 
-fn discard_option(value: &mut Value, suffix: &str, path: &str) -> Option<(String, Value, bool)> {
-    if suffix.is_empty() {
-        return Some((path.to_owned(), std::mem::take(value), false));
+fn discard_at(value: &mut Value, path: &[ConfigPathSegment]) -> Option<Value> {
+    let (last, parents) = path.split_last()?;
+    let mut parent = value;
+    for segment in parents {
+        parent = match segment {
+            ConfigPathSegment::Key(key) => parent.get_mut(key)?,
+            ConfigPathSegment::Index(index) => parent.get_mut(*index)?,
+        };
     }
-    match value {
-        Value::Object(entries) => {
-            let suffix = suffix.strip_prefix('.')?;
-            let key = entries
-                .keys()
-                .filter(|key| {
-                    suffix == key.as_str()
-                        || suffix
-                            .strip_prefix(key.as_str())
-                            .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
-                })
-                .max_by_key(|key| key.len())?
-                .clone();
-            let rest = suffix.strip_prefix(&key)?;
-            let path = if path.is_empty() {
-                key.clone()
-            } else {
-                format!("{path}.{key}")
-            };
-            if rest.is_empty() {
-                Some((path, entries.shift_remove(&key)?, false))
-            } else {
-                discard_option(entries.get_mut(&key)?, rest, &path)
-                    .or_else(|| Some((path, entries.shift_remove(&key)?, false)))
-            }
+    match last {
+        ConfigPathSegment::Key(key) => parent.as_object_mut()?.shift_remove(key),
+        ConfigPathSegment::Index(index) => {
+            let array = parent.as_array_mut()?;
+            (*index < array.len()).then(|| array.remove(*index))
         }
-        Value::Array(entries) => {
-            let (index, rest) = suffix.strip_prefix('[')?.split_once(']')?;
-            let index = index.parse::<usize>().ok()?;
-            if index >= entries.len() {
-                return None;
-            }
-            let path = format!("{path}[{index}]");
-            if rest.is_empty() {
-                Some((path, entries.remove(index), true))
-            } else {
-                discard_option(&mut entries[index], rest, &path)
-                    .or_else(|| Some((path, entries.remove(index), true)))
-            }
-        }
-        _ => None,
     }
 }
 

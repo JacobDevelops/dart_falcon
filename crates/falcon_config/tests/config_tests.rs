@@ -460,7 +460,7 @@ fn test_find_config_none_when_no_local_or_git_config() {
 
 #[test]
 fn test_config_error_display() {
-    let err = ConfigError("test error message".to_string());
+    let err = ConfigError::new("test error message".to_string());
     assert!(err.to_string().contains("test error message"));
 }
 

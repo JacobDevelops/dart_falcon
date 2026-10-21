@@ -151,23 +151,26 @@ fn override_schema_rejects_presets_but_base_sections_allow_them() {
 }
 
 #[test]
-fn typed_options_reject_invalid_values_with_canonical_full_paths() {
+fn typed_options_reject_invalid_values_with_original_full_paths() {
+    use falcon_config::ConfigPathSegment::{Index, Key};
     let directory = directory();
     let path = directory.join("falcon.json");
-    for (section, group, rule, options, field) in [
+    for (section, group, rule, options, field, segments) in [
         (
             "linter",
             "complexity",
             "max-parameters-for-function",
             json!({ "unknown_key": 1 }),
             "unknown_key",
+            vec![Key("unknown_key".into())],
         ),
         (
             "linter",
             "complexity",
             "max-parameters-for-function",
             json!({ "max_parameters": "2" }),
-            "max-parameters",
+            "max_parameters",
+            vec![Key("max_parameters".into())],
         ),
         (
             "linter",
@@ -175,20 +178,23 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             "max-parameters-for-function",
             json!({ "max-parameters": -1 }),
             "max-parameters",
+            vec![Key("max-parameters".into())],
         ),
         (
             "linter",
             "style",
             "prefer-correct-handler-name",
             json!({ "name_pattern": "[" }),
-            "name-pattern",
+            "name_pattern",
+            vec![Key("name_pattern".into())],
         ),
         (
             "linter",
             "style",
             "use-design-system-item",
             json!({ "items": [{ "class_name": 42 }] }),
-            "items[0].class-name",
+            "items[0].class_name",
+            vec![Key("items".into()), Index(0), Key("class_name".into())],
         ),
         (
             "linter",
@@ -196,6 +202,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             "use-design-system-item",
             json!({ "items": [{ "class-name": "Container", "unknown_key": true }] }),
             "items[0].unknown_key",
+            vec![Key("items".into()), Index(0), Key("unknown_key".into())],
         ),
         (
             "linter",
@@ -203,6 +210,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             "class-members-ordering",
             json!({ "order": ["not-a-member-category"] }),
             "order[0]",
+            vec![Key("order".into()), Index(0)],
         ),
         (
             "cross-file",
@@ -210,6 +218,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             "banned-imports",
             json!({ "rules": "not-a-list" }),
             "rules",
+            vec![Key("rules".into())],
         ),
         (
             "cross-file",
@@ -220,6 +229,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
                 "message": "No Flutter", "unknown_key": true
             }] }),
             "rules[0].unknown_key",
+            vec![Key("rules".into()), Index(0), Key("unknown_key".into())],
         ),
         (
             "cross-file",
@@ -229,6 +239,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
                 "files": [], "deny": ["package:flutter/**"], "message": "No Flutter"
             }] }),
             "rules[0].files",
+            vec![Key("rules".into()), Index(0), Key("files".into())],
         ),
     ] {
         for in_override in [false, true] {
@@ -245,6 +256,14 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             let error = load_config(&path).unwrap_err();
             let expected = format!("{prefix}{section}.rules.{group}.{rule}.options.{field}");
             assert!(error.0.contains(&expected), "expected {expected}: {error}");
+            let mut expected_segments = Vec::with_capacity(7 + segments.len());
+            if in_override {
+                expected_segments.extend([Key("overrides".into()), Index(0)]);
+            }
+            expected_segments
+                .extend([section, "rules", group, rule, "options"].map(|key| Key(key.into())));
+            expected_segments.extend_from_slice(&segments);
+            assert_eq!(error.1, expected_segments, "{error}");
         }
     }
     fs::remove_dir_all(directory).unwrap();

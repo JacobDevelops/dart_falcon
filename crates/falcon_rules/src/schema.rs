@@ -78,7 +78,7 @@ fn section_rules(cross_file: bool, preset_allowed: bool) -> Value {
         props.insert(
             "recommended".into(),
             json!({
-                "type": "boolean",
+                "type": ["boolean", "null"],
                 "default": true,
                 "description": "Enable the recommended preset for this section. \
                     When on, every rule in the preset reports at its default severity \
@@ -135,7 +135,7 @@ pub fn config_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "$schema": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "URL of the falcon.json JSON Schema, enabling rule \
                     autocomplete and level validation in editors."
             },
@@ -163,7 +163,7 @@ pub fn config_schema() -> Value {
                             Set to false to disable all file rules. Defaults to true."
                     },
                     "domains": {
-                        "type": "object",
+                        "type": ["object", "null"],
                         "additionalProperties": false,
                         "description": "Per-domain gating for domain-scoped rules \
                             (for example Flutter rules).",
@@ -202,8 +202,18 @@ pub fn config_schema() -> Value {
                              selecting the files this override applies to. Omitted \
                              patterns apply to every file."
                         ),
-                        "linter": { "$ref": "#/definitions/overrideLinter" },
-                        "cross-file": { "$ref": "#/definitions/overrideCrossFile" }
+                        "linter": {
+                            "anyOf": [
+                                {"$ref": "#/definitions/overrideLinter"},
+                                {"type": "null"}
+                            ]
+                        },
+                        "cross-file": {
+                            "anyOf": [
+                                {"$ref": "#/definitions/overrideCrossFile"},
+                                {"type": "null"}
+                            ]
+                        }
                     }
                 }
             },
@@ -229,7 +239,7 @@ pub fn config_schema() -> Value {
                 "description": "Linter settings applied by an override to its matched files.",
                 "properties": {
                     "enabled": {
-                        "type": "boolean",
+                        "type": ["boolean", "null"],
                         "description": "Master switch for the single-file linter within \
                             this override."
                     },
@@ -242,7 +252,7 @@ pub fn config_schema() -> Value {
                 "description": "Cross-file settings applied by an override to its matched files.",
                 "properties": {
                     "enabled": {
-                        "type": "boolean",
+                        "type": ["boolean", "null"],
                         "description": "Master switch for cross-file analysis within this \
                             override."
                     },
@@ -272,4 +282,37 @@ pub fn config_schema_string() -> String {
     let mut s = serde_json::to_string_pretty(&config_schema()).expect("schema serializes");
     s.push('\n');
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_configuration_fields_accept_null() {
+        let schema = config_schema();
+        for path in [
+            "/properties/$schema/type",
+            "/properties/linter/properties/domains/type",
+            "/properties/linter/properties/rules/properties/recommended/type",
+            "/properties/cross-file/properties/rules/properties/recommended/type",
+            "/definitions/overrideLinter/properties/enabled/type",
+            "/definitions/overrideCrossFile/properties/enabled/type",
+            "/properties/max-errors/type",
+        ] {
+            assert!(
+                schema
+                    .pointer(path)
+                    .and_then(Value::as_array)
+                    .is_some_and(|types| types.contains(&json!("null"))),
+                "{path}"
+            );
+        }
+        for section in ["linter", "cross-file"] {
+            assert_eq!(
+                schema["properties"]["overrides"]["items"]["properties"][section]["anyOf"][1],
+                json!({"type": "null"})
+            );
+        }
+    }
 }

@@ -25,11 +25,9 @@ pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> std::io::Resul
     })
 }
 
-pub const RULES_THREAD_ERROR: &str = "rules-thread-error";
-
 pub fn rules_thread_diagnostic(path: &std::path::Path, error: &std::io::Error) -> Diagnostic {
     Diagnostic::new(
-        RULES_THREAD_ERROR,
+        falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID,
         falcon_diagnostics::Severity::Error,
         format!("could not start rules thread: {error}"),
         path.to_string_lossy().into_owned(),
@@ -43,7 +41,10 @@ fn rules_thread_failure_has_a_distinct_error_marker() {
         std::path::Path::new("main.dart"),
         &std::io::Error::other("thread limit"),
     );
-    assert_eq!(diagnostic.rule, RULES_THREAD_ERROR);
+    assert_eq!(
+        diagnostic.rule,
+        falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+    );
     assert_eq!(diagnostic.severity, falcon_diagnostics::Severity::Error);
 }
 

@@ -11,7 +11,10 @@ use falcon_analyze::{
     AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
 };
 use falcon_dart_parser::lex_tree;
-use falcon_diagnostics::{Diagnostic, LineIndex, Severity, Span};
+use falcon_diagnostics::{
+    Diagnostic, LineIndex, RULES_THREAD_ERROR_DIAGNOSTIC_ID, SYNTAX_ERROR_DIAGNOSTIC_ID, Severity,
+    Span, UNMATCHED_PATH_DIAGNOSTIC_ID,
+};
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
     load_config, load_or_default, package_identities, requires_resolution, run_cross_file,
@@ -152,7 +155,7 @@ pub fn collect_check_with_sdk_locator(
             .any(|(manifest, _)| paths.iter().any(|path| manifest.starts_with(path)));
         unmatched.extend(walked.missing_paths.iter().map(|path| {
             Diagnostic::new(
-                "unmatched-path",
+                UNMATCHED_PATH_DIAGNOSTIC_ID,
                 Severity::Error,
                 "Input path does not exist.",
                 path.to_string_lossy(),
@@ -161,7 +164,7 @@ pub fn collect_check_with_sdk_locator(
         }));
         unmatched.extend(walked.filtered_paths.iter().map(|path| {
             Diagnostic::new(
-                "unmatched-path",
+                UNMATCHED_PATH_DIAGNOSTIC_ID,
                 Severity::Error,
                 "Input path is excluded by files.includes or command-line excludes.",
                 path.to_string_lossy(),
@@ -170,7 +173,7 @@ pub fn collect_check_with_sdk_locator(
         }));
         if files.is_empty() && !has_selected_manifest && unmatched.is_empty() {
             unmatched.push(Diagnostic::new(
-                "unmatched-path",
+                UNMATCHED_PATH_DIAGNOSTIC_ID,
                 Severity::Error,
                 "No files were processed.",
                 paths[0].to_string_lossy(),
@@ -239,7 +242,7 @@ pub fn collect_check_with_sdk_locator(
 
     let mut pipeline_failed = diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.rule == falcon_analyze::RULES_THREAD_ERROR);
+        .any(|diagnostic| diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID);
     apply_severities(&mut diagnostics, &config);
     let has_unmatched = !unmatched.is_empty();
     diagnostics.append(&mut unmatched);
@@ -264,8 +267,8 @@ pub fn collect_check_with_sdk_locator(
     }
 
     diagnostics.retain(|diagnostic| {
-        diagnostic.rule == "unmatched-path"
-            || diagnostic.rule == falcon_analyze::RULES_THREAD_ERROR
+        diagnostic.rule == UNMATCHED_PATH_DIAGNOSTIC_ID
+            || diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID
             || if Path::new(&diagnostic.file_path)
                 .extension()
                 .is_some_and(|ext| ext == "dart")
@@ -303,7 +306,9 @@ pub fn collect_check_with_sdk_locator(
     diagnostics.sort_by(|a, b| {
         a.file_path
             .cmp(&b.file_path)
-            .then((a.rule != "syntax-error").cmp(&(b.rule != "syntax-error")))
+            .then(
+                (a.rule != SYNTAX_ERROR_DIAGNOSTIC_ID).cmp(&(b.rule != SYNTAX_ERROR_DIAGNOSTIC_ID)),
+            )
             .then(a.span.start.cmp(&b.span.start))
             .then(a.rule.cmp(b.rule))
             .then(a.span.end.cmp(&b.span.end))

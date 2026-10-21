@@ -109,12 +109,15 @@ empty rule descriptions and bad examples that produce no diagnostics.
    cargo xtask codegen rule --group correctness --name avoid-project-foo --cross-file
    ```
 
-   This writes a `Rule` stub under `src/lint/<group>/`, or a
-   `CrossFileRule` stub under `src/cross_file/`, plus placeholder `bad.dart` /
-   `good.dart` fixtures. Cross-file scaffolding also creates a `cross-file/`
-   project with `main.dart` and `support.dart`. Replace every placeholder before
-   submitting; scaffolding is not corpus coverage. The command prints the
-   declaration entry and remaining steps.
+   This writes a `Rule` stub under `src/lint/<group>/`, with placeholder
+   `bad.dart` / `good.dart` fixtures. With `--cross-file`, it writes a
+   `CrossFileRule` stub under `src/cross_file/` and separate
+   `cross-file/bad/` (`main.dart` and `support.dart`) and `cross-file/good/`
+   (`main.dart`) fixture projects, without top-level Dart fixtures. Replace every
+   placeholder before submitting; scaffolding is not corpus coverage. The command
+   prints the declaration entry and remaining steps. Internal diagnostic ids,
+   Rust keywords, and names that conflict with the selected template are rejected
+   before files are written.
 
 2. **Implement** the rule. Derive `Default` and implement `Rule` from
    `falcon_analyze`, or implement `CrossFileRule::prepare_project` for project-wide
@@ -155,9 +158,11 @@ empty rule descriptions and bad examples that produce no diagnostics.
 
    Choose `file` for syntax-only rules, `resolved` for file rules requiring
    resolution, `cross_file` for project-wide rules, or `resolved_cross_file` when
-   project-wide analysis requires resolution. File entries include an optional
-   domain (`None` or, for example, `Some(Domain::Flutter)`); cross-file entries
-   omit this field. Both include the recommended flag and source. Sources are
+   project-wide analysis requires resolution. Reading `ctx.library()` to inspect
+   part siblings also requires resolution, even when the rule uses a structural
+   collector. File entries include an optional domain (`None` or, for example,
+   `Some(Domain::Flutter)`); cross-file entries omit this field. Both include the
+   recommended flag and source. Sources are
    `RuleSource::DartCodeLinter("...")`,
    `RuleSource::PyramidLint("...")`, `RuleSource::Lints("...")`, or
    `RuleSource::Falcon` for original rules. Rules with options append
@@ -178,9 +183,10 @@ empty rule descriptions and bad examples that produce no diagnostics.
    `root_config_tests.rs` requires the root `falcon.json` to list every rule
    exactly once.
 
-5. **Write the corpus** (`bad.dart` + `good.dart`, plus `config.json` if the rule
-   takes options). Cross-file rules also need genuine multi-file positive and
-   negative cases in `cross-file/`, not only single-file lookalikes. Run
+5. **Write the corpus** (`bad.dart` + `good.dart` for file rules, plus
+   `config.json` if the rule takes options). Cross-file rules need genuine
+   multi-file positive and negative projects in `cross-file/bad/` and
+   `cross-file/good/`, not only single-file lookalikes. Run
    `cargo xtask validate-rules --rule <rule-id>`, then both `makers test` and
    `makers validate_rules`. The in-process corpus tests enforce registration
    coverage and reject orphan directories and placeholder fixtures; the CLI

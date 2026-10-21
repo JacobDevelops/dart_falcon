@@ -1,7 +1,10 @@
 //! Validated rule options cached with each distinct configuration value.
 
 use falcon_analyze::AnalyzeContext;
-use falcon_config::{ConfigError, FalconConfig, RuleOptions, deserialize_error_path};
+use falcon_config::{
+    ConfigError, ConfigPathSegment, FalconConfig, RuleOptions, deserialize_error_path,
+    format_config_path,
+};
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -49,7 +52,7 @@ pub(crate) fn cross_file<'a, T: TypedOptions>(
 }
 
 struct OptionError {
-    path: String,
+    path: Vec<ConfigPathSegment>,
     message: String,
 }
 
@@ -58,12 +61,12 @@ fn read<T: TypedOptions>(options: Option<&RuleOptions>) -> Result<&T, &OptionErr
         Some(options) => options.get_or_try_init(|value| {
             if !value.is_object() {
                 return Err(OptionError {
-                    path: String::new(),
+                    path: Vec::new(),
                     message: "expected an options object".to_owned(),
                 });
             }
             T::deserialize(value).map_err(|error| OptionError {
-                path: deserialize_error_path::<T>(value, ""),
+                path: deserialize_error_path::<T>(value, &[]),
                 message: error.to_string(),
             })
         }),
@@ -71,16 +74,50 @@ fn read<T: TypedOptions>(options: Option<&RuleOptions>) -> Result<&T, &OptionErr
     }
 }
 
-fn option_error(path: &str, error: &OptionError) -> ConfigError {
-    let separator = if error.path.is_empty() || error.path.starts_with('[') {
-        ""
-    } else {
-        "."
+fn option_error(path: &[ConfigPathSegment], error: &OptionError) -> ConfigError {
+    let mut path = path.to_vec();
+    path.extend_from_slice(&error.path);
+    ConfigError::at(
+        format!(
+            "invalid rule options `{}`: {}",
+            format_config_path(&path),
+            error.message
+        ),
+        path,
+    )
+}
+
+/// Accept JSON Schema integers, including whole-number float representations.
+pub(crate) fn integer<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<usize, D::Error> {
+    use serde::de::Error;
+
+    let number = serde_json::Number::deserialize(deserializer)?;
+    let range_error = || {
+        D::Error::custom(format_args!(
+            "expected an integer in the allowed range 0..={}",
+            usize::MAX
+        ))
     };
-    ConfigError(format!(
-        "invalid rule options `{path}{separator}{}`: {}",
-        error.path, error.message
-    ))
+    if let Some(value) = number.as_u64() {
+        return usize::try_from(value).map_err(|_| range_error());
+    }
+    let value = number.as_f64().ok_or_else(range_error)?;
+    // The exclusive bound avoids accepting 2^64 when usize::MAX rounds up as f64.
+    if value < 0.0 || value >= usize::MAX as f64 + 1.0 || value.fract() != 0.0 {
+        return Err(range_error());
+    }
+    Ok(value as usize)
+}
+
+pub(crate) fn optional_integer<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<usize>, D::Error> {
+    #[derive(Deserialize)]
+    struct Integer(#[serde(deserialize_with = "integer")] usize);
+
+    Option::<Integer>::deserialize(deserializer).map(|value| value.map(|integer| integer.0))
 }
 
 /// A regex compiled when its containing rule options are loaded.
@@ -177,7 +214,10 @@ fn schema<T: TypedOptions>() -> Value {
     schema
 }
 
-fn validate<T: TypedOptions>(options: &RuleOptions, path: &str) -> Result<(), ConfigError> {
+fn validate<T: TypedOptions>(
+    options: &RuleOptions,
+    path: &[ConfigPathSegment],
+) -> Result<(), ConfigError> {
     read::<T>(Some(options))
         .map(|_| ())
         .map_err(|error| option_error(path, error))
@@ -186,7 +226,7 @@ fn validate<T: TypedOptions>(options: &RuleOptions, path: &str) -> Result<(), Co
 #[derive(Clone, Copy)]
 pub(crate) struct OptionDefinition {
     schema: fn() -> Value,
-    validate: fn(&RuleOptions, &str) -> Result<(), ConfigError>,
+    validate: fn(&RuleOptions, &[ConfigPathSegment]) -> Result<(), ConfigError>,
 }
 
 impl OptionDefinition {
@@ -228,7 +268,7 @@ pub(crate) fn schema_for(name: &str) -> Option<&'static Value> {
 pub(crate) fn validate_rule(
     name: &str,
     options: &RuleOptions,
-    path: &str,
+    path: &[ConfigPathSegment],
 ) -> Result<(), ConfigError> {
     if let Some(definition) = crate::meta::meta_for(name).and_then(|meta| meta.options) {
         return (definition.validate)(options, path);
@@ -237,11 +277,230 @@ pub(crate) fn validate_rule(
     if value.as_object().is_some_and(serde_json::Map::is_empty) {
         return Ok(());
     }
-    let path = value
-        .as_object()
-        .and_then(|object| object.keys().next())
-        .map_or_else(|| path.to_owned(), |key| format!("{path}.{key}"));
-    Err(ConfigError(format!(
-        "invalid rule options `{path}`: this rule has no options"
-    )))
+    let mut path = path.to_vec();
+    if let Some(key) = value.as_object().and_then(|object| object.keys().next()) {
+        path.push(ConfigPathSegment::Key(key.clone()));
+    }
+    Err(ConfigError::at(
+        format!(
+            "invalid rule options `{}`: this rule has no options",
+            format_config_path(&path)
+        ),
+        path,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn integer_options_accept_whole_number_floats() {
+        for (name, schema) in schemas() {
+            for (key, field) in schema["properties"].as_object().unwrap() {
+                let integer = field["type"] == "integer"
+                    || field["type"]
+                        .as_array()
+                        .is_some_and(|types| types.iter().any(|kind| kind == "integer"));
+                if !integer {
+                    continue;
+                }
+                let options: RuleOptions = serde_json::from_value(json!({key: 1.0})).unwrap();
+                validate_rule(name, &options, &[])
+                    .unwrap_or_else(|error| panic!("{name}.{key}: {error}"));
+            }
+        }
+    }
+
+    #[test]
+    fn integer_options_report_allowed_range() {
+        for input in ["-1", "1.5", "18446744073709551616", "1e100"] {
+            let options: RuleOptions =
+                serde_json::from_str(&format!(r#"{{"max-lines": {input}}}"#)).unwrap();
+            let error = validate_rule("max-lines-for-file", &options, &[]).unwrap_err();
+            assert!(error.0.contains("max-lines"), "{error}");
+            assert!(
+                error
+                    .0
+                    .contains(&format!("allowed range 0..={}", usize::MAX)),
+                "{error}"
+            );
+            assert_eq!(error.1, [ConfigPathSegment::Key("max-lines".into())]);
+        }
+    }
+
+    #[test]
+    fn integer_options_preserve_exact_maximum() {
+        let options: RuleOptions =
+            serde_json::from_value(json!({"max-lines": usize::MAX})).unwrap();
+        validate_rule("max-lines-for-file", &options, &[]).unwrap();
+    }
+
+    #[test]
+    fn optional_integer_accepts_null() {
+        let options: RuleOptions =
+            serde_json::from_value(json!({"allowed-line-count": null})).unwrap();
+        validate_rule("prefer-extracting-callbacks", &options, &[]).unwrap();
+    }
+
+    #[test]
+    fn option_error_paths_preserve_literal_unknown_keys() {
+        let base = [ConfigPathSegment::Key("options".into())];
+        for key in ["a.b", "a[0]", "a`b"] {
+            let options: RuleOptions = serde_json::from_value(json!({key: true})).unwrap();
+            let error = validate_rule("max-lines-for-file", &options, &base).unwrap_err();
+            assert_eq!(
+                error.1,
+                [
+                    ConfigPathSegment::Key("options".into()),
+                    ConfigPathSegment::Key(key.into())
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn option_error_paths_preserve_nested_array_indices() {
+        let options: RuleOptions = serde_json::from_value(json!({
+            "rules": [{"deny": ["valid", 42], "message": "Banned."}]
+        }))
+        .unwrap();
+        let error = validate_rule("avoid-banned-names", &options, &[]).unwrap_err();
+        assert_eq!(
+            error.1,
+            [
+                ConfigPathSegment::Key("rules".into()),
+                ConfigPathSegment::Index(0),
+                ConfigPathSegment::Key("deny".into()),
+                ConfigPathSegment::Index(1)
+            ]
+        );
+    }
+
+    #[test]
+    fn whole_number_float_threshold_controls_rule_behavior() {
+        use falcon_analyze::{ParsedFile, RuleAnalysis};
+
+        let config = serde_json::from_value(json!({
+            "linter": {"rules": {"complexity": {"max-lines-for-file": {
+                "level": "warn", "options": {"max-lines": 1.0}
+            }}}}
+        }))
+        .unwrap();
+        let source = "void main() {\n}\n";
+        let parsed = std::sync::Arc::new(ParsedFile {
+            source: source.into(),
+            tree: falcon_dart_parser::parser::parse(source).tree,
+        });
+        let context = AnalyzeContext::new(std::path::Path::new("main.dart"), &config, &parsed);
+        let crate::meta::RuleKind::File { make, .. } =
+            crate::meta::meta_for("max-lines-for-file").unwrap().kind
+        else {
+            unreachable!()
+        };
+        let diagnostics = make().analyze("max-lines-for-file", parsed.program(), &context);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "max-lines-for-file");
+    }
+
+    fn load_value(value: Value) -> Result<falcon_config::LoadedConfig, ConfigError> {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("falcon.json");
+        std::fs::write(&path, value.to_string()).unwrap();
+        crate::load_config(&path)
+    }
+
+    #[test]
+    fn loaded_option_errors_preserve_original_alias_paths() {
+        for in_override in [false, true] {
+            for (group, rule, key, invalid, index) in [
+                (
+                    "complexity",
+                    "max-lines-for-file",
+                    "max_lines",
+                    json!(-1),
+                    None,
+                ),
+                (
+                    "style",
+                    "boolean_prefixes",
+                    "valid_prefixes",
+                    json!(["ok", 42]),
+                    Some(1),
+                ),
+            ] {
+                let section = json!({"rules": {group: {rule: {
+                    "level": "warn", "options": {key: invalid}
+                }}}});
+                let value = if in_override {
+                    json!({"overrides": [{"linter": section}]})
+                } else {
+                    json!({"linter": section})
+                };
+                let error = load_value(value).unwrap_err();
+                let mut expected = if in_override {
+                    vec![
+                        ConfigPathSegment::Key("overrides".into()),
+                        ConfigPathSegment::Index(0),
+                    ]
+                } else {
+                    Vec::new()
+                };
+                expected.extend(
+                    ["linter", "rules", group, rule, "options", key]
+                        .map(|key| ConfigPathSegment::Key(key.into())),
+                );
+                if let Some(index) = index {
+                    expected.push(ConfigPathSegment::Index(index));
+                }
+                assert_eq!(error.1, expected);
+                assert!(error.0.contains(&format_config_path(&expected)), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn discarded_rule_and_option_aliases_do_not_fail_validation() {
+        let loaded = load_value(json!({
+            "linter": {"rules": {
+                "style": {
+                    "boolean_prefixes": {"level": "warn", "options": {"valid_prefixes": 42}},
+                    "boolean-prefixes": {"level": "warn", "options": {"valid-prefixes": ["is"]}}
+                },
+                "complexity": {"max-lines-for-file": {
+                    "level": "warn", "options": {"max_lines": -1, "max-lines": 1}
+                }}
+            }}
+        }))
+        .unwrap();
+        assert!(!loaded.config.linter.rules.groups["style"].contains_key("boolean_prefixes"));
+        let options = loaded.config.linter.rules.groups["complexity"]["max-lines-for-file"]
+            .options_data()
+            .unwrap();
+        assert_eq!(options.value(), &json!({"max-lines": 1}));
+    }
+
+    #[test]
+    fn winning_higher_severity_alias_reports_its_original_path() {
+        let error = load_value(json!({
+            "linter": {"rules": {"style": {
+                "boolean_prefixes": {"level": "error", "options": {"valid_prefixes": 42}},
+                "boolean-prefixes": {"level": "warn", "options": {"valid-prefixes": ["is"]}}
+            }}}
+        }))
+        .unwrap_err();
+        assert_eq!(
+            error.1,
+            [
+                "linter",
+                "rules",
+                "style",
+                "boolean_prefixes",
+                "options",
+                "valid_prefixes"
+            ]
+            .map(|key| ConfigPathSegment::Key(key.into()))
+        );
+    }
 }

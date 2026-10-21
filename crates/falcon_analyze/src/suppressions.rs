@@ -15,20 +15,15 @@
 //!
 //! A malformed comment (missing reason, bad path, unknown rule, or a rule under
 //! the wrong group/section) does **not** suppress; instead it surfaces a
-//! [`MALFORMED_SUPPRESSION`] diagnostic so the mistake is visible. That rule is
-//! internal — it is deliberately absent from `meta.rs`/`falcon.json`, and
+//! [`MALFORMED_SUPPRESSION_DIAGNOSTIC_ID`] diagnostic so the mistake is visible.
+//! That rule is internal — it is deliberately absent from `meta.rs`/`falcon.json`, and
 //! `apply_severities` leaves diagnostics whose rule has no metadata untouched.
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_diagnostics::{Diagnostic, Severity, Span};
+use falcon_diagnostics::{Diagnostic, MALFORMED_SUPPRESSION_DIAGNOSTIC_ID, Severity, Span};
 use falcon_syntax::cst::{NodeKind, SyntaxToken, SyntaxTree};
 use falcon_syntax::token::TokenKind;
-
-/// Rule name carried by the diagnostics emitted for malformed suppression
-/// comments. Internal: not registered in `meta.rs`, not configurable, and never
-/// itself suppressible.
-pub const MALFORMED_SUPPRESSION: &str = "malformed-suppression";
 
 /// Maps a (possibly-legacy) rule name to its `(canonical_name, group,
 /// is_cross_file)` metadata, used to validate a suppression path. Returning the
@@ -244,7 +239,7 @@ fn malformed_diag(token: SyntaxToken<'_>, file_path: &str, message: String) -> D
     let start = token.offset();
     let end = start + token.text().len();
     Diagnostic::new(
-        MALFORMED_SUPPRESSION,
+        MALFORMED_SUPPRESSION_DIAGNOSTIC_ID,
         Severity::Warning,
         message,
         file_path,
@@ -362,7 +357,7 @@ mod tests {
     fn missing_reason_reports_and_does_not_suppress() {
         let s = parse("dynamic x; // falcon-ignore lint/suspicious/avoid-dynamic\n");
         assert!(!s.is_suppressed("avoid-dynamic", 0));
-        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION_DIAGNOSTIC_ID]);
         assert!(s.diagnostics()[0].message.contains("requires a reason"));
     }
 
@@ -370,14 +365,14 @@ mod tests {
     fn empty_reason_reports() {
         let s = parse("dynamic x; // falcon-ignore lint/suspicious/avoid-dynamic:   \n");
         assert!(!s.is_suppressed("avoid-dynamic", 0));
-        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION_DIAGNOSTIC_ID]);
     }
 
     #[test]
     fn wrong_group_reports_correct_path() {
         let s = parse("// falcon-ignore lint/style/avoid-dynamic: x\ndynamic y;\n");
         assert!(!s.is_suppressed("avoid-dynamic", 1));
-        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION_DIAGNOSTIC_ID]);
         assert!(
             s.diagnostics()[0]
                 .message
@@ -400,7 +395,7 @@ mod tests {
     #[test]
     fn unknown_rule_reports() {
         let s = parse("// falcon-ignore lint/suspicious/not-a-rule: x\ndynamic y;\n");
-        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION_DIAGNOSTIC_ID]);
         assert!(
             s.diagnostics()[0]
                 .message
@@ -411,7 +406,7 @@ mod tests {
     #[test]
     fn malformed_path_reports() {
         let s = parse("// falcon-ignore avoid-dynamic: x\ndynamic y;\n");
-        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION_DIAGNOSTIC_ID]);
         assert!(s.diagnostics()[0].message.contains("malformed"));
     }
 

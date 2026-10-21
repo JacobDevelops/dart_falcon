@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use falcon_config::FalconConfig;
-use falcon_diagnostics::{Diagnostic, Fix, FixKind, Severity, Span, TextEdit};
+use falcon_diagnostics::{
+    CONFIG_DIAGNOSTIC_ID, Diagnostic, Fix, FixKind, Severity, Span, TextEdit,
+};
 use falcon_syntax::cst::{FunctionKind, NodeId, Program, SyntaxToken, SyntaxTree, TopLevelDecl};
 
 use crate::environment::{AnalysisEnvironment, LanguageVersion};
@@ -115,7 +117,7 @@ impl<'a> AnalyzeContext<'a> {
             return;
         }
         errors.push(Diagnostic::new(
-            "config",
+            CONFIG_DIAGNOSTIC_ID,
             Severity::Error,
             message,
             self.file_path.to_string_lossy().into_owned(),
@@ -326,7 +328,11 @@ impl<'a> AnalyzeContext<'a> {
     }
 
     /// Locate effective options for configuration diagnostics.
-    pub fn rule_options_location(&self, group: &str, rule_name: &str) -> String {
+    pub fn rule_options_location(
+        &self,
+        group: &str,
+        rule_name: &str,
+    ) -> Vec<falcon_config::ConfigPathSegment> {
         self.config
             .rule_options_location_for(&self.file_path.to_string_lossy(), group, rule_name)
     }
