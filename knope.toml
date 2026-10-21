@@ -27,6 +27,10 @@ type = "PrepareRelease"
 
 [[workflows.steps]]
 type    = "Command"
+command = "cargo update --workspace --offline"
+
+[[workflows.steps]]
+type    = "Command"
 command = "cargo xtask version $version"
 
 [[workflows.steps]]
