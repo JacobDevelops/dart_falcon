@@ -93,7 +93,7 @@ Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code u
 
 The `eol-at-end-of-file` rule can report a virtual one-character range at EOF. In that case `span.end` is one byte beyond the file; preserve the extra unit when computing the UTF-16 range length.
 
-Diagnostics may include a `fix` object with a `kind` of `safe` (preserves program behaviour) or `unsafe` (may change behaviour), as declared by the rule. Its `edits` contain a `span` and `replacement` string. Edit spans are half-open UTF-8 byte offsets into the original source, sorted, non-overlapping, within bounds, and on character boundaries. Apply all edits together against that original source, not successively against changed text. Diagnostics without fixes omit `fix`; fixes are not applied automatically.
+Diagnostics may include a `fix` object with a `title` (the quick-fix label, such as "Replace `var` with `final`") and a `kind` of `safe` (preserves program behaviour) or `unsafe` (may change behaviour), as declared by the rule. Its non-empty `edits` contain a `span` and `replacement` string. Edit spans are half-open UTF-8 byte offsets into the original source, sorted, non-overlapping, within bounds, and on character boundaries. Rules attach fixes through `AnalyzeContext::with_fix`, which validates them against the original source; invalid fixes panic in debug builds and are omitted in release builds. Apply all edits together against that original source, not successively against changed text. Diagnostics without fixes omit `fix`; fixes are not applied automatically. LSP diagnostics do not carry fix payloads.
 
 falcon discovers `falcon.json` automatically: the current directory, then the
 enclosing git root, then `~/.falcon.json`.

@@ -345,7 +345,7 @@ fn context_reuses_per_file_analysis_facts() {
 
 #[test]
 fn context_fix_uses_lossless_cst_byte_spans() {
-    use falcon_diagnostics::{Fix, FixKind, TextEdit};
+    use falcon_diagnostics::{FixKind, TextEdit};
 
     let source = "// café\r\nvoid main() { var value = 1; /* kept */ }\r\n";
     let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
@@ -360,12 +360,59 @@ fn context_fix_uses_lossless_cst_byte_spans() {
         .find(|token| token.text() == "var")
         .unwrap()
         .span();
-    let diagnostic = ctx
-        .diagnostic("test-rule", "Prefer final", span)
-        .with_fix(Fix::new(FixKind::Safe, vec![TextEdit::new(span, "final")]));
+    let diagnostic = ctx.with_fix(
+        ctx.diagnostic("test-rule", "Prefer final", span),
+        "Replace `var` with `final`",
+        FixKind::Safe,
+        vec![TextEdit::new(span, "final")],
+    );
 
     assert_eq!(
         diagnostic.fix.unwrap().apply(ctx.source()).unwrap(),
         "// café\r\nvoid main() { final value = 1; /* kept */ }\r\n"
     );
+}
+
+#[test]
+fn context_rejects_invalid_rule_fixes() {
+    use falcon_diagnostics::{FixKind, TextEdit};
+
+    let source = "// é\nvoid main() {}";
+    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let config = FalconConfig::default();
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+    for spans in [
+        vec![],
+        vec![Span { start: 4, end: 5 }],
+        vec![Span {
+            start: 0,
+            end: source.len() + 1,
+        }],
+        vec![Span { start: 5, end: 6 }, Span { start: 0, end: 1 }],
+        vec![Span { start: 0, end: 6 }, Span { start: 5, end: 6 }],
+    ] {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.with_fix(
+                ctx.diagnostic("test-rule", "Invalid fix", Span { start: 0, end: 0 }),
+                "Invalid fix",
+                FixKind::Safe,
+                spans
+                    .into_iter()
+                    .map(|span| TextEdit::new(span, ""))
+                    .collect(),
+            )
+        }));
+        if cfg!(debug_assertions) {
+            assert!(
+                result.is_err(),
+                "invalid rule fix must panic in debug builds"
+            );
+        } else {
+            assert!(result.unwrap().fix.is_none());
+        }
+    }
 }

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use falcon_config::FalconConfig;
-use falcon_diagnostics::{Diagnostic, Severity, Span};
+use falcon_diagnostics::{Diagnostic, Fix, FixKind, Severity, Span, TextEdit};
 use falcon_syntax::cst::{FunctionKind, NodeId, Program, SyntaxToken, SyntaxTree, TopLevelDecl};
 
 use crate::environment::{AnalysisEnvironment, LanguageVersion};
@@ -232,8 +232,7 @@ impl<'a> AnalyzeContext<'a> {
         self
     }
 
-    /// Build a diagnostic; chain [`Diagnostic::with_fix`] to attach rule-declared
-    /// byte-span replacements over [`Self::source`].
+    /// Build a diagnostic; use [`Self::with_fix`] to attach validated edits.
     pub fn diagnostic(
         &self,
         rule: &'static str,
@@ -247,6 +246,29 @@ impl<'a> AnalyzeContext<'a> {
             self.file_path.to_string_lossy().into_owned(),
             span,
         )
+    }
+
+    /// Attach a rule-declared fix validated against this file's original source.
+    ///
+    /// Invalid fixes panic in debug builds and are omitted in release builds.
+    pub fn with_fix(
+        &self,
+        diagnostic: Diagnostic,
+        title: impl Into<String>,
+        kind: FixKind,
+        edits: Vec<TextEdit>,
+    ) -> Diagnostic {
+        let fix = Fix::new(title, kind, edits).and_then(|fix| {
+            fix.validate(self.source())?;
+            Ok(fix)
+        });
+        match fix {
+            Ok(fix) => diagnostic.with_fix(fix),
+            Err(error) => {
+                debug_assert!(false, "invalid rule fix: {error}");
+                diagnostic
+            }
+        }
     }
 
     /// Attach a cross-file type index.

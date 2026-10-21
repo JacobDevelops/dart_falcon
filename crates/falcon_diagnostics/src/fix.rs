@@ -33,13 +33,50 @@ impl TextEdit {
 /// One atomic fix, with edits in ascending source order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Fix {
+    pub title: String,
     pub kind: FixKind,
-    pub edits: Vec<TextEdit>,
+    edits: Vec<TextEdit>,
 }
 
 impl Fix {
-    pub fn new(kind: FixKind, edits: Vec<TextEdit>) -> Self {
-        Self { kind, edits }
+    pub fn new(
+        title: impl Into<String>,
+        kind: FixKind,
+        edits: Vec<TextEdit>,
+    ) -> Result<Self, ApplyFixError> {
+        if edits.is_empty() {
+            return Err(ApplyFixError::EmptyEdits);
+        }
+        let mut end = 0;
+        for (index, edit) in edits.iter().enumerate() {
+            if edit.span.start > edit.span.end {
+                return Err(ApplyFixError::InvalidSpan { index });
+            }
+            if edit.span.start < end {
+                return Err(ApplyFixError::UnsortedOrOverlapping { index });
+            }
+            end = edit.span.end;
+        }
+        Ok(Self {
+            title: title.into(),
+            kind,
+            edits,
+        })
+    }
+
+    pub fn edits(&self) -> &[TextEdit] {
+        &self.edits
+    }
+
+    /// Check the edit bounds and UTF-8 boundaries against the original source.
+    pub fn validate(&self, source: &str) -> Result<(), ApplyFixError> {
+        for (index, edit) in self.edits.iter().enumerate() {
+            if !source.is_char_boundary(edit.span.start) || !source.is_char_boundary(edit.span.end)
+            {
+                return Err(ApplyFixError::InvalidSpan { index });
+            }
+        }
+        Ok(())
     }
 
     /// Apply all edits to the original source, or reject the entire fix.
@@ -49,20 +86,7 @@ impl Fix {
     /// Adjacent edits are allowed, including insertions at the same offset, which
     /// are applied in their declared order. The caller decides which kinds to apply.
     pub fn apply(&self, source: &str) -> Result<String, ApplyFixError> {
-        let mut end = 0;
-        for (index, edit) in self.edits.iter().enumerate() {
-            let span = edit.span;
-            if span.start > span.end
-                || !source.is_char_boundary(span.start)
-                || !source.is_char_boundary(span.end)
-            {
-                return Err(ApplyFixError::InvalidSpan { index });
-            }
-            if span.start < end {
-                return Err(ApplyFixError::UnsortedOrOverlapping { index });
-            }
-            end = span.end;
-        }
+        self.validate(source)?;
 
         let mut result = String::with_capacity(source.len());
         let mut end = 0;
@@ -76,9 +100,10 @@ impl Fix {
     }
 }
 
-/// The index identifies the invalid edit in [`Fix::edits`].
+/// An invalid fix, with an edit index where applicable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApplyFixError {
+    EmptyEdits,
     InvalidSpan { index: usize },
     UnsortedOrOverlapping { index: usize },
 }
@@ -86,6 +111,7 @@ pub enum ApplyFixError {
 impl fmt::Display for ApplyFixError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EmptyEdits => f.write_str("a fix must contain at least one edit"),
             Self::InvalidSpan { index } => write!(f, "edit {index} has an invalid source span"),
             Self::UnsortedOrOverlapping { index } => {
                 write!(f, "edit {index} is unsorted or overlaps an earlier edit")

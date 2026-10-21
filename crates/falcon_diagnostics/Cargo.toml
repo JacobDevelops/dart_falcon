@@ -5,7 +5,9 @@ edition.workspace = true
 description       = "Diagnostic types, severity levels, and reporting for falcon"
 
 [dependencies]
-falcon_syntax        = { path = "../falcon_syntax" }
-serde.workspace      = true
+falcon_syntax       = { path = "../falcon_syntax" }
+serde.workspace     = true
+lsp-types.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true
-lsp-types.workspace  = true

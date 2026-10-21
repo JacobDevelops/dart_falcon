@@ -231,10 +231,7 @@ impl Diagnostic {
             related_information: None,
             tags: None,
             code_description: None,
-            data: self
-                .fix
-                .as_ref()
-                .map(|fix| serde_json::json!({ "fix": fix })),
+            data: None,
         }
     }
 }
