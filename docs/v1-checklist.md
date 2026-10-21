@@ -18,6 +18,7 @@ Owns `crates/falcon_syntax`, `crates/falcon_dart_parser`, and the feature-gate c
 - [ ] **One parameter-kind encoding.** Parameter kinds are encoded both as marker nodes and as tree-builder flags (`tree.rs:98-414`).
 - [ ] **Typed feature-gate parse errors.** `external.rs:1276` decides external-library resolution by matching the message prefix `"This requires the '"`. Add a `ParseErrorKind`.
 - [ ] **Lexer and parser leftovers.** Unclosed `${` swallows the rest of the file; the nested-comment scan in `language_version.rs` is quadratic; the `in_ctor_init_value` latch isn't restored; the cascade selector loop has drifted from `parse_postfix`; `parse_field_or_method` keeps errors from the abandoned attempt.
+- [ ] **Exponential nullable-declaration speculation.** A statement starting `a ? b = …` is first tried as the declaration `a? b = …`, which parses the whole initializer, fails at `:`, and reparses it as a conditional (`stmt.rs:535-557`). Nesting block lambdas doubles the work: `"a ? b = () {" * N + "0;" + "} : c;" * N` takes 0.57 s at N=20, 36 s at N=26 and times out at N=29 (534 bytes). Decide declaration vs conditional from the tokens before parsing the initializer.
 
 #### 8. CLI and config behaviour
 
