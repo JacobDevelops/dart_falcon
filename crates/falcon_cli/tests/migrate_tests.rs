@@ -918,11 +918,22 @@ fn yaml_drops_malformed_values_with_exact_option_path() {
     assert_migrated_config_loads(&result.json);
 }
 
-fn assert_migrated_config_loads(json: &str) {
+fn assert_migrated_config_loads(json: &str) -> falcon_config::FalconConfig {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("falcon.json");
     std::fs::write(&path, json).unwrap();
-    falcon_rules::load_config(&path).expect("migration output passes actual canonical loading");
+    falcon_rules::load_config(&path)
+        .expect("migration output passes actual canonical loading")
+        .config
+}
+
+fn migrated_path(config: &falcon_config::FalconConfig, relative: &str) -> String {
+    config
+        .root_dir()
+        .unwrap()
+        .join(relative)
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[test]
@@ -1867,7 +1878,7 @@ fn upgrade_legacy_disabled_rule_retains_options_and_ignores_severity_enablement(
 #[test]
 fn upgrade_refuses_invalid_legacy_severity_with_original_key() {
     for severity in [
-        serde_json::json!("warning"),
+        serde_json::json!("fatal"),
         serde_json::json!(42),
         Value::Null,
         serde_json::json!({"level": "error"}),
@@ -2045,4 +2056,283 @@ fn upgrade_relocates_override_rules_into_nullable_sections_without_widening_scop
         }));
         assert_migrated_config_loads(&result.json);
     }
+}
+
+#[test]
+fn upgrade_legacy_defaults_warns_for_only_unlisted_disabled_rules() {
+    use falcon_rules::meta::RULE_METADATA;
+
+    let input = serde_json::json!({
+        "files": {"includes": ["lib/**", "!lib/generated/**"]},
+        "rules": {
+            "avoid-late-keyword": {"enabled": true},
+            "avoid-dynamic": {"enabled": false}
+        },
+        "severity_override": {"max_lines_for_file": "error"}
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let config = assert_migrated_config_loads(&result.json);
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(value["files"], input["files"]);
+    assert!(
+        config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "lib/main.dart"))
+    );
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "test/main.dart"))
+    );
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "lib/generated/a.dart"))
+    );
+    let mut affected = 0;
+    for meta in RULE_METADATA {
+        let group = meta.group.as_str();
+        let resolved = if meta.is_cross_file() {
+            config
+                .cross_file
+                .resolve_rule(group, meta.name, meta.recommended)
+        } else {
+            config
+                .linter
+                .resolve_rule(group, meta.name, meta.recommended, meta.domain_names())
+        };
+        match meta.name {
+            "avoid-late-keyword" => {
+                assert_eq!(resolved, Some(falcon_config::ResolvedSeverity::Warn))
+            }
+            "avoid-dynamic" => assert_eq!(resolved, None),
+            "max-lines-for-file" => {
+                assert_eq!(resolved, Some(falcon_config::ResolvedSeverity::Error))
+            }
+            _ if resolved.is_none() => affected += 1,
+            _ => {}
+        }
+    }
+    assert!(affected > 0);
+    let defaults: Vec<_> = result
+        .warnings
+        .iter()
+        .filter(|warning| warning.contains("legacy flat configs ran all rules"))
+        .collect();
+    assert_eq!(defaults.len(), 1);
+    assert!(defaults[0].contains(&format!(
+        "{affected} unlisted rules no longer run by default"
+    )));
+    assert!(defaults[0].contains("recommended plus explicitly listed"));
+    assert!(defaults[0].contains("`linter.rules` or `cross-file.rules`"));
+    assert_eq!(
+        config
+            .linter
+            .rules
+            .groups
+            .values()
+            .map(|group| group.len())
+            .sum::<usize>(),
+        3
+    );
+    let modern = migrate_existing_config(r#"{"linter":{"rules":{}}}"#).unwrap();
+    assert!(
+        !modern
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("ran all rules"))
+    );
+}
+
+#[test]
+fn upgrade_legacy_single_star_exclusions_match_nested_files() {
+    let input = serde_json::json!({
+        "files": {"includes": ["lib/**", "!lib/old/**"]},
+        "exclude_patterns": ["*.g.dart", "**/*.freezed.dart", "**/generated/**", "build/**"]
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(
+        value["files"]["includes"],
+        serde_json::json!([
+            "lib/**",
+            "!lib/old/**",
+            "!**/*.g.dart",
+            "!**/*.freezed.dart",
+            "!**/generated/**",
+            "!build/**"
+        ])
+    );
+    let config = assert_migrated_config_loads(&result.json);
+    for path in [
+        "lib/a.g.dart",
+        "lib/src/b.g.dart",
+        "lib/src/a.freezed.dart",
+        "lib/generated/a.dart",
+        "lib/src/generated/a.dart",
+        "lib/old/a.dart",
+        "test/a.dart",
+        "build/a.dart",
+    ] {
+        assert!(
+            !config.files.includes.admits(&migrated_path(&config, path)),
+            "{path}"
+        );
+    }
+    assert!(
+        config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "lib/src/a.dart"))
+    );
+    let default_scope = migrate_existing_config(r#"{"exclude_patterns":["*.g.dart"]}"#).unwrap();
+    let config = assert_migrated_config_loads(&default_scope.json);
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "root.g.dart"))
+    );
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "lib/src/b.g.dart"))
+    );
+    assert!(
+        config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "lib/src/b.dart"))
+    );
+}
+
+#[test]
+fn upgrade_refuses_unpreservable_legacy_wildcards() {
+    for pattern in [
+        "lib/*.dart",
+        "lib/**/a*.dart",
+        "*foo/*.dart",
+        "lib/?.dart",
+        "lib/[!a].dart",
+    ] {
+        let input = serde_json::json!({"exclude_patterns": [pattern]});
+        let error = migrate_existing_config(&input.to_string()).err().unwrap();
+        assert!(error.contains("exclude_patterns"), "{error}");
+        assert!(
+            error.contains("cannot preserve wildcard semantics"),
+            "{error}"
+        );
+        assert!(error.contains(pattern), "{error}");
+    }
+}
+
+#[test]
+fn upgrade_legacy_severity_accepts_case_and_historical_aliases() {
+    for (legacy, canonical, severity) in [
+        ("warning", "warn", falcon_config::ResolvedSeverity::Warn),
+        ("WaRn", "warn", falcon_config::ResolvedSeverity::Warn),
+        ("Error", "error", falcon_config::ResolvedSeverity::Error),
+        ("NOTE", "info", falcon_config::ResolvedSeverity::Info),
+        ("Info", "info", falcon_config::ResolvedSeverity::Info),
+    ] {
+        let input = serde_json::json!({
+            "files": {"includes": ["lib/**", "!lib/generated/**"]},
+            "rules": {"max_lines_for_file": {"options": {"max_lines": 200}}},
+            "severity_override": {"max_lines_for_file": legacy}
+        });
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(value["files"], input["files"]);
+        assert_eq!(
+            value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+            serde_json::json!({"level": canonical, "options": {"max-lines": 200}})
+        );
+        let config = assert_migrated_config_loads(&result.json);
+        assert_eq!(
+            config.resolve_rule_for(
+                &migrated_path(&config, "lib/a.dart"),
+                "complexity",
+                "max-lines-for-file",
+                false,
+                &[]
+            ),
+            Some(severity)
+        );
+        assert!(
+            config
+                .files
+                .includes
+                .admits(&migrated_path(&config, "lib/a.dart"))
+        );
+        assert!(
+            !config
+                .files
+                .includes
+                .admits(&migrated_path(&config, "lib/generated/a.dart"))
+        );
+        assert!(
+            !config
+                .files
+                .includes
+                .admits(&migrated_path(&config, "test/a.dart"))
+        );
+    }
+}
+
+#[test]
+fn upgrade_discards_only_override_domains_and_retains_scoped_rules() {
+    let input = serde_json::json!({
+        "files": {"includes": ["lib/**", "test/**"]},
+        "linter": {"rules": {"style": {"avoid-late-keyword": "warn"}}},
+        "overrides": [{
+            "includes": ["test/**", "!test/generated/**"],
+            "linter": {
+                "domains": {"flutter": "all"},
+                "enabled": true,
+                "rules": {"style": {"avoid-late-keyword": "off"}}
+            }
+        }]
+    });
+    let result = migrate_existing_config(&input.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    let mut expected = input;
+    expected["overrides"][0]["linter"]
+        .as_object_mut()
+        .unwrap()
+        .remove("domains");
+    assert_eq!(value, expected);
+    assert_eq!(result.warnings.len(), 1);
+    assert!(result.warnings[0].contains("overrides[0].linter.domains"));
+    assert!(result.warnings[0].contains("discarded value"));
+    let config = assert_migrated_config_loads(&result.json);
+    for (path, expected) in [
+        ("test/a.dart", None),
+        (
+            "test/generated/a.dart",
+            Some(falcon_config::ResolvedSeverity::Warn),
+        ),
+        ("lib/a.dart", Some(falcon_config::ResolvedSeverity::Warn)),
+    ] {
+        assert_eq!(
+            config.resolve_rule_for(
+                &migrated_path(&config, path),
+                "style",
+                "avoid-late-keyword",
+                false,
+                &[]
+            ),
+            expected,
+            "{path}"
+        );
+    }
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&migrated_path(&config, "bin/a.dart"))
+    );
 }

@@ -13,7 +13,7 @@ use falcon_syntax::cst::*;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Maximum number of nested switch statements.
-    #[serde(deserialize_with = "crate::lint::options::integer")]
+    #[serde(deserialize_with = "falcon_config::integer")]
     max_nesting: usize,
 }
 

@@ -28,7 +28,7 @@ pub struct PreferContainer;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three.
-    #[serde(deserialize_with = "crate::lint::options::integer")]
+    #[serde(deserialize_with = "falcon_config::integer")]
     min_sequence: usize,
 }
 

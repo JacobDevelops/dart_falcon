@@ -317,7 +317,7 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
         );
     }
 
-    let json = serialize_config(Value::Object(root), &mut migration.warnings)?;
+    let json = serialize_config(Value::Object(root), &mut migration.warnings, false)?;
 
     Ok(MigrationResult {
         json,
@@ -365,6 +365,9 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     let mut root: Value =
         serde_json::from_str(json).map_err(|e| format!("failed to parse falcon.json: {e}"))?;
     let mut report = Migration::default();
+    let legacy_flat = ["rules", "severity_override", "exclude_patterns"]
+        .iter()
+        .any(|key| root.get(key).is_some());
     for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
         rename_key(&mut root, legacy, canonical, "", &mut report.warnings);
     }
@@ -396,7 +399,7 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
         }
     }
 
-    let out = serialize_config(root, &mut report.warnings)?;
+    let out = serialize_config(root, &mut report.warnings, legacy_flat)?;
     Ok(MigrationResult {
         json: out,
         unrecognized: report.unrecognized,
@@ -417,12 +420,18 @@ fn migrate_flat_config(root: &mut Value, report: &mut Migration) -> Result<(), S
             ));
         };
         if key == "severity_override" {
-            for (name, setting) in &entries {
+            for (name, setting) in &mut entries {
                 let level = setting.as_str().ok_or_else(|| {
                     format!("cannot migrate legacy `{key}.{name}`: expected a severity string")
                 })?;
-                falcon_config::level_from_str::<serde_json::Error>(level)
+                let normalized = match level.to_ascii_lowercase().as_str() {
+                    "warning" => "warn".to_owned(),
+                    "note" => "info".to_owned(),
+                    level => level.to_owned(),
+                };
+                falcon_config::level_from_str::<serde_json::Error>(&normalized)
                     .map_err(|error| format!("cannot migrate legacy `{key}.{name}`: {error}"))?;
+                *setting = Value::String(normalized);
             }
             let (canonical, warnings) = canonicalize_rule_entries(entries, key);
             entries = canonical;
@@ -528,18 +537,40 @@ fn migrate_flat_config(root: &mut Value, report: &mut Migration) -> Result<(), S
         let patterns = excludes
             .iter()
             .map(|value| {
-                value
-                    .as_str()
-                    .filter(|pattern| {
-                        !pattern.starts_with('!')
-                            && falcon_config::PathFilter::from(vec![(*pattern).to_owned()])
-                                .warnings()
-                                .is_empty()
+                let pattern = value.as_str().ok_or_else(|| {
+                    format!("cannot migrate legacy `exclude_patterns`: invalid pattern {value}")
+                })?;
+                if pattern.starts_with('!')
+                    || !falcon_config::PathFilter::from(vec![pattern.to_owned()])
+                        .warnings()
+                        .is_empty()
+                {
+                    return Err(format!(
+                        "cannot migrate legacy `exclude_patterns`: invalid pattern {value}"
+                    ));
+                }
+                // Legacy single wildcards could cross separators. A leading `*`
+                // can be expressed recursively, as can `**/*` at the final segment.
+                if pattern.contains('?')
+                    || pattern.contains('[')
+                    || pattern.match_indices('*').any(|(index, _)| {
+                        index != 0
+                            && pattern.as_bytes().get(index - 1) != Some(&b'*')
+                            && pattern.as_bytes().get(index + 1) != Some(&b'*')
+                            && !(pattern[..index].ends_with("**/")
+                                && !pattern[index..].contains('/'))
                     })
-                    .map(|pattern| Value::String(format!("!{pattern}")))
-                    .ok_or_else(|| {
-                        format!("cannot migrate legacy `exclude_patterns`: invalid pattern {value}")
-                    })
+                {
+                    return Err(format!(
+                        "cannot migrate legacy `exclude_patterns`: cannot preserve wildcard semantics of {value}"
+                    ));
+                }
+                let prefix = if pattern.starts_with('*') && !pattern.starts_with("**") {
+                    "!**/"
+                } else {
+                    "!"
+                };
+                Ok(Value::String(format!("{prefix}{pattern}")))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let files = root
@@ -567,6 +598,7 @@ fn migrate_flat_config(root: &mut Value, report: &mut Migration) -> Result<(), S
 
 fn is_section_path(path: &[ConfigPathSegment]) -> bool {
     use ConfigPathSegment::{Index, Key};
+    let in_override = matches!(path, [Key(key), Index(_), ..] if key == "overrides");
     let path = match path {
         [Key(key), Index(_), rest @ ..] if key == "overrides" => rest,
         path => path,
@@ -578,7 +610,7 @@ fn is_section_path(path: &[ConfigPathSegment]) -> bool {
             "files" | "linter" | "cross-file" | "overrides"
         ),
         [Key(section), Key(key)] if section == "linter" || section == "cross-file" => {
-            key == "rules" || (section == "linter" && key == "domains")
+            key == "rules" || (!in_override && section == "linter" && key == "domains")
         }
         [Key(section), Key(rules), Key(group)]
             if section == "linter" || section == "cross-file" =>
@@ -590,7 +622,11 @@ fn is_section_path(path: &[ConfigPathSegment]) -> bool {
 }
 
 /// Repair invalid entries using the canonical loader before serializing.
-fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<String, String> {
+fn serialize_config(
+    mut value: Value,
+    warnings: &mut Vec<String>,
+    legacy_flat: bool,
+) -> Result<String, String> {
     let mut removals = Vec::new();
     repair_includes(&mut value, warnings, &mut removals)?;
     loop {
@@ -598,6 +634,46 @@ fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<Stri
             .and_then(canonicalize_loaded_config);
         match loaded {
             Ok(loaded) => {
+                if legacy_flat {
+                    let config = &loaded.config;
+                    let affected = RULE_METADATA
+                        .iter()
+                        .filter(|meta| {
+                            let group = meta.group.as_str();
+                            let (enabled, rules, resolved) = if meta.is_cross_file() {
+                                (
+                                    config.cross_file.enabled,
+                                    &config.cross_file.rules,
+                                    config.cross_file.resolve_rule(
+                                        group,
+                                        meta.name,
+                                        meta.recommended,
+                                    ),
+                                )
+                            } else {
+                                (
+                                    config.linter.enabled,
+                                    &config.linter.rules,
+                                    config.linter.resolve_rule(
+                                        group,
+                                        meta.name,
+                                        meta.recommended,
+                                        meta.domain_names(),
+                                    ),
+                                )
+                            };
+                            enabled
+                                && !rules
+                                    .groups
+                                    .get(group)
+                                    .is_some_and(|rules| rules.contains_key(meta.name))
+                                && resolved.is_none()
+                        })
+                        .count();
+                    warnings.push(format!(
+                        "legacy flat configs ran all rules by default; migrated configs run recommended plus explicitly listed rules (subject to section/domain settings). {affected} unlisted rules no longer run by default; enable desired rules explicitly by group in `linter.rules` or `cross-file.rules` using `\"warn\"`, `\"info\"`, or `\"error\"`"
+                    ));
+                }
                 for warning in loaded.warnings {
                     if !warnings.contains(&warning) {
                         warnings.push(warning);

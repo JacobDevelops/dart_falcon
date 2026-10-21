@@ -26,7 +26,7 @@ use falcon_syntax::cst::*;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Minimum repeated expression-chain count for extraction (clamped to at least two).
-    #[serde(deserialize_with = "crate::lint::options::integer")]
+    #[serde(deserialize_with = "falcon_config::integer")]
     allowed_duplicated_chains: usize,
 }
 

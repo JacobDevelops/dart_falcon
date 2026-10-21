@@ -4,11 +4,230 @@ use std::collections::HashSet;
 
 use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
+const LINT_SOURCE_TOKENS: &str = r#"//[^\n]*|/\*(?s:.*?)\*/|b?'(?:\\.|[^'\\])'|"(?:\\.|[^"\\])*"|[a-zA-Z_][a-zA-Z_0-9]*|::|[(){},;#\[\]=]"#;
+
+fn lint_import_paths<'a>(
+    tokens: &[&'a str],
+    prefix: &[&'a str],
+    paths: &mut Vec<Vec<&'a str>>,
+) -> usize {
+    let mut path = prefix.to_vec();
+    let mut cursor = 0;
+    while let Some(&token) = tokens.get(cursor) {
+        if token == "{" {
+            cursor += 1;
+            while tokens.get(cursor).is_some_and(|token| *token != "}") {
+                if tokens[cursor] == "," {
+                    cursor += 1;
+                } else {
+                    cursor += lint_import_paths(&tokens[cursor..], &path, paths);
+                }
+            }
+            return cursor + usize::from(tokens.get(cursor) == Some(&"}"));
+        }
+        if !token.starts_with(|character: char| character.is_ascii_alphabetic() || character == '_')
+        {
+            break;
+        }
+        if token != "self" {
+            path.push(token);
+        }
+        cursor += 1;
+        if tokens.get(cursor) != Some(&"::") {
+            break;
+        }
+        cursor += 1;
+    }
+    if !path.is_empty() {
+        paths.push(path);
+    }
+    cursor.max(1)
+}
+
+fn lint_helper_dependencies(
+    root: &std::path::Path,
+    module: &std::path::Path,
+    source: &str,
+    tokenizer: &regex::Regex,
+) -> Vec<std::path::PathBuf> {
+    let tokens: Vec<_> = tokenizer
+        .find_iter(source)
+        .map(|token| token.as_str())
+        .filter(|token| !token.starts_with("//") && !token.starts_with("/*"))
+        .collect();
+    let module = module.strip_prefix(root).unwrap().with_extension("");
+    let components: Vec<_> = module.iter().map(|part| part.to_str().unwrap()).collect();
+    let mut imports = Vec::new();
+    let mut dependencies = Vec::new();
+    let mut skip_until = 0;
+    for (index, &token) in tokens.iter().enumerate() {
+        if index < skip_until {
+            continue;
+        }
+        if tokens[index..].starts_with(&["#", "[", "cfg", "(", "test", ")", "]"]) {
+            let mut depth = 0;
+            for (offset, &token) in tokens[index + 7..].iter().enumerate() {
+                if token == "{" {
+                    depth += 1;
+                } else if token == "}" {
+                    depth -= 1;
+                }
+                if depth == 0 && matches!(token, "}" | ";") {
+                    skip_until = index + 7 + offset + 1;
+                    break;
+                }
+            }
+            continue;
+        }
+        if tokens[index..].starts_with(&["crate", "::"]) {
+            let mut absolute = Vec::new();
+            lint_import_paths(&tokens[index + 2..], &[], &mut absolute);
+            imports.extend(
+                absolute
+                    .into_iter()
+                    .filter(|path| path.first() == Some(&"lint"))
+                    .map(|path| (path[1..].to_vec(), 0)),
+            );
+        } else if tokens[index..].starts_with(&["super", "::"]) {
+            let mut depth = 1;
+            let mut cursor = index + 2;
+            while tokens[cursor..].starts_with(&["super", "::"]) {
+                depth += 1;
+                cursor += 2;
+            }
+            if depth <= components.len() {
+                let prefix_length = components.len() - depth;
+                let mut relative = Vec::new();
+                lint_import_paths(
+                    &tokens[cursor..],
+                    &components[..prefix_length],
+                    &mut relative,
+                );
+                imports.extend(relative.into_iter().map(|path| (path, prefix_length)));
+            }
+        }
+        if token == "mod" && tokens.get(index + 2) == Some(&";") {
+            let child = tokens[index + 1];
+            let attributes = tokens[..index]
+                .rsplit(|token| matches!(*token, ";" | "{" | "}"))
+                .next()
+                .unwrap();
+            let path = attributes.windows(6).find_map(|attribute| match attribute {
+                ["#", "[", "path", "=", path, "]"] => Some(path),
+                _ => None,
+            });
+            let candidate = if let Some(path) = path {
+                root.join(module.parent().unwrap())
+                    .join(path.trim_matches('"'))
+            } else {
+                root.join(&module).join(child).with_extension("rs")
+            };
+            assert!(
+                candidate.is_file(),
+                "cannot resolve module {child} in {}",
+                module.display()
+            );
+            dependencies.push(candidate);
+        }
+    }
+    dependencies.extend(imports.into_iter().filter_map(|(segments, prefix_length)| {
+        (prefix_length + 1..=segments.len())
+            .rev()
+            .find_map(|length| {
+                let candidate = root.join(segments[..length].join("/")).with_extension("rs");
+                candidate.is_file().then_some(candidate)
+            })
+    }));
+    dependencies
+}
+
+#[test]
+fn lint_helper_imports_include_grouped_relative_and_direct_paths() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lint");
+    let module = root.join("correctness/add_equatable_props.rs");
+    let tokenizer = regex::Regex::new(LINT_SOURCE_TOKENS).unwrap();
+    for source in [
+        "use crate::lint::riverpod;",
+        "crate::lint::riverpod::is_identity(ctx, identity, names)",
+        "use crate::lint::{options, riverpod::{is_identity, is_provider}};",
+        "use crate::{meta::RuleSource, lint::{options, riverpod}};",
+        "use super::super::riverpod::is_identity;",
+        "#[cfg(test)] mod tests { fn check() { use super::*; } } use crate::lint::riverpod;",
+        r##"let quote = '"'; let text = "unrelated"; use crate::lint::riverpod;"##,
+        r##"let quote = b'"'; let text = "unrelated"; use crate::lint::riverpod;"##,
+    ] {
+        assert!(
+            lint_helper_dependencies(&root, &module, source, &tokenizer)
+                .contains(&root.join("riverpod.rs")),
+            "{source}"
+        );
+    }
+    assert!(
+        lint_helper_dependencies(&root, &module, "use super::equatable;", &tokenizer)
+            .contains(&root.join("correctness/equatable.rs"))
+    );
+    let module = root.join("correctness/use_build_context_synchronously.rs");
+    for source in [
+        "#[path = \"use_build_context_semantics.rs\"] mod semantics;",
+        "#[path = \"use_build_context_semantics.rs\"] pub(crate) mod semantics;",
+        "#[path = \"use_build_context_semantics.rs\"] #[doc(hidden)] mod semantics;",
+    ] {
+        assert!(
+            lint_helper_dependencies(&root, &module, source, &tokenizer)
+                .contains(&root.join("correctness/use_build_context_semantics.rs"))
+        );
+    }
+    for source in [
+        "// use crate::lint::riverpod;",
+        "/* crate::lint::riverpod::is_identity() */",
+        "\"crate::lint::riverpod::is_identity()\"",
+        "#[cfg(test)] mod tests { fn check() { use crate::lint::riverpod; } }",
+        "mod dcl { use super::Options; }",
+    ] {
+        assert!(lint_helper_dependencies(&root, &module, source, &tokenizer).is_empty());
+    }
+    assert!(
+        lint_helper_dependencies(
+            &root,
+            &root.join("correctness.rs"),
+            "mod equatable;",
+            &tokenizer,
+        )
+        .contains(&root.join("correctness/equatable.rs"))
+    );
+}
+
+fn resolution_only_access(source: &str, context_parameters: &regex::Regex) -> Option<String> {
+    let compact: String = source
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    let methods = [
+        "types",
+        "identities",
+        "signatures",
+        "library",
+        "globals",
+        "flow_writes",
+    ];
+    context_parameters
+        .captures_iter(source)
+        .flat_map(|parameter| methods.map(|method| format!("{}.{method}(", &parameter[1])))
+        .chain(methods.map(|method| format!("AnalyzeContext::{method}(")))
+        .chain(
+            ["SemanticState::new(", "SemanticModel::new("]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .find(|access| compact.contains(access))
+}
+
 #[test]
 fn file_rules_do_not_use_resolution_only_context() {
     use falcon_rules::meta::RuleKind;
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lint");
+    let tokenizer = regex::Regex::new(LINT_SOURCE_TOKENS).unwrap();
     let context_parameters = regex::Regex::new(
         r"\b([a-zA-Z_][a-zA-Z_0-9]*)\s*:\s*&\s*(?:'[a-zA-Z_][a-zA-Z_0-9]*\s*)?(?:mut\s+)?(?:falcon_analyze::)?AnalyzeContext\b",
     )
@@ -20,6 +239,19 @@ fn file_rules_do_not_use_resolution_only_context() {
     ] {
         assert_eq!(&context_parameters.captures(parameter).unwrap()[1], "ctx");
     }
+    for source in [
+        "AnalyzeContext::library(ctx)",
+        "falcon_analyze::AnalyzeContext::identities(ctx)",
+    ] {
+        assert!(resolution_only_access(source, &context_parameters).is_some());
+    }
+    assert!(
+        resolution_only_access(
+            "fn check(ctx: &AnalyzeContext) { sdk.library(uri) }",
+            &context_parameters,
+        )
+        .is_none()
+    );
     for metadata in RULE_METADATA {
         if !matches!(
             metadata.kind,
@@ -33,35 +265,21 @@ fn file_rules_do_not_use_resolution_only_context() {
         let path = root
             .join(metadata.group.as_str())
             .join(format!("{}.rs", metadata.name.replace('-', "_")));
-        let source = std::fs::read_to_string(&path).unwrap();
-        let compact: String = source
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect();
-        let accesses = context_parameters
-            .captures_iter(&source)
-            .flat_map(|parameter| {
-                [
-                    "types",
-                    "identities",
-                    "signatures",
-                    "library",
-                    "globals",
-                    "flow_writes",
-                ]
-                .map(|method| format!("{}.{method}(", &parameter[1]))
-            })
-            .chain(
-                ["SemanticState::new(", "SemanticModel::new("]
-                    .into_iter()
-                    .map(str::to_owned),
-            );
-        for access in accesses {
-            assert!(
-                !compact.contains(&access),
-                "{} uses {access} but is not declared resolved",
-                metadata.name
-            );
+        let mut pending = vec![path];
+        let mut visited = HashSet::new();
+        while let Some(path) = pending.pop() {
+            if !visited.insert(path.clone()) {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            pending.extend(lint_helper_dependencies(&root, &path, &source, &tokenizer));
+            if let Some(access) = resolution_only_access(&source, &context_parameters) {
+                panic!(
+                    "{} uses {access} in {} but is not declared resolved",
+                    metadata.name,
+                    path.display()
+                );
+            }
         }
     }
 }

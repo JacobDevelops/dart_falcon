@@ -18,7 +18,7 @@ pub struct PreferNamedParameters;
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Maximum number of positional parameters allowed before named parameters are preferred.
-    #[serde(deserialize_with = "crate::lint::options::integer")]
+    #[serde(deserialize_with = "falcon_config::integer")]
     max_number: usize,
 }
 

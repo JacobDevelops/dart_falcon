@@ -71,6 +71,39 @@ fn discovery_uses_the_canonical_loader_and_propagates_errors() {
 }
 
 #[test]
+fn max_errors_uses_shared_integer_validation_in_the_canonical_loader() {
+    let directory = directory();
+    let path = directory.join("falcon.json");
+    for key in ["max-errors", "max_errors"] {
+        fs::write(&path, format!(r#"{{"{key}": 1.0}}"#)).unwrap();
+        let loaded = load_config(&path).unwrap();
+        assert_eq!(loaded.config.max_errors, Some(1));
+        assert_eq!(loaded.warnings.len(), usize::from(key == "max_errors"));
+
+        fs::write(&path, format!(r#"{{"{key}": null}}"#)).unwrap();
+        assert_eq!(load_config(&path).unwrap().config.max_errors, None);
+
+        for input in ["-1", "1.5", "18446744073709551616", "1e100"] {
+            fs::write(&path, format!(r#"{{"{key}": {input}}}"#)).unwrap();
+            let error = load_config(&path).unwrap_err();
+            assert_eq!(
+                error.1,
+                vec![falcon_config::ConfigPathSegment::Key(key.to_owned())],
+            );
+            assert!(
+                error
+                    .0
+                    .contains(&format!("allowed range 1..={}", usize::MAX)),
+                "{key}: {input}: {error}",
+            );
+        }
+    }
+    fs::write(&path, "{}").unwrap();
+    assert_eq!(load_config(&path).unwrap().config.max_errors, None);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn known_rules_in_nonexistent_slots_are_errors_with_full_paths() {
     let directory = directory();
     let path = directory.join("falcon.json");

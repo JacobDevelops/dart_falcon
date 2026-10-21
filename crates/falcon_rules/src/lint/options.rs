@@ -87,39 +87,6 @@ fn option_error(path: &[ConfigPathSegment], error: &OptionError) -> ConfigError 
     )
 }
 
-/// Accept JSON Schema integers, including whole-number float representations.
-pub(crate) fn integer<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<usize, D::Error> {
-    use serde::de::Error;
-
-    let number = serde_json::Number::deserialize(deserializer)?;
-    let range_error = || {
-        D::Error::custom(format_args!(
-            "expected an integer in the allowed range 0..={}",
-            usize::MAX
-        ))
-    };
-    if let Some(value) = number.as_u64() {
-        return usize::try_from(value).map_err(|_| range_error());
-    }
-    let value = number.as_f64().ok_or_else(range_error)?;
-    // The exclusive bound avoids accepting 2^64 when usize::MAX rounds up as f64.
-    if value < 0.0 || value >= usize::MAX as f64 + 1.0 || value.fract() != 0.0 {
-        return Err(range_error());
-    }
-    Ok(value as usize)
-}
-
-pub(crate) fn optional_integer<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<usize>, D::Error> {
-    #[derive(Deserialize)]
-    struct Integer(#[serde(deserialize_with = "integer")] usize);
-
-    Option::<Integer>::deserialize(deserializer).map(|value| value.map(|integer| integer.0))
-}
-
 /// A regex compiled when its containing rule options are loaded.
 #[derive(Debug, Clone, JsonSchema)]
 #[schemars(with = "String")]

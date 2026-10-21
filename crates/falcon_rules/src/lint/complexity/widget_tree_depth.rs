@@ -21,7 +21,7 @@ use falcon_syntax::cst::{Expr, Program, Span};
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
     /// Maximum depth of nested widget construction allowed in a widget tree.
-    #[serde(deserialize_with = "crate::lint::options::integer")]
+    #[serde(deserialize_with = "falcon_config::integer")]
     max_nesting: usize,
 }
 

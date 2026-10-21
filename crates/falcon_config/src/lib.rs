@@ -41,8 +41,64 @@ pub struct FalconConfig {
     pub overrides: Vec<Override>,
     /// Maximum number of printed diagnostics. Defaults to None (unlimited).
     /// Accepts the legacy key `max_errors` as a deserialization alias.
-    #[serde(rename = "max-errors", alias = "max_errors")]
+    #[serde(
+        rename = "max-errors",
+        alias = "max_errors",
+        deserialize_with = "optional_integer::<_, 1>"
+    )]
     pub max_errors: Option<usize>,
+}
+
+/// Accept JSON Schema integers, including whole-number float representations.
+///
+/// # Errors
+///
+/// Rejects non-numbers, fractional values, and values outside the `usize` range.
+pub fn integer<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
+    integer_with_range_minimum::<D, 0>(deserializer)
+}
+
+fn integer_with_range_minimum<'de, D: Deserializer<'de>, const RANGE_MIN: usize>(
+    deserializer: D,
+) -> Result<usize, D::Error> {
+    use serde::de::Error;
+
+    let number = serde_json::Number::deserialize(deserializer)?;
+    let range_error = || {
+        D::Error::custom(format_args!(
+            "expected an integer in the allowed range {RANGE_MIN}..={}",
+            usize::MAX
+        ))
+    };
+    if let Some(value) = number.as_u64() {
+        return usize::try_from(value).map_err(|_| range_error());
+    }
+    let value = number.as_f64().ok_or_else(range_error)?;
+    // The exclusive bound avoids accepting 2^64 when usize::MAX rounds up as f64.
+    if value < 0.0 || value >= usize::MAX as f64 + 1.0 || value.fract() != 0.0 {
+        return Err(range_error());
+    }
+    Ok(value as usize)
+}
+
+/// Deserialize an optional JSON Schema integer, preserving null as `None`.
+///
+/// `RANGE_MIN` controls the diagnostic's lower bound; callers validate their
+/// minimum separately so they can provide context-specific errors for zero.
+///
+/// # Errors
+///
+/// Rejects non-null values that [`integer`] rejects.
+pub fn optional_integer<'de, D: Deserializer<'de>, const RANGE_MIN: usize>(
+    deserializer: D,
+) -> Result<Option<usize>, D::Error> {
+    #[derive(Deserialize)]
+    struct Integer<const RANGE_MIN: usize>(
+        #[serde(deserialize_with = "integer_with_range_minimum::<_, RANGE_MIN>")] usize,
+    );
+
+    Option::<Integer<RANGE_MIN>>::deserialize(deserializer)
+        .map(|value| value.map(|integer| integer.0))
 }
 
 /// One `overrides` entry: a path filter plus a partial linter that re-patches

@@ -167,6 +167,8 @@ With no config file, only falcon's recommended rules run, at warning severity.
 ## `max-errors`
 
 Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic. The cap never changes the exit code: all diagnostics count, including those not printed. The legacy config key `max_errors` still loads with a deprecation warning.
+Whole-number JSON values such as `1.0` are accepted; fractional and out-of-range
+values are rejected.
 
 ## Rule options
 
@@ -698,8 +700,8 @@ the editor, rather than paths as walked. User-level `~/.falcon.json` globs inste
 use the CLI current directory or LSP workspace root. Review filters when upgrading:
 `!build/**` now excludes the project's build directory with `falcon check .`,
 and `*` no longer spans directory separators. Replace `lib/*.dart` with
-`lib/**/*.dart` when nested files should match. `migrate` preserves glob text;
-it does not guess whether a single-level pattern was intended to be recursive.
+`lib/**/*.dart` when nested files should match. Existing `includes` glob text
+is preserved; legacy flat `exclude_patterns` use the conversion described below.
 
 ```sh
 # Rewrite legacy rule ids in place
@@ -714,7 +716,13 @@ translates these keys using the mapping below and each rule's declared group and
 section. Unmapped legacy rules or settings fail migration without writing,
 rather than discarding the old configuration.
 
-Severity overrides change the level without replacing rule options. Explicitly
+Legacy flat configurations enabled every rule unless explicitly disabled. The
+current schema has no all-rules preset, so migration keeps the recommended
+preset and explicitly listed rules, and warns how many unlisted rules no longer
+run. Enable desired rules explicitly under `linter.rules` or `cross-file.rules`.
+
+Severity overrides are case-insensitive; `warning` maps to `warn` and `note`
+maps to `info`. They change the level without replacing rule options. Explicitly
 disabled rules remain disabled, and their supported options are preserved.
 
 | Legacy                                             | New                                                            |
@@ -724,6 +732,11 @@ disabled rules remain disabled, and their supported options are preserved.
 | `"rules": { "x": { "options": { ... } } }`         | `"linter": { "rules": { "<group>": { "x": { "level": "warn", "options": { ... } } } } }` |
 | `"exclude_patterns": ["**/gen/**"]`                | `"files": { "includes": ["**", "!**/gen/**"] }`                |
 | `"max_errors": 100`                                | `"max-errors": 100`                                            |
+
+Legacy exclusions beginning with a single `*`, such as `*.g.dart`, become
+recursive exclusions such as `!**/*.g.dart`. Patterns whose old matching cannot
+be preserved, including a single `*` inside a path such as `lib/*.dart`, `?`,
+or character classes such as `[ab]`, fail migration without writing.
 
 The group for a rule is its category (`a11y`, `complexity`, `correctness`,
 `performance`, `security`, `style`, `suspicious`); see the declarations in

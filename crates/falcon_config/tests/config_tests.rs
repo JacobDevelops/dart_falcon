@@ -490,6 +490,50 @@ fn test_deserialize_config_rejects_max_errors_zero() {
 }
 
 #[test]
+fn test_deserialize_config_max_errors_json_schema_integers() {
+    let path = temp_file_path("max_errors_integers.json");
+    for key in ["max-errors", "max_errors"] {
+        for input in ["1", "1.0", "1e0"] {
+            fs::write(&path, format!(r#"{{"{key}": {input}}}"#)).unwrap();
+            assert_eq!(
+                deserialize_config(&path).unwrap().config.max_errors,
+                Some(1),
+                "{key}: {input}",
+            );
+        }
+        fs::write(&path, format!(r#"{{"{key}": {}}}"#, usize::MAX)).unwrap();
+        assert_eq!(
+            deserialize_config(&path).unwrap().config.max_errors,
+            Some(usize::MAX),
+        );
+        fs::write(&path, format!(r#"{{"{key}": null}}"#)).unwrap();
+        assert_eq!(deserialize_config(&path).unwrap().config.max_errors, None);
+
+        for input in ["-1", "1.5", "18446744073709551616", "1e100"] {
+            fs::write(&path, format!(r#"{{"{key}": {input}}}"#)).unwrap();
+            let error = deserialize_config(&path).unwrap_err();
+            assert_eq!(
+                error.1,
+                vec![falcon_config::ConfigPathSegment::Key(key.to_owned())],
+                "{key}: {input}",
+            );
+            assert!(
+                error
+                    .0
+                    .contains(&format!("allowed range 1..={}", usize::MAX)),
+                "{key}: {input}: {error}",
+            );
+        }
+        fs::write(&path, format!(r#"{{"{key}": 0.0}}"#)).unwrap();
+        let error = deserialize_config(&path).unwrap_err();
+        assert!(error.0.contains("must be at least 1"), "{error}");
+    }
+    fs::write(&path, "{}").unwrap();
+    assert_eq!(deserialize_config(&path).unwrap().config.max_errors, None);
+    cleanup(&path);
+}
+
+#[test]
 fn test_legacy_underscore_cross_file_alias_resolves_identically() {
     let legacy = from_json(serde_json::json!({
         "cross_file": { "rules": { "correctness": { "unused-files": "error" } } }
