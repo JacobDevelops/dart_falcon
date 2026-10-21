@@ -564,15 +564,7 @@ pub(crate) fn assert_project_fixture(rule_name: &'static str, rule: &dyn falcon_
         };
         let mut actual: Vec<usize> = diagnostics
             .iter()
-            .map(|diagnostic| {
-                assert_eq!(
-                    diagnostic.rule,
-                    rule_name,
-                    "diagnostic identity for {}",
-                    path.display()
-                );
-                line_of(diagnostic.span.start)
-            })
+            .map(|diagnostic| line_of(diagnostic.span.start))
             .collect();
         actual.sort_unstable();
         let expected: Vec<usize> = source

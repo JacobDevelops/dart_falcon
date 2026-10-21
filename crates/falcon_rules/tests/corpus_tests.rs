@@ -20,7 +20,9 @@ mod corpus;
 #[path = "support/inference.rs"]
 mod inference;
 mod support;
-use corpus::{Expectation, cross_file_project_roots, parse_expectations};
+use corpus::{
+    Expectation, contains_placeholder_marker, cross_file_project_roots, parse_expectations,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -37,10 +39,9 @@ use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
 use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
 use falcon_rules::{all_cross_file_rules, all_rules, rule_requires_resolution};
 
-/// Rules registered as deliberate stubs. A name here exempts the rule from the
-/// corpus-coverage invariants, and every entry must still have both a
-/// `Stub registration` source marker and a placeholder fixture, so the list
-/// cannot outlive the stub it excuses.
+/// Rules registered as deliberate stubs, exempt from the registration coverage
+/// check. Each entry must retain a `Stub registration` source marker and a
+/// placeholder fixture; executable cross-file projects still need expectations.
 const KNOWN_STUB_RULES: &[&str] = &[];
 
 fn corpus_dir() -> PathBuf {
@@ -152,17 +153,6 @@ fn is_intentional_clean_fixture(rule_dir: &Path, path: &Path, source: &str) -> b
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.starts_with("good") || name.starts_with("clean"))
         && parse_expectations(source).is_empty()
-}
-
-fn contains_placeholder_marker(source: &str) -> bool {
-    source.lines().any(|line| {
-        matches!(
-            line.trim(),
-            "// Placeholder fixture: filled in when the rule is implemented."
-                | "// Placeholder: compliant code, no annotations."
-                | "// Placeholder: violation examples with expect annotations will be added"
-        )
-    })
 }
 
 fn source_rule_name(path: &Path) -> Option<String> {
@@ -490,15 +480,7 @@ fn corpus_matches_expectations() {
             let mut diag_lines: Vec<usize> =
                 run_rule(registered_name, *rule, &file, &source, &config)
                     .into_iter()
-                    .map(|(name, line)| {
-                        assert_eq!(
-                            name,
-                            *registered_name,
-                            "diagnostic identity for {}",
-                            file.display()
-                        );
-                        line
-                    })
+                    .map(|(_, line)| line)
                     .collect();
 
             // Greedily match each expectation to an as-yet-unused diagnostic on the same line.
@@ -698,7 +680,6 @@ class Bar {
         1,
         "custom order should flag exactly Bar.run, got {diags:?}"
     );
-    assert_eq!(diags[0].rule, "class-members-ordering");
     assert!(
         diags[0].message.contains("configured order"),
         "order path should use the configured-order message: {}",
@@ -723,6 +704,7 @@ fn cross_file_corpus_matches_expectations() {
             rule_name
         );
         let config = corpus_config(&corpus.join(rule_name));
+        let mut rule_expectations = 0;
         let mut registry = CrossFileRuleRegistry::new();
         registry.register(rule_name, rule);
 
@@ -776,6 +758,7 @@ fn cross_file_corpus_matches_expectations() {
                     if exp.rule == rule_name {
                         total_expectations += 1;
                         expectations.push((path.to_string_lossy().into_owned(), exp.line));
+                        rule_expectations += 1;
                     }
                 }
             }
@@ -785,7 +768,6 @@ fn cross_file_corpus_matches_expectations() {
                 .expect("cross-file rules thread starts")
                 .into_iter()
                 .map(|d| {
-                    assert_eq!(d.rule, rule_name, "diagnostic identity for {}", d.file_path);
                     (
                         d.file_path.clone(),
                         byte_offset_to_line(
@@ -817,6 +799,10 @@ fn cross_file_corpus_matches_expectations() {
                 ));
             }
         }
+        assert!(
+            rule_expectations > 0,
+            "cross-file rule `{rule_name}` fixture has no expectations"
+        );
     }
 
     assert!(
@@ -965,15 +951,7 @@ fn resolver_dependent_per_file_project_corpus() {
             let mut diag_lines: Vec<usize> = rule
                 .analyze(rule_name, programs[i], &ctx)
                 .into_iter()
-                .map(|d| {
-                    assert_eq!(
-                        d.rule,
-                        *rule_name,
-                        "diagnostic identity for {}",
-                        source_paths[i].display()
-                    );
-                    byte_offset_to_line(&sources[i], d.span.start)
-                })
+                .map(|d| byte_offset_to_line(&sources[i], d.span.start))
                 .collect();
 
             let expectations: Vec<usize> = parse_expectations(&sources[i])

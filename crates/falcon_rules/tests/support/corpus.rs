@@ -36,6 +36,18 @@ pub fn parse_expectations(source: &str) -> Vec<Expectation> {
     expectations
 }
 
+#[cfg(test)]
+pub fn contains_placeholder_marker(source: &str) -> bool {
+    source.lines().any(|line| {
+        matches!(
+            line.trim(),
+            "// Placeholder fixture: filled in when the rule is implemented."
+                | "// Placeholder: compliant code, no annotations."
+                | "// Placeholder: violation examples with expect annotations will be added"
+        )
+    })
+}
+
 pub fn cross_file_project_roots(dir: &Path) -> Vec<PathBuf> {
     let mut projects: Vec<_> = fs::read_dir(dir)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))

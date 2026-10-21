@@ -26,6 +26,13 @@ corpus/
 - At minimum, each rule directory must contain `bad.dart` and `good.dart`
 - Additional variants (e.g., `bad_2.dart`, `good_2.dart`) are permitted for complex rules with multiple violation patterns
 - Coverage target (plan §5.7): ≥5 positive and ≥5 negative examples per rule; rules that emit at most one diagnostic per file (e.g., `max_lines_for_file`) approximate this with multiple fixture file variants
+- Codegen fixtures contain `// Placeholder…` markers. Replace all placeholders
+  with real cases; the in-process coverage test rejects these markers.
+- Cross-file rules also require `cross-file/` fixtures with at least one
+  expectation for that rule across the directory. Both corpus harnesses reject
+  expectation-free cross-file coverage. Use `bad*` and `good*` subproject
+  directories for positive and negative coverage; negative projects remain
+  annotation-free.
 
 ### Per-Rule Config (`config.json`)
 
@@ -165,8 +172,9 @@ The `cargo xtask validate-rules` harness processes corpus fixtures to verify tha
 
 For the bundled corpus, `validate-rules` and `docgen` pass the shared
 `tests/support/sdk` fixture SDK through subprocess `DART_SDK` for sources listed
-in `tests/support/sdk/fixtures.txt`, and run unlisted sources with `DART_SDK`,
-`FLUTTER_ROOT` and `PATH` removed so no installed SDK is discovered. The
+in `tests/support/sdk/fixtures.txt`, with `FLUTTER_ROOT` and `PATH` removed. They
+run unlisted sources with `DART_SDK`, `FLUTTER_ROOT` and `PATH` removed so no
+installed SDK is discovered. The
 in-process corpus tests consume that same fixture inventory and parse those same
 declaration-only Dart excerpts, not a separate semantic signature table, and also
 analyze unlisted fixtures without an SDK, so generated docs do not depend on the

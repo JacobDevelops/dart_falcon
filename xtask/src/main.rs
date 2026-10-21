@@ -76,10 +76,7 @@ fn main() {
                     name,
                     cross_file,
                 },
-        } => {
-            codegen::run(group, name, cross_file);
-            Ok(())
-        }
+        } => codegen::run(group, name, cross_file),
         Task::ValidateRules(options) => validate_rules::run(options),
         Task::PerfLock(options) => {
             perf_lock::run(options);
@@ -114,20 +111,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn codegen_rejects_invalid_ids_before_generating_files() {
-        for name in ["../avoid-foo", "avoid_foo", "AvoidFoo", "avoid--foo"] {
-            assert!(
-                Cli::try_parse_from([
-                    "xtask",
-                    "codegen",
-                    "rule",
-                    "--group",
-                    "correctness",
-                    "--name",
-                    name,
-                ])
-                .is_err()
-            );
-        }
+    fn codegen_cli_uses_rule_id_value_parser() {
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "codegen",
+                "rule",
+                "--group",
+                "correctness",
+                "--name",
+                "avoid_foo",
+            ])
+            .is_err()
+        );
     }
 }

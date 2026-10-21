@@ -117,8 +117,8 @@ empty rule descriptions and bad examples that produce no diagnostics.
    declaration entry and remaining steps.
 
 2. **Implement** the rule. Derive `Default` and implement `Rule` from
-   `falcon_analyze`, or implement `CrossFileRule::prepare_project` (or
-   `CrossFileRuleAnalysis::analyze_project`) for project-wide analysis.
+   `falcon_analyze`, or implement `CrossFileRule::prepare_project` for project-wide
+   analysis.
    File rules' required `prepare` hook selects exactly one analysis kind:
 
    - `RulePreparation::Structural`: syntax rules return an independent `StructuralRuleVisitor` collector. Wrap the complete trait implementation in `falcon_analyze::structural_visitor!` so callback subscriptions are derived from its methods, not maintained separately. All enabled collectors share the source-order structural walk. Inspect nodes in `visit_*` callbacks, restore scoped state in matching `exit_*` callbacks, and return diagnostics from consuming `finish`. Do not recurse from callbacks. `StructuralTraversal::SkipChildren` and `route_child` suppress callbacks only for that collector, never for other rules.
@@ -172,8 +172,8 @@ empty rule descriptions and bad examples that produce no diagnostics.
    cross-file rules).
 
    Compilation checks declarations and constructors. `meta_tests.rs` checks
-   metadata name uniqueness, source ids, and the committed schema; corpus tests
-   check diagnostic identities against fixture expectations.
+   metadata name uniqueness, source ids, and the committed schema. Diagnostic
+   identities come from the declarations and are stamped by the registries.
    `root_config_tests.rs` requires the root `falcon.json` to list every rule
    exactly once.
 

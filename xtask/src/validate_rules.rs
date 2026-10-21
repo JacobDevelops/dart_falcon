@@ -157,6 +157,13 @@ fn validate_cross_file_dir(
     }
 
     let mut failures = Vec::new();
+    if expectations.is_empty() {
+        failures.push(format!(
+            "ERROR {} — cross-file fixture for `{rule_name}` has no expectations",
+            cross_file_dir.display()
+        ));
+        return (0, 0, failures);
+    }
     let mut diags = Vec::new();
     for root in cross_file_project_roots(cross_file_dir) {
         // A failed invocation must not read as "the rule fired nowhere".
@@ -427,6 +434,25 @@ fn validate_rule_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cross_file_fixture_without_expectations_fails_before_running_falcon() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
+        let runner = FalconRunner {
+            binary: directory
+                .path()
+                .join("missing-falcon")
+                .to_string_lossy()
+                .into_owned(),
+            fallback_sdk: None,
+        };
+        let (expected, matched, failures) =
+            validate_cross_file_dir(directory.path(), "avoid-foo", &runner, None);
+        assert_eq!((expected, matched), (0, 0));
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("has no expectations"), "{failures:?}");
+    }
 
     #[test]
     fn unknown_rule_filter_fails_before_building_or_running_falcon() {
