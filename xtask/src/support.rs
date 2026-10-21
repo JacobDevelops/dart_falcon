@@ -110,6 +110,7 @@ impl FalconRunner {
             cmd.args(["--config", config_path.to_str().unwrap_or("")]);
         }
         if let Some((project, _)) = &staged {
+            cmd.env_remove("FLUTTER_ROOT").env_remove("PATH");
             cmd.env(
                 "DART_SDK",
                 project.path().join("flutter/bin/cache/dart-sdk"),
@@ -600,7 +601,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn unlisted_bundled_fixtures_run_without_ambient_sdk_discovery() {
+    fn bundled_fixtures_run_without_ambient_sdk_discovery() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let environment = directory.path().join("environment");
@@ -614,32 +615,40 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
-        let child_environment = |fallback_sdk: Option<PathBuf>| {
+        let child_environment = |fallback_sdk: Option<PathBuf>, file: &Path| {
             let runner = super::FalconRunner {
                 binary: binary.to_string_lossy().into_owned(),
                 fallback_sdk,
             };
-            assert!(
-                runner
-                    .run(&directory.path().join("clean.dart"), None)
-                    .unwrap()
-                    .is_empty()
-            );
+            assert!(runner.run(file, None).unwrap().is_empty());
             fs::read_to_string(&environment).unwrap()
         };
         let sdk_variables = ["DART_SDK=", "FLUTTER_ROOT=", "PATH="];
         // Custom corpora keep the caller's environment, so PATH proves inheritance works.
         assert!(
-            child_environment(None)
+            child_environment(None, &directory.path().join("clean.dart"))
                 .lines()
                 .any(|line| line.starts_with("PATH="))
         );
-        let isolated = child_environment(Some(directory.path().join("sdk")));
+        let isolated = child_environment(
+            Some(directory.path().join("sdk")),
+            &directory.path().join("clean.dart"),
+        );
         assert!(
             isolated.lines().all(|line| !sdk_variables
                 .iter()
                 .any(|variable| line.starts_with(variable))),
             "{isolated}"
+        );
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/falcon_rules/tests/corpus/avoid-dynamic-calls/bad.dart");
+        let staged = child_environment(Some(directory.path().join("sdk")), &fixture);
+        assert!(staged.lines().any(|line| line.starts_with("DART_SDK=")));
+        assert!(
+            staged
+                .lines()
+                .all(|line| !line.starts_with("FLUTTER_ROOT=") && !line.starts_with("PATH=")),
+            "{staged}"
         );
     }
 
