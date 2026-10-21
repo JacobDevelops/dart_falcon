@@ -703,6 +703,13 @@ fn plain_interpolation_still_lexes() {
 }
 
 #[test]
+fn deeply_nested_string_interpolations_do_not_use_the_call_stack() {
+    let source = format!("{}x{}", "'${".repeat(20_000), "}'".repeat(20_000));
+    assert_eq!(only_kind(&source), TokenKind::StringLit);
+    assert_no_errors(&source);
+}
+
+#[test]
 fn block_doc_ignore_lexes_as_single_doc_comment() {
     // A `/** falcon-ignore ... */` directive is now a DocComment token. This
     // documents the token-level fact the suppressions layer must guard against

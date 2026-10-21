@@ -313,9 +313,9 @@ impl<'src> Parser<'src> {
 
     /// Scan a balanced `<...>` starting at `start` (which must be `<`),
     /// returning the token index immediately *after* the closing `>` when the
-    /// span contains only type-ish tokens, or `None` when some token means the
-    /// `<` is really a comparison operator. Shared by generic-invocation and
-    /// generic-instantiation detection.
+    /// span contains only type-ish tokens (including type parameter bounds),
+    /// or `None` when some token means the `<` is really a comparison operator.
+    /// Shared by generic-invocation, instantiation, and statement lookahead.
     pub(super) fn after_generic_type_args(&self, start: usize) -> Option<usize> {
         use TokenKind::*;
         debug_assert_eq!(self.kind_at(start), Lt);
@@ -352,13 +352,13 @@ impl<'src> Parser<'src> {
                     Some(base) if base == depth => {}
                     _ => return None,
                 },
-                At if !bracket_stack.is_empty() => {
+                At => {
                     i = self.index_after_annotations(i);
                     continue;
                 }
                 // Tokens that legitimately appear inside a type-argument list
                 // (named/qualified types, records, function types, nullability).
-                Dot | Comma | Qmark | Void => {}
+                Dot | Comma | Qmark | Void | Extends => {}
                 k if k.is_identifier_like() => {}
                 // Anything else (operators, literals, `=>`, `:`, `;`, …) means
                 // this `<` is a comparison, not type arguments.

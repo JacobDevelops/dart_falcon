@@ -18,6 +18,12 @@ fn nullable_declaration_initializers_keep_their_expression_shapes() {
         "T? x = cond ? value as T? : other;",
         "T? x = cond ? f<T? Function()>() : other;",
         "bool? r = i < n ? xs[i] > 0 : false;",
+        "bool? r = i < n ? count > [0].length : null;",
+        "bool? r = i < n ? count > {0}.length : null;",
+        "bool? r = await < n ? count > [0].length : null;",
+        "T? x = <int?>[];",
+        "T? x = <String?, int>{};",
+        "T? x = <T extends Object?>(T x) => x;",
         "T? x = {'key': cond ? a : b};",
         "T? x = call(named: cond ? a : b);",
         "T? x = () { a ? b = 1 : c; };",
@@ -72,6 +78,11 @@ fn conditional_assignment_statements_are_not_nullable_declarations() {
         "a ? b = value as T? : c;",
         "a ? b = value as T? Function() : c;",
         "a ? b = f<T? Function()>() : c;",
+        "a ? b = <int?>[] : c = 1;",
+        "a ? b = <String?, int>{} : c = 1;",
+        "a ? b = <T extends Object?>(T x) => x : c = 1;",
+        "a ? b = !<int?>[].isEmpty : c = 1;",
+        "a ? b = <@x T extends Object?>(T x) => x : c = 1;",
         "a ? b = {'key': cond ? x : y} : c;",
         "a ? b = () { T? x; } : c;",
     ] {
@@ -92,6 +103,18 @@ fn conditional_assignment_statements_are_not_nullable_declarations() {
             "{source}"
         );
     }
+}
+
+#[test]
+fn awaited_typed_collection_keeps_the_conditional_statement() {
+    let source = "void f() async { a ? b = await <int?>[] : c = 1; }";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    assert!(parsed.tree.is_lossless(source));
+    assert!(matches!(
+        body_stmts(parsed.tree.program(source)).next(),
+        Some(Stmt::Expr(statement)) if matches!(statement.expr(), Expr::Conditional(_))
+    ));
 }
 
 #[test]

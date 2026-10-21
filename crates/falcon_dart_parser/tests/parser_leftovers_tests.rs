@@ -46,6 +46,24 @@ fn valid_multiline_interpolation_is_not_recovered_at_a_newline() {
 }
 
 #[test]
+fn nested_strings_allow_multiline_interpolations() {
+    let source = "void f() { return 'x ${[a].map((e) => '${\n    e.length\n  }').join()} y'; }";
+    let tokens = Lexer::new(source).tokenize();
+    assert!(tokens.iter().all(|token| token.kind != TokenKind::Error));
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    assert!(parsed.tree.is_lossless(source));
+    let interpolations: Vec<_> = parsed
+        .tree
+        .root(source)
+        .descendants()
+        .filter(|node| node.kind() == NodeKind::StringInterpolation)
+        .collect();
+    assert_eq!(interpolations.len(), 2);
+    assert_eq!(interpolations[1].text(), "${\n    e.length\n  }");
+}
+
+#[test]
 fn abandoned_member_parses_do_not_leak_diagnostics() {
     let source = "class C { method<T extends Object>(T value) {} }";
     let parsed = parse(source);

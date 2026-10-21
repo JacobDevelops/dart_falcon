@@ -627,9 +627,35 @@ impl<'src> Parser<'src> {
                     continue;
                 }
                 TokenKind::Lt => {
+                    let mut operand_end = i - 1;
+                    while operand_end > 0 && self.kind_at(operand_end) == TokenKind::Bang {
+                        operand_end -= 1;
+                    }
                     if let Some(after) = self.after_generic_type_args(i)
                         && (self.after_type_args_is_call(after)
-                            || self.token_ends_generic_instantiation(after))
+                            || self.token_ends_generic_instantiation(after)
+                            || (matches!(
+                                self.kind_at(after),
+                                TokenKind::LBracket | TokenKind::LBrace
+                            ) && !(self.kind_at(operand_end).is_identifier_like()
+                                && !(self.kind_at(operand_end) == TokenKind::Await
+                                    && self.ctx.body.is_async()))
+                                && !matches!(
+                                    self.kind_at(operand_end),
+                                    TokenKind::RParen
+                                        | TokenKind::RBracket
+                                        | TokenKind::RBrace
+                                        | TokenKind::IntLit
+                                        | TokenKind::DoubleLit
+                                        | TokenKind::StringLit
+                                        | TokenKind::True
+                                        | TokenKind::False
+                                        | TokenKind::Null
+                                        | TokenKind::This
+                                        | TokenKind::Super
+                                        | TokenKind::PlusPlus
+                                        | TokenKind::MinusMinus
+                                )))
                     {
                         i = after;
                         continue;
