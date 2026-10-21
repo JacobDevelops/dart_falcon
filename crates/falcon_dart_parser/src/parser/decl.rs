@@ -209,7 +209,7 @@ impl<'src> Parser<'src> {
             return (name, false);
         }
         if !representation && !self.version.supports(Feature::PrimaryConstructors) {
-            self.error("This requires the 'primary-constructors' language feature");
+            self.feature_error("This requires the 'primary-constructors' language feature");
         }
         let marker = self.start();
         if named {
@@ -319,7 +319,7 @@ impl<'src> Parser<'src> {
     fn parse_class_body_in(&mut self, ctor_name: Option<&'src str>) {
         if let Some(semicolon) = self.eat(TokenKind::Semicolon) {
             if !self.version.supports(Feature::PrimaryConstructors) {
-                self.error_at(
+                self.feature_error_at(
                     semicolon.offset(),
                     "This requires the 'primary-constructors' language feature",
                 );
@@ -448,7 +448,7 @@ impl<'src> Parser<'src> {
             )
         {
             if !self.version.supports(Feature::PrimaryConstructors) {
-                self.error("This requires the 'primary-constructors' language feature");
+                self.feature_error("This requires the 'primary-constructors' language feature");
             }
             self.advance();
             self.parse_constructor_initializers();
@@ -458,7 +458,7 @@ impl<'src> Parser<'src> {
         // Dart 3.13 generative constructor syntax: `new(...)`, `new name(...)`.
         if self.at(TokenKind::New) && self.ctx.ctor_name.is_some() {
             if !self.version.supports(Feature::PrimaryConstructors) {
-                self.error("This requires the 'primary-constructors' language feature");
+                self.feature_error("This requires the 'primary-constructors' language feature");
             }
             self.parse_new_constructor();
             return NodeKind::ConstructorDecl;
@@ -641,7 +641,7 @@ impl<'src> Parser<'src> {
                         self.parse_function_body(AsyncMarker::Sync);
                         return NodeKind::ConstructorDecl;
                     }
-                    self.restore_cursor(ctor_saved);
+                    self.restore(ctor_saved);
                 }
             }
             self.try_parse_type_followed_by(TokenKind::is_identifier_like);
@@ -678,7 +678,7 @@ impl<'src> Parser<'src> {
                 self.finish_field(name);
                 return NodeKind::FieldDecl;
             }
-            self.restore_cursor(saved);
+            self.restore(saved);
         }
 
         // Type parameters or an async/sync marker force an untyped method.
@@ -711,7 +711,7 @@ impl<'src> Parser<'src> {
                     return NodeKind::ConstructorDecl;
                 }
             }
-            self.restore_cursor(saved);
+            self.restore(saved);
         }
         // Give up — emit error node and skip to next member.
         let recovery = self.start();
@@ -897,15 +897,19 @@ impl<'src> Parser<'src> {
                 self.expect(TokenKind::Semicolon);
                 return;
             }
-            self.restore_cursor(saved);
+            self.restore(saved);
         }
         // Legacy form: `typedef [returnType] Name<T>(params);`
         let legacy_marker = self.start();
+        let return_type = self.checkpoint();
         self.parse_type();
-        if self.cur().kind.is_identifier_like() {
-            self.expect_ident();
-            self.parse_type_params();
+        if !self.cur().kind.is_identifier_like() {
+            // An omitted return type leaves the alias name itself looking like
+            // a type. Reparse it as a declaration name, not a phantom NamedType.
+            self.restore(return_type);
         }
+        self.expect_ident();
+        self.parse_type_params();
         self.parse_formal_param_list();
         legacy_marker.complete(self, NodeKind::LegacyTypedef);
         self.expect(TokenKind::Semicolon);

@@ -165,7 +165,7 @@ impl<'src> Lexer<'src> {
                     self.advance();
                 }
                 Some('$') if !raw => {
-                    if !self.lex_interpolation() {
+                    if !self.lex_interpolation(quote, triple) {
                         return self.make(TokenKind::Error, start);
                     }
                 }
@@ -187,13 +187,34 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_interpolation(&mut self) -> bool {
+    fn lex_interpolation(&mut self, quote: char, triple: bool) -> bool {
         self.advance();
         match self.cur() {
             Some('{') => {
                 let close = scan::interp_close(self.src.as_bytes(), self.pos, self.src.len());
-                self.pos = close.map_or(self.src.len(), |close| close + 1);
-                close.is_some()
+                if let Some(close) = close {
+                    self.pos = close + 1;
+                    return true;
+                }
+                // An unmatched interpolation must not consume subsequent declarations.
+                // Retry only the enclosing string boundary, not the interpolation grammar.
+                while let Some(c) = self.cur() {
+                    if !triple && matches!(c, '\n' | '\r') {
+                        break;
+                    }
+                    if c == quote
+                        && (!triple || (self.peek(1) == Some(quote) && self.peek(2) == Some(quote)))
+                    {
+                        self.advance();
+                        if triple {
+                            self.advance();
+                            self.advance();
+                        }
+                        break;
+                    }
+                    self.advance();
+                }
+                false
             }
             Some(c) if is_ident_start(c) => {
                 // `$` starts the next interpolation rather than continuing this name.

@@ -281,6 +281,114 @@ fn test_formal_param_named_required_and_source_order() {
 }
 
 #[test]
+fn parameter_kinds_share_one_encoding_across_typed_views() {
+    let cases: &[(&str, &[ParamKind])] = &[
+        (
+            "void f(int a, {required int b, int c = 1}) {}",
+            &[
+                ParamKind::Positional,
+                ParamKind::Named { required: true },
+                ParamKind::Named { required: false },
+            ],
+        ),
+        (
+            "void f([int a = 1, int b = 2]) {}",
+            &[ParamKind::OptionalPositional, ParamKind::OptionalPositional],
+        ),
+        (
+            "typedef F = void Function(int a, {required int b, int c});",
+            &[
+                ParamKind::Positional,
+                ParamKind::Named { required: true },
+                ParamKind::Named { required: false },
+            ],
+        ),
+        (
+            "typedef F = void Function([int a, int b]);",
+            &[ParamKind::OptionalPositional, ParamKind::OptionalPositional],
+        ),
+        (
+            "typedef void F(int a, {required int b, int c});",
+            &[
+                ParamKind::Positional,
+                ParamKind::Named { required: true },
+                ParamKind::Named { required: false },
+            ],
+        ),
+        (
+            "void f(void callback({required int inner}), {int outer = 1}) {}",
+            &[
+                ParamKind::Positional,
+                ParamKind::Named { required: true },
+                ParamKind::Named { required: false },
+            ],
+        ),
+    ];
+    for &(source, expected) in cases {
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
+        assert!(parsed.tree.is_lossless(source));
+        let params: Vec<_> = parsed
+            .tree
+            .root(source)
+            .descendants()
+            .filter_map(FunctionTypeParam::cast)
+            .collect();
+        assert_eq!(
+            params.iter().map(|param| param.kind()).collect::<Vec<_>>(),
+            expected
+        );
+        for param in params {
+            let kind = param.kind();
+            assert_eq!(param.is_named(), matches!(kind, ParamKind::Named { .. }));
+            assert_eq!(
+                param.is_required(),
+                matches!(
+                    kind,
+                    ParamKind::Positional | ParamKind::Named { required: true }
+                ),
+            );
+            if let Some(formal) = FormalParam::cast(param.syntax()) {
+                assert_eq!(formal.kind(), kind);
+            }
+            assert!(
+                param
+                    .syntax()
+                    .children()
+                    .all(|child| child.span().start < child.span().end)
+            );
+        }
+    }
+}
+
+#[test]
+fn recovered_parameter_keeps_its_explicit_group_kind() {
+    let source = "void f({required , int other}) {}";
+    let parsed = parse(source);
+    assert!(!parsed.errors.is_empty());
+    assert!(parsed.tree.is_lossless(source));
+    let params: Vec<_> = parsed
+        .tree
+        .root(source)
+        .descendants()
+        .filter_map(FormalParam::cast)
+        .collect();
+    assert_eq!(
+        params.iter().map(|param| param.kind()).collect::<Vec<_>>(),
+        [
+            ParamKind::Named { required: true },
+            ParamKind::Named { required: false }
+        ],
+    );
+    for param in params {
+        assert_eq!(
+            FunctionTypeParam::cast(param.syntax()).unwrap().kind(),
+            param.kind()
+        );
+    }
+}
+
+#[test]
 fn test_local_var_decl() {
     let src = "main() { int x = 42; }";
     let source = src;

@@ -79,6 +79,128 @@ fn record(src: &str) -> Recorder {
 }
 
 #[test]
+fn expression_kinds_cast_and_round_trip_without_losing_syntax() {
+    macro_rules! assert_expression_kinds {
+        ($($kind:ident => $variant:ident),* $(,)?) => {
+            $({
+                let source = "x";
+                let tree = SyntaxTree::build(source, &[], vec![
+                    Event::Start {
+                        kind: NodeKind::Program,
+                        forward_parent: None,
+                        offset: 0,
+                    },
+                    Event::Start {
+                        kind: NodeKind::$kind,
+                        forward_parent: None,
+                        offset: 0,
+                    },
+                    Event::Token {
+                        kind: falcon_syntax::TokenKind::Ident,
+                        len: source.len(),
+                        offset: 0,
+                    },
+                    Event::Finish,
+                    Event::Finish,
+                ]);
+                let syntax = tree.root(source).children().next().unwrap();
+                let expression = Expr::cast(syntax)
+                    .expect(concat!(stringify!($kind), " must cast to Expr"));
+                assert!(matches!(expression, Expr::$variant(_)));
+                assert_eq!(expression.syntax(), syntax);
+                assert_eq!(<Expr<'_> as AstNode<'_>>::syntax(expression), syntax);
+                assert_eq!(expression.span(), syntax.span());
+                assert_eq!(<Expr<'_> as AstNode<'_>>::span(expression), syntax.span());
+                assert!(Expr::cast(tree.root(source)).is_none());
+            })*
+        };
+    }
+
+    // Keep this independent of expression_enum!: losing a kind's typed cast
+    // must fail here rather than silently filtering an expression out of a walk.
+    assert_expression_kinds! {
+        IntLitExpr => IntLit,
+        DoubleLitExpr => DoubleLit,
+        StringLitNode => StringLit,
+        AdjacentStrings => StringLit,
+        BoolLitExpr => BoolLit,
+        NullLitExpr => NullLit,
+        Identifier => Ident,
+        ParenExpr => Paren,
+        ThisExpr => This,
+        SuperExpr => Super,
+        UnaryExpr => Unary,
+        PostfixIncDecExpr => PostfixIncDec,
+        BinaryExpr => Binary,
+        AssignExpr => Assign,
+        ConditionalExpr => Conditional,
+        IsExpr => Is,
+        AsExpr => As,
+        FieldExpr => Field,
+        IndexExpr => Index,
+        CallExpr => Call,
+        CascadeExpr => Cascade,
+        ListExpr => List,
+        MapExpr => Map,
+        SetExpr => Set,
+        RecordExpr => Record,
+        FuncExpr => FuncExpr,
+        NewExpr => New,
+        DotShorthandExpr => DotShorthand,
+        AwaitExpr => Await,
+        ThrowExpr => Throw,
+        SwitchExpr => Switch,
+        NullAssertExpr => NullAssert,
+        SymbolLitExpr => SymbolLit,
+        GenericInstantiationExpr => GenericInstantiation,
+        ErrorExpr => Error,
+    }
+}
+
+#[test]
+fn expression_mapping_preserves_recovery_view_spans() {
+    let source = ";";
+    let tokens = [
+        falcon_syntax::Token::new(falcon_syntax::TokenKind::Semicolon, 0, 1),
+        falcon_syntax::Token::new(falcon_syntax::TokenKind::Eof, 1, 0),
+    ];
+    for kind in [
+        NodeKind::Identifier,
+        NodeKind::StringLitNode,
+        NodeKind::ErrorExpr,
+    ] {
+        let tree = SyntaxTree::build(
+            source,
+            &tokens,
+            vec![
+                Event::Start {
+                    kind: NodeKind::Program,
+                    forward_parent: None,
+                    offset: 0,
+                },
+                Event::Start {
+                    kind,
+                    forward_parent: None,
+                    offset: 0,
+                },
+                Event::RecoverySpan(Span::new(0, 1)),
+                Event::Finish,
+                Event::Finish,
+            ],
+        );
+        let syntax = tree.root(source).children().next().unwrap();
+        assert_eq!(syntax.span(), Span::new(0, 0));
+        let expression = Expr::cast(syntax).unwrap();
+        assert_eq!(expression.syntax(), syntax);
+        assert_eq!(expression.span(), Span::new(0, 1));
+        assert_eq!(
+            <Expr<'_> as AstNode<'_>>::span(expression),
+            expression.span()
+        );
+    }
+}
+
+#[test]
 fn walks_function_type_parameter_annotations() {
     let r = record("typedef F = void Function(@sentinel(713) int value);");
     assert_eq!(r.annotations, 1);

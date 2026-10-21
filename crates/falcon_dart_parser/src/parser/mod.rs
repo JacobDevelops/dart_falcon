@@ -54,6 +54,7 @@ pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>)
         );
         ParseResult {
             errors: vec![ParseError {
+                kind: ParseErrorKind::Syntax,
                 message: format!("could not start parser thread: {error}"),
                 offset: 0,
             }],
@@ -114,8 +115,15 @@ fn parse_inner(source: &str, version: LanguageVersion) -> ParseResult {
     ParseResult { errors, tree }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseErrorKind {
+    Syntax,
+    FeatureGate,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParseError {
+    pub kind: ParseErrorKind,
     pub message: String,
     pub offset: usize,
 }
@@ -124,7 +132,7 @@ pub struct ParseError {
 pub(super) struct Ctx<'src> {
     pub(super) suppress_conditional_qmark: bool,
     pub(super) pattern_binding: bool,
-    /// Bracketed sub-parses clear this latch; body-marker scopes must not restore it.
+    /// Bracketed sub-parses temporarily clear this latch.
     pub(super) in_ctor_init_value: bool,
     /// The enclosing switch guard's top-level arrow is an arm separator, not a lambda.
     pub(super) switch_guard_arrow: Option<usize>,
@@ -155,6 +163,7 @@ pub(super) struct Checkpoint {
     interpolation_tokens: usize,
     split: Option<Token>,
     split_count: usize,
+    in_ctor_init_value: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -286,6 +295,8 @@ pub(super) struct Parser<'src> {
     forward_parents: Vec<(usize, Option<usize>)>,
     interpolation_tokens: Vec<(Span, Vec<Token>)>,
     pub(super) tokens: SignificantTokens<'src>,
+    /// Lazily paired significant-token brackets for initializer-free statement lookahead.
+    pub(super) statement_delimiters: Option<Vec<u32>>,
     pub(super) pos: usize,
     pub(super) src: &'src str,
     /// The language version the source is parsed at; gates grammar that
@@ -339,6 +350,7 @@ impl<'src> Parser<'src> {
             forward_parents: Vec::new(),
             interpolation_tokens: Vec::new(),
             tokens: SignificantTokens::new(tokens),
+            statement_delimiters: None,
             pos: 0,
             src,
             version,
@@ -414,6 +426,7 @@ impl<'src> Parser<'src> {
             interpolation_tokens: self.interpolation_tokens.len(),
             split: self.split,
             split_count: self.split_count,
+            in_ctor_init_value: self.ctx.in_ctor_init_value,
         }
     }
 
@@ -438,6 +451,7 @@ impl<'src> Parser<'src> {
             .truncate(checkpoint.interpolation_tokens);
         self.split = checkpoint.split;
         self.split_count = checkpoint.split_count;
+        self.ctx.in_ctor_init_value = checkpoint.in_ctor_init_value;
     }
 
     #[inline]
@@ -568,6 +582,19 @@ impl<'src> Parser<'src> {
     /// Report a diagnostic at a retained token or node span after consuming it.
     pub(super) fn error_at(&mut self, offset: usize, msg: impl Into<String>) {
         self.errors.push(ParseError {
+            kind: ParseErrorKind::Syntax,
+            message: msg.into(),
+            offset,
+        });
+    }
+
+    pub(super) fn feature_error(&mut self, msg: impl Into<String>) {
+        self.feature_error_at(self.cur().offset(), msg);
+    }
+
+    pub(super) fn feature_error_at(&mut self, offset: usize, msg: impl Into<String>) {
+        self.errors.push(ParseError {
+            kind: ParseErrorKind::FeatureGate,
             message: msg.into(),
             offset,
         });
@@ -724,10 +751,15 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_arg_list(&mut self) -> CompletedMarker {
+        self.with_ctx(
+            |ctx| ctx.in_ctor_init_value = false,
+            Self::parse_arg_list_inner,
+        )
+    }
+
+    fn parse_arg_list_inner(&mut self) -> CompletedMarker {
         let marker = self.start();
         self.expect(TokenKind::LParen);
-        // Inside an argument list a trailing `{` never opens the constructor body.
-        self.ctx.in_ctor_init_value = false;
 
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Comma) {
@@ -1258,5 +1290,22 @@ mod tests {
         parser.restore(checkpoint);
         assert!(parser.errors.is_empty());
         assert!(!parser.depth_limit_hit);
+    }
+
+    #[test]
+    fn checkpoint_restores_constructor_initializer_latch() {
+        let source = "(value) {}";
+        let tokens = Lexer::new(source).tokenize();
+        let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
+        parser.ctx.in_ctor_init_value = true;
+        let checkpoint = parser.checkpoint();
+        parser.parse_expr();
+        assert!(parser.ctx.in_ctor_init_value);
+        parser.ctx.in_ctor_init_value = false;
+        parser.restore_cursor(checkpoint);
+        assert!(parser.ctx.in_ctor_init_value);
+        parser.parse_expr();
+        assert_eq!(parser.cur().kind, TokenKind::LBrace);
+        assert!(parser.errors.is_empty(), "{:?}", parser.errors);
     }
 }

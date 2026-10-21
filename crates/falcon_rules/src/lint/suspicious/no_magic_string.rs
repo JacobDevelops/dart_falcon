@@ -56,7 +56,7 @@ impl Collector<'_> {
         while let Some(parent) = child.parent() {
             match parent.kind() {
                 NodeKind::Annotation
-                | NodeKind::FormalParam
+                | NodeKind::FormalParam(_)
                 | NodeKind::AssertStmt
                 | NodeKind::AssertInitializer
                 | NodeKind::EnumVariant

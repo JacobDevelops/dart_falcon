@@ -20,185 +20,224 @@ fn collection_condition(node: SyntaxNode<'_>) -> IfCondition<'_> {
         .required()
 }
 
-#[derive(Clone, Copy)]
-pub enum Expr<'a> {
-    IntLit(IntLitExpr<'a>),
-    DoubleLit(DoubleLitExpr<'a>),
-    StringLit(StringLitNode<'a>),
-    BoolLit(BoolLitExpr<'a>),
-    NullLit(NullLitExpr<'a>),
-    Ident(Identifier<'a>),
-    Paren(ParenExpr<'a>),
-    This(ThisExpr<'a>),
-    Super(SuperExpr<'a>),
-    Unary(UnaryExpr<'a>),
-    PostfixIncDec(PostfixIncDecExpr<'a>),
-    Binary(BinaryExpr<'a>),
-    Assign(AssignExpr<'a>),
-    Conditional(ConditionalExpr<'a>),
-    Is(IsExpr<'a>),
-    As(AsExpr<'a>),
-    Field(FieldExpr<'a>),
-    Index(IndexExpr<'a>),
-    Call(CallExpr<'a>),
-    Cascade(CascadeExpr<'a>),
-    List(ListExpr<'a>),
-    Map(MapExpr<'a>),
-    Set(SetExpr<'a>),
-    Record(RecordExpr<'a>),
-    FuncExpr(FuncExpr<'a>),
-    New(NewExpr<'a>),
-    DotShorthand(DotShorthandExpr<'a>),
-    Await(AwaitExpr<'a>),
-    Throw(ThrowExpr<'a>),
-    Switch(SwitchExpr<'a>),
-    NullAssert(NullAssertExpr<'a>),
-    SymbolLit(SymbolLitExpr<'a>),
-    GenericInstantiation(GenericInstantiationExpr<'a>),
-    Error(ErrorExpr<'a>),
-}
-impl<'a> AstNode<'a> for Expr<'a> {
-    fn cast(node: SyntaxNode<'a>) -> Option<Self> {
-        match node.kind() {
-            NodeKind::IntLitExpr => Some(Self::IntLit(IntLitExpr(node))),
-            NodeKind::DoubleLitExpr => Some(Self::DoubleLit(DoubleLitExpr(node))),
-            NodeKind::StringLitNode | NodeKind::AdjacentStrings => {
-                Some(Self::StringLit(StringLitNode(node)))
+// One variant list defines the enum, casts, syntax mapping, spans, and debug
+// dispatch. Expr also classifies every nonexpression kind explicitly: adding a
+// NodeKind must never silently remove an expression from typed child iterators.
+macro_rules! expression_enum {
+    ($name:ident { $($variant:ident($view:ident => $($kind:ident)|+)),* }
+        tuples { $($tuple:ident),* } non_expressions { $($other:pat_param)|+ }) => {
+        expression_enum!(@define $name { $($variant($view)),* } tuples { $($tuple),* }
+            cast |node| {
+                match node.kind() {
+                    $($(NodeKind::$kind)|+ => $view::cast(node).map(Self::$variant),)*
+                    $($other)|+ => None,
+                }
             }
-            NodeKind::BoolLitExpr => Some(Self::BoolLit(BoolLitExpr(node))),
-            NodeKind::NullLitExpr => Some(Self::NullLit(NullLitExpr(node))),
-            NodeKind::Identifier => Some(Self::Ident(Identifier::from_node(node)?)),
-            NodeKind::ParenExpr => Some(Self::Paren(ParenExpr(node))),
-            NodeKind::ThisExpr => Some(Self::This(ThisExpr(node))),
-            NodeKind::SuperExpr => Some(Self::Super(SuperExpr(node))),
-            NodeKind::UnaryExpr => Some(Self::Unary(UnaryExpr(node))),
-            NodeKind::PostfixIncDecExpr => Some(Self::PostfixIncDec(PostfixIncDecExpr(node))),
-            NodeKind::BinaryExpr => Some(Self::Binary(BinaryExpr(node))),
-            NodeKind::AssignExpr => Some(Self::Assign(AssignExpr(node))),
-            NodeKind::ConditionalExpr => Some(Self::Conditional(ConditionalExpr(node))),
-            NodeKind::IsExpr => Some(Self::Is(IsExpr(node))),
-            NodeKind::AsExpr => Some(Self::As(AsExpr(node))),
-            NodeKind::FieldExpr => Some(Self::Field(FieldExpr(node))),
-            NodeKind::IndexExpr => Some(Self::Index(IndexExpr(node))),
-            NodeKind::CallExpr => Some(Self::Call(CallExpr(node))),
-            NodeKind::CascadeExpr => Some(Self::Cascade(CascadeExpr(node))),
-            NodeKind::ListExpr => Some(Self::List(ListExpr(node))),
-            NodeKind::MapExpr => Some(Self::Map(MapExpr(node))),
-            NodeKind::SetExpr => Some(Self::Set(SetExpr(node))),
-            NodeKind::RecordExpr => Some(Self::Record(RecordExpr(node))),
-            NodeKind::FuncExpr => Some(Self::FuncExpr(FuncExpr(node))),
-            NodeKind::NewExpr => Some(Self::New(NewExpr(node))),
-            NodeKind::DotShorthandExpr => Some(Self::DotShorthand(DotShorthandExpr(node))),
-            NodeKind::AwaitExpr => Some(Self::Await(AwaitExpr(node))),
-            NodeKind::ThrowExpr => Some(Self::Throw(ThrowExpr(node))),
-            NodeKind::SwitchExpr => Some(Self::Switch(SwitchExpr(node))),
-            NodeKind::NullAssertExpr => Some(Self::NullAssert(NullAssertExpr(node))),
-            NodeKind::SymbolLitExpr => Some(Self::SymbolLit(SymbolLitExpr(node))),
-            NodeKind::GenericInstantiationExpr => {
-                Some(Self::GenericInstantiation(GenericInstantiationExpr(node)))
+        );
+    };
+    ($name:ident { $($variant:ident($view:ident)),* } tuples { $($tuple:ident),* }) => {
+        expression_enum!(@define $name { $($variant($view)),* } tuples { $($tuple),* }
+            cast |node| {
+                $(if let Some(view) = $view::cast(node) { return Some(Self::$variant(view)); })*
+                None
             }
-            NodeKind::ErrorExpr => Some(Self::Error(ErrorExpr(node))),
-            _ => None,
+        );
+    };
+    (@define $name:ident { $($variant:ident($view:ident)),* } tuples { $($tuple:ident),* }
+        cast |$node:ident| $cast:block) => {
+        #[derive(Clone, Copy)]
+        pub enum $name<'a> { $($variant($view<'a>)),* }
+        impl<'a> AstNode<'a> for $name<'a> {
+            fn cast($node: SyntaxNode<'a>) -> Option<Self> { $cast }
+            fn syntax(self) -> SyntaxNode<'a> { match self { $(Self::$variant(view) => view.syntax()),* } }
+            fn span(self) -> Span { self.span() }
         }
-    }
-    fn syntax(self) -> SyntaxNode<'a> {
-        match self {
-            Self::IntLit(node) => node.syntax(),
-            Self::DoubleLit(node) => node.syntax(),
-            Self::StringLit(node) => node.syntax(),
-            Self::BoolLit(node) => node.syntax(),
-            Self::NullLit(node) => node.syntax(),
-            Self::Ident(node) => node.syntax(),
-            Self::Paren(node) => node.syntax(),
-            Self::This(node) => node.syntax(),
-            Self::Super(node) => node.syntax(),
-            Self::Unary(node) => node.syntax(),
-            Self::PostfixIncDec(node) => node.syntax(),
-            Self::Binary(node) => node.syntax(),
-            Self::Assign(node) => node.syntax(),
-            Self::Conditional(node) => node.syntax(),
-            Self::Is(node) => node.syntax(),
-            Self::As(node) => node.syntax(),
-            Self::Field(node) => node.syntax(),
-            Self::Index(node) => node.syntax(),
-            Self::Call(node) => node.syntax(),
-            Self::Cascade(node) => node.syntax(),
-            Self::List(node) => node.syntax(),
-            Self::Map(node) => node.syntax(),
-            Self::Set(node) => node.syntax(),
-            Self::Record(node) => node.syntax(),
-            Self::FuncExpr(node) => node.syntax(),
-            Self::New(node) => node.syntax(),
-            Self::DotShorthand(node) => node.syntax(),
-            Self::Await(node) => node.syntax(),
-            Self::Throw(node) => node.syntax(),
-            Self::Switch(node) => node.syntax(),
-            Self::NullAssert(node) => node.syntax(),
-            Self::SymbolLit(node) => node.syntax(),
-            Self::GenericInstantiation(node) => node.syntax(),
-            Self::Error(node) => node.syntax(),
+        impl<'a> $name<'a> {
+            pub fn cast(node: SyntaxNode<'a>) -> Option<Self> { <Self as AstNode>::cast(node) }
+            pub fn syntax(self) -> SyntaxNode<'a> { <Self as AstNode>::syntax(self) }
+            pub fn span(self) -> Span { match self { $(Self::$variant(view) => view.span()),* } }
         }
-    }
-    fn span(self) -> Span {
-        self.span()
-    }
+        impl fmt::Debug for $name<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                $(if let Self::$tuple(view) = self {
+                    return f.debug_tuple(stringify!($tuple)).field(view).finish();
+                })*
+                match self { $(Self::$variant(view) => fmt::Debug::fmt(view, f)),* }
+            }
+        }
+    };
 }
-impl<'a> Expr<'a> {
-    pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
-        <Self as AstNode>::cast(node)
-    }
-    pub fn syntax(self) -> SyntaxNode<'a> {
-        <Self as AstNode>::syntax(self)
-    }
-    pub fn span(self) -> Span {
-        match self {
-            Self::Ident(node) => node.span(),
-            Self::Error(node) => node.span(),
-            Self::StringLit(node) => node.span(),
-            _ => self.syntax().span(),
-        }
-    }
-}
-impl fmt::Debug for Expr<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IntLit(node) => fmt::Debug::fmt(node, f),
-            Self::DoubleLit(node) => fmt::Debug::fmt(node, f),
-            Self::StringLit(node) => f.debug_tuple("StringLit").field(node).finish(),
-            Self::BoolLit(node) => fmt::Debug::fmt(node, f),
-            Self::NullLit(node) => fmt::Debug::fmt(node, f),
-            Self::Ident(node) => f.debug_tuple("Ident").field(node).finish(),
-            Self::Paren(node) => fmt::Debug::fmt(node, f),
-            Self::This(node) => fmt::Debug::fmt(node, f),
-            Self::Super(node) => fmt::Debug::fmt(node, f),
-            Self::Unary(node) => fmt::Debug::fmt(node, f),
-            Self::PostfixIncDec(node) => fmt::Debug::fmt(node, f),
-            Self::Binary(node) => fmt::Debug::fmt(node, f),
-            Self::Assign(node) => fmt::Debug::fmt(node, f),
-            Self::Conditional(node) => fmt::Debug::fmt(node, f),
-            Self::Is(node) => fmt::Debug::fmt(node, f),
-            Self::As(node) => fmt::Debug::fmt(node, f),
-            Self::Field(node) => fmt::Debug::fmt(node, f),
-            Self::Index(node) => fmt::Debug::fmt(node, f),
-            Self::Call(node) => fmt::Debug::fmt(node, f),
-            Self::Cascade(node) => fmt::Debug::fmt(node, f),
-            Self::List(node) => fmt::Debug::fmt(node, f),
-            Self::Map(node) => fmt::Debug::fmt(node, f),
-            Self::Set(node) => fmt::Debug::fmt(node, f),
-            Self::Record(node) => fmt::Debug::fmt(node, f),
-            Self::FuncExpr(node) => fmt::Debug::fmt(node, f),
-            Self::New(node) => fmt::Debug::fmt(node, f),
-            Self::DotShorthand(node) => fmt::Debug::fmt(node, f),
-            Self::Await(node) => fmt::Debug::fmt(node, f),
-            Self::Throw(node) => fmt::Debug::fmt(node, f),
-            Self::Switch(node) => fmt::Debug::fmt(node, f),
-            Self::NullAssert(node) => fmt::Debug::fmt(node, f),
-            Self::SymbolLit(node) => fmt::Debug::fmt(node, f),
-            Self::GenericInstantiation(node) => fmt::Debug::fmt(node, f),
-            Self::Error(node) => fmt::Debug::fmt(node, f),
-        }
-    }
-}
+
+expression_enum!(Expr {
+    IntLit(IntLitExpr => IntLitExpr),
+    DoubleLit(DoubleLitExpr => DoubleLitExpr),
+    StringLit(StringLitNode => StringLitNode | AdjacentStrings),
+    BoolLit(BoolLitExpr => BoolLitExpr),
+    NullLit(NullLitExpr => NullLitExpr),
+    Ident(Identifier => Identifier),
+    Paren(ParenExpr => ParenExpr),
+    This(ThisExpr => ThisExpr),
+    Super(SuperExpr => SuperExpr),
+    Unary(UnaryExpr => UnaryExpr),
+    PostfixIncDec(PostfixIncDecExpr => PostfixIncDecExpr),
+    Binary(BinaryExpr => BinaryExpr),
+    Assign(AssignExpr => AssignExpr),
+    Conditional(ConditionalExpr => ConditionalExpr),
+    Is(IsExpr => IsExpr),
+    As(AsExpr => AsExpr),
+    Field(FieldExpr => FieldExpr),
+    Index(IndexExpr => IndexExpr),
+    Call(CallExpr => CallExpr),
+    Cascade(CascadeExpr => CascadeExpr),
+    List(ListExpr => ListExpr),
+    Map(MapExpr => MapExpr),
+    Set(SetExpr => SetExpr),
+    Record(RecordExpr => RecordExpr),
+    FuncExpr(FuncExpr => FuncExpr),
+    New(NewExpr => NewExpr),
+    DotShorthand(DotShorthandExpr => DotShorthandExpr),
+    Await(AwaitExpr => AwaitExpr),
+    Throw(ThrowExpr => ThrowExpr),
+    Switch(SwitchExpr => SwitchExpr),
+    NullAssert(NullAssertExpr => NullAssertExpr),
+    SymbolLit(SymbolLitExpr => SymbolLitExpr),
+    GenericInstantiation(GenericInstantiationExpr => GenericInstantiationExpr),
+    Error(ErrorExpr => ErrorExpr)
+} tuples { StringLit, Ident } non_expressions {
+    NodeKind::Program
+    | NodeKind::LibraryDirective
+    | NodeKind::PartOfDirective
+    | NodeKind::PartDirective
+    | NodeKind::ImportDirective
+    | NodeKind::ExportDirective
+    | NodeKind::ConfigurableUri
+    | NodeKind::Combinator
+    | NodeKind::ClassDecl
+    | NodeKind::PrimaryConstructor
+    | NodeKind::PrimaryConstructorBody
+    | NodeKind::ClassTypeAliasDecl
+    | NodeKind::FieldDecl
+    | NodeKind::VarDeclarator
+    | NodeKind::ConstructorDecl
+    | NodeKind::RedirectedConstructor
+    | NodeKind::SuperCallInitializer
+    | NodeKind::ThisCallInitializer
+    | NodeKind::FieldInitializer
+    | NodeKind::AssertInitializer
+    | NodeKind::MethodDecl
+    | NodeKind::GetterDecl
+    | NodeKind::SetterDecl
+    | NodeKind::OperatorDecl
+    | NodeKind::MixinDecl
+    | NodeKind::MixinClassDecl
+    | NodeKind::EnumDecl
+    | NodeKind::EnumVariant
+    | NodeKind::ExtensionDecl
+    | NodeKind::ExtensionTypeDecl
+    | NodeKind::FunctionDecl
+    | NodeKind::TopLevelVarDecl
+    | NodeKind::TypeAliasDecl
+    | NodeKind::FormalParamList
+    | NodeKind::FormalParam(_)
+    | NodeKind::ArrowBody
+    | NodeKind::NativeBody
+    | NodeKind::Annotation
+    | NodeKind::ExtendsClause
+    | NodeKind::WithClause
+    | NodeKind::ImplementsClause
+    | NodeKind::OnClause
+    | NodeKind::SetterParameter
+    | NodeKind::LegacyTypedef
+    | NodeKind::NamedType
+    | NodeKind::FunctionType
+    | NodeKind::FunctionTypeParam(_)
+    | NodeKind::RecordType
+    | NodeKind::NamedRecordField
+    | NodeKind::TypeParam
+    | NodeKind::VoidType
+    | NodeKind::DynamicType
+    | NodeKind::TypeArgs
+    | NodeKind::Block
+    | NodeKind::IfStmt
+    | NodeKind::CaseCondition
+    | NodeKind::ForStmt
+    | NodeKind::ForHeader
+    | NodeKind::ForInInit
+    | NodeKind::PatternForInInit
+    | NodeKind::ForExprsInit
+    | NodeKind::WhileStmt
+    | NodeKind::DoWhileStmt
+    | NodeKind::SwitchStmt
+    | NodeKind::SwitchCase
+    | NodeKind::CasePatternLabel
+    | NodeKind::CaseExprLabel
+    | NodeKind::DefaultLabel
+    | NodeKind::TryCatchStmt
+    | NodeKind::CatchClause
+    | NodeKind::ReturnStmt
+    | NodeKind::ThrowStmt
+    | NodeKind::RethrowStmt
+    | NodeKind::EmptyStmt
+    | NodeKind::BreakStmt
+    | NodeKind::ContinueStmt
+    | NodeKind::LocalVarDecl
+    | NodeKind::PatternDeclaration
+    | NodeKind::PatternAssignStmt
+    | NodeKind::LabeledStmt
+    | NodeKind::LocalFuncDecl
+    | NodeKind::AssertStmt
+    | NodeKind::YieldStmt
+    | NodeKind::ExprStmt
+    | NodeKind::ErrorNode
+    | NodeKind::ForCondition
+    | NodeKind::ForUpdates
+    | NodeKind::AwaitFor
+    | NodeKind::StringInterpolation
+    | NodeKind::CascadeSection
+    | NodeKind::CascadeField
+    | NodeKind::CascadeIndex
+    | NodeKind::CascadeNullAssert
+    | NodeKind::CascadeCall
+    | NodeKind::CascadeInvoke
+    | NodeKind::CascadeAssign
+    | NodeKind::CascadeIndexAssign
+    | NodeKind::NullAwareElement
+    | NodeKind::SpreadElement
+    | NodeKind::IfElement
+    | NodeKind::ForElement
+    | NodeKind::MapEntry
+    | NodeKind::MapSpreadElement
+    | NodeKind::MapIfElement
+    | NodeKind::MapForElement
+    | NodeKind::RecordField
+    | NodeKind::ArgList
+    | NodeKind::NamedArg
+    | NodeKind::SwitchExprArm
+    | NodeKind::ExprCondition
+    | NodeKind::ExprGuard
+    | NodeKind::WildcardPattern
+    | NodeKind::VariablePattern
+    | NodeKind::LiteralPattern
+    | NodeKind::ConstPattern
+    | NodeKind::ListPattern
+    | NodeKind::RecordPattern
+    | NodeKind::MapPattern
+    | NodeKind::ObjectPattern
+    | NodeKind::LogicalAndPattern
+    | NodeKind::LogicalOrPattern
+    | NodeKind::RelationalPattern
+    | NodeKind::CastPattern
+    | NodeKind::NullCheckPattern
+    | NodeKind::NullAssertPattern
+    | NodeKind::ParenPattern
+    | NodeKind::ErrorPattern
+    | NodeKind::RestPattern
+    | NodeKind::RecordPatternField
+    | NodeKind::MapPatternEntry
+    | NodeKind::ObjectPatternField
+    | NodeKind::ConstPatternExpr
+    | NodeKind::Error
+});
 
 impl<'a> Expr<'a> {
     pub fn unparenthesized(self) -> Self {
@@ -1121,34 +1160,6 @@ impl<'a> SwitchExprArm<'a> {
     pub fn body(self) -> Expr<'a> {
         self.0.required()
     }
-}
-
-macro_rules! expression_enum {
-    ($name:ident { $($variant:ident($view:ident)),* } tuples { $($tuple:ident),* }) => {
-        #[derive(Clone, Copy)]
-        pub enum $name<'a> { $($variant($view<'a>)),* }
-        impl<'a> AstNode<'a> for $name<'a> {
-            fn cast(node: SyntaxNode<'a>) -> Option<Self> {
-                $(if let Some(view) = $view::cast(node) { return Some(Self::$variant(view)); })*
-                None
-            }
-            fn syntax(self) -> SyntaxNode<'a> { match self { $(Self::$variant(view) => view.syntax()),* } }
-            fn span(self) -> Span { self.span() }
-        }
-        impl<'a> $name<'a> {
-            pub fn cast(node: SyntaxNode<'a>) -> Option<Self> { <Self as AstNode>::cast(node) }
-            pub fn syntax(self) -> SyntaxNode<'a> { <Self as AstNode>::syntax(self) }
-            pub fn span(self) -> Span { match self { $(Self::$variant(view) => view.span()),* } }
-        }
-        impl fmt::Debug for $name<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                $(if let Self::$tuple(view) = self {
-                    return f.debug_tuple(stringify!($tuple)).field(view).finish();
-                })*
-                match self { $(Self::$variant(view) => fmt::Debug::fmt(view, f)),* }
-            }
-        }
-    };
 }
 
 expression_enum!(CascadeOp {

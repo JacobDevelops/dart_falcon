@@ -4,8 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use falcon_dart_parser::parser::ParseError;
-use falcon_dart_parser::try_parse_for_package;
+use falcon_dart_parser::{ParseError, ParseErrorKind, try_parse_for_package};
 use falcon_syntax::cst::visit::{Visitor, walk_top_level_decl};
 use falcon_syntax::cst::{ClassMember, FunctionDecl, Program, Span, TopLevelDecl};
 use rayon::prelude::*;
@@ -1273,16 +1272,13 @@ fn declarations_intact(program: Program<'_>, errors: &[ParseError]) -> bool {
         return false;
     }
     errors.iter().all(|error| {
-        error.message.starts_with(FEATURE_GATE)
+        error.kind == ParseErrorKind::FeatureGate
             || integrity
                 .bodies
                 .iter()
                 .any(|body| body.start <= error.offset && error.offset < body.end)
     })
 }
-
-/// The parser's message prefix for syntax gated behind a language feature.
-const FEATURE_GATE: &str = "This requires the '";
 
 impl AnalysisEnvironment {
     /// The origin of the library defined at canonical `path` in `context`.
@@ -1306,6 +1302,25 @@ impl AnalysisEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declaration_integrity_uses_error_kind_not_message() {
+        let source = "class Example {}";
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty());
+        let mut error = ParseError {
+            kind: ParseErrorKind::FeatureGate,
+            message: "A language feature is unavailable".into(),
+            offset: 0,
+        };
+        assert!(declarations_intact(
+            parsed.tree.program(source),
+            std::slice::from_ref(&error),
+        ));
+        error.kind = ParseErrorKind::Syntax;
+        error.message = "This requires the 'misleading text".into();
+        assert!(!declarations_intact(parsed.tree.program(source), &[error],));
+    }
 
     #[test]
     fn unclassified_dependencies_are_enqueued_once_per_context() {

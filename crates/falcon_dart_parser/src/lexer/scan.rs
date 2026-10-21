@@ -65,9 +65,15 @@ fn skip_nested_string(bytes: &[u8], open: usize, end: usize) -> Option<usize> {
     let raw = open > 0 && bytes[open - 1] == b'r';
     let triple = open + 2 < end && bytes[open + 1] == quote && bytes[open + 2] == quote;
     let mut pos = open + if triple { 3 } else { 1 };
-    // Nested strings allow newlines and do not recurse into interpolation.
+    // Only triple-quoted strings can cross a physical newline.
     while pos < end {
+        if !triple && matches!(bytes[pos], b'\n' | b'\r') {
+            return None;
+        }
         if bytes[pos] == b'\\' && !raw {
+            if !triple && pos + 1 < end && matches!(bytes[pos + 1], b'\n' | b'\r') {
+                return None;
+            }
             pos += 2;
         } else if bytes[pos] == quote
             && (!triple || (pos + 2 < end && bytes[pos + 1] == quote && bytes[pos + 2] == quote))

@@ -16,6 +16,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_stmt(&mut self) -> CompletedMarker {
+        let before = self.pos;
         let marker = self.start();
         let stmt = self.guarded(
             |p| {
@@ -111,6 +112,14 @@ impl<'src> Parser<'src> {
                 })
             },
         );
+        // A statement can enter just below the depth ceiling while its expression
+        // returns a missing node without consuming input. Keep enclosing block
+        // recovery moving rather than parsing the same token forever.
+        if self.pos == before && self.depth_limit_hit && !self.at(TokenKind::Eof) {
+            let error = self.start();
+            self.advance();
+            error.complete(self, NodeKind::ErrorExpr);
+        }
         match stmt {
             Ok(block) => {
                 marker.abandon(self);
@@ -536,27 +545,34 @@ impl<'src> Parser<'src> {
             && !self.at_any(&[TokenKind::Await, TokenKind::Yield])
             && let Some(stmt) = self.speculate(|p| {
                 p.parse_type();
+                let nullable = p.kind_at(p.pos.saturating_sub(1)) == TokenKind::Qmark;
                 let name = p.parse_ident()?;
+                // Decide before parsing parameters as well as initializers: call
+                // arguments can contain closure bodies, too.
+                if nullable && p.nullable_decl_is_conditional() {
+                    return None;
+                }
                 if p.at_any(&[TokenKind::LParen, TokenKind::Lt]) {
                     p.parse_type_params();
                     p.parse_formal_param_list();
                     let async_marker = p.parse_async_marker();
                     p.parse_function_body(async_marker)?;
-                    Some(NodeKind::LocalFuncDecl)
+                    Some(Err(NodeKind::LocalFuncDecl))
                 } else if p.at_any(&[TokenKind::Eq, TokenKind::Semicolon, TokenKind::Comma]) {
-                    p.parse_declarators(name);
-                    // A colon exposes a ternary misread as a nullable type.
-                    if !p.at_any(&[TokenKind::Semicolon, TokenKind::RBrace, TokenKind::Eof]) {
-                        return None;
-                    }
-                    p.eat(TokenKind::Semicolon);
-                    Some(NodeKind::LocalVarDecl)
+                    Some(Ok(name))
                 } else {
                     None
                 }
             })
         {
-            return stmt;
+            return match stmt {
+                Ok(name) => {
+                    self.parse_declarators(name);
+                    self.eat(TokenKind::Semicolon);
+                    NodeKind::LocalVarDecl
+                }
+                Err(kind) => kind,
+            };
         }
 
         // Untyped local function: `name [<T>](params) [async] { .. }` / `=> e`
@@ -574,6 +590,118 @@ impl<'src> Parser<'src> {
         self.parse_expr();
         self.eat(TokenKind::Semicolon);
         NodeKind::ExprStmt
+    }
+
+    /// Find the colon belonging to the `?` consumed as a nullable type suffix.
+    /// Only this delimiter level matters; cached pairs skip nested closure bodies
+    /// in constant time, so nested ambiguous statements do not rescan one another.
+    fn nullable_decl_is_conditional(&mut self) -> bool {
+        let mut i = self.pos;
+        let mut function_head = self.at_any(&[TokenKind::LParen, TokenKind::Lt]);
+        let mut questions = 0usize;
+        loop {
+            match self.kind_at(i) {
+                TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::QmarkLBracket
+                | TokenKind::LBrace => {
+                    self.cache_statement_delimiters();
+                    let close = self.statement_delimiters.as_ref().unwrap()[i];
+                    if close == u32::MAX {
+                        return false;
+                    }
+                    if function_head && self.kind_at(i) == TokenKind::LParen {
+                        let mut body = close as usize + 1;
+                        if matches!(self.kind_at(body), TokenKind::Async | TokenKind::Sync) {
+                            body += 1;
+                            if self.kind_at(body) == TokenKind::Star {
+                                body += 1;
+                            }
+                        }
+                        if self.kind_at(body) == TokenKind::LBrace {
+                            return false;
+                        }
+                        function_head = false;
+                    }
+                    i = close as usize + 1;
+                    continue;
+                }
+                TokenKind::Lt => {
+                    if let Some(after) = self.after_generic_type_args(i)
+                        && (self.after_type_args_is_call(after)
+                            || self.token_ends_generic_instantiation(after))
+                    {
+                        i = after;
+                        continue;
+                    }
+                }
+                TokenKind::Is | TokenKind::As => {
+                    // Use the same nullable-type disambiguation as expression parsing.
+                    // This parses only a type, never an initializer or closure body.
+                    let saved = self.checkpoint();
+                    let function_keyword = self.last_function_keyword;
+                    self.pos = i + 1;
+                    self.eat(TokenKind::Bang);
+                    self.with_ctx(
+                        |ctx| ctx.suppress_conditional_qmark = true,
+                        Self::parse_type,
+                    );
+                    i = self.pos;
+                    self.restore(saved);
+                    self.last_function_keyword = function_keyword;
+                    continue;
+                }
+                TokenKind::Qmark => questions += 1,
+                TokenKind::Colon => {
+                    let Some(remaining) = questions.checked_sub(1) else {
+                        return true;
+                    };
+                    questions = remaining;
+                }
+                TokenKind::Semicolon
+                | TokenKind::RParen
+                | TokenKind::RBracket
+                | TokenKind::RBrace
+                | TokenKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    fn cache_statement_delimiters(&mut self) {
+        if self.statement_delimiters.is_some() {
+            return;
+        }
+        let mut pairs = vec![u32::MAX; self.tokens.len()];
+        let mut stack = Vec::with_capacity(Self::MAX_PARSE_DEPTH.min(self.tokens.len()));
+        // Counts let unmatched closers be ignored in O(1). Every matched or
+        // discarded opener is popped once, including malformed bracket groups.
+        let mut open_counts = [0usize; 3];
+        for (i, token) in self.tokens.iter_from(0).unwrap().enumerate() {
+            let (delimiter, opening) = match token.kind {
+                TokenKind::LParen => (0, true),
+                TokenKind::LBracket | TokenKind::QmarkLBracket => (1, true),
+                TokenKind::LBrace => (2, true),
+                TokenKind::RParen => (0, false),
+                TokenKind::RBracket => (1, false),
+                TokenKind::RBrace => (2, false),
+                _ => continue,
+            };
+            if opening {
+                stack.push((i, delimiter));
+                open_counts[delimiter] += 1;
+            } else if open_counts[delimiter] > 0 {
+                while let Some((open, expected)) = stack.pop() {
+                    open_counts[expected] -= 1;
+                    if expected == delimiter {
+                        pairs[open] = u32::try_from(i).expect("lexer exceeds u32 token capacity");
+                        break;
+                    }
+                }
+            }
+        }
+        self.statement_delimiters = Some(pairs);
     }
 
     /// True when a statement-leading `const` begins a const *expression*

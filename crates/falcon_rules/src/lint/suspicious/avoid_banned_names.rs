@@ -129,14 +129,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             NodeKind::ClassDecl | NodeKind::MixinDecl | NodeKind::EnumDecl
             | NodeKind::ExtensionDecl | NodeKind::FunctionDecl | NodeKind::MethodDecl
             | NodeKind::GetterDecl | NodeKind::SetterDecl | NodeKind::VarDeclarator
-            | NodeKind::FormalParam | NodeKind::TypeParam | NodeKind::TypeAliasDecl
+            | NodeKind::FormalParam(_) | NodeKind::TypeParam | NodeKind::TypeAliasDecl
             | NodeKind::LocalFuncDecl | NodeKind::VariablePattern
             | NodeKind::ClassTypeAliasDecl | NodeKind::MixinClassDecl
             | NodeKind::ExtensionTypeDecl | NodeKind::EnumVariant
         ) || parent.children().find_map(Identifier::cast).is_none_or(|name| name.span() != node.span())) {
             return StructuralTraversal::Continue;
         }
-        let declaration = if parent.kind() == NodeKind::FormalParam {
+        let declaration = if matches!(parent.kind(), NodeKind::FormalParam(_)) {
             parent.ancestors().skip(1).find(|ancestor| matches!(ancestor.kind(),
                 NodeKind::MethodDecl | NodeKind::SetterDecl | NodeKind::FunctionDecl
                 | NodeKind::ConstructorDecl | NodeKind::LocalFuncDecl | NodeKind::FuncExpr

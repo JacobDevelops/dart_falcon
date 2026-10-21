@@ -403,6 +403,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_type_led_pattern(&mut self) -> (NodeKind, bool) {
+        let start = self.checkpoint();
         let (ty, bare_name) = self.parse_type_with_binding_name();
         if self.at(TokenKind::LParen) {
             self.advance();
@@ -453,6 +454,10 @@ impl<'src> Parser<'src> {
         }
         match ty.kind {
             NodeKind::NamedType if self.ctx.pattern_binding && bare_name => {
+                // The bare name binds a variable; its speculative type wrapper
+                // is not part of the written pattern's type.
+                self.restore(start);
+                self.expect_ident();
                 (NodeKind::VariablePattern, true)
             }
             NodeKind::NamedType | NodeKind::DynamicType => (NodeKind::ConstPattern, false),

@@ -1,3 +1,5 @@
+use super::ParamKind;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum NodeKind {
@@ -36,7 +38,8 @@ pub enum NodeKind {
     TopLevelVarDecl,
     TypeAliasDecl,
     FormalParamList,
-    FormalParam,
+    /// Carries the parser's authoritative parameter kind.
+    FormalParam(ParamKind),
     ArrowBody,
     NativeBody,
     Annotation,
@@ -50,15 +53,14 @@ pub enum NodeKind {
     // types
     NamedType,
     FunctionType,
-    FunctionTypeParam,
+    /// Uses the same kind encoding as a declaration's formal parameters.
+    FunctionTypeParam(ParamKind),
     RecordType,
     NamedRecordField,
     TypeParam,
     VoidType,
     DynamicType,
     TypeArgs,
-    NamedTypeParamFlag,
-    OptionalTypeParamFlag,
 
     // stmt
     Block,

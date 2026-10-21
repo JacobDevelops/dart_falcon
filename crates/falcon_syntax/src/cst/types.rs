@@ -102,21 +102,10 @@ impl<'a> AstNode<'a> for FunctionType<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct FunctionTypeParam<'a>(pub(crate) SyntaxNode<'a>);
-
-impl<'a> AstNode<'a> for FunctionTypeParam<'a> {
-    fn cast(node: SyntaxNode<'a>) -> Option<Self> {
-        matches!(
-            node.kind(),
-            NodeKind::FunctionTypeParam | NodeKind::FormalParam
-        )
-        .then_some(Self(node))
-    }
-    fn syntax(self) -> SyntaxNode<'a> {
-        self.0
-    }
-}
+typed_node!(
+    FunctionTypeParam,
+    pattern NodeKind::FunctionTypeParam(_) | NodeKind::FormalParam(_)
+);
 typed_node!(RecordType, RecordType);
 typed_node!(NamedRecordField, NamedRecordField);
 #[derive(Clone, Copy)]
@@ -124,20 +113,7 @@ pub struct TypeParam<'a>(pub(crate) SyntaxNode<'a>);
 
 impl<'a> AstNode<'a> for TypeParam<'a> {
     fn cast(node: SyntaxNode<'a>) -> Option<Self> {
-        if node.kind() == NodeKind::TypeParam {
-            return Some(Self(node));
-        }
-        let args = node.parent()?;
-        let head = args.parent()?;
-        (args.kind() == NodeKind::TypeArgs
-            && head.kind() == NodeKind::NamedType
-            && head.parent()?.kind() == NodeKind::LegacyTypedef
-            && !head
-                .parent()?
-                .children()
-                .any(|child| child.kind() == NodeKind::Identifier)
-            && DartType::cast(node).is_some())
-        .then_some(Self(node))
+        (node.kind() == NodeKind::TypeParam).then_some(Self(node))
     }
     fn syntax(self) -> SyntaxNode<'a> {
         self.0
@@ -207,9 +183,6 @@ impl<'a> FunctionType<'a> {
         }
     }
     pub fn return_type(self) -> Option<DartType<'a>> {
-        if self.0.kind() == NodeKind::LegacyTypedef && self.0.child::<Identifier>().is_none() {
-            return None;
-        }
         self.0.child()
     }
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
@@ -241,15 +214,6 @@ debug_node!(FunctionType {
 });
 
 impl<'a> FunctionTypeParam<'a> {
-    pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
-        <Self as AstNode>::cast(node)
-    }
-    pub fn syntax(self) -> SyntaxNode<'a> {
-        self.0
-    }
-    pub fn span(self) -> Span {
-        self.0.span()
-    }
     pub fn annotations(self) -> AstChildren<'a, Annotation<'a>> {
         AstChildren::new(self.0)
     }
@@ -261,20 +225,17 @@ impl<'a> FunctionTypeParam<'a> {
             .child()
             .unwrap_or(DartType::Dynamic(DynamicType(self.0)))
     }
-    fn group(self) -> Option<TokenKind> {
-        self.0.children().find_map(|child| match child.kind() {
-            NodeKind::NamedTypeParamFlag => Some(TokenKind::LBrace),
-            NodeKind::OptionalTypeParamFlag => Some(TokenKind::LBracket),
-            _ => None,
-        })
+    pub fn kind(self) -> super::ParamKind {
+        self.0.param_kind()
     }
     pub fn is_named(self) -> bool {
-        self.group() == Some(TokenKind::LBrace)
+        matches!(self.kind(), super::ParamKind::Named { .. })
     }
     pub fn is_required(self) -> bool {
-        (self.0.child_token(TokenKind::Required).is_some()
-            && (self.0.kind() != NodeKind::FormalParam || self.is_named()))
-            || self.group().is_none()
+        matches!(
+            self.kind(),
+            super::ParamKind::Positional | super::ParamKind::Named { required: true }
+        )
     }
 }
 
@@ -343,24 +304,13 @@ impl<'a> TypeParam<'a> {
         self.0.span()
     }
     pub fn annotations(self) -> AstChildren<'a, Annotation<'a>> {
-        let mut children = self.0.children();
-        if self.0.kind() != NodeKind::TypeParam {
-            children.by_ref().for_each(drop);
-        }
-        AstChildren::from_children(children)
+        AstChildren::new(self.0)
     }
     pub fn name(self) -> Identifier<'a> {
-        if matches!(self.0.kind(), NodeKind::TypeParam | NodeKind::NamedType)
-            && let Some(name) = AstChildren::<Identifier>::new(self.0).next_back()
-        {
-            return name;
-        }
-        Identifier::synthetic(self.0, "<error>", self.span())
+        self.0.required()
     }
     pub fn bound(self) -> Option<DartType<'a>> {
-        (self.0.kind() == NodeKind::TypeParam)
-            .then(|| self.0.child())
-            .flatten()
+        self.0.child()
     }
 }
 

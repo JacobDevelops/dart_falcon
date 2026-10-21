@@ -100,13 +100,10 @@ impl<'a> WildcardPattern<'a> {
 }
 impl<'a> VariablePattern<'a> {
     pub fn type_(self) -> Option<DartType<'a>> {
-        self.0.child::<Identifier>().and_then(|_| self.0.child())
+        self.0.child()
     }
     pub fn name(self) -> Identifier<'a> {
-        self.0
-            .child()
-            .or_else(|| self.0.children().find_map(SyntaxNode::child))
-            .expect("variable pattern has a binding name")
+        self.0.required()
     }
 }
 debug_node!(WildcardPattern => "Wildcard" { type_, span });

@@ -1,4 +1,4 @@
-use falcon_dart_parser::{parse, parse_for_package};
+use falcon_dart_parser::{ParseErrorKind, parse, parse_for_package};
 use falcon_syntax::LanguageVersion;
 use falcon_syntax::cst::*;
 
@@ -120,10 +120,11 @@ fn primary_constructor_syntax_requires_313() {
     ] {
         let falcon_dart_parser::ParseResult { errors, .. } =
             parse_for_package(source, Some(LanguageVersion::new(3, 12)));
+        assert!(!errors.is_empty(), "{source}");
         assert!(
             errors
                 .iter()
-                .any(|error| error.message.starts_with("This requires the '")),
+                .all(|error| error.kind == ParseErrorKind::FeatureGate),
             "{source}: {errors:?}"
         );
         let falcon_dart_parser::ParseResult { errors, .. } =
@@ -147,6 +148,7 @@ fn empty_class_feature_gate_reports_the_consumed_semicolon() {
         let falcon_dart_parser::ParseResult { errors, .. } =
             parse_for_package(source, Some(LanguageVersion::new(3, 9)));
         assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+        assert_eq!(errors[0].kind, ParseErrorKind::FeatureGate);
         assert_eq!(
             errors[0].message,
             "This requires the 'primary-constructors' language feature"
@@ -168,6 +170,7 @@ fn private_named_formal_feature_gate_reports_the_field_name() {
         let falcon_dart_parser::ParseResult { errors, .. } =
             parse_for_package(source, Some(LanguageVersion::new(3, 11)));
         assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+        assert_eq!(errors[0].kind, ParseErrorKind::FeatureGate);
         assert_eq!(
             errors[0].message,
             "This requires the 'private-named-parameters' language feature"
@@ -191,4 +194,16 @@ fn private_named_formals_follow_file_language_version() {
     let falcon_dart_parser::ParseResult { errors, .. } =
         parse_for_package(source, Some(LanguageVersion::new(3, 11)));
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn malformed_declarations_have_syntax_errors_not_feature_gates() {
+    let parsed = parse("class Broken { void method( }");
+    assert!(!parsed.errors.is_empty());
+    assert!(
+        parsed
+            .errors
+            .iter()
+            .all(|error| error.kind == ParseErrorKind::Syntax)
+    );
 }

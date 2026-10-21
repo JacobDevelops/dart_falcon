@@ -15,7 +15,22 @@ struct Recorder {
     null_asserts: usize,
 }
 
+// In particular, do not override visit_expr/visit_pattern here: their default
+// implementations flatten chains without invoking those hooks for each link.
+#[derive(Default)]
+struct DefaultRecorder(Recorder);
+
+impl DefaultRecorder {
+    fn recorder(&mut self) -> &mut Recorder {
+        &mut self.0
+    }
+}
+
 impl Recorder {
+    fn recorder(&mut self) -> &mut Self {
+        self
+    }
+
     fn record(&mut self, kind: &'static str, id: NodeId, span: Span) {
         assert!(
             self.addresses.insert((kind, id, span.start, span.end)),
@@ -23,27 +38,237 @@ impl Recorder {
         );
         *self.counts.entry(kind).or_default() += 1;
     }
+
+    fn assert_reaches_every_node(&self, root: SyntaxNode<'_>) {
+        self.assert_reaches_node_hooks(root, false);
+        let mut default = DefaultRecorder::default();
+        default.visit_program(Program::cast(root).unwrap());
+        default.0.assert_reaches_node_hooks(root, true);
+    }
+
+    fn assert_reaches_node_hooks(&self, root: SyntaxNode<'_>, default_chains: bool) {
+        for node in root.descendants() {
+            // ErrorNode is the visitor's opaque recovery payload. Its raw
+            // Error subtree is lossless storage, not retained typed syntax.
+            if node
+                .ancestors()
+                .any(|ancestor| ancestor.kind() == NodeKind::Error)
+            {
+                continue;
+            }
+            // Match the most specific hook, not just a node id: a DartType
+            // callback cannot conceal a missing NamedType callback, for example.
+            let hook = match node.kind() {
+                NodeKind::Program => "Program",
+                NodeKind::LibraryDirective => "LibraryDirective",
+                NodeKind::PartOfDirective => "PartOfDirective",
+                NodeKind::PartDirective => "PartDirective",
+                NodeKind::ImportDirective => "ImportDirective",
+                NodeKind::ExportDirective => "ExportDirective",
+                NodeKind::ConfigurableUri => "ConfigurableUri",
+                NodeKind::Combinator => "ImportCombinator",
+                NodeKind::ClassDecl => "ClassDecl",
+                NodeKind::PrimaryConstructor => "PrimaryConstructor",
+                NodeKind::PrimaryConstructorBody => "PrimaryConstructorBody",
+                NodeKind::ClassTypeAliasDecl => "ClassTypeAliasDecl",
+                NodeKind::FieldDecl => "FieldDecl",
+                NodeKind::VarDeclarator => "VarDeclarator",
+                NodeKind::ConstructorDecl => "ConstructorDecl",
+                NodeKind::RedirectedConstructor => "RedirectedConstructor",
+                NodeKind::SuperCallInitializer
+                | NodeKind::ThisCallInitializer
+                | NodeKind::FieldInitializer
+                | NodeKind::AssertInitializer => "ConstructorInitializer",
+                NodeKind::MethodDecl => "MethodDecl",
+                NodeKind::GetterDecl => "GetterDecl",
+                NodeKind::SetterDecl => "SetterDecl",
+                NodeKind::OperatorDecl => "OperatorDecl",
+                NodeKind::MixinDecl => "MixinDecl",
+                NodeKind::MixinClassDecl => "MixinClassDecl",
+                NodeKind::EnumDecl => "EnumDecl",
+                NodeKind::EnumVariant => "EnumVariant",
+                NodeKind::ExtensionDecl => "ExtensionDecl",
+                NodeKind::ExtensionTypeDecl => "ExtensionTypeDecl",
+                NodeKind::FunctionDecl => "FunctionDecl",
+                NodeKind::TopLevelVarDecl => "TopLevelVarDecl",
+                NodeKind::TypeAliasDecl => "TypeAliasDecl",
+                NodeKind::FormalParamList => "FormalParamList",
+                NodeKind::FormalParam(_) => "FormalParam",
+                NodeKind::ArrowBody | NodeKind::NativeBody => "FunctionBody",
+                NodeKind::Annotation => "Annotation",
+                NodeKind::NamedType => "NamedType",
+                NodeKind::FunctionType => "FunctionType",
+                NodeKind::FunctionTypeParam(_) => "FunctionTypeParam",
+                NodeKind::RecordType => "RecordType",
+                NodeKind::NamedRecordField => "NamedRecordField",
+                NodeKind::TypeParam => "TypeParam",
+                NodeKind::VoidType | NodeKind::DynamicType => "DartType",
+                NodeKind::Block => "Block",
+                NodeKind::IfStmt => "IfStmt",
+                NodeKind::CaseCondition => "IfCondition",
+                NodeKind::ForStmt => "ForStmt",
+                NodeKind::ForHeader => "ForHeader",
+                NodeKind::ForInInit | NodeKind::PatternForInInit | NodeKind::ForExprsInit => {
+                    "ForInit"
+                }
+                NodeKind::WhileStmt => "WhileStmt",
+                NodeKind::DoWhileStmt => "DoWhileStmt",
+                NodeKind::SwitchStmt => "SwitchStmt",
+                NodeKind::SwitchCase => "SwitchCase",
+                NodeKind::CasePatternLabel | NodeKind::CaseExprLabel | NodeKind::DefaultLabel => {
+                    "SwitchCaseKind"
+                }
+                NodeKind::TryCatchStmt => "TryCatchStmt",
+                NodeKind::CatchClause => "CatchClause",
+                NodeKind::ReturnStmt => "ReturnStmt",
+                NodeKind::ThrowStmt => "ThrowStmt",
+                NodeKind::RethrowStmt | NodeKind::EmptyStmt => "Stmt",
+                NodeKind::BreakStmt => "BreakStmt",
+                NodeKind::ContinueStmt => "ContinueStmt",
+                NodeKind::LocalVarDecl => "LocalVarDecl",
+                NodeKind::PatternDeclaration => "PatternDeclaration",
+                NodeKind::PatternAssignStmt => "PatternAssignStmt",
+                NodeKind::LabeledStmt => "LabeledStmt",
+                NodeKind::LocalFuncDecl => "LocalFuncDecl",
+                NodeKind::AssertStmt => "AssertStmt",
+                NodeKind::YieldStmt => "YieldStmt",
+                NodeKind::ExprStmt => "ExprStmt",
+                NodeKind::ErrorNode => "ErrorNode",
+                NodeKind::Identifier => "Identifier",
+                NodeKind::StringLitNode | NodeKind::AdjacentStrings => "StringLitNode",
+                NodeKind::StringInterpolation => "StringInterpolation",
+                NodeKind::CascadeSection => "CascadeSection",
+                NodeKind::CascadeField
+                | NodeKind::CascadeIndex
+                | NodeKind::CascadeNullAssert
+                | NodeKind::CascadeCall
+                | NodeKind::CascadeInvoke
+                | NodeKind::CascadeAssign
+                | NodeKind::CascadeIndexAssign => "CascadeOp",
+                NodeKind::NullAwareElement
+                | NodeKind::SpreadElement
+                | NodeKind::IfElement
+                | NodeKind::ForElement => "CollectionElement",
+                NodeKind::MapEntry => "MapEntry",
+                NodeKind::MapSpreadElement | NodeKind::MapIfElement | NodeKind::MapForElement => {
+                    "MapElement"
+                }
+                NodeKind::RecordField => "RecordField",
+                NodeKind::ArgList => "ArgList",
+                NodeKind::NamedArg => "NamedArg",
+                NodeKind::SwitchExprArm => "SwitchExprArm",
+                NodeKind::LiteralPattern => "LiteralPattern",
+                NodeKind::ConstPattern => "ConstPattern",
+                NodeKind::ListPattern => "ListPattern",
+                NodeKind::RecordPattern => "RecordPattern",
+                NodeKind::MapPattern => "MapPattern",
+                NodeKind::ObjectPattern => "ObjectPattern",
+                NodeKind::RestPattern => "ListPatternElement",
+                NodeKind::RecordPatternField => "RecordPatternField",
+                NodeKind::MapPatternEntry => "MapPatternEntry",
+                NodeKind::ObjectPatternField => "ObjectPatternField",
+                NodeKind::WildcardPattern
+                | NodeKind::VariablePattern
+                | NodeKind::LogicalAndPattern
+                | NodeKind::LogicalOrPattern
+                | NodeKind::RelationalPattern
+                | NodeKind::CastPattern
+                | NodeKind::NullCheckPattern
+                | NodeKind::NullAssertPattern
+                | NodeKind::ParenPattern
+                | NodeKind::ErrorPattern => {
+                    if default_chains {
+                        // Default pattern chains promise their observable
+                        // children, not a callback for each intermediate link.
+                        continue;
+                    }
+                    "Pattern"
+                }
+                NodeKind::IntLitExpr
+                | NodeKind::DoubleLitExpr
+                | NodeKind::BoolLitExpr
+                | NodeKind::NullLitExpr
+                | NodeKind::ParenExpr
+                | NodeKind::ThisExpr
+                | NodeKind::SuperExpr
+                | NodeKind::UnaryExpr
+                | NodeKind::PostfixIncDecExpr
+                | NodeKind::BinaryExpr
+                | NodeKind::AssignExpr
+                | NodeKind::ConditionalExpr
+                | NodeKind::IsExpr
+                | NodeKind::AsExpr
+                | NodeKind::FieldExpr
+                | NodeKind::IndexExpr
+                | NodeKind::CallExpr
+                | NodeKind::CascadeExpr
+                | NodeKind::ListExpr
+                | NodeKind::MapExpr
+                | NodeKind::SetExpr
+                | NodeKind::RecordExpr
+                | NodeKind::FuncExpr
+                | NodeKind::NewExpr
+                | NodeKind::DotShorthandExpr
+                | NodeKind::AwaitExpr
+                | NodeKind::ThrowExpr
+                | NodeKind::SwitchExpr
+                | NodeKind::NullAssertExpr
+                | NodeKind::SymbolLitExpr
+                | NodeKind::GenericInstantiationExpr
+                | NodeKind::ErrorExpr => {
+                    if default_chains {
+                        // The unmodified default expression hook has no leaf
+                        // callback for literal values or chain links themselves.
+                        continue;
+                    }
+                    "Expr"
+                }
+                // Transparent source grouping nodes have no independent hook.
+                NodeKind::ExtendsClause
+                | NodeKind::WithClause
+                | NodeKind::ImplementsClause
+                | NodeKind::OnClause
+                | NodeKind::SetterParameter
+                | NodeKind::LegacyTypedef
+                | NodeKind::TypeArgs
+                | NodeKind::ForCondition
+                | NodeKind::ForUpdates
+                | NodeKind::AwaitFor
+                | NodeKind::ExprCondition
+                | NodeKind::ExprGuard
+                | NodeKind::ConstPatternExpr
+                | NodeKind::Error => continue,
+            };
+            // Adjacent strings expose one logical literal to visitors; the
+            // segment nodes are spelling, not additional expression visits.
+            if node.kind() == NodeKind::StringLitNode
+                && node
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == NodeKind::AdjacentStrings)
+            {
+                continue;
+            }
+            assert!(
+                self.addresses
+                    .iter()
+                    .any(|(kind, id, _, _)| *kind == hook && *id == node.id()),
+                "{} walk missed {hook} for {:?} at {:?}: {:?}",
+                if default_chains {
+                    "default"
+                } else {
+                    "explicit"
+                },
+                node.kind(),
+                node.span(),
+                node.text()
+            );
+        }
+    }
 }
 
 macro_rules! recording_visitor {
     ($($ty:ident => $hook:ident $(/ $walk:ident)?),* $(,)?) => {
-        impl<'a> Visitor<'a> for Recorder {
-            $(fn $hook(&mut self, node: $ty<'a>) {
-                self.record(stringify!($ty), node.syntax().id(), node.span());
-                let previous = self.current_node.replace((node.syntax().id(), node.span()));
-                $($walk(self, node);)?
-                self.current_node = previous;
-            })*
-
-            fn visit_identifier(&mut self, node: Identifier<'a>) {
-                self.record("Identifier", node.syntax().id(), node.span());
-                self.names.push(node.name().to_owned());
-            }
-
-            fn visit_name(&mut self, node: Identifier<'a>) {
-                self.visit_identifier(node);
-            }
-
+        recording_visitor!(@impl Recorder {
             fn visit_expr(&mut self, node: Expr<'a>) {
                 self.record("Expr", node.syntax().id(), node.span());
                 if let Expr::IntLit(value) = node {
@@ -52,29 +277,55 @@ macro_rules! recording_visitor {
                 walk_expr(self, node);
             }
 
+            fn visit_pattern(&mut self, node: Pattern<'a>) {
+                self.record("Pattern", node.syntax().id(), node.span());
+                walk_pattern(self, node);
+            }
+        } $($ty => $hook $(/ $walk)?),*);
+        recording_visitor!(@impl DefaultRecorder {} $($ty => $hook $(/ $walk)?),*);
+    };
+    (@impl $recorder:ident { $($extra:tt)* } $($ty:ident => $hook:ident $(/ $walk:ident)?),* $(,)?) => {
+        impl<'a> Visitor<'a> for $recorder {
+            $($extra)*
+            $(fn $hook(&mut self, node: $ty<'a>) {
+                self.recorder().record(stringify!($ty), node.syntax().id(), node.span());
+                let previous = self.recorder().current_node.replace((node.syntax().id(), node.span()));
+                $($walk(self, node);)?
+                self.recorder().current_node = previous;
+            })*
+
+            fn visit_identifier(&mut self, node: Identifier<'a>) {
+                self.recorder().record("Identifier", node.syntax().id(), node.span());
+                self.recorder().names.push(node.name().to_owned());
+            }
+
+            fn visit_name(&mut self, node: Identifier<'a>) {
+                self.visit_identifier(node);
+            }
+
             fn visit_cascade_op(&mut self, node: CascadeOp<'a>) {
-                self.record("CascadeOp", node.syntax().id(), node.span());
+                self.recorder().record("CascadeOp", node.syntax().id(), node.span());
                 if let CascadeOp::NullAssert(_) = node {
-                    self.null_asserts += 1;
+                    self.recorder().null_asserts += 1;
                 }
                 walk_cascade_op(self, node);
             }
 
             fn visit_function_kind(&mut self, node: FunctionKind<'a>) {
-                let (id, span) = self.current_node.expect("function kind owner");
-                self.record("FunctionKind", id, span);
+                let (id, span) = self.recorder().current_node.expect("function kind owner");
+                self.recorder().record("FunctionKind", id, span);
                 walk_function_kind(self, node);
             }
 
             fn visit_literal_pattern_value(&mut self, node: LiteralPatternValue<'a>) {
-                let (id, span) = self.current_node.expect("literal pattern owner");
-                self.record("LiteralPatternValue", id, span);
+                let (id, span) = self.recorder().current_node.expect("literal pattern owner");
+                self.recorder().record("LiteralPatternValue", id, span);
                 walk_literal_pattern_value(self, node);
             }
 
             fn visit_const_pattern_value(&mut self, node: ConstPatternValue<'a>) {
-                let (id, span) = self.current_node.expect("constant pattern owner");
-                self.record("ConstPatternValue", id, span);
+                let (id, span) = self.recorder().current_node.expect("constant pattern owner");
+                self.recorder().record("ConstPatternValue", id, span);
                 walk_const_pattern_value(self, node);
             }
         }
@@ -162,7 +413,6 @@ recording_visitor! {
     ArgList => visit_arg_list / walk_arg_list,
     NamedArg => visit_named_arg / walk_named_arg,
     SwitchExprArm => visit_switch_expr_arm / walk_switch_expr_arm,
-    Pattern => visit_pattern / walk_pattern,
     LiteralPattern => visit_literal_pattern / walk_literal_pattern,
     ConstPattern => visit_const_pattern / walk_const_pattern,
     ListPattern => visit_list_pattern / walk_list_pattern,
@@ -223,59 +473,7 @@ fn representative_program_walks_source_children_exactly_once() {
         ]
     );
     assert_eq!(recorder.null_asserts, 1);
-    assert_eq!(
-        recorder.counts,
-        BTreeMap::from([
-            ("Program", 1),
-            ("Identifier", expected_names.len()),
-            ("StringLitNode", 2),
-            ("StringInterpolation", 1),
-            ("LibraryDirective", 1),
-            ("ImportDirective", 1),
-            ("ImportCombinator", 1),
-            ("TopLevelDecl", 2),
-            ("ClassDecl", 1),
-            ("ClassMember", 3),
-            ("FieldDecl", 1),
-            ("VarDeclarator", 3),
-            ("ConstructorDecl", 1),
-            ("ConstructorInitializer", 1),
-            ("MethodDecl", 1),
-            ("TypeAliasDecl", 1),
-            ("DartType", 10),
-            ("NamedType", 9),
-            ("FunctionType", 1),
-            ("FunctionTypeParam", 1),
-            ("TypeParam", 1),
-            ("FormalParamList", 2),
-            ("FormalParam", 2),
-            ("FunctionBody", 1),
-            ("Annotation", 1),
-            ("Block", 4),
-            ("Stmt", 9),
-            ("TryCatchStmt", 1),
-            ("CatchClause", 1),
-            ("ThrowStmt", 1),
-            ("ReturnStmt", 2),
-            ("ExprStmt", 3),
-            ("LocalVarDecl", 2),
-            ("SwitchStmt", 1),
-            ("SwitchCase", 2),
-            ("SwitchCaseKind", 2),
-            ("Pattern", 3),
-            ("ListPattern", 1),
-            ("ListPatternElement", 2),
-            ("CascadeSection", 1),
-            ("CascadeOp", 3),
-            ("CollectionElement", 5),
-            ("IfCondition", 1),
-            ("ForHeader", 1),
-            ("ForInit", 1),
-            ("ArgList", 3),
-            ("NamedArg", 1),
-            ("Expr", 28),
-        ])
-    );
+    recorder.assert_reaches_every_node(parsed.tree.root(source));
 }
 
 #[test]
@@ -288,25 +486,137 @@ fn recovery_nodes_and_retained_declarations_are_walked() {
     assert!(recorder.counts["ErrorNode"] > 0);
     assert_eq!(recorder.counts["FunctionDecl"], 1);
     assert_eq!(recorder.names, ["retained"]);
+    recorder.assert_reaches_every_node(parsed.tree.root(source));
 }
 
 #[test]
 fn legacy_typedef_walks_written_parameters_not_synthesized_copies() {
-    let source = "typedef int Legacy<T>(T value, {String? label}); typedef Untyped(int value);";
+    let source = "typedef int Legacy<T>(T value, {String? label}); \
+        typedef Untyped(int value); typedef Generic<T extends Bound>(T value);";
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut recorder = Recorder::default();
     recorder.visit_program(parsed.tree.program(source));
-    let mut expected: Vec<_> = "Legacy T int T value String label Untyped int value"
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect();
+    let mut expected: Vec<_> =
+        "Legacy T int T value String label Untyped int value Generic T Bound T value"
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
     expected.sort();
     recorder.names.sort();
     assert_eq!(recorder.names, expected);
-    assert_eq!(recorder.counts["TypeAliasDecl"], 2);
-    assert_eq!(recorder.counts["FormalParamList"], 2);
-    assert_eq!(recorder.counts["FormalParam"], 3);
+    assert_eq!(recorder.counts["TypeAliasDecl"], 3);
+    assert_eq!(recorder.counts["FormalParamList"], 3);
+    assert_eq!(recorder.counts["FormalParam"], 4);
     assert!(!recorder.counts.contains_key("FunctionType"));
     assert!(!recorder.counts.contains_key("FunctionTypeParam"));
+    recorder.assert_reaches_every_node(parsed.tree.root(source));
+}
+
+#[test]
+fn explicit_hooks_and_default_leaves_reach_all_retained_syntax() {
+    let sources = [
+        r#"
+            import 'default.dart' if (dart.library.io) 'io.dart' show Visible;
+            export 'api.dart' hide Hidden;
+            part 'part.dart';
+            class C<T extends Base> extends Parent with Mix implements Interface {
+              int field;
+              C(this.field) : super(1);
+              C.redirect() : this(2);
+              int get value => field;
+              set value(int next) { field = next; }
+              C operator +(C other) => this;
+            }
+            mixin M on Parent implements Interface {}
+            extension E on C {}
+            extension type ET(int value) implements Interface {}
+            enum Choice { first, second; }
+            class Alias = Parent with Mix;
+            mixin class Mixed() {}
+            class Primary(dynamic value) { this {} }
+            class Factory { factory Factory() = C; }
+            class Initialized { int field; Initialized() : field = 1; }
+            class Derived extends Parent { Object method() => super.value; }
+            void nativeFunction() native '${nativeArgument}';
+        "#,
+        r#"
+            typedef Callback = (int, {String label}) Function<T>(T value, {int count});
+            var closure = <T extends Bound>(T value) => value;
+            void f(Object value, [int count = 1]) async {
+              var expressions = [
+                1, 2.5, 'hello ${value}' ' world', true, null, (value),
+                -count, count++, count + 1, count = 2,
+                true ? count : 0, value is C, value as C,
+                value.field, value[0], target<int>(named: count),
+                <int>{1}, <String, int>{'key': 2}, (count, name: value),
+                new C(count), const C(1), await future, value!, #symbol,
+                target<int>, switch (value) { _ => 1 },
+                if (true) 1 else 2, for (var item in values) item, ...values,
+                ?value, true ? count : throw value, .named(count),
+                <String, int>{
+                  ...entries, if (guard) 'a': 1 else 'b': 2,
+                  for (var item in values) 'c': item,
+                },
+              ];
+              value..field = 1..method<int>(2);
+              value..[index]..[index] = assigned..method()()<int>(argument);
+              value..method()!.field;
+              for (final (left, right) in pairs) { target(left, right); }
+              if (value case [var first, ...var rest] when guard) {
+                while (guard) { break; }
+              } else { do { continue; } while (guard); }
+              for (var i = 0; i < count; i++) { assert(guard, 'message'); }
+              void local(int inner) { return; }
+              labeled: for (;;) { break labeled; }
+              throw value;
+            }
+        "#,
+        r#"
+            void f(Object value) {
+              switch (value) {
+                case const (constant + 1): break;
+                case {'key': var entry}: break;
+                case C(field: var field): break;
+                case (var first, named: var second): break;
+                case > 0 && < 10: break;
+                case 'literal': break;
+                case (var nullable?! as C) || var alternative: break;
+                default: ;
+              }
+              var (first, second) = pair;
+              (first, second) = pair;
+              try { target(); } on Failure catch (error, stack) { rethrow; }
+              finally { cleanup(); }
+            }
+        "#,
+        "part of library_name;",
+        "Iterable<dynamic> generator() sync* { yield value; yield* values; }",
+    ];
+    for source in sources {
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let mut recorder = Recorder::default();
+        recorder.visit_program(parsed.tree.program(source));
+        recorder.assert_reaches_every_node(parsed.tree.root(source));
+    }
+}
+
+#[test]
+fn explicit_hooks_and_default_leaves_reach_recovered_expressions_and_patterns() {
+    for (source, recovered_kind) in [
+        ("var invalid = @;", NodeKind::ErrorExpr),
+        ("void f() { if (value case :) {} }", NodeKind::ErrorPattern),
+    ] {
+        let parsed = parse(source);
+        assert!(!parsed.errors.is_empty());
+        let root = parsed.tree.root(source);
+        assert!(
+            root.descendants().any(|node| node.kind() == recovered_kind),
+            "missing expected recovery node {recovered_kind:?}"
+        );
+        let mut recorder = Recorder::default();
+        recorder.visit_program(parsed.tree.program(source));
+        recorder.assert_reaches_every_node(root);
+    }
 }

@@ -316,7 +316,7 @@ impl<'src> Parser<'src> {
     /// span contains only type-ish tokens, or `None` when some token means the
     /// `<` is really a comparison operator. Shared by generic-invocation and
     /// generic-instantiation detection.
-    fn after_generic_type_args(&self, start: usize) -> Option<usize> {
+    pub(super) fn after_generic_type_args(&self, start: usize) -> Option<usize> {
         use TokenKind::*;
         debug_assert_eq!(self.kind_at(start), Lt);
         let mut depth = 0i32;
@@ -393,7 +393,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn after_type_args_is_call(&self, idx: usize) -> bool {
+    pub(super) fn after_type_args_is_call(&self, idx: usize) -> bool {
         matches!(
             self.tokens.get(idx).map(|t| &t.kind),
             Some(TokenKind::LParen | TokenKind::Dot | TokenKind::QmarkDot)
@@ -404,7 +404,7 @@ impl<'src> Parser<'src> {
     /// or continue the right-hand side of a `<` comparison, so the `<...>` must
     /// be a generic-instantiation type-argument list. `f(a < b, c > d)` stays a
     /// comparison because an identifier follows `>`, which is *not* in this set.
-    fn token_ends_generic_instantiation(&self, idx: usize) -> bool {
+    pub(super) fn token_ends_generic_instantiation(&self, idx: usize) -> bool {
         use TokenKind::*;
         matches!(
             self.tokens.get(idx).map(|t| &t.kind),
@@ -579,63 +579,17 @@ impl<'src> Parser<'src> {
                             p.advance();
                             NodeKind::PostfixIncDecExpr
                         }
-                        TokenKind::Bang => {
-                            p.advance();
-                            NodeKind::NullAssertExpr
-                        }
-                        TokenKind::Dot | TokenKind::QmarkDot => {
-                            p.advance();
-                            p.expect_ctor_name();
-                            NodeKind::FieldExpr
-                        }
-                        TokenKind::LBracket | TokenKind::QmarkLBracket => {
-                            p.advance();
-                            p.parse_expr();
-                            p.expect(TokenKind::RBracket);
-                            NodeKind::IndexExpr
-                        }
-                        TokenKind::LParen => {
-                            p.parse_arg_list();
-                            NodeKind::CallExpr
-                        }
-                        TokenKind::Lt => {
-                            // A balanced `<...>` closed immediately before `(`, `.`, or
-                            // `?.` is a generic invocation; one followed by a token that
-                            // cannot continue a comparison is a bare tear-off
-                            // instantiation; otherwise `<` is a comparison operator
-                            // (`a < b ? () => c() : null`).
-                            if p.is_generic_invocation() {
-                                let parsed = p.speculate(|p| {
-                                    p.parse_type_args();
-                                    if p.at(TokenKind::LParen) {
-                                        p.parse_arg_list();
-                                        Some(NodeKind::CallExpr)
-                                    } else if matches!(
-                                        p.cur().kind,
-                                        TokenKind::Dot | TokenKind::QmarkDot
-                                    ) {
-                                        Some(NodeKind::GenericInstantiationExpr)
-                                    } else {
-                                        None
-                                    }
-                                });
-                                let Some(kind) = parsed else {
-                                    break;
-                                };
-                                kind
-                            } else if p.is_generic_instantiation() {
-                                p.parse_type_args();
-                                NodeKind::GenericInstantiationExpr
-                            } else {
-                                break;
-                            }
-                        }
                         TokenKind::Switch => {
                             p.advance();
                             p.parse_switch_expr_arms();
                             NodeKind::SwitchExpr
                         }
-                        _ => break,
+                        _ => {
+                            let Some(kind) = p.parse_selector(true) else {
+                                break;
+                            };
+                            kind
+                        }
                     };
                     let marker = expr.precede(p);
                     expr = marker.complete(p, kind);
@@ -643,6 +597,51 @@ impl<'src> Parser<'src> {
                 expr
             },
         )
+    }
+
+    /// Shared selector grammar; cascades cannot represent bare generic tear-offs.
+    fn parse_selector(&mut self, allow_instantiation: bool) -> Option<NodeKind> {
+        Some(match self.cur().kind {
+            TokenKind::Bang => {
+                self.advance();
+                NodeKind::NullAssertExpr
+            }
+            TokenKind::Dot | TokenKind::QmarkDot => {
+                self.advance();
+                self.expect_ctor_name();
+                NodeKind::FieldExpr
+            }
+            TokenKind::LBracket | TokenKind::QmarkLBracket => {
+                self.advance();
+                self.parse_expr();
+                self.expect(TokenKind::RBracket);
+                NodeKind::IndexExpr
+            }
+            TokenKind::LParen => {
+                self.parse_arg_list();
+                NodeKind::CallExpr
+            }
+            TokenKind::Lt if self.is_generic_invocation() => {
+                return self.speculate(|p| {
+                    p.parse_type_args();
+                    if p.at(TokenKind::LParen) {
+                        p.parse_arg_list();
+                        Some(NodeKind::CallExpr)
+                    } else if allow_instantiation
+                        && matches!(p.cur().kind, TokenKind::Dot | TokenKind::QmarkDot)
+                    {
+                        Some(NodeKind::GenericInstantiationExpr)
+                    } else {
+                        None
+                    }
+                });
+            }
+            TokenKind::Lt if allow_instantiation && self.is_generic_instantiation() => {
+                self.parse_type_args();
+                NodeKind::GenericInstantiationExpr
+            }
+            _ => return None,
+        })
     }
 
     fn parse_cascade_sections(&mut self) {
@@ -659,16 +658,17 @@ impl<'src> Parser<'src> {
 
     /// Parse the selector chain of a single cascade section (everything after the
     /// `..`/`?..`). Dart allows a full assignable-selector chain here — `..a.b()`,
-    /// `..m().n()`, `..a[i]=x`, `..a?.b()` — not just one selector, so this mirrors
-    /// the `parse_postfix` selector loop but seeds the first selector as a bare
-    /// identifier or `[index]` (no leading dot) and stops at a terminal assignment.
+    /// `..m().n()`, `..a[i]=x`, `..a?.b()` — not just one selector. It shares
+    /// postfix selector parsing but seeds the first selector as a bare identifier
+    /// or `[index]` (no leading dot) and stops at a terminal assignment.
     fn parse_cascade_section_ops(&mut self) -> bool {
         // First selector after `..`: bare identifier or `[index]`, no leading dot.
         let marker = self.start();
-        if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
-            self.advance();
-            self.parse_expr();
-            self.expect(TokenKind::RBracket);
+        if matches!(
+            self.cur().kind,
+            TokenKind::LBracket | TokenKind::QmarkLBracket
+        ) {
+            let _ = self.parse_selector(false);
             if self.try_parse_assign_op().is_some() {
                 self.parse_expr_without_cascade();
                 marker.complete(self, NodeKind::CascadeIndexAssign);
@@ -677,9 +677,9 @@ impl<'src> Parser<'src> {
             marker.complete(self, NodeKind::CascadeIndex);
         } else if self.cur().kind.is_identifier_like() {
             self.expect_ident();
-            if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                self.parse_type_args();
-                self.parse_arg_list();
+            if matches!(self.cur().kind, TokenKind::LParen | TokenKind::Lt)
+                && self.parse_selector(false) == Some(NodeKind::CallExpr)
+            {
                 marker.complete(self, NodeKind::CascadeCall);
             } else if self.try_parse_assign_op().is_some() {
                 self.parse_expr_without_cascade();
@@ -693,63 +693,38 @@ impl<'src> Parser<'src> {
             return false; // empty section
         }
         loop {
-            match self.cur().kind {
-                TokenKind::Dot | TokenKind::QmarkDot => {
-                    let marker = self.start();
-                    self.advance();
-                    self.expect_ctor_name();
-                    if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                        self.parse_type_args();
-                        self.parse_arg_list();
-                        marker.complete(self, NodeKind::CascadeCall);
+            let marker = self.start();
+            let Some(selector) = self.parse_selector(false) else {
+                marker.abandon(self);
+                break;
+            };
+            let kind = match selector {
+                NodeKind::FieldExpr => {
+                    if matches!(self.cur().kind, TokenKind::LParen | TokenKind::Lt)
+                        && self.parse_selector(false) == Some(NodeKind::CallExpr)
+                    {
+                        NodeKind::CascadeCall
                     } else if self.try_parse_assign_op().is_some() {
                         self.parse_expr_without_cascade();
                         marker.complete(self, NodeKind::CascadeAssign);
                         break;
                     } else {
-                        marker.complete(self, NodeKind::CascadeField);
+                        NodeKind::CascadeField
                     }
                 }
-                TokenKind::LBracket | TokenKind::QmarkLBracket => {
-                    let marker = self.start();
-                    self.advance();
-                    self.parse_expr();
-                    self.expect(TokenKind::RBracket);
+                NodeKind::IndexExpr => {
                     if self.try_parse_assign_op().is_some() {
                         self.parse_expr_without_cascade();
                         marker.complete(self, NodeKind::CascadeIndexAssign);
                         break;
                     }
-                    marker.complete(self, NodeKind::CascadeIndex);
+                    NodeKind::CascadeIndex
                 }
-                TokenKind::Bang => {
-                    let marker = self.start();
-                    self.advance();
-                    marker.complete(self, NodeKind::CascadeNullAssert);
-                }
-                TokenKind::LParen => {
-                    let marker = self.start();
-                    self.parse_arg_list();
-                    marker.complete(self, NodeKind::CascadeInvoke);
-                }
-                TokenKind::Lt if self.is_generic_invocation() => {
-                    let invocation = self.speculate(|parser| {
-                        let marker = parser.start();
-                        parser.parse_type_args();
-                        if parser.at(TokenKind::LParen) {
-                            parser.parse_arg_list();
-                            marker.complete(parser, NodeKind::CascadeInvoke);
-                            Some(())
-                        } else {
-                            None
-                        }
-                    });
-                    if invocation.is_none() {
-                        break;
-                    }
-                }
-                _ => break,
-            }
+                NodeKind::NullAssertExpr => NodeKind::CascadeNullAssert,
+                NodeKind::CallExpr => NodeKind::CascadeInvoke,
+                _ => unreachable!("cascade selector grammar returned a non-selector"),
+            };
+            marker.complete(self, kind);
         }
         true
     }
@@ -876,9 +851,14 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_paren_or_record_inner(&mut self, marker: Marker) -> CompletedMarker {
+        self.with_ctx(
+            |ctx| ctx.in_ctor_init_value = false,
+            |p| p.parse_paren_or_record_contents(marker),
+        )
+    }
+
+    fn parse_paren_or_record_contents(&mut self, marker: Marker) -> CompletedMarker {
         self.advance();
-        // Within these parens a trailing `{` never opens the constructor body.
-        self.ctx.in_ctor_init_value = false;
         if self.at(TokenKind::RParen) {
             self.advance();
             return marker.complete(self, NodeKind::RecordExpr);
@@ -983,9 +963,14 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_list_literal(&mut self, marker: Marker) -> CompletedMarker {
+        self.with_ctx(
+            |ctx| ctx.in_ctor_init_value = false,
+            |p| p.parse_list_literal_contents(marker),
+        )
+    }
+
+    fn parse_list_literal_contents(&mut self, marker: Marker) -> CompletedMarker {
         self.advance();
-        // Inside a list literal a trailing `{` never opens the constructor body.
-        self.ctx.in_ctor_init_value = false;
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
             self.parse_collection_element();
             if self.eat(TokenKind::Comma).is_none() {
@@ -1001,9 +986,18 @@ impl<'src> Parser<'src> {
         type_arg_count: usize,
         marker: Marker,
     ) -> CompletedMarker {
+        self.with_ctx(
+            |ctx| ctx.in_ctor_init_value = false,
+            |p| p.parse_map_or_set_literal_contents(type_arg_count, marker),
+        )
+    }
+
+    fn parse_map_or_set_literal_contents(
+        &mut self,
+        type_arg_count: usize,
+        marker: Marker,
+    ) -> CompletedMarker {
         self.advance();
-        // Inside a set/map literal a trailing `{` never opens the constructor body.
-        self.ctx.in_ctor_init_value = false;
         if self.at(TokenKind::RBrace) {
             self.advance();
             // Empty braces: a single type arg (`<int>{}`) is a Set; no type args

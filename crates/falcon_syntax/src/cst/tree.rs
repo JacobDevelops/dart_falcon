@@ -66,9 +66,6 @@ impl Element {
     pub(crate) fn as_node(self) -> Option<NodeId> {
         (self.0 & Self::TOKEN == 0).then_some(NodeId(self.0))
     }
-    pub(crate) fn as_token(self) -> Option<TokenId> {
-        (self.0 & Self::TOKEN != 0).then_some(TokenId(self.0 & !Self::TOKEN))
-    }
     pub(crate) fn resolve(self, parent: SyntaxNode<'_>) -> SyntaxElement<'_> {
         match self.as_node() {
             Some(id) => SyntaxElement::Node(SyntaxNode { id, ..parent }),
@@ -96,20 +93,10 @@ pub(crate) struct NodeData {
 
 impl NodeData {
     const SIGNIFICANT: u8 = 1;
-    const OPTIONAL_PARAM: u8 = 2;
-    const NAMED_PARAM: u8 = 4;
-    const REQUIRED_PARAM: u8 = 8;
-    const HAS_PARAMS: u8 = 16;
-
     pub(crate) fn param_kind(&self) -> super::ParamKind {
-        if self.flags & Self::NAMED_PARAM != 0 {
-            super::ParamKind::Named {
-                required: self.flags & Self::REQUIRED_PARAM != 0,
-            }
-        } else if self.flags & Self::OPTIONAL_PARAM != 0 {
-            super::ParamKind::OptionalPositional
-        } else {
-            super::ParamKind::Positional
+        match self.kind {
+            NodeKind::FormalParam(kind) | NodeKind::FunctionTypeParam(kind) => kind,
+            _ => panic!("parameter kind requires a parameter node"),
         }
     }
 
@@ -286,7 +273,6 @@ impl SyntaxTree {
             elements[*position as usize] = element;
             *position += 1;
         }
-        cache_param_kinds(&mut sink.nodes, &elements, &sink.tokens);
         recovery_spans.sort_unstable_by_key(|(node, _)| *node);
         Self {
             source_len: source.len(),
@@ -296,46 +282,6 @@ impl SyntaxTree {
             token_parents: sink.parents.into_boxed_slice(),
             delimiter_pairs: OnceLock::new(),
             recovery_spans: recovery_spans.into_boxed_slice(),
-        }
-    }
-}
-
-fn cache_param_kinds(nodes: &mut [NodeData], elements: &[Element], tokens: &[Token]) {
-    for parent in 0..nodes.len() {
-        if nodes[parent].flags & NodeData::HAS_PARAMS == 0 {
-            continue;
-        }
-        let children = &elements[nodes[parent].child_range()];
-        let mut cursor = 0;
-        let mut group = 0;
-        let mut previous_start = 0;
-        for child in children.iter().filter_map(|element| element.as_node()) {
-            let param = &mut nodes[child.0 as usize];
-            if param.kind != NodeKind::FormalParam {
-                continue;
-            }
-            // Only markers strictly before param.span.start apply. Empty recovery
-            // params can precede earlier siblings, so restart their marker scan.
-            if param.span.start < previous_start {
-                cursor = 0;
-                group = 0;
-            }
-            previous_start = param.span.start;
-            while let Some(element) = children.get(cursor) {
-                if let Some(token) = element.as_token() {
-                    let token = &tokens[token.index()];
-                    if token.offset() >= param.span.start {
-                        break;
-                    }
-                    match token.kind {
-                        TokenKind::LBracket => group = NodeData::OPTIONAL_PARAM,
-                        TokenKind::LBrace => group = NodeData::NAMED_PARAM,
-                        _ => {}
-                    }
-                }
-                cursor += 1;
-            }
-            param.flags |= group;
         }
     }
 }
@@ -376,9 +322,6 @@ impl Sink<'_> {
         let id = NodeId(arena_id(self.nodes.len()));
         let parent = self.stack.last().copied();
         if let Some(parent) = parent {
-            if kind == NodeKind::FormalParam {
-                self.nodes[parent.0 as usize].flags |= NodeData::HAS_PARAMS;
-            }
             self.edge(parent, Element::node(id));
         } else {
             assert!(self.nodes.is_empty(), "syntax tree must have one root");
@@ -408,9 +351,6 @@ impl Sink<'_> {
         self.tokens.push(token);
         self.parents.push(parent);
         let node = &mut self.nodes[parent.0 as usize];
-        if token.kind == TokenKind::Required && node.kind == NodeKind::FormalParam {
-            node.flags |= NodeData::REQUIRED_PARAM;
-        }
         if !token.is_trivia() && token.kind != TokenKind::Eof {
             if node.flags & NodeData::SIGNIFICANT == 0 {
                 node.span.start = token.offset();
@@ -515,160 +455,52 @@ mod tests {
         assert_eq!(node.token_range(), u32::MAX as usize..u32::MAX as usize);
     }
 
-    fn assert_param_cache(events: Vec<Event>, source_len: usize) -> Vec<super::super::ParamKind> {
+    #[test]
+    fn parameter_kind_comes_only_from_the_event() {
         use super::super::{FormalParam, ParamKind};
 
-        let source = "x".repeat(source_len);
-        let tree = SyntaxTree::build(&source, &[], events);
-        tree.root(&source)
-            .descendants()
-            .filter_map(FormalParam::cast)
-            .map(|param| {
-                let node = param.syntax();
-                let mut expected = ParamKind::Positional;
-                if let Some(parent) = node.parent() {
-                    for token in parent
-                        .children_with_tokens()
-                        .filter_map(SyntaxElement::into_token)
-                        .filter(|token| token.span().start < param.span().start)
-                    {
-                        match token.kind() {
-                            TokenKind::LBracket => expected = ParamKind::OptionalPositional,
-                            TokenKind::LBrace => expected = ParamKind::Named { required: false },
-                            _ => {}
-                        }
-                    }
-                }
-                if matches!(expected, ParamKind::Named { .. }) {
-                    expected = ParamKind::Named {
-                        required: node
-                            .children_with_tokens()
-                            .filter_map(SyntaxElement::into_token)
-                            .any(|token| token.kind() == TokenKind::Required),
-                    };
-                }
-                assert_eq!(param.kind(), expected, "parameter {:?}", param.span());
-                for kind in [TokenKind::Required, TokenKind::Ident, TokenKind::LBrace] {
-                    assert_eq!(
-                        node.child_token(kind),
-                        node.children_with_tokens()
-                            .filter_map(SyntaxElement::into_token)
-                            .find(|token| token.kind() == kind)
-                    );
-                }
-                expected
-            })
-            .collect()
-    }
-
-    fn param_token(events: &mut Vec<Event>, offset: &mut usize, kind: TokenKind) {
-        events.push(Event::Token {
-            kind,
-            len: 1,
-            offset: *offset,
-        });
-        *offset += 1;
-    }
-
-    fn param_fixture(
-        events: &mut Vec<Event>,
-        offset: &mut usize,
-        direct_required: bool,
-        nested_required: bool,
-    ) {
-        events.push(start(NodeKind::FormalParam, *offset));
-        if direct_required {
-            param_token(events, offset, TokenKind::Required);
-        }
-        if nested_required {
-            events.push(start(NodeKind::Error, *offset));
-            param_token(events, offset, TokenKind::Required);
-            param_token(events, offset, TokenKind::LBrace);
-            events.push(Event::Finish);
-        }
-        param_token(events, offset, TokenKind::Ident);
-        events.push(Event::Finish);
-    }
-
-    #[test]
-    fn parameter_cache_matches_scanning_for_valid_and_malformed_groups() {
-        let markers = [
-            TokenKind::LBracket,
-            TokenKind::LBrace,
-            TokenKind::RBracket,
-            TokenKind::RBrace,
-            TokenKind::Comma,
-            TokenKind::Required,
-            TokenKind::Whitespace,
-        ];
-        for first in markers {
-            for second in markers {
-                let mut events = vec![
-                    start(NodeKind::Program, 0),
-                    start(NodeKind::FormalParamList, 0),
-                ];
-                let mut offset = 0;
-                param_fixture(&mut events, &mut offset, false, false);
-                for marker in [first, second] {
-                    // Empty params share the following marker's offset: it must
-                    // not affect them, even though the scan sees later edges.
-                    events.push(start(NodeKind::FormalParam, offset));
-                    events.push(Event::Finish);
-                    param_token(&mut events, &mut offset, marker);
-                    for (direct, nested) in [(false, false), (true, false), (false, true)] {
-                        param_fixture(&mut events, &mut offset, direct, nested);
-                    }
-                }
-                events.extend([Event::Finish, Event::Finish]);
-                assert_eq!(assert_param_cache(events, offset).len(), 9);
-            }
-        }
-    }
-
-    #[test]
-    fn parameter_cache_preserves_empty_recovery_offsets_and_direct_parent_scope() {
-        use super::super::ParamKind;
-
-        let mut events = vec![start(NodeKind::Program, 0)];
-        let mut offset = 0;
-        param_token(&mut events, &mut offset, TokenKind::LBrace);
-        param_fixture(&mut events, &mut offset, true, false);
-        // A recovered empty node may point before already-consumed markers.
-        events.push(start(NodeKind::FormalParam, 0));
-        events.push(Event::Finish);
-        events.push(start(NodeKind::Error, offset));
-        param_fixture(&mut events, &mut offset, true, false);
-        events.push(Event::Finish);
-        param_fixture(&mut events, &mut offset, false, true);
-        events.push(Event::Finish);
-        assert_eq!(
-            assert_param_cache(events, offset),
-            [
-                ParamKind::Named { required: true },
-                ParamKind::Positional,
-                ParamKind::Positional,
-                ParamKind::Named { required: false },
-            ]
-        );
-    }
-
-    #[test]
-    fn parentless_parameter_cache_remains_positional() {
-        assert_eq!(
-            assert_param_cache(
+        for kind in [
+            ParamKind::Positional,
+            ParamKind::OptionalPositional,
+            ParamKind::Named { required: false },
+            ParamKind::Named { required: true },
+        ] {
+            let source = "{required";
+            let tree = SyntaxTree::build(
+                source,
+                &[],
                 vec![
-                    start(NodeKind::FormalParam, 0),
+                    start(NodeKind::Program, 0),
                     Event::Token {
-                        kind: TokenKind::Required,
+                        kind: TokenKind::LBrace,
                         len: 1,
                         offset: 0,
                     },
+                    start(NodeKind::FormalParam(kind), 1),
+                    Event::Token {
+                        kind: TokenKind::Required,
+                        len: 8,
+                        offset: 1,
+                    },
+                    Event::Finish,
                     Event::Finish,
                 ],
-                1,
-            ),
-            [super::super::ParamKind::Positional]
-        );
+            );
+            let param = tree
+                .root(source)
+                .descendants()
+                .find_map(FormalParam::cast)
+                .unwrap();
+            assert_eq!(param.kind(), kind);
+            assert!(tree.is_lossless(source));
+
+            let empty = SyntaxTree::build(
+                "",
+                &[],
+                vec![start(NodeKind::FormalParam(kind), 0), Event::Finish],
+            );
+            assert_eq!(FormalParam::cast(empty.root("")).unwrap().kind(), kind);
+        }
     }
 
     #[test]

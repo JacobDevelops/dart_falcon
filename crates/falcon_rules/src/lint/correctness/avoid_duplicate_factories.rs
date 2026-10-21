@@ -83,7 +83,7 @@ fn implementation_of(constructor: cst::ConstructorDecl<'_>) -> Option<cst::Synta
         matches!(
             node.kind(),
             cst::NodeKind::VarDeclarator
-                | cst::NodeKind::FormalParam
+                | cst::NodeKind::FormalParam(_)
                 | cst::NodeKind::TypeParam
                 | cst::NodeKind::PatternDeclaration
                 | cst::NodeKind::FuncExpr

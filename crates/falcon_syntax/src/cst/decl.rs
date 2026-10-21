@@ -894,32 +894,10 @@ impl<'a> TypeAliasDecl<'a> {
             .find(|n| n.kind() == NodeKind::LegacyTypedef)
     }
     pub fn name(self) -> Identifier<'a> {
-        if let Some(legacy) = self.legacy() {
-            legacy.child::<Identifier>().unwrap_or_else(|| {
-                let leading = legacy.required::<DartType>();
-                if let DartType::Named(named) = leading
-                    && let Some(name) = named.segments().next_back()
-                {
-                    return name;
-                }
-                Identifier::synthetic(leading.syntax(), "<error>", leading.span())
-            })
-        } else {
-            self.0.required::<Identifier>()
-        }
+        self.legacy().unwrap_or(self.0).required()
     }
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
-        let parent = self.legacy().unwrap_or(self.0);
-        if self.legacy().is_some()
-            && parent.child::<Identifier>().is_none()
-            && let Some(args) = parent
-                .children()
-                .find(|n| n.kind() == NodeKind::NamedType)
-                .and_then(|n| n.children().find(|n| n.kind() == NodeKind::TypeArgs))
-        {
-            return AstChildren::new(args);
-        }
-        AstChildren::new(parent)
+        AstChildren::new(self.legacy().unwrap_or(self.0))
     }
     pub fn aliased(self) -> DartType<'a> {
         if let Some(legacy) = self.legacy() {
@@ -970,7 +948,9 @@ impl<'a> FormalParamList<'a> {
             .filter(|p| matches!(p.kind(), ParamKind::Named { .. }))
     }
 }
-view!(FormalParam {
+typed_node!(FormalParam, pattern NodeKind::FormalParam(_));
+
+debug_node!(FormalParam {
     annotations,
     kind,
     is_covariant,

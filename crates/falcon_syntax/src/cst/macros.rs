@@ -2,12 +2,15 @@ use std::fmt;
 
 macro_rules! typed_node {
     ($name:ident, $kind:ident) => {
+        typed_node!($name, pattern $crate::cst::NodeKind::$kind);
+    };
+    ($name:ident, pattern $kind:pat) => {
         #[derive(Clone, Copy)]
         pub struct $name<'a>(pub(crate) $crate::cst::SyntaxNode<'a>);
 
         impl<'a> $crate::cst::AstNode<'a> for $name<'a> {
             fn cast(syntax: $crate::cst::SyntaxNode<'a>) -> Option<Self> {
-                (syntax.kind() == $crate::cst::NodeKind::$kind).then_some(Self(syntax))
+                matches!(syntax.kind(), $kind).then_some(Self(syntax))
             }
 
             fn syntax(self) -> $crate::cst::SyntaxNode<'a> {

@@ -150,19 +150,21 @@ impl<'src> Parser<'src> {
                 }
             }
             let marker = self.start();
-            if in_named {
-                self.missing(NodeKind::NamedTypeParamFlag);
-            } else if in_optional {
-                self.missing(NodeKind::OptionalTypeParamFlag);
-            }
             self.parse_annotations();
-            self.eat(TokenKind::Required);
+            let required = self.eat(TokenKind::Required).is_some();
+            let kind = if in_named {
+                ParamKind::Named { required }
+            } else if in_optional {
+                ParamKind::OptionalPositional
+            } else {
+                ParamKind::Positional
+            };
             let _ = self
                 .eat(TokenKind::Final)
                 .or_else(|| self.eat(TokenKind::Covariant));
             self.parse_type();
             self.parse_ident();
-            marker.complete(self, NodeKind::FunctionTypeParam);
+            marker.complete(self, NodeKind::FunctionTypeParam(kind));
             if !self.at(TokenKind::Comma) {
                 break;
             }
@@ -297,19 +299,14 @@ impl<'src> Parser<'src> {
 
     fn parse_formal_param(&mut self, kind: ParamKind) -> CompletedMarker {
         let marker = self.start();
-        match kind {
-            ParamKind::Named { .. } => {
-                self.missing(NodeKind::NamedTypeParamFlag);
-            }
-            ParamKind::OptionalPositional => {
-                self.missing(NodeKind::OptionalTypeParamFlag);
-            }
-            ParamKind::Positional => {}
-        }
         while self.at(TokenKind::At) {
             self.parse_annotations();
         }
-        self.eat(TokenKind::Required);
+        let required = self.eat(TokenKind::Required).is_some();
+        let kind = match kind {
+            ParamKind::Named { .. } => ParamKind::Named { required },
+            kind => kind,
+        };
         self.eat(TokenKind::Covariant);
         let is_final = self.eat(TokenKind::Final).is_some();
         // `var` marks a mutable parameter (declaring in a primary constructor);
@@ -348,7 +345,7 @@ impl<'src> Parser<'src> {
             && name.text(self).starts_with('_')
             && !self.version.supports(Feature::PrivateNamedParameters)
         {
-            self.error_at(
+            self.feature_error_at(
                 name.span.start,
                 "This requires the 'private-named-parameters' language feature",
             );
@@ -374,7 +371,7 @@ impl<'src> Parser<'src> {
             self.parse_expr();
         }
 
-        marker.complete(self, NodeKind::FormalParam)
+        marker.complete(self, NodeKind::FormalParam(kind))
     }
 
     /// An old-style function-typed formal whose *name* is the built-in

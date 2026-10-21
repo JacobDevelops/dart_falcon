@@ -118,20 +118,27 @@ fn leading_number(text: &str) -> Option<(u32, &str)> {
 
 /// The text after a (possibly nested) block comment whose opening `/*` has been
 /// consumed; `None` when the comment is unterminated.
-fn skip_block_comment(mut rest: &str) -> Option<&str> {
+fn skip_block_comment(rest: &str) -> Option<&str> {
+    let bytes = rest.as_bytes();
+    let mut pos = 0;
     let mut depth = 1usize;
-    while depth > 0 {
-        let close = rest.find("*/")?;
-        let open = rest.find("/*").filter(|&open| open < close);
-        if let Some(open) = open {
-            depth += 1;
-            rest = &rest[open + 2..];
-        } else {
-            depth -= 1;
-            rest = &rest[close + 2..];
+    while pos + 1 < bytes.len() {
+        match (bytes[pos], bytes[pos + 1]) {
+            (b'/', b'*') => {
+                depth += 1;
+                pos += 2;
+            }
+            (b'*', b'/') => {
+                depth -= 1;
+                pos += 2;
+                if depth == 0 {
+                    return Some(&rest[pos..]);
+                }
+            }
+            _ => pos += 1,
         }
     }
-    Some(rest)
+    None
 }
 
 impl fmt::Display for LanguageVersion {
@@ -189,6 +196,27 @@ mod tests {
         assert_eq!(
             version("// @dart = 2.19  \r\n"),
             Some(LanguageVersion::new(2, 19))
+        );
+    }
+
+    #[test]
+    fn scans_deeply_nested_header_comments() {
+        let source = format!(
+            "{}{}// @dart = 3.1\n",
+            "/*".repeat(1_000_000),
+            "*/".repeat(1_000_000)
+        );
+        // A linear 4 MB scan has ample headroom; repeatedly searching the remaining
+        // suffix for a close rescans terabytes on this input.
+        let started = std::time::Instant::now();
+        assert_eq!(
+            LanguageVersion::file_override(&source),
+            Some(LanguageVersion::new(3, 1))
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(
+            LanguageVersion::file_override("/* /* */ // @dart = 3.1"),
+            None
         );
     }
 

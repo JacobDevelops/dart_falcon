@@ -78,8 +78,8 @@ fn test_interpolation_comments_ignore_closing_braces() {
 }
 
 #[test]
-fn test_unterminated_interpolation_and_comment_consume_source() {
-    for src in ["'${ /* x", "'${ 'x", "/* x"] {
+fn test_unterminated_interpolation_and_comment_without_recovery_boundary_consume_source() {
+    for src in ["'${ /* x", "/* x"] {
         let tokens = Lexer::new(src).tokenize();
         assert_eq!(tokens.len(), 2, "{src:?}: {tokens:?}");
         assert_eq!(tokens[0].kind, TokenKind::Error, "{src:?}");
@@ -87,6 +87,22 @@ fn test_unterminated_interpolation_and_comment_consume_source() {
         assert_eq!(tokens[0].len(), src.len());
         assert_eq!(tokens[1].kind, TokenKind::Eof);
     }
+}
+
+#[test]
+fn test_unterminated_interpolation_recovers_at_enclosing_quote() {
+    let src = "'${ 'x";
+    let tokens = Lexer::new(src).tokenize();
+    assert_eq!(tokens.len(), 3, "{tokens:?}");
+    assert_eq!(tokens[0].kind, TokenKind::Error);
+    assert_eq!(tokens[0].offset(), 0);
+    assert_eq!(tokens[0].text(src), "'${ '");
+    assert_eq!(tokens[1].kind, TokenKind::Ident);
+    assert_eq!(tokens[1].offset(), tokens[0].len());
+    assert_eq!(tokens[1].text(src), "x");
+    assert_eq!(tokens[2].kind, TokenKind::Eof);
+    assert_eq!(tokens[2].offset(), src.len());
+    assert_eq!(tokens.iter().map(Token::len).sum::<usize>(), src.len());
 }
 
 #[test]
