@@ -1,36 +1,14 @@
 # Falcon 1.0 checklist
 
-Every hardening item and rule row below must be resolved before falcon 1.0; there is no post-1.0 tier. A hardening item or rule row is deleted once it ships, and a batch heading goes with its last item. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
+Every hardening item and rule row below must be resolved before falcon 1.0; there is no post-1.0 tier. A hardening item or rule row is deleted once it ships, and a batch heading goes with its last item. The declarations in `crates/falcon_rules/src/lint/<group>.rs` and `crates/falcon_rules/src/cross_file.rs` are authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
 ## Hardening
 
 Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
 
-### Stage 3: start now
-
-These change the rule API every rule uses, so they run one at a time and no stage 4 batch starts until batch 10 lands.
-
-#### 10. Rule declaration and ids
-
-Owns `crates/falcon_rules/src/meta.rs`, the `lint/<group>.rs` files, `registry.rs`, every rule's `ctx.diagnostic` call, and codegen in xtask. Rules attach fixes with `AnalyzeContext::with_fix` from here on.
-
-- [ ] **Single rule declaration.** Adding a rule touches about 15 places, more than half unchecked. Replace the hand-written `RULE_METADATA` entries and `pub mod` lines with a per-group declaration macro that emits the module, metadata and `const NAME`, and split `meta.rs` into per-group tables.
-- [ ] **Diagnostic rule ids aren't enforced.** Rules retype their id in every `ctx.diagnostic("…")`, and the corpus test drops foreign ids (`corpus_tests.rs:489`), so a typo gives a warning nobody can configure or suppress. Have the registry stamp the id per slot.
-- [ ] **Derive `needs_resolution`.** The `file`/`resolved` choice is hand-set and independent of what `prepare` returns. Assert `Semantic` preparation implies resolution in `meta_tests`.
-- [ ] **Registry invariants.** Assert alias keys don't shadow live rule names; drop the unused `domain` parameter on cross-file rules; replace the linear `meta_for` scan with a map.
-- [ ] **Codegen matches the procedure.** Compile-test the stub template, list schema/docgen/changeset steps, scaffold cross-file rules, validate the kebab-case id, delete the dead group-exists branch.
-
-#### 11. Typed rule options
-
-Owns `lint/options.rs`, the 46 option-reading rules, `schema.rs` and the options table in `docs/configuration.md`. After batch 10.
-
-Option keys are kebab-case like every other config key. The current snake_case keys keep loading with a deprecation warning, and `falcon migrate` rewrites them.
-
-- [ ] **Typed rule options.** Options are `serde_json::Value` read by string key in 46 files, and bad values silently disable behaviour (`prefer_correct_handler_name` drops an invalid regex). Give each rule a `Deserialize + JsonSchema` options struct with `deny_unknown_fields`, emit per-rule schemas, and generate the `configuration.md` options table.
-
 ### Stage 4: rule internals
 
-After batch 10. Batches 12 and 13 can run in parallel; 14 runs after 12 because both move code out of `use_build_context_synchronously`.
+Batches 12 and 13 can run in parallel; 14 runs after 12 because both move code out of `use_build_context_synchronously`.
 
 #### 12. Shared rule helpers
 
@@ -65,7 +43,7 @@ Owns `AnalyzeContext` caches, `semantic_scope.rs` queries, `const_eval.rs`, `Con
 
 ### Stage 5: analysis core
 
-Can run alongside stages 3 and 4 except where a batch touches rule files. Batch 15 goes first; 16 and 17 then work in separate modules.
+Can run alongside stage 4 except where a batch touches rule files. Batch 15 goes first; 16 and 17 then work in separate modules.
 
 #### 15. Split `resolve/semantic.rs`
 
