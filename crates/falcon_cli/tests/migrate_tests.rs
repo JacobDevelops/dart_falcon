@@ -1934,10 +1934,12 @@ fn yaml_exclusion_only_rule_excludes_warn_without_broad_off_override() {
             || value["overrides"].as_array().is_some_and(Vec::is_empty)
     );
     assert!(
-        result
-            .warnings
-            .iter()
-            .any(|warning| { warning.contains("exclude") && warning.contains("!lib/keep.dart") })
+        result.warnings.iter().any(|warning| {
+            warning.contains("`dart_code_linter.rules[0].avoid-late-keyword.exclude`")
+                && warning.contains("!lib/keep.dart")
+        }),
+        "{:?}",
+        result.warnings
     );
     assert_migrated_config_loads(&result.json);
 }

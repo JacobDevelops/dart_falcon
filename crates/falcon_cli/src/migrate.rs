@@ -156,11 +156,11 @@ impl Migration {
         source: &str,
         index: Option<usize>,
     ) {
+        let path = match index {
+            Some(index) => format!("{source}.rules[{index}].{id}"),
+            None => format!("{source}.rules.{id}"),
+        };
         let Some(meta) = lookup.get(id.as_str()) else {
-            let path = match index {
-                Some(index) => format!("{source}.rules[{index}].{id}"),
-                None => format!("{source}.rules.{id}"),
-            };
             self.warnings.push(format!(
                 "unknown upstream rule `{path}`; discarded value {value}"
             ));
@@ -183,7 +183,7 @@ impl Migration {
                             .is_some_and(|patterns| patterns.iter().any(has_positive))
                     {
                         self.warnings.push(format!(
-                            "cannot migrate `{source}.rules.{id}.exclude` without a positive pattern; discarded value {excludes}; keeping the rule enabled"
+                            "cannot migrate `{path}.exclude` without a positive pattern; discarded value {excludes}; keeping the rule enabled"
                         ));
                     } else {
                         let section = if meta.is_cross_file() {
