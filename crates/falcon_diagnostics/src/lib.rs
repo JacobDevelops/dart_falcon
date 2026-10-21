@@ -1,12 +1,15 @@
 //! Diagnostic types, severity levels, and reporting.
 //!
 //! The `Diagnostic` type is the canonical output of every lint rule.
-//! JSON exposes rule, severity, message, file_path, span, line, and col.
+//! JSON exposes rule, severity, message, file_path, span, resolved positions, and an optional fix.
 //! LSP diagnostics use the rule name as their code.
 
 use lsp_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range};
 use serde::Serialize;
 use std::fmt;
+
+mod fix;
+pub use fix::{ApplyFixError, Fix, FixKind, TextEdit};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
@@ -22,6 +25,9 @@ pub struct Diagnostic {
     /// 1-based column of `span.start`. 0 means unresolved.
     #[serde(skip_serializing_if = "is_zero")]
     pub col: u32,
+    /// An optional rule-declared fix over the original source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<Fix>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -164,7 +170,14 @@ impl Diagnostic {
             span: span.into(),
             line: 0,
             col: 0,
+            fix: None,
         }
+    }
+
+    /// Attach a fix whose safety is explicitly declared by the rule.
+    pub fn with_fix(mut self, fix: Fix) -> Self {
+        self.fix = Some(fix);
+        self
     }
 
     /// Fill `line`/`col` (1-based) from `source` for this diagnostic's span start.
@@ -211,7 +224,10 @@ impl Diagnostic {
             related_information: None,
             tags: None,
             code_description: None,
-            data: None,
+            data: self
+                .fix
+                .as_ref()
+                .map(|fix| serde_json::json!({ "fix": fix })),
         }
     }
 }

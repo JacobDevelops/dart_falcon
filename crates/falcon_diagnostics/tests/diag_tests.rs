@@ -33,6 +33,21 @@ fn test_format_text_error() {
 }
 
 #[test]
+fn test_format_text_omits_unresolved_position() {
+    let diag = Diagnostic::new(
+        "unmatched-path",
+        Severity::Error,
+        "Path does not exist.",
+        "missing.dart",
+        Span::new(0, 0),
+    );
+    assert_eq!(
+        diag.format_text(),
+        "missing.dart: [error] (unmatched-path) Path does not exist."
+    );
+}
+
+#[test]
 fn test_byte_to_line_col_is_one_based() {
     let source = "void main() {\n  print(\"hi\"\n}\n";
     // offset 0 -> line 1, col 1

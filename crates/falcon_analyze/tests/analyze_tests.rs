@@ -342,3 +342,30 @@ fn context_reuses_per_file_analysis_facts() {
         second.flow_writes(program)
     ));
 }
+
+#[test]
+fn context_fix_uses_lossless_cst_byte_spans() {
+    use falcon_diagnostics::{Fix, FixKind, TextEdit};
+
+    let source = "// café\r\nvoid main() { var value = 1; /* kept */ }\r\n";
+    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let config = FalconConfig::default();
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+    let span = ctx
+        .tokens()
+        .find(|token| token.text() == "var")
+        .unwrap()
+        .span();
+    let diagnostic = ctx
+        .diagnostic("test-rule", "Prefer final", span)
+        .with_fix(Fix::new(FixKind::Safe, vec![TextEdit::new(span, "final")]));
+
+    assert_eq!(
+        diagnostic.fix.unwrap().apply(ctx.source()).unwrap(),
+        "// café\r\nvoid main() { final value = 1; /* kept */ }\r\n"
+    );
+}

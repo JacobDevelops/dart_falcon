@@ -232,6 +232,8 @@ impl<'a> AnalyzeContext<'a> {
         self
     }
 
+    /// Build a diagnostic; chain [`Diagnostic::with_fix`] to attach rule-declared
+    /// byte-span replacements over [`Self::source`].
     pub fn diagnostic(
         &self,
         rule: &'static str,
