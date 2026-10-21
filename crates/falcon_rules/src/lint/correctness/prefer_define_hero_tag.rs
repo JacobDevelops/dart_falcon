@@ -54,11 +54,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .named()
             .any(|argument| argument.name().name() == "heroTag")
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-define-hero-tag",
-                "Provide an explicit heroTag for this floating action button.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diags.push(self.ctx.diagnostic("Provide an explicit heroTag for this floating action button.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

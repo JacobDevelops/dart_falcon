@@ -20,7 +20,7 @@ impl Rule for ExtendEquatable {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, "extend-equatable");
+        let options = crate::lint::options::for_rule(ctx, ExtendEquatable::NAME);
         let class_pattern = options
             .and_then(|options| options.get("class_name_pattern"))
             .and_then(|value| value.as_str())
@@ -76,7 +76,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 || identities.is_package_declaration(identity, "equatable", "EquatableMixin")
         }) == Truth::No {
             self.diagnostics.push(self.ctx.diagnostic(
-                "extend-equatable",
                 "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'.",
                 name.span(),
             ));

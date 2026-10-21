@@ -43,7 +43,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::Empty(empty) = node {
             self.diags.push(self.ctx.diagnostic(
-                "empty-statements",
                 "Unnecessary empty statement — remove the `;` or replace it with a block",
                 empty.span(),
             ));

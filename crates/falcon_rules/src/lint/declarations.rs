@@ -455,7 +455,7 @@ mod tests {
                     tree,
                 });
                 let ctx = AnalyzeContext::new(Path::new("containers.dart"), &config, &parsed);
-                let diagnostics = rule.analyze(parsed.program(), &ctx);
+                let diagnostics = rule.analyze(name, parsed.program(), &ctx);
                 assert_eq!(
                     diagnostics.iter().any(|diagnostic| diagnostic.rule == name),
                     name != "hash-and-equals" || matches!(kind, "Class" | "MixinClass"),

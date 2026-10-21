@@ -47,7 +47,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && name.name() == "new"
         {
             self.diags.push(self.ctx.diagnostic(
-                "unnecessary-constructor-name",
                 "Unnecessary `.new`; the default constructor can be invoked without it.",
                 name.span(),
             ));
@@ -65,7 +64,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && access.field().name() == "new"
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "unnecessary-constructor-name",
                         "Unnecessary `.new`; the default constructor can be invoked without it.",
                         access.field().span(),
                     ));
@@ -77,7 +75,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && name.name() == "new"
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "unnecessary-constructor-name",
                         "Unnecessary `.new`; the default constructor can be invoked without it.",
                         name.span(),
                     ));

@@ -23,11 +23,7 @@ impl Rule for UseStringInPartOfDirectives {
             && part_of.uri().is_none()
             && part_of.name().next().is_some()
         {
-            diags.push(ctx.diagnostic(
-                "use-string-in-part-of-directives",
-                "Use a string to refer to the containing library in a part-of directive.",
-                part_of.span(),
-            ));
+            diags.push(ctx.diagnostic("Use a string to refer to the containing library in a part-of directive.", part_of.span()));
         }
         RulePreparation::Diagnostics(diags)
     }

@@ -93,15 +93,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "prefer-provider-extensions",
-            if method == "read" {
-                "Use context.read instead of Provider.of."
-            } else {
-                "Use context.watch instead of Provider.of."
-            },
-            call.callee().span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic(if method == "read" {
+            "Use context.read instead of Provider.of."
+        } else {
+            "Use context.watch instead of Provider.of."
+        }, call.callee().span()));
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {

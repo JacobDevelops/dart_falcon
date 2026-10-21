@@ -52,7 +52,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             });
             if !chained {
                 self.diags.push(self.ctx.diagnostic(
-                    "avoid-multi-assignment", "Split chained assignments into separate statements.", assign.span(),
+                    "Split chained assignments into separate statements.", assign.span(),
                 ));
             }
         }
@@ -67,7 +67,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if value.is_some_and(|value| matches!(value.unparenthesized(), Expr::Assign(_))) {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-multi-assignment", "Split chained assignments into separate statements.", node.span(),
+                "Split chained assignments into separate statements.", node.span(),
             ));
         }
         StructuralTraversal::Continue

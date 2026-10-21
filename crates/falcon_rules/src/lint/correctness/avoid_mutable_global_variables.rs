@@ -41,7 +41,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && var_decl.keyword() == VarKeyword::Var
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-mutable-global-variables",
                 "Avoid mutable global variables. Use const or final instead.",
                 var_decl.span(),
             ));

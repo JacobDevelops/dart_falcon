@@ -50,11 +50,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, name: Identifier<'_>) {
         if has_leading_underscore(name.name()) {
-            self.diags.push(self.ctx.diagnostic(
-                "no-leading-underscores-for-local-identifiers",
-                MESSAGE,
-                name.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, name.span()));
         }
     }
 }
@@ -195,8 +191,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        NoLeadingUnderscoresForLocalIdentifiers
-            .analyze(program, &ctx)
+        NoLeadingUnderscoresForLocalIdentifiers.analyze(NoLeadingUnderscoresForLocalIdentifiers::NAME, program, &ctx)
             .len()
     }
 

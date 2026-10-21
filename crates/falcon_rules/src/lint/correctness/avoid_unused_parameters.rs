@@ -56,11 +56,7 @@ mod dcl {
                 {
                     continue;
                 }
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "avoid-unused-parameters",
-                    format!("Parameter '{name}' is declared but not used"),
-                    param.name().span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic(format!("Parameter '{name}' is declared but not used"), param.name().span()));
             }
         }
     }

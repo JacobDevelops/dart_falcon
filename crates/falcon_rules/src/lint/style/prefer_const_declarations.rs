@@ -174,14 +174,10 @@ impl<'a> SemanticRuleVisitor<'a> for Checker<'a> {
                     }
                     start
                 };
-                Some(ctx.diagnostic(
-                    "prefer-const-declarations",
-                    "Use 'const' for final variables initialized to a constant value.",
-                    Span {
-                        start,
-                        end: group.span.end,
-                    },
-                ))
+                Some(ctx.diagnostic("Use 'const' for final variables initialized to a constant value.", Span {
+                    start,
+                    end: group.span.end,
+                }))
             })
             .collect()
     }
@@ -283,7 +279,7 @@ void f() {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = PreferConstDeclarations.analyze(program, &ctx);
+        let diagnostics = PreferConstDeclarations.analyze(PreferConstDeclarations::NAME, program, &ctx);
         let spans: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

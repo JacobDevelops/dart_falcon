@@ -139,7 +139,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 _ => return StructuralTraversal::SkipChildren,
             };
             self.diags.push(ctx.diagnostic(
-                "implicit-reopen",
                 format!(
                     "The class '{}' reopens '{}' because it is not marked '{reason}'.",
                     name.name(), super_name.name()

@@ -94,5 +94,5 @@ fn check_members<'a>(
         ),
         _ => return,
     };
-    diags.push(ctx.diagnostic("hash-and-equals", message, span));
+    diags.push(ctx.diagnostic(message, span));
 }

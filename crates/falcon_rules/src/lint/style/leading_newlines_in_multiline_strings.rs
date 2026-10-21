@@ -62,7 +62,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 .is_some_and(|text| text.contains(['\n', '\r']));
             if spans_lines {
                 self.diags.push(self.ctx.diagnostic(
-                    "leading-newlines-in-multiline-strings",
                     "Missing a newline at the beginning of a multiline string.",
                     span,
                 ));

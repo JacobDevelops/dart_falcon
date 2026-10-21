@@ -33,7 +33,6 @@ impl Rule for PreferDoubleQuotes {
         RulePreparation::Structural(Box::new(QuoteVisitor::new(
             ctx,
             QuotePreference {
-                rule: "prefer-double-quotes",
                 message: "Unnecessary use of single quotes.",
                 preferred: b'"',
             },

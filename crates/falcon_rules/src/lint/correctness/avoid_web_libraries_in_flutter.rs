@@ -26,7 +26,7 @@ impl Rule for AvoidWebLibrariesInFlutter {
         let mut diags = Vec::new();
         for import in program.imports() {
             if is_web_library(&import.uri().value()) {
-                diags.push(ctx.diagnostic("avoid-web-libraries-in-flutter", "Avoid using web-only libraries in Flutter code; they are not portable across platforms.", import.span()));
+                diags.push(ctx.diagnostic("Avoid using web-only libraries in Flutter code; they are not portable across platforms.", import.span()));
             }
         }
         RulePreparation::Diagnostics(diags)
@@ -80,8 +80,7 @@ mod tests {
             let source = &parsed.source;
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(&path, &config, &parsed);
-            let lines: Vec<_> = AvoidWebLibrariesInFlutter
-                .analyze(parsed.program(), &ctx)
+            let lines: Vec<_> = AvoidWebLibrariesInFlutter.analyze(AvoidWebLibrariesInFlutter::NAME, parsed.program(), &ctx)
                 .into_iter()
                 .map(|diagnostic| source[..diagnostic.span.start].matches('\n').count() + 1)
                 .collect();

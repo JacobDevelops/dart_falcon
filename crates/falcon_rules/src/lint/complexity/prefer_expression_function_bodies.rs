@@ -68,11 +68,7 @@ impl Collector<'_, '_> {
                     start = marker.offset();
                 }
             }
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-expression-function-bodies",
-                "Unnecessary use of a block function body.",
-                Span::new(start, block.span().end),
-            ));
+            self.diags.push(self.ctx.diagnostic("Unnecessary use of a block function body.", Span::new(start, block.span().end)));
         }
     }
 }
@@ -140,7 +136,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = PreferExpressionFunctionBodies.analyze(parsed.program(), &ctx);
+        let diagnostics = PreferExpressionFunctionBodies.analyze(PreferExpressionFunctionBodies::NAME, parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -166,7 +162,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = PreferExpressionFunctionBodies.analyze(parsed.program(), &ctx);
+        let diagnostics = PreferExpressionFunctionBodies.analyze(PreferExpressionFunctionBodies::NAME, parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

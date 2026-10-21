@@ -83,7 +83,6 @@ impl Collector<'_> {
         report(
             self.ctx,
             &self.entries,
-            "banned-usage",
             name,
             span,
             &mut self.diagnostics,

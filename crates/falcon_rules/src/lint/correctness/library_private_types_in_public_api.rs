@@ -214,11 +214,7 @@ impl<'a> Collector<'a> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "library-private-types-in-public-api",
-            "Avoid using a private type in a public API.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("Avoid using a private type in a public API.", span));
     }
 
     fn type_params(&mut self, params: AstChildren<'a, TypeParam<'a>>) {

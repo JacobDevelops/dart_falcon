@@ -72,11 +72,7 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-dynamic-calls",
-            "Method invocation or property access on a 'dynamic' target.",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Method invocation or property access on a 'dynamic' target.", span));
     }
 
     /// Reports `target` when it is provably `dynamic`; explicit casts are allowed.
@@ -449,7 +445,7 @@ void use(dynamic value) {
             "{:?}",
             accumulator.0
         );
-        let diagnostics = AvoidDynamicCalls.analyze(program, &ctx);
+        let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -482,7 +478,7 @@ void use(dynamic value) {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = AvoidDynamicCalls.analyze(program, &ctx);
+        let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
         let mut starts: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.span.start)

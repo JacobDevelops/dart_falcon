@@ -43,21 +43,21 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
         if let TopLevelDecl::Variable(var) = node
             && var.is_late()
         {
-            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", var.span()));
+            self.diags.push(self.ctx.diagnostic("Avoid using the late keyword — use nullable types or initialize immediately instead", var.span()));
         }
         StructuralTraversal::Continue
     }
 
     fn visit_field_decl(&mut self, node: FieldDecl<'a>) -> StructuralTraversal {
         if node.is_late() {
-            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", node.span()));
+            self.diags.push(self.ctx.diagnostic("Avoid using the late keyword — use nullable types or initialize immediately instead", node.span()));
         }
         StructuralTraversal::Continue
     }
 
     fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
         if local.is_late() {
-            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", local.full_span()));
+            self.diags.push(self.ctx.diagnostic("Avoid using the late keyword — use nullable types or initialize immediately instead", local.full_span()));
         }
         StructuralTraversal::Continue
     }

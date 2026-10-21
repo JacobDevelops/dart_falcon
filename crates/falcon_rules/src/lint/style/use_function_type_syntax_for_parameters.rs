@@ -43,7 +43,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
         if node.function_params().is_some() {
             self.diags.push(self.ctx.diagnostic(
-                "use-function-type-syntax-for-parameters",
                 "Use the generic function type syntax for parameters.".to_string(),
                 node.span(),
             ));
@@ -77,7 +76,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = UseFunctionTypeSyntaxForParameters.analyze(parsed.program(), &ctx);
+        let diagnostics = UseFunctionTypeSyntaxForParameters.analyze(UseFunctionTypeSyntaxForParameters::NAME, parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

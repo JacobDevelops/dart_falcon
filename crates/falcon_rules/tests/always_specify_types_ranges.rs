@@ -12,10 +12,11 @@ fn assert_ranges(source: &str, expected: &[(&str, &str)]) {
     assert_rule_ranges("always-specify-types", source, expected);
 }
 
-fn assert_rule_ranges(rule_name: &str, source: &str, expected: &[(&str, &str)]) {
+fn assert_rule_ranges(rule_name: &'static str, source: &str, expected: &[(&str, &str)]) {
     let rules = all_rules();
     let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
     let diagnostics = inference::analyze(
+        rule_name,
         rule.as_ref(),
         Path::new("always_specify_types_ranges.dart"),
         source,

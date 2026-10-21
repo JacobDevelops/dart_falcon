@@ -82,11 +82,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .iter()
             .any(|fact| fact.is_static && matches!(fact.kind, MemberKind::Field { .. }))
         {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-assigning-to-static-field",
-                "Avoid assigning to static fields from instance methods; move the state to an instance or make the method static.",
-                target.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Avoid assigning to static fields from instance methods; move the state to an instance or make the method static.", target.span()));
         }
     }
 

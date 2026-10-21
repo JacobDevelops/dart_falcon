@@ -44,7 +44,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
             && cascade.sections().count() == 1
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-single-cascade-in-expression-statements",
                 "Single cascade in an expression statement — use `.` instead of `..`",
                 cascade.span(),
             ));

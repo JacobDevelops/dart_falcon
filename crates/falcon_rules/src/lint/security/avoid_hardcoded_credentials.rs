@@ -71,7 +71,7 @@ impl Collector<'_> {
             _ => false,
         };
         if literal {
-            self.diagnostics.push(self.ctx.diagnostic("avoid-hardcoded-credentials", "Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration.", name.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Credential-like name is assigned a hardcoded value; read the credential from secure runtime configuration.", name.span()));
         }
     }
 }

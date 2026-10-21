@@ -41,11 +41,7 @@ impl Rule for CombinatorsOrdering {
                         ordered
                     });
                     (!sorted).then(|| {
-                        ctx.diagnostic(
-                            "combinators-ordering",
-                            "Sort combinator names alphabetically.",
-                            combinator.span(),
-                        )
+                        ctx.diagnostic("Sort combinator names alphabetically.", combinator.span())
                     })
                 })
                 .collect(),

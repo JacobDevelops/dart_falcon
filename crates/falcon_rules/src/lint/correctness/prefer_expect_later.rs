@@ -49,11 +49,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .implements_sdk(&state.infer(actual), "dart:async", "Future")
             == falcon_analyze::Truth::Yes
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-expect-later",
-                "Use expectLater and await its result when expecting a Future.",
-                actual.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use expectLater and await its result when expecting a Future.", actual.span()));
         }
     }
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {

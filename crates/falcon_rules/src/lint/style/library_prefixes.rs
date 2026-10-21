@@ -26,7 +26,7 @@ impl Rule for LibraryPrefixes {
                     && ctx.language_version().supports(Feature::WildcardVariables))
                 && !is_valid_library_prefix(prefix.name())
             {
-                diags.push(ctx.diagnostic("library-prefixes", MESSAGE, prefix.span()));
+                diags.push(ctx.diagnostic(MESSAGE, prefix.span()));
             }
         }
         RulePreparation::Diagnostics(diags)

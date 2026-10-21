@@ -27,7 +27,6 @@ use crate::member_order::{category_rank, check_sequence, read_string_list};
 #[derive(Default)]
 pub struct ClassMembersOrdering;
 
-const NAME: &str = "class-members-ordering";
 
 impl Rule for ClassMembersOrdering {
     fn prepare<'a>(
@@ -37,7 +36,7 @@ impl Rule for ClassMembersOrdering {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            order: read_string_list(ctx, NAME, "order"),
+            order: read_string_list(ctx, Self::NAME, "order"),
             diags: Vec::new(),
         }))
     }
@@ -60,7 +59,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     members,
                     &mut self.diags,
                     self.ctx,
-                    NAME,
                     |m| category_rank(m, seq),
                     ORDER_MESSAGE,
                 ),
@@ -163,7 +161,7 @@ fn check_members(
         let before_larger = i > 3 && cat < max_left[i];
         if after_smaller || before_larger {
             let span = member.span();
-            diags.push(ctx.diagnostic(NAME, "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members", span));
+            diags.push(ctx.diagnostic("Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members", span));
         }
     }
 }

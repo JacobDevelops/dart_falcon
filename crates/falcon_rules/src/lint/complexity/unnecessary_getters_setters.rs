@@ -84,12 +84,8 @@ fn check_members<'a>(
         // Both accessors must wrap the same private backing field.
         if gf == sf && gf.starts_with('_') {
             diags.push(
-                ctx.diagnostic(
-                    "unnecessary-getters-setters",
-                    "Avoid wrapping a field in trivial getters and setters; use a public field."
-                        .to_string(),
-                    getter.name().span(),
-                ),
+                ctx.diagnostic("Avoid wrapping a field in trivial getters and setters; use a public field."
+                    .to_string(), getter.name().span()),
             );
         }
     }

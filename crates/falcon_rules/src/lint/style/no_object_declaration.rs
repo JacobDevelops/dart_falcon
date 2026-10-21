@@ -49,7 +49,7 @@ fn check_type(ty: Option<DartType<'_>>, diags: &mut Vec<Diagnostic>, ctx: &Analy
     if let Some(ty) = ty
         && is_object_type(ty)
     {
-        diags.push(ctx.diagnostic("no-object-declaration", MESSAGE, ty.span()));
+        diags.push(ctx.diagnostic(MESSAGE, ty.span()));
     }
 }
 

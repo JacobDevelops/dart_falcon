@@ -26,7 +26,7 @@ impl Rule for PreferUniqueTestNames {
             tests: Vec::new(),
             loops: Vec::new(),
             include_methods: crate::lint::options::strings(
-                crate::lint::options::for_rule(ctx, "prefer-unique-test-names"),
+                crate::lint::options::for_rule(ctx, PreferUniqueTestNames::NAME),
                 "include_methods",
             )
             .into_iter()
@@ -118,11 +118,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             && scope(*location) == scope(*span)
                     })
             {
-                diagnostics.push(self.ctx.diagnostic(
-                    "prefer-unique-test-names",
-                    "Use a unique test description within this group.",
-                    *span,
-                ));
+                diagnostics.push(self.ctx.diagnostic("Use a unique test description within this group.", *span));
             }
         }
         diagnostics

@@ -124,7 +124,6 @@ impl<'a> StructuralRuleVisitor<'a> for Declarations<'a> {
                 .constructor_name
                 .map_or(node.name_span.end, |name| name.span().end);
             self.diagnostics.push(self.ctx.diagnostic(
-                "deprecated-consistency",
                 "Constructors in a deprecated class should be deprecated.",
                 Span::new(node.name_span.start, end),
             ));
@@ -142,7 +141,6 @@ impl<'a> StructuralRuleVisitor<'a> for Declarations<'a> {
             let parameter_deprecated = has_deprecated(param.annotations(), self.model);
             if field_deprecated && !parameter_deprecated {
                 self.diagnostics.push(self.ctx.diagnostic(
-                    "deprecated-consistency",
                     "Parameters that initialize a deprecated field should be deprecated.",
                     param.span(),
                 ));
@@ -151,7 +149,6 @@ impl<'a> StructuralRuleVisitor<'a> for Declarations<'a> {
                 && let Some(field_span) = field_span
             {
                 self.diagnostics.push(self.ctx.diagnostic(
-                    "deprecated-consistency",
                     "Fields that are initialized by a deprecated parameter should be deprecated.",
                     *field_span,
                 ));
@@ -234,8 +231,7 @@ mod tests {
         let identities = IdentityIndex::build(&sources, &[source], &[], None);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
-        let spans: Vec<_> = DeprecatedConsistency
-            .analyze(program, &ctx)
+        let spans: Vec<_> = DeprecatedConsistency.analyze(DeprecatedConsistency::NAME, program, &ctx)
             .into_iter()
             .map(|d| &source[d.span.start..d.span.end])
             .collect();

@@ -123,22 +123,19 @@ impl<'a> Collector<'a> {
             .chain(args.named().map(|argument| argument.value()))
         {
             if self.matches_argument(argument, state) {
-                let (rule, message) = match self.passing {
-                    Passing::BlocToBloc => (
-                        "avoid-passing-bloc-to-bloc",
-                        "Avoid coupling blocs by passing a Bloc or Cubit to another bloc.",
-                    ),
-                    Passing::ContextToBloc => (
-                        "avoid-passing-build-context-to-blocs",
-                        "Keep Flutter BuildContext out of Bloc and Cubit dependencies.",
-                    ),
-                    Passing::BlocToWidget => (
-                        "avoid-passing-bloc-to-widget",
-                        "Obtain the Bloc or Cubit from the widget context instead of passing it directly.",
-                    ),
+                let message = match self.passing {
+                    Passing::BlocToBloc => {
+                        "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
+                    }
+                    Passing::ContextToBloc => {
+                        "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+                    }
+                    Passing::BlocToWidget => {
+                        "Obtain the Bloc or Cubit from the widget context instead of passing it directly."
+                    }
                 };
                 self.diagnostics
-                    .push(self.ctx.diagnostic(rule, message, argument.span()));
+                    .push(self.ctx.diagnostic(message, argument.span()));
             }
         }
     }

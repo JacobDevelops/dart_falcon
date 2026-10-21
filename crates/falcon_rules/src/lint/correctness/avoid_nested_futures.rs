@@ -136,20 +136,18 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 || ty.interface("dart:async", "FutureOr");
             let inner_future = inner.interface("dart:async", "Future")
                 || inner.interface("dart:async", "FutureOr");
-            let (report, rule, message) = match self.nesting {
+            let (report, message) = match self.nesting {
                 Nesting::Futures => (
                     outer_future && inner_future,
-                    "avoid-nested-futures",
                     "Remove the nested future wrapper; return a single Future or FutureOr instead.",
                 ),
                 Nesting::Mixed => (
                     (ty.interface("dart:async", "Stream") && inner_future)
                         || (outer_future && inner.interface("dart:async", "Stream")),
-                    "avoid-nested-streams-and-futures",
                     "Remove the nested stream/future wrapper; expose a single asynchronous sequence.",
                 ),
             };
-            if report { self.diagnostics.push(self.ctx.diagnostic(rule, message, node.span())); }
+            if report { self.diagnostics.push(self.ctx.diagnostic(message, node.span())); }
         }
         StructuralTraversal::Continue
     }

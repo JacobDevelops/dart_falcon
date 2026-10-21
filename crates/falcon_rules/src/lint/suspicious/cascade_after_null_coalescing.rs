@@ -46,7 +46,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
             && ends_in_null_coalescing(cascade.object())
         {
             self.diags.push(self.ctx.diagnostic(
-                "cascade-after-null-coalescing",
                 "Cascade after `??` applies to the whole receiver; parenthesize the receiver or fallback.",
                 cascade.span(),
             ));

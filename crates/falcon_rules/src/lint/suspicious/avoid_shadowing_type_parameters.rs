@@ -48,15 +48,11 @@ impl<'a> Checker<'_, 'a> {
                 .iter()
                 .filter(|(name, _)| *name == tp.name().name())
             {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-shadowing-type-parameters",
-                    format!(
-                        "The type parameter '{}' shadows a type parameter from the enclosing {}.",
-                        tp.name().name(),
-                        ancestor_kind
-                    ),
-                    tp.name().span(),
-                ));
+                self.diags.push(self.ctx.diagnostic(format!(
+                    "The type parameter '{}' shadows a type parameter from the enclosing {}.",
+                    tp.name().name(),
+                    ancestor_kind
+                ), tp.name().span()));
             }
         }
         self.scope

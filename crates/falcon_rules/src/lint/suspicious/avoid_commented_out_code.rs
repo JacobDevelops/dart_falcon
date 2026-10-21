@@ -51,11 +51,7 @@ impl Rule for AvoidCommentedOutCode {
                 }
             }
             if code {
-                diagnostics.push(ctx.diagnostic(
-                    "avoid-commented-out-code",
-                    "Remove commented-out code; version control preserves obsolete implementations.",
-                    token.span(),
-                ));
+                diagnostics.push(ctx.diagnostic("Remove commented-out code; version control preserves obsolete implementations.", token.span()));
             }
         }
         RulePreparation::Diagnostics(diagnostics)

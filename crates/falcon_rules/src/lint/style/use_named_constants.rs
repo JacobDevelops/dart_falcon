@@ -212,13 +212,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         if let Some(constant) = self.matching_constant(node, &identity, state) {
-            self.diags.push(self.ctx.diagnostic(
-                "use-named-constants",
-                format!(
-                    "Use the constant '{constant}' rather than a constructor returning the same object."
-                ),
-                span,
-            ));
+            self.diags.push(self.ctx.diagnostic(format!(
+                "Use the constant '{constant}' rather than a constructor returning the same object."
+            ), span));
         }
     }
 }

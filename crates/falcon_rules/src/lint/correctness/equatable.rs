@@ -89,7 +89,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         match self.check {
             Check::Props if !is_abstract && props.is_none() && !has_props_field => {
                 self.diags.push(self.ctx.diagnostic(
-                    "add-equatable-props",
                     "This Equatable subclass is missing a 'props' getter. Override it to define equality.",
                     name.span(),
                 ));
@@ -115,7 +114,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 }
                 if missing {
                     self.diags.push(self.ctx.diagnostic(
-                        "list-all-equatable-fields",
                         "The 'props' list omits declared instance fields. Add every field to the list.",
                         getter.name().span(),
                     ));
@@ -150,11 +148,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
 impl Collector<'_> {
     fn mutable(&mut self, name: Identifier<'_>) {
-        self.diags.push(self.ctx.diagnostic(
-            "avoid-mutable-equatable-subclass-fields",
-            "Mutable fields can invalidate Equatable equality and hash codes. Make this field final.",
-            name.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic("Mutable fields can invalidate Equatable equality and hash codes. Make this field final.", name.span()));
     }
 }
 

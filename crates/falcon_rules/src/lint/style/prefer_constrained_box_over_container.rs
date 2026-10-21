@@ -23,7 +23,6 @@ impl Rule for PreferConstrainedBoxOverContainer {
     ) -> RulePreparation<'a> {
         prepare(
             ctx,
-            "prefer-constrained-box-over-container",
             "Container",
             "Prefer 'ConstrainedBox' over a Container used only for constraints.",
             matches,

@@ -61,11 +61,7 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-emit-outside-bloc",
-            "Do not emit state outside its Bloc or Cubit; use its events or public methods.",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Do not emit state outside its Bloc or Cubit; use its events or public methods.", span));
     }
 
     fn package_extension(&self, expression: Expr<'a>, state: &SemanticState<'a>) -> bool {

@@ -90,7 +90,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.candidates.into_iter().filter(|(_, count)| *count <= 1).map(|(name, _)| {
             self.ctx.diagnostic(
-                "avoid-private-typedef-functions",
                 "The typedef is unnecessary because it is only used in one place.",
                 name.span(),
             )

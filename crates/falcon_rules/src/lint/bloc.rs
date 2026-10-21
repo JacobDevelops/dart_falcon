@@ -414,7 +414,6 @@ pub(crate) fn prepare_models<'a>(
     ctx: &'a AnalyzeContext<'a>,
     kind: ModelKind,
     requirement: ModelRequirement,
-    rule: &'static str,
 ) -> RulePreparation<'a> {
     let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
         return RulePreparation::Diagnostics(Vec::new());
@@ -426,7 +425,6 @@ pub(crate) fn prepare_models<'a>(
         types: BlocTypes::new(program),
         kind,
         requirement,
-        rule,
         roots: Vec::new(),
         classes: Vec::new(),
     }))
@@ -439,7 +437,6 @@ struct ModelCollector<'a> {
     types: BlocTypes<'a>,
     kind: ModelKind,
     requirement: ModelRequirement,
-    rule: &'static str,
     roots: Vec<DeclarationIdentity>,
     classes: Vec<ClassDecl<'a>>,
 }
@@ -542,7 +539,7 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
                 (ModelKind::Event, ModelRequirement::Suffix) => "End Bloc event class names with 'Event'.",
                 (ModelKind::State, ModelRequirement::Suffix) => "End Bloc state class names with 'State'.",
             };
-            diagnostics.push(self.ctx.diagnostic(self.rule, message, class.name().span()));
+            diagnostics.push(self.ctx.diagnostic(message, class.name().span()));
         }
         diagnostics
     }

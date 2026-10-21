@@ -22,7 +22,6 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const RULE: &str = "always-put-required-named-parameters-first";
 const MESSAGE: &str = "Required named parameters should be before optional named parameters.";
 
 #[derive(Default)]
@@ -68,7 +67,7 @@ impl Collector<'_, '_> {
             if required {
                 if optional_seen {
                     self.diags
-                        .push(self.ctx.diagnostic(RULE, MESSAGE, param.name().span()));
+                        .push(self.ctx.diagnostic(MESSAGE, param.name().span()));
                 }
             } else {
                 optional_seen = true;
@@ -142,7 +141,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
                 if param.is_required() {
                     if optional_seen && let Some(name) = param.name() {
                         self.diags
-                            .push(self.ctx.diagnostic(RULE, MESSAGE, name.span()));
+                            .push(self.ctx.diagnostic(MESSAGE, name.span()));
                     }
                 } else {
                     optional_seen = true;

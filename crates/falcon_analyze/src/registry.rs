@@ -135,7 +135,17 @@ impl RuleRegistry {
                 diagnostics_by_rule[index].extend(visitor.finish());
             }
         }
-        let diagnostics: Vec<Diagnostic> = diagnostics_by_rule.into_iter().flatten().collect();
+        let diagnostics: Vec<Diagnostic> = self
+            .rules
+            .iter()
+            .zip(diagnostics_by_rule)
+            .flat_map(|((name, _), diagnostics)| {
+                diagnostics.into_iter().map(move |mut diagnostic| {
+                    diagnostic.rule = name;
+                    diagnostic
+                })
+            })
+            .collect();
 
         // Parse even without rule diagnostics so malformed suppressions are surfaced.
         let mut diagnostics = diagnostics;

@@ -35,7 +35,6 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::resolve::lexical_usage::{LocalWrite, LocalWriteKind};
 
-const RULE: &str = "parameter-assignments";
 
 #[derive(Default)]
 pub struct ParameterAssignments;
@@ -136,14 +135,10 @@ impl<'a> Collector<'a> {
                 LocalWriteKind::ForIn => false,
             };
             if report {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    RULE,
-                    format!(
-                        "Invalid assignment to the parameter '{}'.",
-                        &self.ctx.source()[name.start..name.end]
-                    ),
-                    write.span,
-                ));
+                self.diagnostics.push(self.ctx.diagnostic(format!(
+                    "Invalid assignment to the parameter '{}'.",
+                    &self.ctx.source()[name.start..name.end]
+                ), write.span));
             }
         }
     }

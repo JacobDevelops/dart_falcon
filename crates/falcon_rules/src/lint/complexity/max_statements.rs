@@ -22,7 +22,7 @@ impl Rule for MaxStatements {
             ctx,
             diags: Vec::new(),
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "max-statements"),
+                crate::lint::options::for_rule(ctx, MaxStatements::NAME),
                 "max_statements",
             )
             .unwrap_or(20),
@@ -44,7 +44,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
     fn exit_function_body(&mut self, node: FunctionBody<'a>) {
         if let Some(count) = self.counts.pop() && count > self.threshold {
-            self.diags.push(self.ctx.diagnostic("max-statements", format!("Function contains {count} statements (max {}). Extract smaller functions.", self.threshold), node.span()));
+            self.diags.push(self.ctx.diagnostic(format!("Function contains {count} statements (max {}). Extract smaller functions.", self.threshold), node.span()));
         }
     }
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {

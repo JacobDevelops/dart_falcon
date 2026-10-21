@@ -91,7 +91,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         if self.building && let Some(identity) = constructed_identity(node, &self.model, self.signatures)
             && self.target.as_ref() == Some(&identity) {
-            self.diagnostics.push(self.ctx.diagnostic("avoid-recursive-widget-calls", "This build constructs its own widget recursively; return a different widget.", node.span()));
+            self.diagnostics.push(self.ctx.diagnostic("This build constructs its own widget recursively; return a different widget.", node.span()));
         }
         StructuralTraversal::Continue
     }

@@ -17,8 +17,6 @@ use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 #[derive(Default)]
 pub struct DoNotUseEnvironment;
 
-const NAME: &str = "do-not-use-environment";
-const MESSAGE: &str = "Invalid use of an environment declaration.";
 
 impl Rule for DoNotUseEnvironment {
     fn prepare<'a>(
@@ -65,7 +63,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     };
                     if reads_environment(ty, name.name()) {
                         self.diags
-                            .push(self.ctx.diagnostic(NAME, MESSAGE, name.span()));
+                            .push(self.ctx.diagnostic("Invalid use of an environment declaration.", name.span()));
                     }
                     return;
                 }
@@ -118,7 +116,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => return,
         };
         if reads_environment(&ty, constructor) {
-            self.diags.push(self.ctx.diagnostic(NAME, MESSAGE, span));
+            self.diags.push(self.ctx.diagnostic("Invalid use of an environment declaration.", span));
         }
     }
 }

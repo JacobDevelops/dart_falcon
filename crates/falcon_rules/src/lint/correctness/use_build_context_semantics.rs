@@ -27,7 +27,6 @@ pub(crate) struct Semantics {
     pub protected_callbacks: HashSet<NodeId>,
     pub constants: HashMap<NodeId, bool>,
     pub never: HashSet<NodeId>,
-    pub rule: &'static str,
     pub message: &'static str,
 }
 
@@ -53,7 +52,6 @@ pub(super) fn prepare<'a>(
         semantics: Semantics::default(),
         globals: HashMap::with_capacity(global_count),
     };
-    collector.semantics.rule = "use-build-context-synchronously";
     collector.semantics.message =
         "Do not use a BuildContext across an async gap without a matching mounted check.";
     for declaration in program.declarations() {
@@ -89,7 +87,6 @@ pub(super) fn prepare_setstate<'a>(
 ) -> Option<Collector<'a>> {
     let mut collector = prepare(program, ctx)?;
     collector.setstate = true;
-    collector.semantics.rule = "use-setstate-synchronously";
     collector.semantics.message =
         "Do not call setState across an async gap without checking mounted.";
     Some(collector)
@@ -729,12 +726,9 @@ void callbacks() {
   a.Future<void>.microtask(() {});
 }
 ";
-        inference::analyze(
-            &CheckProtectedCallbacks,
-            Path::new("generic_future_callbacks.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        inference::analyze("check-protected-callbacks", &CheckProtectedCallbacks, Path::new("generic_future_callbacks.dart"),
+        source,
+        &FalconConfig::default(),);
     }
 
     struct CheckCascadeCallbacks;
@@ -766,12 +760,9 @@ void use(Holder holder, BuildContext context) {
   holder..[0](context).then((value) {});
 }
 ";
-        inference::analyze(
-            &CheckCascadeCallbacks,
-            Path::new("cascade_callbacks.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        inference::analyze("check-cascade-callbacks", &CheckCascadeCallbacks, Path::new("cascade_callbacks.dart"),
+        source,
+        &FalconConfig::default(),);
     }
 
     struct CheckEqualityConstants;
@@ -809,11 +800,8 @@ bool shadowed(bool aliased) => aliased == true;
 bool parenthesized() => aliased == (negated);
 bool nestedParenthesized() => aliased == ((negated));
 ";
-        inference::analyze(
-            &CheckEqualityConstants,
-            Path::new("equality_constants.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        inference::analyze("check-equality-constants", &CheckEqualityConstants, Path::new("equality_constants.dart"),
+        source,
+        &FalconConfig::default(),);
     }
 }

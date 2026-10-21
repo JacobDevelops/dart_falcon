@@ -129,11 +129,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             };
             equality.visit_expr(argument);
             if equality.unstable {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "prefer-immutable-provider-arguments",
-                    "Use a provider family argument with stable value equality.",
-                    argument.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Use a provider family argument with stable value equality.", argument.span()));
             }
         }
     }

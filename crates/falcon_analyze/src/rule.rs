@@ -16,6 +16,7 @@ pub enum RulePreparation<'a> {
 /// Rule instances are immutable; diagnostics are local per file.
 /// Thread safety: implementors MUST NOT use mutable self state.
 pub trait Rule: Send + Sync {
+    /// Returns collector output; use a registry or [`RuleAnalysis`] to assign ids.
     fn prepare<'a>(&self, program: Program<'a>, ctx: &'a AnalyzeContext<'a>)
     -> RulePreparation<'a>;
 }
@@ -24,13 +25,24 @@ pub trait Rule: Send + Sync {
 ///
 /// Implement [`Rule::prepare`] instead; the blanket implementation keeps direct and
 /// registry analysis from diverging through an overridden entry point.
+/// The name is the canonical id supplied by the caller's rule declaration.
 pub trait RuleAnalysis: Rule {
-    fn analyze<'a>(&self, program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Vec<Diagnostic>;
+    fn analyze<'a>(
+        &self,
+        name: &'static str,
+        program: Program<'a>,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> Vec<Diagnostic>;
 }
 
 impl<T: Rule + ?Sized> RuleAnalysis for T {
-    fn analyze<'a>(&self, program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Vec<Diagnostic> {
-        match self.prepare(program, ctx) {
+    fn analyze<'a>(
+        &self,
+        name: &'static str,
+        program: Program<'a>,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = match self.prepare(program, ctx) {
             RulePreparation::Diagnostics(diagnostics) => diagnostics,
             RulePreparation::Semantic(mut visitor) => {
                 if let Some(state) = SemanticState::new(program, ctx) {
@@ -44,6 +56,10 @@ impl<T: Rule + ?Sized> RuleAnalysis for T {
                     .flatten()
                     .collect()
             }
+        };
+        for diagnostic in &mut diagnostics {
+            diagnostic.rule = name;
         }
+        diagnostics
     }
 }

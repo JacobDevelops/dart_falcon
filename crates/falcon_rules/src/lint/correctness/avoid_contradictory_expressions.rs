@@ -55,15 +55,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            "avoid-contradictory-expressions",
-            if binary.op() == BinaryOp::And {
-                "These conditions are always false together. Correct the contradictory comparison."
-            } else {
-                "These conditions are always true together. Correct the contradictory comparison."
-            },
-            binary.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic(if binary.op() == BinaryOp::And {
+            "These conditions are always false together. Correct the contradictory comparison."
+        } else {
+            "These conditions are always true together. Correct the contradictory comparison."
+        }, binary.span()));
     }
 }
 

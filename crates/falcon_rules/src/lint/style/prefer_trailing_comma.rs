@@ -54,14 +54,10 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            "prefer-trailing-comma",
-            "Add a trailing comma to the argument list",
-            DiagSpan {
-                start: close.offset(),
-                end: close.offset() + close.len(),
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Add a trailing comma to the argument list", DiagSpan {
+            start: close.offset(),
+            end: close.offset() + close.len(),
+        }));
     }
 }
 
@@ -147,7 +143,7 @@ mod tests {
             });
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-            let diagnostics = PreferTrailingComma.analyze(parsed.program(), &ctx);
+            let diagnostics = PreferTrailingComma.analyze(PreferTrailingComma::NAME, parsed.program(), &ctx);
             let spans: Vec<_> = diagnostics.iter().map(|diag| diag.span).collect();
             let expected: Vec<_> = if expected {
                 let close = source.rfind(')').unwrap();

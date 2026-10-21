@@ -64,7 +64,7 @@ impl Rule for PreferCommentingAnalyzerIgnores {
     ) -> RulePreparation<'a> {
         let mut diagnostics = Vec::new();
         let ignore_global =
-            crate::lint::options::for_rule(ctx, "prefer-commenting-analyzer-ignores")
+            crate::lint::options::for_rule(ctx, PreferCommentingAnalyzerIgnores::NAME)
                 .and_then(|options| options.get("ignore_global"))
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true);
@@ -112,11 +112,7 @@ impl Rule for PreferCommentingAnalyzerIgnores {
                         character.is_ascii_alphanumeric() || character == '_'
                     });
                 if has_code && !inline_explanation && !preceding_explanation {
-                    diagnostics.push(ctx.diagnostic(
-                        "prefer-commenting-analyzer-ignores",
-                        "This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment.",
-                        token.span(),
-                    ));
+                    diagnostics.push(ctx.diagnostic("This analyzer ignore has no explanation. Add trailing explanatory text or an immediately preceding explanation comment.", token.span()));
                 }
             }
             previous_comment = Some(token);

@@ -46,7 +46,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && is_length_minus_one(index.object(), index.index())
         {
             self.diags.push(self.ctx.diagnostic(
-                "prefer-last",
                 "Prefer .last over [length - 1] to access the last element",
                 index.span(),
             ));

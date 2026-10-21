@@ -219,11 +219,7 @@ fn observe_expression<'a>(
         {
             let candidate = candidates.remove(index);
             if candidate.crossed_gap {
-                diagnostics.push(ctx.diagnostic(
-                    "avoid-uncaught-future-errors",
-                    "This future is awaited after an async gap; await it immediately or attach an error handler first.",
-                    name.span(),
-                ));
+                diagnostics.push(ctx.diagnostic("This future is awaited after an async gap; await it immediately or attach an error handler first.", name.span()));
             }
         }
         for candidate in candidates {

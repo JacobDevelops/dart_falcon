@@ -50,7 +50,7 @@ const MESSAGE: &str = "Boolean should be named with a valid prefix.";
 fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
     let mut prefixes: Vec<String> = DEFAULT_PREFIXES.iter().map(|s| s.to_string()).collect();
     if let Some(list) = crate::lint::options::strings(
-        crate::lint::options::for_rule(ctx, "boolean-prefixes"),
+        crate::lint::options::for_rule(ctx, BooleanPrefixes::NAME),
         "valid_prefixes",
     ) {
         prefixes.extend(list.map(str::to_string));
@@ -81,7 +81,7 @@ fn check_name(
     prefixes: &[String],
 ) {
     if !has_valid_boolean_prefix(name.name(), prefixes) {
-        diags.push(ctx.diagnostic("boolean-prefixes", MESSAGE, name.span()));
+        diags.push(ctx.diagnostic(MESSAGE, name.span()));
     }
 }
 

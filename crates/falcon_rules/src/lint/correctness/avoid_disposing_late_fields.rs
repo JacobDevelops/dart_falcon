@@ -166,11 +166,7 @@ impl Collector<'_> {
         self.diagnostics.push((
             owner,
             field,
-            self.ctx.diagnostic(
-                "avoid-disposing-late-fields",
-                "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable.",
-                span,
-            ),
+            self.ctx.diagnostic("Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable.", span),
         ));
     }
 }

@@ -322,7 +322,7 @@ void shadowed() {
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
-    let diagnostics = UseTestThrowsMatchers.analyze(program, &context);
+    let diagnostics = UseTestThrowsMatchers.analyze(UseTestThrowsMatchers::NAME, program, &context);
     inference::assert_diagnostics(source, "use-test-throws-matchers", &diagnostics, 2);
 }
 

@@ -175,7 +175,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 .next()
                 .map_or(start, |token| token.offset() + token.len());
             self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-const-constructors-in-immutables",
                 "Declare a const constructor in an immutable class.",
                 Span::new(start, end),
             ));
@@ -204,7 +203,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && self.signatures.has_non_final_field(&scope.owner) == Some(false)))
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-const-constructors-in-immutables",
                 "Declare a const constructor in an immutable class.",
                 Span::new(
                     scope.name.span().start,
@@ -422,6 +420,7 @@ class External {
 class Other implements External { const Other(); }
 ";
         let diagnostics = span_test_support::analyze(
+            PreferConstConstructorsInImmutables::NAME,
             &PreferConstConstructorsInImmutables,
             Path::new("test.dart"),
             source,
@@ -453,6 +452,7 @@ class Frozen() {
 }
 ";
         let diagnostics = span_test_support::analyze(
+            PreferConstConstructorsInImmutables::NAME,
             &PreferConstConstructorsInImmutables,
             Path::new("test.dart"),
             source,

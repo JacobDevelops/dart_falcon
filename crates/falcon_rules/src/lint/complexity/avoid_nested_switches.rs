@@ -21,7 +21,7 @@ impl Rule for AvoidNestedSwitches {
             ctx,
             diags: Vec::new(),
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "avoid-nested-switches"),
+                crate::lint::options::for_rule(ctx, AvoidNestedSwitches::NAME),
                 "max_nesting",
             )
             .unwrap_or(1),
@@ -51,7 +51,7 @@ fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if matches!(node, Stmt::Switch(_)) {
             self.depth += 1;
             if self.depth == self.threshold.saturating_add(1) {
-                self.diags.push(self.ctx.diagnostic("avoid-nested-switches", format!("Nesting exceeds {} levels. Extract the nested construct into a helper.", self.threshold), node.span()));
+                self.diags.push(self.ctx.diagnostic(format!("Nesting exceeds {} levels. Extract the nested construct into a helper.", self.threshold), node.span()));
             }
         }
         StructuralTraversal::Continue

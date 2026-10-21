@@ -112,7 +112,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if renamed.peek().is_some() && !is_documented(&self.tokens, start, annotations) {
             self.diags.extend(renamed.map(|(param, parent_name)| {
                 self.ctx.diagnostic(
-                    "avoid-renaming-method-parameters",
                     format!(
                         "Rename parameter '{}' to match the overridden declaration's '{}'.",
                         param.name().name(), parent_name

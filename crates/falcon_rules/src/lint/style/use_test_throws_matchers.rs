@@ -71,11 +71,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Some(identities) = self.ctx.identities()
             && is_test_fail(last.expr(), library, identities, state)
         {
-            self.diags.push(self.ctx.diagnostic(
-                "use-test-throws-matchers",
-                "Use the 'throwsA' matcher instead of using 'fail' when there is no exception thrown.",
-                last.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use the 'throwsA' matcher instead of using 'fail' when there is no exception thrown.", last.span()));
         }
     }
 }

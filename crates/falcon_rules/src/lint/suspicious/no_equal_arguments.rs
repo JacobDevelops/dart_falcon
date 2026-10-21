@@ -92,11 +92,7 @@ fn report_duplicates(entries: &[(&str, Span)], diags: &mut Vec<Diagnostic>, ctx:
         // member only.
         if last != i && entries[..i].iter().all(|(other, _)| other != src) {
             let span = entries[last].1;
-            diags.push(ctx.diagnostic(
-                "no-equal-arguments",
-                "The argument has already been passed",
-                span,
-            ));
+            diags.push(ctx.diagnostic("The argument has already been passed", span));
         }
     }
 }

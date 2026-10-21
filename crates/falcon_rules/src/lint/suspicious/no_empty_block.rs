@@ -112,11 +112,7 @@ fn flag_if_empty(block: Block<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCon
     let Some(span) = empty_block_end(block) else {
         return;
     };
-    diags.push(ctx.diagnostic(
-        "no-empty-block",
-        "Avoid empty blocks — add a comment explaining the intent or remove the block",
-        span,
-    ));
+    diags.push(ctx.diagnostic("Avoid empty blocks — add a comment explaining the intent or remove the block", span));
 }
 
 /// Closing brace of an empty block without an explanatory comment.
@@ -156,7 +152,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("/project/lib/test.dart"), &config, &parsed);
-        let diagnostics = NoEmptyBlock.analyze(parsed.program(), &ctx);
+        let diagnostics = NoEmptyBlock.analyze(NoEmptyBlock::NAME, parsed.program(), &ctx);
         let closing_brace = source.find("{}").unwrap() + 1;
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].span.start, closing_brace);

@@ -24,7 +24,6 @@ impl Rule for PreferTransformOverContainer {
     ) -> RulePreparation<'a> {
         prepare(
             ctx,
-            "prefer-transform-over-container",
             "Container",
             "Prefer 'Transform' over a Container used only for transform.",
             matches,

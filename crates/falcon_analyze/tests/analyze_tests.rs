@@ -1,5 +1,6 @@
 use falcon_analyze::{
-    AnalyzeContext, ParsedFile, Rule, RuleAnalysis, RulePreparation, RuleRegistry,
+    AnalyzeContext, CrossFileRuleAnalysis, ParsedFile, Rule, RuleAnalysis, RulePreparation,
+    RuleRegistry,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
@@ -28,7 +29,7 @@ impl Rule for AlwaysErrorRule {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(vec![Diagnostic::new(
-            "always_error",
+            "deliberately-wrong-id",
             Severity::Error,
             "test error",
             ctx.file_path().to_string_lossy().to_string(),
@@ -71,7 +72,7 @@ fn test_mock_rule_analyze_empty() {
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
-    let diagnostics = rule.analyze(parsed.program(), &ctx);
+    let diagnostics = rule.analyze("no_op", parsed.program(), &ctx);
     assert!(diagnostics.is_empty());
 }
 
@@ -108,6 +109,66 @@ fn test_registry_run_all_emits_diagnostic() {
     let diagnostics = registry.run_all(parsed.program(), &ctx);
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].rule, "always_error");
+    assert_eq!(diagnostics[0].severity, Severity::Error);
+}
+
+#[test]
+fn direct_analysis_uses_provided_registered_name() {
+    let source = "void main() {}";
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree: falcon_dart_parser::parse(source).tree,
+    });
+    let config = FalconConfig::default();
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+
+    let diagnostics = AlwaysErrorRule.analyze("registered-name", parsed.program(), &ctx);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "registered-name");
+    assert_eq!(diagnostics[0].message, "test error");
+    assert_eq!(diagnostics[0].severity, Severity::Error);
+}
+
+#[test]
+fn cross_file_registry_overwrites_incoming_diagnostic_identity() {
+    struct WrongIdentityRule;
+    impl falcon_analyze::CrossFileRule for WrongIdentityRule {
+        fn prepare_project(
+            &self,
+            _files: &[falcon_analyze::ProjectFile],
+            _config: &FalconConfig,
+            _indexes: Option<&falcon_analyze::SemanticIndexes>,
+        ) -> Vec<Diagnostic> {
+            vec![Diagnostic::new(
+                "deliberately-wrong-id",
+                Severity::Error,
+                "project error",
+                "test.dart",
+                Span { start: 0, end: 0 },
+            )]
+        }
+    }
+
+    let mut registry = falcon_analyze::CrossFileRuleRegistry::new();
+    registry.register("registered-project-name", Box::new(WrongIdentityRule));
+    assert_eq!(registry.rules().len(), 1);
+    assert_eq!(registry.rules()[0].0, "registered-project-name");
+    let diagnostics = registry
+        .run_all(&[], &FalconConfig::default(), None)
+        .expect("cross-file rules thread starts");
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "registered-project-name");
+    assert_eq!(diagnostics[0].message, "project error");
+
+    let direct = WrongIdentityRule.analyze_project(
+        "registered-project-name",
+        &[],
+        &FalconConfig::default(),
+        None,
+    );
+    assert_eq!(direct.len(), 1);
+    assert_eq!(direct[0].rule, "registered-project-name");
+    assert_eq!(direct[0].message, "project error");
     assert_eq!(diagnostics[0].severity, Severity::Error);
 }
 
@@ -295,8 +356,8 @@ fn test_context_diagnostic_uses_file_and_warning_default() {
     });
     let ctx = AnalyzeContext::new(Path::new("foo.dart"), &config, &parsed);
     let span = falcon_syntax::cst::Span { start: 1, end: 3 };
-    let diagnostic = ctx.diagnostic("rule", "message", span);
-    assert_eq!(diagnostic.rule, "rule");
+    let diagnostic = ctx.diagnostic("message", span);
+    assert!(diagnostic.rule.is_empty());
     assert_eq!(diagnostic.message, "message");
     assert_eq!(diagnostic.file_path, "foo.dart");
     assert_eq!(diagnostic.severity, Severity::Warning);
@@ -361,7 +422,7 @@ fn context_fix_uses_lossless_cst_byte_spans() {
         .unwrap()
         .span();
     let diagnostic = ctx.with_fix(
-        ctx.diagnostic("test-rule", "Prefer final", span),
+        ctx.diagnostic("Prefer final", span),
         "Replace `var` with `final`",
         FixKind::Safe,
         vec![TextEdit::new(span, "final")],
@@ -397,7 +458,7 @@ fn context_rejects_invalid_rule_fixes() {
     ] {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             ctx.with_fix(
-                ctx.diagnostic("test-rule", "Invalid fix", Span { start: 0, end: 0 }),
+                ctx.diagnostic("Invalid fix", Span { start: 0, end: 0 }),
                 "Invalid fix",
                 FixKind::Safe,
                 spans

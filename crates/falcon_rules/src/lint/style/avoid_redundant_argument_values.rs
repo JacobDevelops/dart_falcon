@@ -545,11 +545,7 @@ impl Targets<'_> {
         if contextual_number(value, argument, double_context) != default_value {
             return;
         }
-        diags.push(self.ctx.diagnostic(
-            "avoid-redundant-argument-values",
-            "The value of the argument is redundant because it matches the default value.",
-            argument.span(),
-        ));
+        diags.push(self.ctx.diagnostic("The value of the argument is redundant because it matches the default value.", argument.span()));
     }
 
     /// Whether `argument` is a constant expression: collection literals and
@@ -844,7 +840,7 @@ mod tests {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let mut diagnostics = AvoidRedundantArgumentValues.analyze(parsed.program(), &context);
+        let mut diagnostics = AvoidRedundantArgumentValues.analyze(AvoidRedundantArgumentValues::NAME, parsed.program(), &context);
         diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
         diagnostics
             .into_iter()
@@ -956,7 +952,7 @@ void run() {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = AvoidRedundantArgumentValues.analyze(parsed.program(), &context);
+        let diagnostics = AvoidRedundantArgumentValues.analyze(AvoidRedundantArgumentValues::NAME, parsed.program(), &context);
         let arguments: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

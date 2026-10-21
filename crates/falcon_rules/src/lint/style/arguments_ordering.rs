@@ -13,7 +13,6 @@ use falcon_syntax::cst::*;
 
 use super::ordering::Order;
 
-const RULE: &str = "arguments-ordering";
 
 #[derive(Default)]
 pub struct ArgumentsOrdering;
@@ -24,8 +23,8 @@ impl Rule for ArgumentsOrdering {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let order = Order::configured(ctx, RULE).or_else(|| {
-            crate::lint::options::for_rule(ctx, RULE)?
+        let order = Order::configured(ctx, Self::NAME).or_else(|| {
+            crate::lint::options::for_rule(ctx, Self::NAME)?
                 .get("alphabetize")?
                 .as_bool()?
                 .then_some(Order::Ascending)
@@ -55,7 +54,6 @@ impl Collector<'_> {
     fn check(&mut self, args: ArgList<'_>) {
         self.order.check_names(
             self.ctx,
-            RULE,
             args.named().map(|argument| Some(argument.name())),
             &mut self.diagnostics,
         );
@@ -139,11 +137,7 @@ impl DeclarationCollector<'_> {
                 .zip(current)
                 .is_some_and(|(previous, current)| previous > current)
             {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    RULE,
-                    "Reorder named arguments to follow the parameter declaration order.",
-                    argument.name().span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Reorder named arguments to follow the parameter declaration order.", argument.name().span()));
             }
             previous = current;
         }

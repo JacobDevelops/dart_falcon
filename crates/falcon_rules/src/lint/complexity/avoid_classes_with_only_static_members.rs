@@ -137,7 +137,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         }
                     }
                     Some(ctx.diagnostic(
-                        "avoid-classes-with-only-static-members",
                         "Classes should define instance members.",
                         name.span(),
                     ))

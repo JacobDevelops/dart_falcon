@@ -26,7 +26,6 @@ impl Rule for PreferImmutableBlocState {
             ctx,
             ModelKind::State,
             ModelRequirement::Immutable,
-            "prefer-immutable-bloc-state",
         )
     }
 }

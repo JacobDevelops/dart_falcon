@@ -71,11 +71,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     "The type '{name}' should not be caught because it is a subclass of 'Error'."
                 )
             };
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-catching-errors",
-                message,
-                catch.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(message, catch.span()));
         }
     }
 }

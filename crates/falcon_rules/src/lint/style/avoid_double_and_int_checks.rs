@@ -96,11 +96,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-double-and-int-checks",
-            "Explicit check for double or int.",
-            else_condition.unparenthesized().span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Explicit check for double or int.", else_condition.unparenthesized().span()));
     }
 }
 

@@ -23,7 +23,6 @@ impl Rule for PreferCenterOverAlign {
     ) -> RulePreparation<'a> {
         prepare(
             ctx,
-            "prefer-center-over-align",
             "Align",
             "Prefer 'Center' over an Align with centered alignment.",
             matches,

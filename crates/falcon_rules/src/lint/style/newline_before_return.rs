@@ -82,11 +82,7 @@ fn check_stmts_for_return(
         if let Stmt::Return(ret) = stmt
             && !has_blank_line_before(ret.syntax())
         {
-            diags.push(ctx.diagnostic(
-                "newline-before-return",
-                "Add a blank line before return statement",
-                ret.span(),
-            ));
+            diags.push(ctx.diagnostic("Add a blank line before return statement", ret.span()));
         }
     }
 }
@@ -119,7 +115,7 @@ mod tests {
             let program = parsed.program();
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-            let diagnostics = NewlineBeforeReturn.analyze(program, &ctx);
+            let diagnostics = NewlineBeforeReturn.analyze(NewlineBeforeReturn::NAME, program, &ctx);
             let actual: Vec<_> = diagnostics
                 .iter()
                 .map(|diagnostic| diagnostic.span.start)

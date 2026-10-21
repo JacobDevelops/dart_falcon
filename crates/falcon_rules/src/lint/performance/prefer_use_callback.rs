@@ -55,11 +55,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => None,
         };
         if value.is_some_and(|value| matches!(value.unparenthesized(), Expr::FuncExpr(_))) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-use-callback",
-                "Prefer 'useCallback' instead of 'useMemoized' for function expressions.",
-                call.callee().span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Prefer 'useCallback' instead of 'useMemoized' for function expressions.", call.callee().span()));
         }
     }
 

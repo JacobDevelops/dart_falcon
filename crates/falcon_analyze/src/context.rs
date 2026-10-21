@@ -232,15 +232,11 @@ impl<'a> AnalyzeContext<'a> {
         self
     }
 
-    /// Build a diagnostic; use [`Self::with_fix`] to attach validated edits.
-    pub fn diagnostic(
-        &self,
-        rule: &'static str,
-        message: impl Into<String>,
-        span: impl Into<Span>,
-    ) -> Diagnostic {
+    /// Build a diagnostic whose rule id is assigned by the execution boundary.
+    /// Use [`Self::with_fix`] to attach validated edits.
+    pub fn diagnostic(&self, message: impl Into<String>, span: impl Into<Span>) -> Diagnostic {
         Diagnostic::new(
-            rule,
+            "",
             Severity::Warning,
             message,
             self.file_path.to_string_lossy().into_owned(),

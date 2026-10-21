@@ -91,14 +91,10 @@ fn scan_content(content: &str, base: usize, ctx: &AnalyzeContext, diags: &mut Ve
         let follows_tag = matches!(bytes.get(p), Some(b'>' | b',' | b'<' | b' ' | b'\t'));
         let name = content[name_start..p].to_ascii_lowercase();
         if follows_tag && !HTML_TAGS.contains(&name.as_str()) {
-            diags.push(ctx.diagnostic(
-                "unintended-html-in-doc-comment",
-                "Angle brackets will be interpreted as HTML.",
-                DiagSpan {
-                    start: base + i,
-                    end: base + p,
-                },
-            ));
+            diags.push(ctx.diagnostic("Angle brackets will be interpreted as HTML.", DiagSpan {
+                start: base + i,
+                end: base + p,
+            }));
         }
         i = p;
     }
@@ -237,8 +233,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        UnintendedHtmlInDocComment
-            .analyze(program, &ctx)
+        UnintendedHtmlInDocComment.analyze(UnintendedHtmlInDocComment::NAME, program, &ctx)
             .into_iter()
             .map(|d| &source[d.span.start..d.span.end])
             .collect()

@@ -24,7 +24,7 @@ impl Rule for AvoidUnnecessaryGetter {
         let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let ignore_upcast = crate::lint::options::for_rule(ctx, "avoid-unnecessary-getter")
+        let ignore_upcast = crate::lint::options::for_rule(ctx, AvoidUnnecessaryGetter::NAME)
             .and_then(|options| options.get("ignore_upcast"))
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(true);
@@ -87,7 +87,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 if matches!(field_type, ResolvedType::Unknown) || field_type != getter_type { continue; }
             }
             self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unnecessary-getter",
                 "This getter only exposes a final field; replace both with a public final field.",
                 getter.name().span(),
             ));

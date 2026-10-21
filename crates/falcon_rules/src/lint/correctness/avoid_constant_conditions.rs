@@ -240,7 +240,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 Some(ConstantValue::Bool(_))
             )
         {
-            self.diagnostics.push(self.ctx.diagnostic("avoid-constant-conditions", "Condition is statically constant; keep only the reachable branch or remove the unreachable code.", node.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Condition is statically constant; keep only the reachable branch or remove the unreachable code.", node.span()));
         }
         match node {
             Expr::Conditional(node) => self.check(node.condition(), state),

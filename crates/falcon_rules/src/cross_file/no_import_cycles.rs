@@ -26,10 +26,8 @@ use super::{
 #[derive(Default)]
 pub struct NoImportCycles;
 
-const NAME: &str = "no-import-cycles";
-
 impl CrossFileRule for NoImportCycles {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -163,7 +161,7 @@ impl CrossFileRule for NoImportCycles {
             }
             message.push_str(". Break the cycle by removing a dependency.");
             diagnostics.push(Diagnostic::new(
-                NAME,
+                "",
                 Severity::Warning,
                 message,
                 files[representatives[start]]
@@ -248,6 +246,7 @@ mod cycle_regressions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::CrossFileRuleAnalysis;
     use falcon_dart_parser::parser::parse;
 
     fn file(path: &str, source: &str) -> ProjectFile {
@@ -263,7 +262,7 @@ mod tests {
     }
 
     fn diagnostics(files: &[ProjectFile]) -> Vec<Diagnostic> {
-        NoImportCycles.analyze_project(files, &FalconConfig::default(), None)
+        NoImportCycles.analyze_project("no-import-cycles", files, &FalconConfig::default(), None)
     }
 
     #[test]

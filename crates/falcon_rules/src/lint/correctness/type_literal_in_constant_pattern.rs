@@ -68,11 +68,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ResolvedType::Interface { ref identity, .. }
                 if *identity == DeclarationIdentity::sdk("dart:core", "Type"))
         {
-            self.diags.push(self.ctx.diagnostic(
-                "type-literal-in-constant-pattern",
-                "Use a type pattern or wrap the type literal in 'const (...)'.",
-                span,
-            ));
+            self.diags.push(self.ctx.diagnostic("Use a type pattern or wrap the type literal in 'const (...)'.", span));
         }
     }
 }
@@ -140,7 +136,7 @@ mod tests {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = TypeLiteralInConstantPattern.analyze(program, &ctx);
+        let diagnostics = TypeLiteralInConstantPattern.analyze(TypeLiteralInConstantPattern::NAME, program, &ctx);
         let start = source.find("A.ty").unwrap();
         let nullable_start = source.find("int?").unwrap();
         assert_eq!(

@@ -22,8 +22,6 @@ use super::{canonical_or_lexical, enclosing_pubspec};
 #[derive(Default)]
 pub struct DependOnReferencedPackages;
 
-const NAME: &str = "depend-on-referenced-packages";
-
 pub(super) struct PackageManifest {
     pub(super) name: String,
     pub(super) dependencies: HashSet<String>,
@@ -31,7 +29,7 @@ pub(super) struct PackageManifest {
 }
 
 impl CrossFileRule for DependOnReferencedPackages {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         config: &FalconConfig,
@@ -85,7 +83,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                 }
 
                 diagnostics.push(Diagnostic::new(
-                    NAME,
+                    "",
                     Severity::Warning,
                     format!(
                         "The imported package '{package}' isn't a dependency of the importing package."
@@ -166,6 +164,7 @@ fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::CrossFileRuleAnalysis;
 
     #[cfg(unix)]
     #[test]
@@ -240,7 +239,7 @@ mod tests {
             .collect();
         assert_eq!(
             DependOnReferencedPackages
-                .analyze_project(&files, &FalconConfig::default(), None)
+                .analyze_project("depend-on-referenced-packages", &files, &FalconConfig::default(), None)
                 .len(),
             2
         );

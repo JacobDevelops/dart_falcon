@@ -96,7 +96,6 @@ pub fn check_sequence<'a>(
     members: impl IntoIterator<Item = ClassMember<'a>>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
-    rule_name: &'static str,
     rank_of: impl Fn(ClassMember<'a>) -> Option<usize>,
     message: &str,
 ) {
@@ -108,7 +107,7 @@ pub fn check_sequence<'a>(
         match max_seen {
             Some(prev) if rank < prev => {
                 let span = member.span();
-                diags.push(ctx.diagnostic(rule_name, message, span));
+                diags.push(ctx.diagnostic(message, span));
             }
             _ => max_seen = Some(rank),
         }

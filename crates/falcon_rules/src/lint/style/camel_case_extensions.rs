@@ -41,7 +41,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && let Some(name) = ext.name()
             && !is_upper_camel_case(name.name())
         {
-            self.diags.push(self.ctx.diagnostic("camel-case-extensions", MESSAGE, name.span()));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, name.span()));
         }
         StructuralTraversal::SkipChildren
     }

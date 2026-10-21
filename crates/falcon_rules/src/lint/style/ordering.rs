@@ -30,7 +30,6 @@ impl Order {
     pub(super) fn check_names<'a>(
         self,
         ctx: &AnalyzeContext<'_>,
-        rule: &'static str,
         names: impl Iterator<Item = Option<Identifier<'a>>>,
         diags: &mut Vec<Diagnostic>,
     ) {
@@ -40,7 +39,6 @@ impl Order {
                 && previous.is_some_and(|previous| self.is_out_of_order(previous, current.name()))
             {
                 diags.push(ctx.diagnostic(
-                    rule,
                     "Reorder named entries to follow the configured order.",
                     current.span(),
                 ));

@@ -48,11 +48,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let boolean = boolean_expectation(expected, state, self.ctx);
         if boolean.is_some() && matches!(actual.unparenthesized(), Expr::Is(_)) {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-test-matchers",
-                "Use isA or isNot(isA) instead of testing the type before expect.",
-                actual.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use isA or isNot(isA) instead of testing the type before expect.", actual.span()));
             return;
         }
         if boolean.is_some()
@@ -67,11 +63,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     | BinaryOp::GtEq
             )
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-test-matchers",
-                "Match the actual value directly with equals, isNot, or an ordering matcher instead of comparing it before expect.",
-                actual.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Match the actual value directly with equals, isNot, or an ordering matcher instead of comparing it before expect.", actual.span()));
             return;
         }
         let message = match expected.unparenthesized() {
@@ -88,8 +80,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if let Some(message) = message {
             self.diags.push(
-                self.ctx
-                    .diagnostic("prefer-test-matchers", message, expected.span()),
+                self.ctx.diagnostic(message, expected.span()),
             );
         }
     }

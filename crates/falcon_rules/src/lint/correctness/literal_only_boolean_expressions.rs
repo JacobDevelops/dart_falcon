@@ -21,7 +21,6 @@ use falcon_syntax::cst::*;
 use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
-const RULE: &str = "literal-only-boolean-expressions";
 const MESSAGE: &str = "The Boolean expression has a constant value.";
 
 #[derive(Default)]
@@ -51,7 +50,7 @@ struct Collector<'a, 'ctx> {
 impl<'a> Collector<'_, 'a> {
     fn report_if_literal(&mut self, condition: Expr<'a>, span: Span, state: &SemanticState<'a>) {
         if self.only_literals(condition, state) {
-            self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, span));
         }
     }
 
@@ -231,12 +230,9 @@ mod tests {
     #[test]
     fn guard_ranges_include_when_and_intervening_comments() {
         let source = "int f(int x) { switch (x) { case 1 when /* guard */ true: return 1; default: return 0; } } int g(int x) => switch (x) { 1 when 2 > 1 => 1, _ => 0 };";
-        let diagnostics = inference::analyze(
-            &LiteralOnlyBooleanExpressions,
-            Path::new("guard_spans.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(LiteralOnlyBooleanExpressions::NAME, &LiteralOnlyBooleanExpressions, Path::new("guard_spans.dart"),
+        source,
+        &FalconConfig::default(),);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -247,12 +243,9 @@ mod tests {
     #[test]
     fn guard_ranges_inside_interpolation_exclude_when() {
         let source = "String f(int x) => '${switch (x) { 1 when /* guard */ true => 1, _ => 0 }}';";
-        let diagnostics = inference::analyze(
-            &LiteralOnlyBooleanExpressions,
-            Path::new("interpolated_guard_spans.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(LiteralOnlyBooleanExpressions::NAME, &LiteralOnlyBooleanExpressions, Path::new("interpolated_guard_spans.dart"),
+        source,
+        &FalconConfig::default(),);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

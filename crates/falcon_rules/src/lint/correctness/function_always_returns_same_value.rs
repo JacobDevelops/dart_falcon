@@ -72,19 +72,17 @@ impl<'a> Collector<'a> {
         let Some(span) = callable_span(owner) else {
             return;
         };
-        let (rule, message) = match (self.kind, is_null) {
-            (ReturnKind::Null, true) => (
-                "function-always-returns-null",
-                "This function returns null on every path; remove the return value or return a meaningful value.",
-            ),
+        let message = match (self.kind, is_null) {
+            (ReturnKind::Null, true) => {
+                "This function returns null on every path; remove the return value or return a meaningful value."
+            }
             (ReturnKind::NonNull, true) | (ReturnKind::Null, false) => return,
-            (ReturnKind::NonNull, _) => (
-                "function-always-returns-same-value",
-                "This function returns the same constant on every path; simplify the function or return a meaningful result.",
-            ),
+            (ReturnKind::NonNull, _) => {
+                "This function returns the same constant on every path; simplify the function or return a meaningful result."
+            }
         };
         self.diagnostics
-            .push(self.ctx.diagnostic(rule, message, span));
+            .push(self.ctx.diagnostic(message, span));
     }
 }
 

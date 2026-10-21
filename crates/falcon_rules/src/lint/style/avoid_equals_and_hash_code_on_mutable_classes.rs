@@ -107,7 +107,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 };
                 let start = first_token_after_annotations(annotations, span, ctx.tree(), ctx.source());
                 self.diags.push(ctx.diagnostic(
-            "avoid-equals-and-hash-code-on-mutable-classes",
             format!(
                 "The method '{member_name}' should not be overridden in classes not annotated with '@immutable'."
             ),
@@ -156,7 +155,7 @@ class Mutable {
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidEqualsAndHashCodeOnMutableClasses.analyze(parsed.tree.program(source), &ctx);
+            AvoidEqualsAndHashCodeOnMutableClasses.analyze(AvoidEqualsAndHashCodeOnMutableClasses::NAME, parsed.tree.program(source), &ctx);
         assert_eq!(diagnostics.len(), 2);
         for (diagnostic, expected) in diagnostics.iter().zip(["bool", "int"]) {
             assert_eq!(diagnostic.span.start, source.find(expected).unwrap());

@@ -107,11 +107,7 @@ impl<'a> Collector<'a> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "avoid-sensitive-query-params",
-            "Do not put secrets in URL query parameters; use an authorization header or request body.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("Do not put secrets in URL query parameters; use an authorization header or request body.", span));
     }
 }
 

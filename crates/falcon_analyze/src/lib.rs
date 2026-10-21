@@ -25,7 +25,8 @@ pub use constant_value::{
 };
 pub use context::AnalyzeContext;
 pub use cross_file::{
-    CrossFileRule, CrossFileRuleRegistry, NodeRef, ParsedFile, ProjectFile, SemanticIndexes,
+    CrossFileRule, CrossFileRuleAnalysis, CrossFileRuleRegistry, NodeRef, ParsedFile, ProjectFile,
+    SemanticIndexes,
 };
 pub use environment::{
     AnalysisEnvironment, ExternalLibraries, ExternalOrigin, Feature, LanguageVersion,

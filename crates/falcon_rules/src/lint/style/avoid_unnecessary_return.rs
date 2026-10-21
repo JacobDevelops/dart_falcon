@@ -80,7 +80,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 }))
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-unnecessary-return",
                 "This trailing return is unnecessary; let the function finish naturally.",
                 ret.span(),
             ));

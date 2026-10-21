@@ -49,7 +49,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         |name| format!("{}.{}", earlier.name().name(), name.name()),
                     );
                     self.diags.push(self.ctx.diagnostic(
-                        "avoid-duplicate-factories",
                         format!("This factory has the same implementation as '{original}' — remove it or add unique functionality"),
                         constructor.constructor_name().map_or(constructor.name().span(), |name| name.span()),
                     ));

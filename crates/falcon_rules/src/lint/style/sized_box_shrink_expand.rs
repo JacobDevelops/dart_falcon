@@ -61,13 +61,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         || named.segments().last().is_some_and(|name| name.name() == "new")))
             && let Some(replacement) = replacement(args)
         {
-            self.diags.push(self.ctx.diagnostic(
-                "sized-box-shrink-expand",
-                format!(
-                    "Use 'SizedBox.{replacement}' to avoid needing to specify the 'height' and 'width'."
-                ),
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diags.push(self.ctx.diagnostic(format!(
+                "Use 'SizedBox.{replacement}' to avoid needing to specify the 'height' and 'width'."
+            ), crate::lint::flutter::constructor_span(node)));
         }
     }
 }

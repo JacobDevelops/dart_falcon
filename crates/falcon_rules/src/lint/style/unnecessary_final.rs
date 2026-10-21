@@ -32,7 +32,6 @@ use falcon_syntax::Feature;
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
-const RULE: &str = "unnecessary-final";
 const MESSAGE: &str = "Local variables should not be marked as 'final'.";
 
 #[derive(Default)]
@@ -82,7 +81,7 @@ impl Collector<'_, '_> {
     fn report_final(&mut self, keyword: Span) {
         if self.reported.insert(keyword.start) {
             self.diagnostics
-                .push(self.ctx.diagnostic(RULE, MESSAGE, keyword));
+                .push(self.ctx.diagnostic(MESSAGE, keyword));
         }
     }
 
@@ -195,7 +194,7 @@ mod tests {
         let program = parsed.program();
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = UnnecessaryFinal.analyze(program, &ctx);
+        let diagnostics = UnnecessaryFinal.analyze(UnnecessaryFinal::NAME, program, &ctx);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
         let local = source.find("final value").unwrap();
         let pattern = source.find("final (first").unwrap();

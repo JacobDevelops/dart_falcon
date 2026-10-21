@@ -61,11 +61,7 @@ impl Collector<'_> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic(
-            "null-closures",
-            "Pass a closure instead of null.",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Pass a closure instead of null.", span));
     }
 
     fn check_arguments(&mut self, args: ArgList<'_>, positional: &[usize], named: &[&str]) {

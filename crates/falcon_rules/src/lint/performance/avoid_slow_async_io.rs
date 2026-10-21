@@ -49,11 +49,7 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-slow-async-io",
-            "Use of an async 'dart:io' method.",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Use of an async 'dart:io' method.", span));
     }
 }
 

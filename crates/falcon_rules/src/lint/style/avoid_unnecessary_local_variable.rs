@@ -62,8 +62,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && self.uses.get(&id) == Some(&1)
                     && !self.mutated.contains(&id)
                 {
-                    self.diagnostics.push(self.ctx.diagnostic("avoid-unnecessary-local-variable",
-                        "Initialize the next local directly instead of introducing this single-use alias.", variable.span()));
+                    self.diagnostics.push(self.ctx.diagnostic("Initialize the next local directly instead of introducing this single-use alias.", variable.span()));
                 }
             }
         }

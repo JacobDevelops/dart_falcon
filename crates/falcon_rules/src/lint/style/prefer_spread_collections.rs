@@ -49,7 +49,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         && call.args().named().is_empty()
                     {
                         self.diags.push(self.ctx.diagnostic(
-                            "prefer-spread-collections",
                             "Use the spread operator '...' instead of 'addAll'.",
                             section.span(),
                         ));

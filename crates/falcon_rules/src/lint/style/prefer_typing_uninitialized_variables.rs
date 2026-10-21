@@ -43,11 +43,7 @@ impl<'a> Collector<'a> {
         }
         for decl in declarators {
             if decl.initializer().is_none() {
-                self.diags.push(self.ctx.diagnostic(
-                    "prefer-typing-uninitialized-variables",
-                    "Prefer typing uninitialized variables and fields.".to_string(),
-                    decl.name().span(),
-                ));
+                self.diags.push(self.ctx.diagnostic("Prefer typing uninitialized variables and fields.".to_string(), decl.name().span()));
             }
         }
     }

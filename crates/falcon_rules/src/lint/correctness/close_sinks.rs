@@ -33,7 +33,6 @@ use crate::lint::resource_leaks::{LeakRule, Release};
 pub struct CloseSinks;
 
 const RULE: LeakRule = LeakRule {
-    name: "close-sinks",
     message: "Unclosed instance of 'Sink'.",
     releases: &[
         Release {

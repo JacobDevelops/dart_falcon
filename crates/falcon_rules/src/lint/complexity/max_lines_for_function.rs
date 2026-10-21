@@ -65,7 +65,7 @@ use crate::lint::expressions::line_of;
 /// Read the `max_lines` option (default 100). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "max-lines-for-function"),
+        crate::lint::options::for_rule(ctx, MaxLinesForFunction::NAME),
         "max_lines",
     )
     .unwrap_or(100)
@@ -78,13 +78,9 @@ fn check_function_lines(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
     let threshold = max_lines_option(ctx);
 
     if lines > threshold {
-        diags.push(ctx.diagnostic(
-            "max-lines-for-function",
-            format!("Function exceeds the maximum number of lines ({threshold})."),
-            DiagSpan {
-                start: span.start,
-                end: span.start,
-            },
-        ));
+        diags.push(ctx.diagnostic(format!("Function exceeds the maximum number of lines ({threshold})."), DiagSpan {
+            start: span.start,
+            end: span.start,
+        }));
     }
 }

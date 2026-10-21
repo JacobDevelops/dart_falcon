@@ -57,7 +57,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             };
             if recursive {
                 self.diags.push(self.ctx.diagnostic(
-                    "avoid-recursive-calls",
                     "Avoid calling the same function recursively; consider an iterative implementation.",
                     call.span(),
                 ));

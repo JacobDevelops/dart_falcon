@@ -27,7 +27,7 @@ use super::{character_to_byte, enclosing_pubspec, program_reference_uris, scalar
 pub struct UnusedDependencies;
 
 impl CrossFileRule for UnusedDependencies {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -101,7 +101,7 @@ impl CrossFileRule for UnusedDependencies {
                     continue;
                 };
                 let mut diagnostic = Diagnostic::new(
-                    "unused-dependencies",
+                    "",
                     Severity::Warning,
                     format!(
                         "No analyzed Dart source uses '{}'; remove the dependency if it is not used natively or by build tools.",
@@ -164,6 +164,7 @@ fn has_flutter_resources(root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::CrossFileRuleAnalysis;
 
     #[test]
     fn package_config_resolves_implicitly_used_font_package() {
@@ -201,7 +202,7 @@ mod tests {
         }];
         assert!(
             UnusedDependencies
-                .analyze_project(&files, &FalconConfig::default(), None)
+                .analyze_project("unused-dependencies", &files, &FalconConfig::default(), None)
                 .is_empty()
         );
         std::fs::write(
@@ -212,7 +213,7 @@ mod tests {
         assert!(!has_flutter_resources(&package.root));
         assert_eq!(
             UnusedDependencies
-                .analyze_project(&files, &FalconConfig::default(), None)
+                .analyze_project("unused-dependencies", &files, &FalconConfig::default(), None)
                 .len(),
             1
         );

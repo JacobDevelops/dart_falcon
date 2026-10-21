@@ -47,7 +47,7 @@ impl Rule for MaximumNestingLevel {
 /// Read the `max_nesting` option (default 5). Malformed/missing → default.
 fn max_nesting_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "maximum-nesting-level"),
+        crate::lint::options::for_rule(ctx, MaximumNestingLevel::NAME),
         "max_nesting",
     )
     .unwrap_or(5)
@@ -114,7 +114,6 @@ impl<'a> StructuralRuleVisitor<'a> for Nesting<'a> {
             let threshold = max_nesting_option(self.ctx);
             if max > threshold {
                 self.diags.push(self.ctx.diagnostic(
-                    "maximum-nesting-level",
                     format!("Function has a nesting level of {max} (max {threshold})."),
                     self.name.unwrap(),
                 ));

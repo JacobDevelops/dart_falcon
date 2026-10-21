@@ -30,7 +30,7 @@ struct CommentCfg {
 }
 
 fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
-    let opts = crate::lint::options::for_rule(ctx, "format-comment");
+    let opts = crate::lint::options::for_rule(ctx, FormatComment::NAME);
 
     let only_doc_comments = opts
         .and_then(|o| o.get("only_doc_comments"))
@@ -187,28 +187,20 @@ fn check_group(
     // Doc blocks report once; regular blocks report each non-ignored token.
     if is_doc {
         let start = group[0].start;
-        diags.push(ctx.diagnostic(
-            "format-comment",
-            "Prefer formatting comments like sentences",
-            DiagSpan {
-                start,
-                end: start + group[0].marker.len(),
-            },
-        ));
+        diags.push(ctx.diagnostic("Prefer formatting comments like sentences", DiagSpan {
+            start,
+            end: start + group[0].marker.len(),
+        }));
     } else {
         for tok in group {
             let trimmed = tok.lexeme[tok.marker.len()..].trim();
             if is_ignore_comment(trimmed) || is_ignored_pattern(trimmed, cfg) {
                 continue;
             }
-            diags.push(ctx.diagnostic(
-                "format-comment",
-                "Prefer formatting comments like sentences",
-                DiagSpan {
-                    start: tok.start,
-                    end: tok.start + tok.marker.len(),
-                },
-            ));
+            diags.push(ctx.diagnostic("Prefer formatting comments like sentences", DiagSpan {
+                start: tok.start,
+                end: tok.start + tok.marker.len(),
+            }));
         }
     }
 }

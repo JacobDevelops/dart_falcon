@@ -63,7 +63,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             Stmt::Throw(throw_stmt) => {
                 if let Some(group) = self.active_group {
                     self.diags.push((group, self.ctx.diagnostic(
-                        "avoid-throw-in-catch-block",
                         "Avoid throwing exceptions within catch blocks",
                         throw_stmt.span(),
                     )));
@@ -131,8 +130,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("catch_order.dart"), &config, &parsed);
-        let actual: Vec<_> = AvoidThrowInCatchBlock
-            .analyze(parsed.program(), &ctx)
+        let actual: Vec<_> = AvoidThrowInCatchBlock.analyze(AvoidThrowInCatchBlock::NAME, parsed.program(), &ctx)
             .into_iter()
             .map(|diagnostic| diagnostic.span.start)
             .collect();

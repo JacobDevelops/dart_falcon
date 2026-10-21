@@ -23,7 +23,6 @@ impl Rule for PreferAlignOverContainer {
     ) -> RulePreparation<'a> {
         prepare(
             ctx,
-            "prefer-align-over-container",
             "Container",
             "Prefer 'Align' over a Container used only for alignment.",
             matches,

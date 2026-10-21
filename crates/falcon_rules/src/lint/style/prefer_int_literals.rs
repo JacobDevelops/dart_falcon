@@ -32,8 +32,6 @@ use std::collections::HashMap;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
-const RULE: &str = "prefer-int-literals";
-const MESSAGE: &str = "Unnecessary use of a 'double' literal.";
 
 #[derive(Default)]
 pub struct PreferIntLiterals;
@@ -101,7 +99,7 @@ impl<'a> DeclaredContexts<'a, '_> {
     fn check(&mut self, expr: Expr<'a>) {
         if let Some(span) = replaceable_literal(expr) {
             self.diagnostics
-                .push(self.ctx.diagnostic(RULE, MESSAGE, span));
+                .push(self.ctx.diagnostic("Unnecessary use of a 'double' literal.", span));
         }
     }
 
@@ -236,7 +234,7 @@ impl<'a> ArgumentContexts<'a> {
         }
         if let Some(span) = replaceable_literal(argument) {
             self.diagnostics
-                .push(self.ctx.diagnostic(RULE, MESSAGE, span));
+                .push(self.ctx.diagnostic("Unnecessary use of a 'double' literal.", span));
         }
     }
 

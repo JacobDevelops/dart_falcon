@@ -25,11 +25,7 @@ impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
             if let Some(prefix) = import.as_name()
                 && has_leading_underscore(prefix.name())
             {
-                diags.push(ctx.diagnostic(
-                    "no-leading-underscores-for-library-prefixes",
-                    MESSAGE,
-                    prefix.span(),
-                ));
+                diags.push(ctx.diagnostic(MESSAGE, prefix.span()));
             }
         }
         RulePreparation::Diagnostics(diags)

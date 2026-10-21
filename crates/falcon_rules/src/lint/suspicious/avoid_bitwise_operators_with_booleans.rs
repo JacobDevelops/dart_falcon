@@ -50,11 +50,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ty.interface("dart:core", "bool") && !ty.nullable()
         };
         if boolean(binary.left()) && boolean(binary.right()) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-bitwise-operators-with-booleans",
-                format!("Use '{replacement}' instead of a bitwise operator on booleans."),
-                binary.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(format!("Use '{replacement}' instead of a bitwise operator on booleans."), binary.span()));
         }
     }
 }

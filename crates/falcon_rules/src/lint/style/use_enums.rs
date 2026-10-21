@@ -73,7 +73,7 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.candidates.into_iter().filter(|candidate| !candidate.found).map(|candidate| {
-            self.ctx.diagnostic("use-enums", "Class should be an enum.", candidate.span)
+            self.ctx.diagnostic("Class should be an enum.", candidate.span)
         }).collect()
     }
 

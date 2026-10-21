@@ -19,7 +19,7 @@ use super::enclosing_pubspec;
 pub struct UndeclaredDependencies;
 
 impl CrossFileRule for UndeclaredDependencies {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -65,7 +65,7 @@ impl CrossFileRule for UndeclaredDependencies {
                     continue;
                 }
                 diagnostics.push(Diagnostic::new(
-                    "undeclared-dependencies",
+                    "",
                     Severity::Warning,
                     format!(
                         "Declare '{package}' in pubspec {} before importing it.",

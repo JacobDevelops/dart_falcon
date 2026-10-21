@@ -45,7 +45,6 @@ impl Rule for EolAtEndOfFile {
             .next()
             .map_or(start + 1, |character| start + character.len_utf8());
         RulePreparation::Diagnostics(vec![ctx.diagnostic(
-            "eol-at-end-of-file",
             message,
             DiagSpan { start, end },
         )])
@@ -78,7 +77,7 @@ mod tests {
             });
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-            let diagnostics = EolAtEndOfFile.analyze(parsed.tree.program(source), &ctx);
+            let diagnostics = EolAtEndOfFile.analyze(EolAtEndOfFile::NAME, parsed.tree.program(source), &ctx);
             assert_eq!(diagnostics.len(), 1);
             let span = &diagnostics[0].span;
             assert_eq!(&source[..span.start], "void f() {}");

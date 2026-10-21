@@ -24,11 +24,7 @@ impl Rule for AvoidRelativeLibImports {
         let mut diags = Vec::new();
         for import in program.imports() {
             if reaches_into_lib(&import.uri().value()) {
-                diags.push(ctx.diagnostic(
-                    "avoid-relative-lib-imports",
-                    "Avoid relative imports for files in 'lib'.",
-                    import.uri().span(),
-                ));
+                diags.push(ctx.diagnostic("Avoid relative imports for files in 'lib'.", import.uri().span()));
             }
         }
         RulePreparation::Diagnostics(diags)

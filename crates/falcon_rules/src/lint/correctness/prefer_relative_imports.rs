@@ -19,7 +19,6 @@ use crate::lint::string_lit::decode_escapes;
 #[derive(Default)]
 pub struct PreferRelativeImports;
 
-const NAME: &str = "prefer-relative-imports";
 
 impl Rule for PreferRelativeImports {
     fn prepare<'a>(
@@ -50,11 +49,7 @@ impl Rule for PreferRelativeImports {
                     is_self_package_uri(&value, &package.name)
                 })
                 .map(|import| {
-                    ctx.diagnostic(
-                        NAME,
-                        "Use relative imports for files in the 'lib' directory.",
-                        import.uri().span(),
-                    )
+                    ctx.diagnostic("Use relative imports for files in the 'lib' directory.", import.uri().span())
                 })
                 .collect(),
         )

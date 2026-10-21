@@ -34,7 +34,6 @@ use crate::lint::declarations::{documented_node_span, operator_span};
 use crate::lint::style::always_specify_types::setter_parameter_span;
 use falcon_analyze::semantic_scope::SemanticState;
 
-const RULE: &str = "type-annotate-public-apis";
 const MESSAGE: &str = "Missing type annotation on a public API.";
 
 #[derive(Default)]
@@ -83,7 +82,7 @@ fn is_private(name: &str) -> bool {
 
 impl<'a> Checker<'a> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
+        self.diags.push(self.ctx.diagnostic(MESSAGE, span));
     }
 
     fn declaration(&mut self, declaration: TopLevelDecl<'a>) {

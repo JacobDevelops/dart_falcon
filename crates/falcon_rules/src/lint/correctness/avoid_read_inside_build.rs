@@ -202,24 +202,18 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
-        let (rule, message) = match self.check {
+        let message = match self.check {
             Check::ReadInsideBuild
                 if self.access(expression, state) == Some(false)
                     && inside_build(expression, state) == Some(true) =>
             {
-                (
-                    "avoid-read-inside-build",
-                    "Use watch instead of read for values used during build.",
-                )
+                "Use watch instead of read for values used during build."
             }
             Check::WatchOutsideBuild
                 if self.access(expression, state) == Some(true)
                     && inside_build(expression, state) == Some(false) =>
             {
-                (
-                    "avoid-watch-outside-build",
-                    "Use read instead of subscribing outside build.",
-                )
+                "Use read instead of subscribing outside build."
             }
             Check::ReadForMethods => {
                 let Expr::Call(call) = expression else {
@@ -255,14 +249,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 if signature.return_type != ResolvedType::Void {
                     return;
                 }
-                (
-                    "prefer-read-for-methods",
-                    "Use read instead of watch when invoking a provided method.",
-                )
+                "Use read instead of watch when invoking a provided method."
             }
             _ => return,
         };
         self.diagnostics
-            .push(self.ctx.diagnostic(rule, message, expression.span()));
+            .push(self.ctx.diagnostic(message, expression.span()));
     }
 }

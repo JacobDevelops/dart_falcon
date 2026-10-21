@@ -86,11 +86,7 @@ impl<'a> Visitor<'a> for MapScan<'_, 'a> {
         }) {
             self.collector
                 .diagnostics
-                .push(self.collector.ctx.diagnostic(
-                    "avoid-duplicate-map-keys",
-                    "Duplicate map key replaces an earlier entry. Remove or change the key.",
-                    key.span(),
-                ));
+                .push(self.collector.ctx.diagnostic("Duplicate map key replaces an earlier entry. Remove or change the key.", key.span()));
         }
         self.seen.push(key);
     }

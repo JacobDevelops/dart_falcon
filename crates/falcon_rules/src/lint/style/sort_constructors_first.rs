@@ -58,7 +58,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     ClassMember::Constructor(constructor) => {
                         if other {
                             self.diags.push(self.ctx.diagnostic(
-                                "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
                          declarations.",
                                 constructor_name_range(constructor),
@@ -68,7 +67,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     ClassMember::PrimaryConstructorBody(body) => {
                         if other {
                             self.diags.push(self.ctx.diagnostic(
-                                "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
                          declarations.",
                                 body.this_span(),

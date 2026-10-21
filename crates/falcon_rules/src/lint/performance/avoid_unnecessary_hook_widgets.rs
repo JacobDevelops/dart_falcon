@@ -185,11 +185,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .into_iter()
             .filter(|candidate| !candidate.needed)
             .map(|candidate| {
-                self.ctx.diagnostic(
-                    "avoid-unnecessary-hook-widgets",
-                    "This widget does not use hooks; replace it with a regular widget.",
-                    candidate.report,
-                )
+                self.ctx.diagnostic("This widget does not use hooks; replace it with a regular widget.", candidate.report)
             })
             .collect()
     }

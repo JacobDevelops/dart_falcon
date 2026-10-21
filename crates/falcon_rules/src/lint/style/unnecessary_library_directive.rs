@@ -41,7 +41,6 @@ impl Rule for UnnecessaryLibraryDirective {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Diagnostics(vec![ctx.diagnostic(
-            "unnecessary-library-directive",
             "Library directives without comments or annotations should be avoided.",
             lib.span(),
         )])

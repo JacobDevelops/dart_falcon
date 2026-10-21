@@ -42,7 +42,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq | BinaryOp::And | BinaryOp::Or)
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-inverted-boolean-checks",
                 "Express this check directly instead of negating a comparison or logical expression.",
                 unary.span(),
             ));

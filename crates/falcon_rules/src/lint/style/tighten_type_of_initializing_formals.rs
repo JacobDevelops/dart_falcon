@@ -231,11 +231,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             || matches!(ty, ResolvedType::Dynamic)
             || nullability(&ty, &state.signatures, self.ctx.types()) == Truth::Yes;
         if nullable && self.reported.insert((param.start, param.end)) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "tighten-type-of-initializing-formals",
-                "Use a type annotation rather than 'assert' to enforce non-nullability.",
-                param,
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Use a type annotation rather than 'assert' to enforce non-nullability.", param));
         }
     }
 }

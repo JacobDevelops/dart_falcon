@@ -36,11 +36,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, name: Identifier<'_>) {
         if !name.name().starts_with('_') {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-top-level-members-in-tests",
-                "Make this top-level test declaration private.",
-                name.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Make this top-level test declaration private.", name.span()));
         }
     }
 }

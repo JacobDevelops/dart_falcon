@@ -56,7 +56,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         if let Some(span) = is_where_is_not_empty(node) {
             self.diags.push(self.ctx.diagnostic(
-                "prefer-iterable-any",
                 "Use .any() instead of .where().isNotEmpty.",
                 span,
             ));

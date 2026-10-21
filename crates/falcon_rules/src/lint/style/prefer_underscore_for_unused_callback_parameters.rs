@@ -45,7 +45,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         || used.contains(&param.name().span().start))
                 }) {
                     self.diagnostics.push(self.ctx.diagnostic(
-                        "prefer-underscore-for-unused-callback-parameters",
                         "Unused callback parameter should be named '_'.",
                         function.span(),
                     ));

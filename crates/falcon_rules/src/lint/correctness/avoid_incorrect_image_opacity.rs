@@ -55,11 +55,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 })
         };
         if matches {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-incorrect-image-opacity",
-                "Apply opacity directly to the Image instead of wrapping it in Opacity.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Apply opacity directly to the Image instead of wrapping it in Opacity.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

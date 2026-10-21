@@ -61,6 +61,6 @@ const MESSAGE: &str = "Name types using UpperCamelCase.";
 
 fn check(name: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if !is_upper_camel_case(name.name()) {
-        diags.push(ctx.diagnostic("camel-case-types", MESSAGE, name.span()));
+        diags.push(ctx.diagnostic(MESSAGE, name.span()));
     }
 }

@@ -44,15 +44,13 @@ pub(super) enum Emptiness {
 }
 
 impl Emptiness {
-    fn details(self) -> (&'static str, &'static str, &'static str) {
+    fn details(self) -> (&'static str, &'static str) {
         match self {
             Self::Empty => (
-                "prefer-is-empty",
                 "isEmpty",
                 "Use 'isEmpty' instead of comparing 'length' to 0.",
             ),
             Self::NotEmpty => (
-                "prefer-is-not-empty",
                 "isNotEmpty",
                 "Use 'isNotEmpty' instead of comparing 'length' to 0.",
             ),
@@ -126,7 +124,7 @@ pub(super) fn analyze_emptiness<'a>(
             let Expr::Binary(binary) = node else {
                 return;
             };
-            let (rule, member, message) = self.emptiness.details();
+            let (member, message) = self.emptiness.details();
             if let Some(receiver) =
                 self.emptiness
                     .comparison_receiver(binary.op(), binary.left(), binary.right())
@@ -138,8 +136,7 @@ pub(super) fn analyze_emptiness<'a>(
                     &["Iterable", "String", "Map"],
                 )
             {
-                self.diags
-                    .push(self.ctx.diagnostic(rule, message, binary.span()));
+                self.diags.push(self.ctx.diagnostic(message, binary.span()));
             }
         }
     }
@@ -176,12 +173,12 @@ mod tests {
         let program = parsed.tree.program(source);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        for rule in [
-            &PreferIsEmpty as &dyn Rule,
-            &PreferIsNotEmpty,
-            &PreferIterableWhereType,
+        for (name, rule) in [
+            (PreferIsEmpty::NAME, &PreferIsEmpty as &dyn Rule),
+            (PreferIsNotEmpty::NAME, &PreferIsNotEmpty),
+            (PreferIterableWhereType::NAME, &PreferIterableWhereType),
         ] {
-            assert!(rule.analyze(program, &ctx).is_empty());
+            assert!(rule.analyze(name, program, &ctx).is_empty());
         }
     }
 }

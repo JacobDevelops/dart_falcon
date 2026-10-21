@@ -73,11 +73,7 @@ impl<'a> Collector<'a> {
                     )
             });
             if let Some(earlier) = original {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-duplicate-initializers",
-                    format!("This initializer duplicates '{}' — reuse that variable or correct this initializer", earlier.declaration.name().name()),
-                    declaration.name().span(),
-                ));
+                self.diags.push(self.ctx.diagnostic(format!("This initializer duplicates '{}' — reuse that variable or correct this initializer", earlier.declaration.name().name()), declaration.name().span()));
             } else {
                 seen.push(Candidate {
                     declaration,

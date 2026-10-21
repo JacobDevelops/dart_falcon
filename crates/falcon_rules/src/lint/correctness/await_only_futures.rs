@@ -47,11 +47,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         let ty = state.infer(expr);
         if awaitable(&ty, state) == Truth::No {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "await-only-futures",
-                "Await only futures or other future-like values.",
-                Span::new(span.start, span.start + "await".len()),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Await only futures or other future-like values.", Span::new(span.start, span.start + "await".len())));
         }
     }
 }
@@ -102,12 +98,9 @@ mod tests {
     #[test]
     fn reports_only_the_await_keyword() {
         let source = "Future<void> f() async { await 42; await ('text'); }";
-        let diagnostics = inference::analyze(
-            &AwaitOnlyFutures,
-            Path::new("await_span.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(AwaitOnlyFutures::NAME, &AwaitOnlyFutures, Path::new("await_span.dart"),
+        source,
+        &FalconConfig::default(),);
         assert_eq!(diagnostics.len(), 2);
         for (diagnostic, (start, _)) in diagnostics.iter().zip(source.match_indices("await")) {
             assert_eq!(diagnostic.span.start, start);

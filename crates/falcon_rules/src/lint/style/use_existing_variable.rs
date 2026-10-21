@@ -179,11 +179,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             if same_block(candidate.declaration.syntax(), node.syntax())
                 && self.equivalent(candidate.value, node)
             {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "use-existing-variable",
-                    "Reuse the existing local instead of repeating this computation.",
-                    node.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Reuse the existing local instead of repeating this computation.", node.span()));
                 break;
             }
         }

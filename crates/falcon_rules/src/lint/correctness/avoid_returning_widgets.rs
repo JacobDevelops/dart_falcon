@@ -45,7 +45,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             if let Some(ret_type) = f.return_type()
                 && contains_widget_type(ret_type)
             {
-                self.diags.push(self.ctx.diagnostic("avoid-returning-widgets", "Functions should not return Widget directly; extract to a separate widget class", f.span()));
+                self.diags.push(self.ctx.diagnostic("Functions should not return Widget directly; extract to a separate widget class", f.span()));
             }
             return StructuralTraversal::SkipChildren;
         }
@@ -123,11 +123,7 @@ fn check_class_member(member: ClassMember<'_>, diags: &mut Vec<Diagnostic>, ctx:
                 && m.name().name() != "build"
                 && !has_override_annotation(m.annotations())
             {
-                diags.push(ctx.diagnostic(
-                    "avoid-returning-widgets",
-                    "Methods should not return Widget directly; extract to a separate widget class",
-                    m.name().span(),
-                ));
+                diags.push(ctx.diagnostic("Methods should not return Widget directly; extract to a separate widget class", m.name().span()));
             }
         }
         ClassMember::Getter(g) => {
@@ -136,11 +132,7 @@ fn check_class_member(member: ClassMember<'_>, diags: &mut Vec<Diagnostic>, ctx:
                 && g.name().name() != "build"
                 && !has_override_annotation(g.annotations())
             {
-                diags.push(ctx.diagnostic(
-                    "avoid-returning-widgets",
-                    "Getters should not return Widget directly; extract to a separate widget class",
-                    g.span(),
-                ));
+                diags.push(ctx.diagnostic("Getters should not return Widget directly; extract to a separate widget class", g.span()));
             }
         }
         _ => {}

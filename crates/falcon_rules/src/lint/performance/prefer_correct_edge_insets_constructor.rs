@@ -69,11 +69,7 @@ fn check_edge_insets_only_call(
                 }
             };
 
-            diags.push(ctx.diagnostic(
-                "prefer-correct-edge-insets-constructor",
-                "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
-                report_span,
-            ));
+            diags.push(ctx.diagnostic("EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().", report_span));
         }
     }
 }
@@ -91,11 +87,7 @@ fn check_edge_insets_only(
     {
         let should_flag = should_use_better_constructor(args);
         if should_flag {
-            diags.push(ctx.diagnostic(
-                "prefer-correct-edge-insets-constructor",
-                "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
-                span,
-            ));
+            diags.push(ctx.diagnostic("EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().", span));
         }
     }
 }

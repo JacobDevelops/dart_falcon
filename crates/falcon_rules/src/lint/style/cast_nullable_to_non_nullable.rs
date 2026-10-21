@@ -67,10 +67,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "cast-nullable-to-non-nullable",
-            "Don't cast a nullable value to a non-nullable type.",
-            cast.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Don't cast a nullable value to a non-nullable type.", cast.span()));
     }
 }

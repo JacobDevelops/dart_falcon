@@ -24,7 +24,7 @@ impl Rule for NoMagicString {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, "no-magic-string");
+        let options = crate::lint::options::for_rule(ctx, NoMagicString::NAME);
         let allow_only_once = options
             .and_then(|options| options.get("allow_only_once"))
             .and_then(|value| value.as_bool())
@@ -177,8 +177,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         self.literals.iter()
             .filter(|(value, _, exempt)| !exempt && (!self.allow_only_once || counts.get(value.as_str()).copied().unwrap_or(0) > 1))
-            .map(|(_, span, _)| self.ctx.diagnostic("no-magic-string",
-                "Extract this magic string into a named variable or constant.", *span))
+            .map(|(_, span, _)| self.ctx.diagnostic("Extract this magic string into a named variable or constant.", *span))
             .collect()
     }
 

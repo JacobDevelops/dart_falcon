@@ -47,7 +47,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && matches!(binary.right().unparenthesized(), Expr::StringLit(_))
         {
             self.diags.push(self.ctx.diagnostic(
-                "prefer-adjacent-string-concatenation",
                 "Use adjacent string literals instead of the `+` operator.",
                 binary.span(),
             ));

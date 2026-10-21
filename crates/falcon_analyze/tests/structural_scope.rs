@@ -246,7 +246,7 @@ fn standalone_and_registry_finalize_once_even_for_empty_programs() {
             policy: 0,
             events: direct_events.clone(),
         };
-        let standalone = rule.analyze(parsed.program(), &context);
+        let standalone = rule.analyze("structural-test", parsed.program(), &context);
         let (registered, registry_events) = run(source, &[0]);
         assert_eq!(standalone.len(), 1);
         assert_eq!(standalone[0].message, registered[0].message);
@@ -303,7 +303,7 @@ fn direct_trait_implementations_receive_all_hooks_without_subscriptions() {
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
     let (events, receiver) = mpsc::channel();
-    DirectRule(events.clone()).analyze(parsed.program(), &context);
+    DirectRule(events.clone()).analyze("direct-test", parsed.program(), &context);
     let events: Vec<_> = receiver.try_iter().collect();
     assert_eq!(keys(&events, 0, "expr").len(), 3);
     assert_eq!(keys(&events, 0, "expr-exit").len(), 3);

@@ -57,7 +57,7 @@ fn check_double(value: &str, span: &Span, diags: &mut Vec<Diagnostic>, ctx: &Ana
     } else {
         return;
     };
-    diags.push(ctx.diagnostic("double-literal-format", message, *span));
+    diags.push(ctx.diagnostic(message, *span));
 }
 
 /// Every double literal in the file, wherever it appears. The shared walker is

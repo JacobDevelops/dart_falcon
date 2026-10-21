@@ -53,6 +53,7 @@ fn constant_type_patterns_use_resolved_static_expression_types() {
 fn unawaited_future_diagnostics_retain_grouping_spans() {
     let source = "import 'dart:async';\nFuture<void> load() async {}\nvoid run() async { load(); (load()); ((load())); }\n";
     let diagnostics = inference::analyze(
+        "unawaited-futures",
         &falcon_rules::lint::style::unawaited_futures::UnawaitedFutures,
         std::path::Path::new("grouped_futures.dart"),
         source,
@@ -65,7 +66,7 @@ fn unawaited_future_diagnostics_retain_grouping_spans() {
     assert_eq!(reported, ["load", "(load())", "((load()))"]);
 }
 
-fn assert_without_external_sources(rule_name: &str, source: &str) {
+fn assert_without_external_sources(rule_name: &'static str, source: &str) {
     use falcon_analyze::{
         AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, SemanticModel,
         SignatureIndex, TypeIndex,
@@ -111,7 +112,12 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
         .with_signatures(&signatures);
     let rules = all_rules();
     let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
-    inference::assert_diagnostics(source, rule_name, &rule.analyze(program, &context), 0);
+    inference::assert_diagnostics(
+        source,
+        rule_name,
+        &rule.analyze(rule_name, program, &context),
+        0,
+    );
 }
 
 #[test]

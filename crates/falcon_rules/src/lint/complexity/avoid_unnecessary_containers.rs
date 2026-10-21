@@ -45,7 +45,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && args.named().next().unwrap().name().name() == "child"
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-unnecessary-containers",
                 "Avoid a Container with only a child; use the child directly.",
                 span,
             ));

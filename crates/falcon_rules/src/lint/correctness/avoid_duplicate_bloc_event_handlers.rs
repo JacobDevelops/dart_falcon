@@ -165,11 +165,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .entry(constructor.syntax().id())
             .or_default();
         if registered.contains(&event_type) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-duplicate-bloc-event-handlers",
-                "This event already has a handler. Combine the handlers into one registration.",
-                event.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("This event already has a handler. Combine the handlers into one registration.", event.span()));
         } else {
             registered.push(event_type);
         }

@@ -118,7 +118,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             )
         {
                     self.diags.push(self.ctx.diagnostic(
-                        "use-setters-to-change-properties",
                         "The method is used to change a property.",
                         method.name().span(),
                     ));

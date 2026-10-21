@@ -79,7 +79,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             is_negated_where_is_empty(node).or_else(|| is_where_length_eq_length(node))
         {
             self.diags.push(self.ctx.diagnostic(
-                "prefer-iterable-every",
                 "Use .every() instead of .where().isEmpty or .where().length comparison.",
                 span,
             ));

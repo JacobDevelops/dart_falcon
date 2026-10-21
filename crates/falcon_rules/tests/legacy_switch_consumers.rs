@@ -43,7 +43,7 @@ fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
     parsed
 }
 
-fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
+fn diagnostics(name: &'static str, rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
     let falcon_dart_parser::ParseResult { tree, .. } = case_program(source, legacy);
     let source = format!(
         "// @dart = {}\n{source}",
@@ -79,7 +79,7 @@ fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
         .with_identities(&identities)
         .with_types(&types);
     let mut messages: Vec<_> = rule
-        .analyze(program, &ctx)
+        .analyze(name, program, &ctx)
         .into_iter()
         .map(|diagnostic| diagnostic.message)
         .collect();
@@ -87,36 +87,38 @@ fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
     messages
 }
 
-fn assert_compatible(rule: &dyn Rule, source: &str) {
-    let modern = diagnostics(rule, source, false);
+fn assert_compatible(name: &'static str, rule: &dyn Rule, source: &str) {
+    let modern = diagnostics(name, rule, source, false);
     assert!(
         !modern.is_empty(),
         "modern source must exercise the consumer"
     );
-    assert_eq!(diagnostics(rule, source, true), modern);
+    assert_eq!(diagnostics(name, rule, source, true), modern);
 }
 
 #[test]
 fn legacy_cases_count_toward_switch_limit() {
     assert_compatible(
+        "max-switch-cases",
         &MaxSwitchCases,
         "void f(int value) {
-        switch (value) {
-            case 0: case 1: case 2: case 3: case 4: case 5:
-            case 6: case 7: case 8: case 9: case 10: break;
-            default: break;
-        }
-    }",
+    switch (value) {
+        case 0: case 1: case 2: case 3: case 4: case 5:
+        case 6: case 7: case 8: case 9: case 10: break;
+        default: break;
+    }
+        }",
     );
 }
 
 #[test]
 fn legacy_case_expressions_visit_adjacent_strings_in_lists() {
     assert_compatible(
+        "no-adjacent-strings-in-list",
         &NoAdjacentStringsInList,
         "void f(Object value) {
-        switch (value) { case const ['a' 'b']: break; }
-    }",
+    switch (value) { case const ['a' 'b']: break; }
+        }",
     );
 }
 
@@ -154,11 +156,11 @@ fn legacy_pseudoenum_cases_preserve_coverage() {
         "{declaration}
         void f(E value) {{ switch (value) {{ case E.a: break; case E.b: break; }} }}"
     );
-    assert!(diagnostics(&ExhaustiveCases, &complete, false).is_empty());
-    assert!(diagnostics(&ExhaustiveCases, &complete, true).is_empty());
+    assert!(diagnostics(ExhaustiveCases::NAME, &ExhaustiveCases, &complete, false).is_empty());
+    assert!(diagnostics(ExhaustiveCases::NAME, &ExhaustiveCases, &complete, true).is_empty());
     let incomplete = format!(
         "{declaration}
         void f(E value) {{ switch (value) {{ case E.a: break; }} }}"
     );
-    assert_compatible(&ExhaustiveCases, &incomplete);
+    assert_compatible("exhaustive-cases", &ExhaustiveCases, &incomplete);
 }

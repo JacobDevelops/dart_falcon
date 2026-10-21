@@ -21,7 +21,7 @@ pub struct MaxLinesForFile;
 /// Read the `max_lines` option (default 200). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "max-lines-for-file"),
+        crate::lint::options::for_rule(ctx, MaxLinesForFile::NAME),
         "max_lines",
     )
     .unwrap_or(200)
@@ -40,11 +40,7 @@ impl Rule for MaxLinesForFile {
 
         if line_count > threshold {
             // Report on line 1 (byte offset 0). Message states the actual threshold.
-            diags.push(ctx.diagnostic(
-                "max-lines-for-file",
-                format!("File exceeds the maximum number of lines ({threshold})."),
-                DiagSpan { start: 0, end: 0 },
-            ));
+            diags.push(ctx.diagnostic(format!("File exceeds the maximum number of lines ({threshold})."), DiagSpan { start: 0, end: 0 }));
         }
 
         RulePreparation::Diagnostics(diags)

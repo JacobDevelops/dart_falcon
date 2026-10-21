@@ -49,14 +49,10 @@ impl Rule for FlutterStyleTodos {
                     TODO.is_match(comment) && !EXPECTED_TODO.is_match(comment)
                 })
                 .map(|token| {
-                    ctx.diagnostic(
-                        "flutter-style-todos",
-                        "To-do comment doesn't follow the Flutter style.",
-                        DiagSpan {
-                            start: token.offset(),
-                            end: token.offset() + token.len(),
-                        },
-                    )
+                    ctx.diagnostic("To-do comment doesn't follow the Flutter style.", DiagSpan {
+                        start: token.offset(),
+                        end: token.offset() + token.len(),
+                    })
                 })
                 .collect(),
         )

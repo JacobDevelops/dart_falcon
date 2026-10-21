@@ -10,7 +10,6 @@ use falcon_syntax::cst::*;
 
 use super::ordering::Order;
 
-const RULE: &str = "parameters-ordering";
 
 #[derive(Default)]
 pub struct ParametersOrdering;
@@ -21,7 +20,7 @@ impl Rule for ParametersOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, RULE) else {
+        let Some(order) = Order::configured(ctx, Self::NAME) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
@@ -41,7 +40,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check_names<'a>(&mut self, names: impl Iterator<Item = Identifier<'a>>) {
         self.order
-            .check_names(self.ctx, RULE, names.map(Some), &mut self.diagnostics);
+            .check_names(self.ctx, names.map(Some), &mut self.diagnostics);
     }
 
     fn check(&mut self, params: FormalParamList<'_>) {

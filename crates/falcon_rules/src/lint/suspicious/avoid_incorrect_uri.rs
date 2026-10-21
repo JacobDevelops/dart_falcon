@@ -33,7 +33,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn report(&mut self, span: Span, message: &str) {
         self.diags
-            .push(self.ctx.diagnostic("avoid-incorrect-uri", message, span));
+            .push(self.ctx.diagnostic(message, span));
     }
 
     fn query<'a>(&mut self, value: Expr<'a>, state: &SemanticState<'a>) {

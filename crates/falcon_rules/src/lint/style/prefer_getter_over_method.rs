@@ -73,8 +73,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 ClassMember::Field(field) if !field.is_static() && !field.is_late() && !field.is_external()
                     && field.declarators().any(|declarator| declarator.name().name() == field_name)));
             if is_field {
-                self.diags.push(self.ctx.diagnostic("prefer-getter-over-method",
-                    "This zero-argument method only reads a field; expose it as a getter instead.", method.name().span()));
+                self.diags.push(self.ctx.diagnostic("This zero-argument method only reads a field; expose it as a getter instead.", method.name().span()));
             }
         }
         StructuralTraversal::SkipChildren

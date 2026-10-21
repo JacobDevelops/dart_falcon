@@ -25,7 +25,7 @@ impl Rule for AvoidReferencingSubclasses {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let ignored = crate::lint::options::strings(
-            crate::lint::options::for_rule(ctx, "avoid-referencing-subclasses"),
+            crate::lint::options::for_rule(ctx, AvoidReferencingSubclasses::NAME),
             "ignored_annotations",
         )
         .map(|names| names.map(str::to_owned).collect())
@@ -70,11 +70,7 @@ impl Collector<'_> {
                 .member_supertype_matches(&identity, &|parent| parent == owner)
                 == Truth::Yes
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-referencing-subclasses",
-                "Avoid referencing a subclass from its base class.",
-                span,
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Avoid referencing a subclass from its base class.", span));
         }
     }
 }

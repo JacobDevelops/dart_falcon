@@ -122,11 +122,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
             let span = Span::new(left.expr.span().start, right.expr.span().end);
             if self.reported.insert((span.start, span.end)) {
-                self.diags.push(self.ctx.diagnostic(
-                    "prefer-interpolation-to-compose-strings",
-                    "Use string interpolation to compose strings and values.",
-                    span,
-                ));
+                self.diags.push(self.ctx.diagnostic("Use string interpolation to compose strings and values.", span));
             }
             // The right operand was just reported; skip over it.
             index += 1;

@@ -131,8 +131,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
             }
             if safe {
-                self.diagnostics.push(self.ctx.diagnostic("use-existing-destructuring",
-                    "Reuse or extend the existing record destructuring instead of reading this field again.", field.span()));
+                self.diagnostics.push(self.ctx.diagnostic("Reuse or extend the existing record destructuring instead of reading this field again.", field.span()));
                 break;
             }
         }

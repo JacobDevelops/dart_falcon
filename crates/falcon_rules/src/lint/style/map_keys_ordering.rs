@@ -16,7 +16,6 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct MapKeysOrdering;
 
-const NAME: &str = "map-keys-ordering";
 
 impl Rule for MapKeysOrdering {
     fn prepare<'a>(
@@ -24,7 +23,7 @@ impl Rule for MapKeysOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, NAME) else {
+        let Some(order) = Order::configured(ctx, Self::NAME) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
@@ -65,7 +64,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && previous.is_some_and(|previous| self.order.is_out_of_order(previous, current))
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        NAME,
                         "Reorder literal string map keys to follow the configured order.",
                         span,
                     ));

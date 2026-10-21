@@ -26,7 +26,6 @@ impl Rule for PreferSealedBlocState {
             ctx,
             ModelKind::State,
             ModelRequirement::Sealed,
-            "prefer-sealed-bloc-state",
         )
     }
 }

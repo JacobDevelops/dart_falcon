@@ -62,11 +62,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && is_is_check_closure(call.args().positional().first().unwrap())
             && !lacks_collection_member(self.ctx, field.object(), state, "whereType", &["Iterable"])
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-iterable-where-type",
-                "Use 'whereType<T>()' instead of 'where' with an 'is' check.",
-                field.field().span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use 'whereType<T>()' instead of 'where' with an 'is' check.", field.field().span()));
         }
     }
 }
@@ -105,11 +101,11 @@ mod tests {
     }
 
     fn count_no_types(source: &str) -> usize {
-        support::count(&PreferIterableWhereType, source, false)
+        support::count("prefer-iterable-where-type", &PreferIterableWhereType, source, false)
     }
 
     fn count_with_types(source: &str) -> usize {
-        support::count(&PreferIterableWhereType, source, true)
+        support::count("prefer-iterable-where-type", &PreferIterableWhereType, source, true)
     }
 
     #[test]

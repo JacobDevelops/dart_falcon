@@ -41,6 +41,7 @@ fn config_for_source_file<'a>(
 }
 
 pub fn analyze(
+    name: &'static str,
     rule: &dyn Rule,
     file: &Path,
     source: &str,
@@ -124,7 +125,7 @@ pub fn analyze(
         .with_identities(&identities)
         .with_signatures(&signatures)
         .with_environment(Some(&environment));
-    rule.analyze(program, &context)
+    rule.analyze(name, program, &context)
 }
 
 // This support module is included by binaries that do not all use marker assertions.
@@ -157,8 +158,9 @@ pub fn assert_lints(rule_name: &str, source: &str, count: usize) {
     let falcon_dart_parser::ParseResult { errors, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let rules = crate::all_rules();
-    let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
+    let (name, rule) = rules.iter().find(|(name, _)| *name == rule_name).unwrap();
     let diagnostics = analyze(
+        name,
         rule.as_ref(),
         Path::new("main.dart"),
         source,

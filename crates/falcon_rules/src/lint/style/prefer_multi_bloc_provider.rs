@@ -30,11 +30,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if provider_args(child, state, self.ctx).is_some() {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-multi-bloc-provider",
-                "Combine nested BlocProviders with MultiBlocProvider.",
-                crate::lint::flutter::constructor_span(expression),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Combine nested BlocProviders with MultiBlocProvider.", crate::lint::flutter::constructor_span(expression)));
         }
     }
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {

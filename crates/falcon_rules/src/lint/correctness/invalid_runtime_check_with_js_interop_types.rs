@@ -424,15 +424,11 @@ impl Collector<'_, '_> {
 
     fn check(&mut self, source: &ResolvedType, target: &ResolvedType, span: &Span, is_check: bool) {
         if self.invalid_test(source, target, is_check) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "invalid-runtime-check-with-js-interop-types",
-                if is_check {
-                    "Runtime type checks involving JS interop types are platform-dependent."
-                } else {
-                    "This cast between JS interop and Dart types is not portable."
-                },
-                *span,
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(if is_check {
+                "Runtime type checks involving JS interop types are platform-dependent."
+            } else {
+                "This cast between JS interop and Dart types is not portable."
+            }, *span));
         }
     }
 }
@@ -483,11 +479,7 @@ impl<'a> SemanticRuleVisitor<'a> for RuntimeChecks<'a> {
                     .model
                     .resolve_type_in(exception_type, &state.type_parameters);
                 if checker.has_interop(&ty, &mut HashSet::new()) == Some(true) {
-                    checker.diagnostics.push(checker.ctx.diagnostic(
-                        "invalid-runtime-check-with-js-interop-types",
-                        "JS interop types cannot be used as catch types.",
-                        exception_type.span(),
-                    ));
+                    checker.diagnostics.push(checker.ctx.diagnostic("JS interop types cannot be used as catch types.", exception_type.span()));
                 }
             }
         }
@@ -631,7 +623,7 @@ mod tests {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = InvalidRuntimeCheckWithJsInteropTypes.analyze(program, &ctx);
+        let diagnostics = InvalidRuntimeCheckWithJsInteropTypes.analyze(InvalidRuntimeCheckWithJsInteropTypes::NAME, program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

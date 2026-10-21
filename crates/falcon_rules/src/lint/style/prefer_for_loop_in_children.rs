@@ -118,10 +118,6 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            "prefer-for-loop-in-children",
-            "Use a collection-for element instead of 'map(...).toList()' in children.",
-            expression.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic("Use a collection-for element instead of 'map(...).toList()' in children.", expression.span()));
     }
 }

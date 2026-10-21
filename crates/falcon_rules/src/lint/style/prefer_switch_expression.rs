@@ -135,7 +135,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && convertible(switch)
         {
             self.diags.push(self.ctx.diagnostic(
-                "prefer-switch-expression",
                 "Use a switch expression to select this value.",
                 switch.span(),
             ));

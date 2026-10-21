@@ -246,11 +246,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.constructors.into_iter().filter(|entry| !entry.missing.is_empty()).map(|entry| {
-            self.ctx.diagnostic(
-                "handle-bloc-event-subclasses",
-                "This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event.",
-                entry.span,
-            )
+            self.ctx.diagnostic("This Bloc leaves event subclasses unhandled. Register their handlers or handle the parent event.", entry.span)
         }).collect()
     }
 }

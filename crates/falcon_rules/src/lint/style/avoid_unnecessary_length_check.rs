@@ -127,11 +127,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Expr::Ident(other) = iterated.unparenthesized()
             && other.name() == identifier.name()
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unnecessary-length-check",
-                "Remove this emptiness guard: iteration already skips empty collections.",
-                condition.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Remove this emptiness guard: iteration already skips empty collections.", condition.span()));
         }
     }
 

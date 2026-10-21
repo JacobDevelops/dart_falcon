@@ -43,11 +43,7 @@ struct Collector<'a, 'ctx> {
 impl Collector<'_, '_> {
     fn check<'a>(&mut self, mut declarators: AstChildren<'a, cst::VarDeclarator<'a>>) {
         if let Some(second) = declarators.nth(1) {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-multiple-declarations-per-line",
-                "Multiple variables declared on a single line.",
-                second.name().span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Multiple variables declared on a single line.", second.name().span()));
         }
     }
 }

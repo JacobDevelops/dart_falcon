@@ -83,8 +83,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         for declaration in node.declarators() {
             if self.pattern.is_match(declaration.name().name().trim_start_matches('_')) != function {
-                self.diags.push(self.ctx.diagnostic(RULE,
-                    if function {
+                self.diags.push(self.ctx.diagnostic(if function {
                         format!("This callback field does not match '{}'; rename it to match the configured pattern.", self.pattern)
                     } else {
                         format!("This non-function field matches callback pattern '{}'; rename it so it does not match.", self.pattern)

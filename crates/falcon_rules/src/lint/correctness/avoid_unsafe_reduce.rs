@@ -326,11 +326,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && !nonempty(field.object(), state)
             && !immediately_guarded(call, field.object(), state)
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unsafe-reduce",
-                "Reducing a possibly empty iterable can throw; use fold or check for emptiness.",
-                field.field().span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Reducing a possibly empty iterable can throw; use fold or check for emptiness.", field.field().span()));
         }
     }
 
@@ -359,11 +355,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             .is_some_and(|first| first.span() == call.span())
                 })
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unsafe-reduce",
-                "Reducing a possibly empty iterable can throw; use fold or check for emptiness.",
-                call.name().span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Reducing a possibly empty iterable can throw; use fold or check for emptiness.", call.name().span()));
         }
     }
 

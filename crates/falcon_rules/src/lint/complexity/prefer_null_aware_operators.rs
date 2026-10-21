@@ -69,7 +69,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 && equivalent(receiver, operand, self.ctx)
             {
                 self.diags.push(self.ctx.diagnostic(
-                    "prefer-null-aware-operators",
                     "Prefer using the null-aware operator '?.'.",
                     conditional.span(),
                 ));

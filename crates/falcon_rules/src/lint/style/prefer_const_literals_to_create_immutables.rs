@@ -79,11 +79,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .chain(args.named().map(|argument| argument.value()));
         for literal in arguments.flat_map(collection_literals) {
             if constant_in_context(literal, &self.deferred, state) {
-                self.diags.push(self.ctx.diagnostic(
-                    "prefer-const-literals-to-create-immutables",
-                    "Use 'const' literals as arguments to constructors of '@immutable' classes.",
-                    literal.unparenthesized().span(),
-                ));
+                self.diags.push(self.ctx.diagnostic("Use 'const' literals as arguments to constructors of '@immutable' classes.", literal.unparenthesized().span()));
             }
         }
     }
@@ -167,12 +163,9 @@ mod tests {
     #[test]
     fn collection_ranges_exclude_surrounding_parentheses() {
         let source = "import 'package:meta/meta.dart'; @immutable class Config { final List<Object> values; Config(this.values); } void f() { Config(([1])); Config(([[2]])); }";
-        let diagnostics = inference::analyze(
-            &PreferConstLiteralsToCreateImmutables,
-            Path::new("literal_spans.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(PreferConstLiteralsToCreateImmutables::NAME, &PreferConstLiteralsToCreateImmutables, Path::new("literal_spans.dart"),
+        source,
+        &FalconConfig::default(),);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

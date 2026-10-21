@@ -181,7 +181,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             });
             if redundant {
                 self.diags.push(self.ctx.diagnostic(
-                    "avoid-duplicate-mixins",
                     "This mixin is already applied without intervening overrides — remove it or replace it with the intended mixin",
                     mixin.span(),
                 ));

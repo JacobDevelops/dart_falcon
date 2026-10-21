@@ -19,11 +19,7 @@ impl Rule for AvoidBarrelFiles {
             program
                 .exports()
                 .map(|export| {
-                    ctx.diagnostic(
-                "avoid-barrel-files",
-                "Avoid barrel files containing only re-exports; import declarations directly.",
-                export.span(),
-            )
+                    ctx.diagnostic("Avoid barrel files containing only re-exports; import declarations directly.", export.span())
                 })
                 .collect()
         } else {

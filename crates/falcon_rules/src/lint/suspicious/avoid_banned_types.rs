@@ -73,7 +73,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             ResolvedType::Void => "void",
             _ => return StructuralTraversal::Continue,
         };
-        report(self.ctx, &self.entries, "avoid-banned-types", name, node.span(), &mut self.diagnostics);
+        report(self.ctx, &self.entries, name, node.span(), &mut self.diagnostics);
         StructuralTraversal::Continue
     }
 

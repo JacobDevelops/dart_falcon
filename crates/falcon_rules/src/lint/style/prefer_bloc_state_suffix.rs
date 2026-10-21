@@ -14,7 +14,6 @@ impl Rule for PreferBlocStateSuffix {
             ctx,
             crate::lint::bloc::ModelKind::State,
             crate::lint::bloc::ModelRequirement::Suffix,
-            "prefer-bloc-state-suffix",
         )
     }
 }

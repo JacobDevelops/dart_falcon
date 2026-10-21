@@ -117,7 +117,6 @@ impl<'a> StructuralRuleVisitor<'a> for ParameterCasts<'a> {
             && !is_parenthesized(cast.expr())
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "test-types-in-equals",
                 format!("Missing type test for '{}' in '=='.", self.type_name),
                 cast.span(),
             ));

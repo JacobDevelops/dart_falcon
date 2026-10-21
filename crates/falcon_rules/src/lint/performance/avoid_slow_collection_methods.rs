@@ -103,10 +103,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if is_type_filter(call.args().positional().first().unwrap()) {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-slow-collection-methods",
-            message,
-            field.field().span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic(message, field.field().span()));
     }
 }

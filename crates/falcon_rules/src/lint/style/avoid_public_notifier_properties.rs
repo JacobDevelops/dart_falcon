@@ -79,11 +79,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 impl Collector<'_> {
     fn property(&mut self, name: Identifier<'_>) {
         if !name.name().starts_with('_') && !matches!(name.name(), "state" | "ref" | "mounted") {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-public-notifier-properties",
-                "Expose notifier data through state rather than a public property.",
-                name.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Expose notifier data through state rather than a public property.", name.span()));
         }
     }
 }

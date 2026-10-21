@@ -49,7 +49,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             name.push('.');
             name.push_str(constructor.name());
         }
-        report(self.ctx, &self.entries, "avoid-banned-annotations", &name, node.span(), &mut self.diagnostics);
+        report(self.ctx, &self.entries, &name, node.span(), &mut self.diagnostics);
         StructuralTraversal::Continue
     }
 

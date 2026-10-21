@@ -99,7 +99,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             if self.const_depth > 0 {
                 self.diags.push(self.ctx.diagnostic(
-                    "unnecessary-const",
                     "Unnecessary `const` keyword inside an already-const context.",
                     span,
                 ));
@@ -137,7 +136,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = UnnecessaryConst.analyze(parsed.program(), &ctx);
+        let diagnostics = UnnecessaryConst.analyze(UnnecessaryConst::NAME, parsed.program(), &ctx);
         let starts: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.span.start)

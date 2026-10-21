@@ -34,8 +34,6 @@ use crate::lint::string_lit::{decode_escapes, decoded_text, literal_parts};
 #[derive(Default)]
 pub struct ConditionalUriDoesNotExist;
 
-const NAME: &str = "conditional-uri-does-not-exist";
-
 impl Rule for ConditionalUriDoesNotExist {
     fn prepare<'a>(
         &self,
@@ -71,11 +69,7 @@ impl Rule for ConditionalUriDoesNotExist {
                     let uri = configuration.uri();
                     let value = uri_value(uri);
                     (resolver.exists(&value) == Some(false)).then(|| {
-                        ctx.diagnostic(
-                            NAME,
-                            format!("The target of the conditional URI '{value}' doesn't exist."),
-                            uri.span(),
-                        )
+                        ctx.diagnostic(format!("The target of the conditional URI '{value}' doesn't exist."), uri.span())
                     })
                 })
                 .collect(),
@@ -354,7 +348,7 @@ mod tests {
         let config = falcon_config::FalconConfig::default();
         let context =
             AnalyzeContext::new(&file, &config, &parsed).with_environment(Some(&environment));
-        let diagnostics = ConditionalUriDoesNotExist.analyze(parsed.program(), &context);
+        let diagnostics = ConditionalUriDoesNotExist.analyze(ConditionalUriDoesNotExist::NAME, parsed.program(), &context);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
             &source[diagnostics[0].span.start..diagnostics[0].span.end],

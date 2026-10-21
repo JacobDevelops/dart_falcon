@@ -52,11 +52,7 @@ impl Collector<'_> {
     ) {
         if async_marker == AsyncMarker::Async && matches!(return_type, Some(cst::DartType::Void(_)))
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-void-async",
-                "An 'async' function should have a 'Future' return type when it doesn't return a value.",
-                name,
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("An 'async' function should have a 'Future' return type when it doesn't return a value.", name));
         }
     }
 }
@@ -141,7 +137,7 @@ mod tests {
         let config = FalconConfig::default();
         let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
-        let diagnostics = AvoidVoidAsync.analyze(parsed.program(), &context);
+        let diagnostics = AvoidVoidAsync.analyze(AvoidVoidAsync::NAME, parsed.program(), &context);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         let span = diagnostics[0].span;
         assert_eq!(&source[span.start..span.end], "operator");

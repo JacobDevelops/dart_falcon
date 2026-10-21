@@ -79,10 +79,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         } else {
             return;
         };
-        self.diags.push(self.ctx.diagnostic(
-            "no-literal-bool-comparisons",
-            "Unnecessary comparison to a boolean literal.",
-            literal.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic("Unnecessary comparison to a boolean literal.", literal.span()));
     }
 }

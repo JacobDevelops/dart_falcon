@@ -41,7 +41,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && matches!(unary.operand().unparenthesized(), Expr::Is(test) if !test.negated())
         {
             self.diags.push(self.ctx.diagnostic(
-                "prefer-is-not-operator",
                 "Prefer using the 'is!' operator.",
                 unary.span(),
             ));

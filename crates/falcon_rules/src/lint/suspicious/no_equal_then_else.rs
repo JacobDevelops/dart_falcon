@@ -95,7 +95,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && normalize(self.ctx, conditional.then_expr().span()).eq(normalize(self.ctx, conditional.else_expr().span()))
         {
             self.diags.push(self.ctx.diagnostic(
-                "no-equal-then-else",
                 "Both branches of ternary are identical — remove the condition",
                 conditional.span(),
             ));
@@ -111,7 +110,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             let last = last_stmt_span(i.then_branch());
             self.diags.push(self.ctx.diagnostic(
-                "no-equal-then-else",
                 "Both branches of if/else are identical — remove the condition",
                 last,
             ));

@@ -95,7 +95,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             for declarator in field.declarators() {
                 if declarator.initializer().is_some() {
                     self.diags.push(self.ctx.diagnostic(
-                        "avoid-field-initializers-in-const-classes",
                         MESSAGE,
                         declarator.span(),
                     ));
@@ -135,7 +134,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && !self.found
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-field-initializers-in-const-classes", MESSAGE, span,
+                MESSAGE, span,
             ));
         }
     }
@@ -184,7 +183,7 @@ mod tests {
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics[0].span.start, source.find("y = 2").unwrap());
         assert_eq!(diagnostics[1].span.start, source.find("x = 1").unwrap());
@@ -203,7 +202,7 @@ mod tests {
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].span.start, source.find("y = 3").unwrap());
     }
@@ -220,7 +219,7 @@ mod tests {
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics[0].span.start, source.find("x = 1").unwrap());
         assert_eq!(diagnostics[1].span.start, source.find("z = 2").unwrap());
@@ -238,7 +237,7 @@ mod tests {
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].span.start, source.find("y = 1").unwrap());
     }

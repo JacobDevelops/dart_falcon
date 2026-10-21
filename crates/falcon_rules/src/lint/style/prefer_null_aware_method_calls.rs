@@ -67,11 +67,7 @@ impl<'a> Collector<'a> {
             return;
         };
         if !is_parenthesized(callee) && equivalent(assertion.operand(), tested, self.ctx) {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-null-aware-method-calls",
-                "Use a null-aware invocation of the 'call' method rather than explicitly testing for null.",
-                invocation.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use a null-aware invocation of the 'call' method rather than explicitly testing for null.", invocation.span()));
         }
     }
 }

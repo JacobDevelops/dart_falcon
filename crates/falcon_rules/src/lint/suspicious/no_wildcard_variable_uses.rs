@@ -54,7 +54,7 @@ impl<'a> StructuralRuleVisitor<'a> for WildcardUseVisitor<'_, 'a> {
         {
             self.diags.push(
                 self.ctx
-                    .diagnostic("no-wildcard-variable-uses", MESSAGE, id.span()),
+                    .diagnostic(MESSAGE, id.span()),
             );
         }
         StructuralTraversal::Continue

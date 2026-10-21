@@ -63,11 +63,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-ref-inside-state-dispose",
-            "Do not use a widget ref during dispose; cache the required resource before disposal.",
-            expression.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Do not use a widget ref during dispose; cache the required resource before disposal.", expression.span()));
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {

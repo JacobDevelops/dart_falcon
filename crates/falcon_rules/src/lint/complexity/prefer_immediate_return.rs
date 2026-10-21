@@ -79,11 +79,7 @@ fn check_stmts(
                 && let Some(Expr::Ident(ident)) = ret.value().map(Expr::unparenthesized)
                 && ident.name() == var_name
             {
-                diags.push(ctx.diagnostic(
-                    "prefer-immediate-return",
-                    "Prefer returning the value directly instead of assigning to a variable first",
-                    local.full_span(),
-                ));
+                diags.push(ctx.diagnostic("Prefer returning the value directly instead of assigning to a variable first", local.full_span()));
             }
         }
     }

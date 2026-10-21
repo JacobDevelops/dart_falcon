@@ -52,9 +52,7 @@ impl Collector<'_> {
             return;
         }
         if !self.allowed.contains(&name.name()) && !self.ignored.contains(&name.name()) {
-            self.diags.push(self.ctx.diagnostic(RULE,
-                format!("This error parameter does not match the configured names; rename it to one of: {}.", self.allowed.join(", ")),
-                name.span()));
+            self.diags.push(self.ctx.diagnostic(format!("This error parameter does not match the configured names; rename it to one of: {}.", self.allowed.join(", ")), name.span()));
         }
     }
 }

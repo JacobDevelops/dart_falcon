@@ -79,7 +79,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }))
             {
                 diags.push(ctx.diagnostic(
-                    "overridden-fields",
                     "Don't override inherited fields.",
                     parameter.name().span(),
                 ));
@@ -103,7 +102,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 .is_some_and(|inherited| matches!(inherited.kind, MemberKind::Field { .. }));
                 if overrides_field {
                     diags.push(ctx.diagnostic(
-                        "overridden-fields",
                         "Don't override inherited fields.",
                         declarator.name().span(),
                     ));

@@ -37,7 +37,7 @@ struct IdentCfg {
 }
 
 fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
-    let opts = crate::lint::options::for_rule(ctx, "prefer-correct-identifier-length");
+    let opts = crate::lint::options::for_rule(ctx, PreferCorrectIdentifierLength::NAME);
     let min_length = crate::lint::options::usize(opts, "min_length").unwrap_or(3);
     let max_length = crate::lint::options::usize(opts, "max_length").unwrap_or(300);
     let exceptions = crate::lint::options::strings(opts, "exceptions")
@@ -168,5 +168,5 @@ fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &IdentCfg) -> D
             cfg.min_length
         )
     };
-    ctx.diagnostic("prefer-correct-identifier-length", message, *span)
+    ctx.diagnostic(message, *span)
 }

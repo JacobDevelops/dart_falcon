@@ -1,6 +1,6 @@
 //! Lint rules, organized biome-style by group. Each rule lives in
-//! `lint/<group>/<rule>.rs`; the `source` field of its `RuleMeta` entry
-//! (see `meta.rs`) records its upstream provenance.
+//! `lint/<group>/<rule>.rs`; its group's declaration supplies its module,
+//! identity, constructor, and metadata.
 
 pub mod a11y;
 pub(crate) mod bloc;

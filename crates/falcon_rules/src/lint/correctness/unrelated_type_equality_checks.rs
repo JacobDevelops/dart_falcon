@@ -51,11 +51,7 @@ impl Collector<'_> {
                 .types_are_unrelated(left, right, &state.model)
                 == Truth::Yes
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "unrelated-type-equality-checks",
-                "Equality checks should compare related types.",
-                span,
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Equality checks should compare related types.", span));
         }
     }
 }

@@ -32,7 +32,6 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
 
-const RULE: &str = "avoid-positional-boolean-parameters";
 const MESSAGE: &str = "'bool' parameters should be named parameters.";
 
 #[derive(Default)]
@@ -175,7 +174,7 @@ impl<'a> Collector<'a> {
             .find(|param| self.is_bool_param(*param, params, super_constructor))
         {
             self.diags
-                .push(self.ctx.diagnostic(RULE, MESSAGE, first.span()));
+                .push(self.ctx.diagnostic(MESSAGE, first.span()));
         }
     }
 
@@ -328,7 +327,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     .name()
                     .map_or(first.param_type().span().end, |name| name.span().end);
                 self.diags
-                    .push(self.ctx.diagnostic(RULE, MESSAGE, DiagSpan { start, end }));
+                    .push(self.ctx.diagnostic(MESSAGE, DiagSpan { start, end }));
             }
         }
         StructuralTraversal::Continue

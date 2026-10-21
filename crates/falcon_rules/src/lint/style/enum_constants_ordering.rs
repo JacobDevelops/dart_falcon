@@ -16,7 +16,6 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct EnumConstantsOrdering;
 
-const NAME: &str = "enum-constants-ordering";
 
 impl Rule for EnumConstantsOrdering {
     fn prepare<'a>(
@@ -24,7 +23,7 @@ impl Rule for EnumConstantsOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, NAME) else {
+        let Some(order) = Order::configured(ctx, Self::NAME) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
@@ -49,7 +48,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Enum(enumeration) = decl {
-            self.order.check_names(self.ctx, NAME, enumeration.variants().map(|variant| Some(variant.name())), &mut self.diags);
+            self.order.check_names(self.ctx, enumeration.variants().map(|variant| Some(variant.name())), &mut self.diags);
         }
         StructuralTraversal::Continue
     }

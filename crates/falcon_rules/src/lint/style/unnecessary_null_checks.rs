@@ -160,14 +160,10 @@ enum ValueContext {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: &Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "unnecessary-null-checks",
-            "Unnecessary use of a null check ('!').",
-            DiagSpan {
-                start: span.end - 1,
-                end: span.end,
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Unnecessary use of a null check ('!').", DiagSpan {
+            start: span.end - 1,
+            end: span.end,
+        }));
     }
 
     fn contextual_arguments(&mut self, args: ArgList<'a>) {

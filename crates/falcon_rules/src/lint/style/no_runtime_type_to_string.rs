@@ -154,7 +154,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for (span, implicit) in self.pending.drain(..) {
             if !implicit || !self.shadowed {
                 self.diagnostics.push(self.ctx.diagnostic(
-                    "no-runtime-type-to-string",
                     "Using 'toString' on a 'Type' is not safe in production code.",
                     span,
                 ));
@@ -250,7 +249,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = NoRuntimeTypeToString.analyze(parsed.program(), &ctx);
+        let diagnostics = NoRuntimeTypeToString.analyze(NoRuntimeTypeToString::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].span.start, source.rfind("toString").unwrap());
     }

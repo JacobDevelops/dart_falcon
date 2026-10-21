@@ -66,7 +66,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 None => {
                     if !matches!(i.then_branch(), Stmt::Block(_)) && !self.on_condition_line(i) {
                         self.diags.push(self.ctx.diagnostic(
-                            "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",
                             i.then_branch().span(),
                         ));
@@ -75,7 +74,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 Some(eb) => {
                     if !matches!(i.then_branch(), Stmt::Block(_)) {
                         self.diags.push(self.ctx.diagnostic(
-                            "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",
                             i.then_branch().span(),
                         ));
@@ -83,7 +81,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     // An `else if` chain is fine; any other non-block else is not.
                     if !matches!(eb, Stmt::Block(_) | Stmt::If(_)) {
                         self.diags.push(self.ctx.diagnostic(
-                            "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",
                             eb.span(),
                         ));
@@ -92,21 +89,18 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             },
             Stmt::For(f) if !matches!(f.body(), Stmt::Block(_)) => {
                 self.diags.push(self.ctx.diagnostic(
-                    "curly-braces-in-flow-control-structures",
                     "Use curly braces around the body of this flow-control statement",
                     f.body().span(),
                 ))
             }
             Stmt::While(w) if !matches!(w.body(), Stmt::Block(_)) => {
                 self.diags.push(self.ctx.diagnostic(
-                    "curly-braces-in-flow-control-structures",
                     "Use curly braces around the body of this flow-control statement",
                     w.body().span(),
                 ))
             }
             Stmt::DoWhile(d) if !matches!(d.body(), Stmt::Block(_)) => {
                 self.diags.push(self.ctx.diagnostic(
-                    "curly-braces-in-flow-control-structures",
                     "Use curly braces around the body of this flow-control statement",
                     d.body().span(),
                 ))

@@ -71,11 +71,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 != Truth::Yes
             && !(constant(binary.left(), state) && constant(binary.right(), state))
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-collection-equality-checks",
-                "Collection equality compares identity — use a content equality helper instead",
-                binary.op_span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Collection equality compares identity — use a content equality helper instead", binary.op_span()));
         }
     }
 }

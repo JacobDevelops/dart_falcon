@@ -57,7 +57,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && matches!(child, "Expanded" | "Flexible")
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "proper-expanded-and-flexible",
                         "Expanded and Flexible must be direct children of a Row, Column, or Flex.",
                         child_span,
                     ));

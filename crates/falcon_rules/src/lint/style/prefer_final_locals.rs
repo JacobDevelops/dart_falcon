@@ -32,8 +32,6 @@ use falcon_syntax::cst::*;
 
 use falcon_syntax::token::TokenKind;
 
-const RULE: &str = "prefer-final-locals";
-const MESSAGE: &str = "Local variables should be final.";
 
 #[derive(Default)]
 pub struct PreferFinalLocals;
@@ -99,7 +97,7 @@ struct Collector<'ctx, 'a> {
 impl<'a> Collector<'_, 'a> {
     fn report(&mut self, span: Span) {
         self.diagnostics
-            .push(self.ctx.diagnostic(RULE, MESSAGE, span));
+            .push(self.ctx.diagnostic("Local variables should be final.", span));
     }
 
     fn is_mutated(&self, name: Identifier<'a>) -> bool {
@@ -461,8 +459,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("a.dart"), &config, &parsed);
-        PreferFinalLocals
-            .analyze(parsed.program(), &ctx)
+        PreferFinalLocals.analyze(PreferFinalLocals::NAME, parsed.program(), &ctx)
             .iter()
             .map(|d| d.span.start)
             .collect()
@@ -503,7 +500,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = PreferFinalLocals.analyze(parsed.program(), &ctx);
+        let diagnostics = PreferFinalLocals.analyze(PreferFinalLocals::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
         let keyword = source.find("var inferred").unwrap();
         let ty = source.find("int typed").unwrap();

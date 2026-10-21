@@ -29,10 +29,8 @@ use super::{
 #[derive(Default)]
 pub struct UnusedFiles;
 
-const NAME: &str = "unused-files";
-
 impl CrossFileRule for UnusedFiles {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -99,7 +97,7 @@ impl CrossFileRule for UnusedFiles {
                 continue;
             }
             diags.push(Diagnostic::new(
-                NAME,
+                "",
                 Severity::Warning,
                 "File is not reachable from any entrypoint (main, a non-lib file, or the public \
                  library surface); it may be dead code",
@@ -143,6 +141,7 @@ fn has_main(program: Program<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::CrossFileRuleAnalysis;
     use falcon_dart_parser::parser::parse;
 
     fn pf(path: &str, src: &str) -> ProjectFile {
@@ -160,7 +159,7 @@ mod tests {
     fn flagged(files: &[ProjectFile]) -> Vec<String> {
         let cfg = FalconConfig::default();
         let mut v: Vec<String> = UnusedFiles
-            .analyze_project(files, &cfg, None)
+            .analyze_project("unused-files", files, &cfg, None)
             .into_iter()
             .map(|d| d.file_path)
             .collect();

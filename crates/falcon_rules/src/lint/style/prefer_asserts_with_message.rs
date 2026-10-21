@@ -17,7 +17,6 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const RULE: &str = "prefer-asserts-with-message";
 const MESSAGE: &str = "Missing a message in an assert.";
 
 #[derive(Default)]
@@ -50,7 +49,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             if let ConstructorInitializer::Assert(assertion) = initializer
                 && assertion.message().is_none()
             {
-                self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, assertion.span()));
+                self.diags.push(self.ctx.diagnostic(MESSAGE, assertion.span()));
             }
         }
         StructuralTraversal::Continue
@@ -60,7 +59,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
         if let Stmt::Assert(assertion) = node
             && assertion.message().is_none()
         {
-            self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, assertion.span()));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, assertion.span()));
         }
         StructuralTraversal::Continue
     }

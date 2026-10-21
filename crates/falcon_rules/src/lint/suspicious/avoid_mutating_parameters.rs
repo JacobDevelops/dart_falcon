@@ -144,7 +144,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.writes.iter().filter(|(declaration, _)| self.parameters.contains(declaration))
             .map(|(_, span)| self.ctx.diagnostic(
-                "avoid-mutating-parameters",
                 "Avoid mutating an object supplied as a parameter.",
                 *span,
             )).collect()

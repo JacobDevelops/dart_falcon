@@ -58,11 +58,7 @@ impl Collector<'_> {
                 && matches!(current, Stmt::Return(_))
                 && branch != fallback
             {
-                self.diags.push(self.ctx.diagnostic(
-                    "prefer-returning-condition",
-                    "Return the condition or its negation instead of boolean literals.",
-                    current.span(),
-                ));
+                self.diags.push(self.ctx.diagnostic("Return the condition or its negation instead of boolean literals.", current.span()));
             }
         }
     }

@@ -230,15 +230,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .map(String::as_str)
             .collect();
         if !missing.is_empty() {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-missing-enum-constant-in-map",
-                format!(
-                    "Include every {} value in this map; missing: {}.",
-                    identity.name(),
-                    missing.join(", ")
-                ),
-                map.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(format!(
+                "Include every {} value in this map; missing: {}.",
+                identity.name(),
+                missing.join(", ")
+            ), map.span()));
         }
     }
 

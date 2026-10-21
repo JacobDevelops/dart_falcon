@@ -39,11 +39,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, node: SyntaxNode<'_>) {
         if is_in_condition(node) {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-assignments-as-conditions",
-                "Avoid assignments inside conditions; move the assignment out or use a comparison.",
-                node.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Avoid assignments inside conditions; move the assignment out or use a comparison.", node.span()));
         }
     }
 }

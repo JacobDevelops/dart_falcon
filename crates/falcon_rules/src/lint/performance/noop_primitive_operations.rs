@@ -46,11 +46,7 @@ const INT_INVARIANTS: &[&str] = &["toInt", "round", "ceil", "floor", "truncate"]
 
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "noop-primitive-operations",
-            "The expression has no effect and can be removed.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("The expression has no effect and can be removed.", span));
     }
 
     /// Reports `<target>.toString()` (with no arguments and a non-`super` target).

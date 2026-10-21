@@ -202,7 +202,6 @@ impl<'a> BuildCollector<'a> {
             && matches!(state.infer(expression), ResolvedType::Function { .. })
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-ref-read-for-methods",
                 "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods.",
                 member.field().span(),
             ));
@@ -225,11 +224,7 @@ impl<'a> SemanticRuleVisitor<'a> for BuildCollector<'a> {
                 if let Some(CascadeOp::Call(call)) = section.ops().next()
                     && !matches!(call.name().name(), "toString" | "noSuchMethod")
                 {
-                    self.diagnostics.push(self.ctx.diagnostic(
-                        "avoid-calling-notifier-members-inside-build",
-                        "Do not invoke notifier methods during build; move the action to a callback.",
-                        call.name().span(),
-                    ));
+                    self.diagnostics.push(self.ctx.diagnostic("Do not invoke notifier methods during build; move the action to a callback.", call.name().span()));
                 }
             }
         }
@@ -274,26 +269,26 @@ impl<'a> SemanticRuleVisitor<'a> for BuildCollector<'a> {
             return;
         }
         let inside_build = self.inside_build(expression, state);
-        let (id, message, report) = match self.rule {
+        let (message, report) = match self.rule {
             BuildRule::WatchOutside => (
-                "avoid-ref-watch-outside-build", "Use 'ref.read' outside build instead of subscribing with 'ref.watch'.",
+                "Use 'ref.read' outside build instead of subscribing with 'ref.watch'.",
                 !inside_build && is_type(self.ctx, state, &state.infer(member.object()), &["WidgetRef"])
             ),
             BuildRule::ReadInside => (
-                "avoid-ref-read-inside-build", "Use 'ref.watch' in build so provider changes rebuild the widget.",
+                "Use 'ref.watch' in build so provider changes rebuild the widget.",
                 inside_build
                     && is_type(self.ctx, state, &state.infer(member.object()), &["Ref", "WidgetRef"])
                     && !call.args().positional().any(|arg| matches!(arg.unparenthesized(), Expr::Field(field) if field.field().name() == "notifier"))
             ),
             BuildRule::ReadForMethods => return,
             BuildRule::NotifierMembers => (
-                "avoid-calling-notifier-members-inside-build", "Do not invoke notifier methods during build; move the action to a callback.",
+                "Do not invoke notifier methods during build; move the action to a callback.",
                 inside_build && is_type(self.ctx, state, &state.infer(member.object()), NOTIFIERS)
             ),
         };
         if report {
             self.diagnostics
-                .push(self.ctx.diagnostic(id, message, member.field().span()));
+                .push(self.ctx.diagnostic(message, member.field().span()));
         }
     }
 }

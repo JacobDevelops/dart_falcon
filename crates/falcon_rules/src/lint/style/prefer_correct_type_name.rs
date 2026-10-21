@@ -85,13 +85,9 @@ fn check_type_name(name_ident: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx:
         && !name.contains('$');
 
     if !is_valid {
-        diags.push(ctx.diagnostic(
-            "prefer-correct-type-name",
-            format!(
-                "Type name '{}' should be in UpperCamelCase and between 3 and 40 characters.",
-                name
-            ),
-            name_ident.span(),
-        ));
+        diags.push(ctx.diagnostic(format!(
+            "Type name '{}' should be in UpperCamelCase and between 3 and 40 characters.",
+            name
+        ), name_ident.span()));
     }
 }

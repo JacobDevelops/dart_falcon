@@ -227,11 +227,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     })
             })
             .map(|added| {
-                self.ctx.diagnostic(
-                    "always-remove-listener",
-                    "Remove this listener with the same callback when the State is disposed.",
-                    added.span,
-                )
+                self.ctx.diagnostic("Remove this listener with the same callback when the State is disposed.", added.span)
             })
             .collect()
     }

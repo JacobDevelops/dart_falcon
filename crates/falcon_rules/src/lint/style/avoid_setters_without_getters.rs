@@ -155,11 +155,7 @@ fn check_members<'a>(
                             ClassMember::Getter(getter) if getter.name().name() == name && getter.body().is_none()))
                 })));
         if !has_inherited {
-            diags.push(ctx.diagnostic(
-                "avoid-setters-without-getters",
-                "Setter has no corresponding getter.",
-                setter.name().span(),
-            ));
+            diags.push(ctx.diagnostic("Setter has no corresponding getter.", setter.name().span()));
         }
     }
 }

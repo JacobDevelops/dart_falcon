@@ -830,11 +830,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             );
         }
         if self.is_unnecessary(node, state) {
-            self.diags.push(self.ctx.diagnostic(
-                "unnecessary-lambdas",
-                "Closure should be a tearoff.",
-                node.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Closure should be a tearoff.", node.span()));
         }
     }
 }

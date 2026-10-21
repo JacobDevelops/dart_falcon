@@ -18,7 +18,6 @@ use crate::lint::string_lit::decode_escapes;
 #[derive(Default)]
 pub struct AlwaysUsePackageImports;
 
-const NAME: &str = "always-use-package-imports";
 
 impl Rule for AlwaysUsePackageImports {
     fn prepare<'a>(
@@ -45,11 +44,7 @@ impl Rule for AlwaysUsePackageImports {
                     uri_scheme(&value) == Some("")
                 })
                 .map(|import| {
-                    ctx.diagnostic(
-                        NAME,
-                        "Use 'package:' imports for files in the 'lib' directory.",
-                        import.uri().span(),
-                    )
+                    ctx.diagnostic("Use 'package:' imports for files in the 'lib' directory.", import.uri().span())
                 })
                 .collect(),
         )

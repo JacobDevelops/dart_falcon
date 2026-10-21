@@ -42,7 +42,6 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
-const RULE: &str = "unnecessary-statements";
 const MESSAGE: &str = "Unnecessary statement.";
 
 #[derive(Default)]
@@ -311,7 +310,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
         self.diagnostics
-            .push(self.ctx.diagnostic(RULE, MESSAGE, span));
+            .push(self.ctx.diagnostic(MESSAGE, span));
     }
 
     /// Reports `root` and, through `&&`/`||`/`??` right operands and

@@ -114,11 +114,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             None => "Use the single Future directly instead of wrapping it in Future.wait/any."
                 .to_owned(),
         };
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-unnecessary-collections",
-            message,
-            argument.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic(message, argument.span()));
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {

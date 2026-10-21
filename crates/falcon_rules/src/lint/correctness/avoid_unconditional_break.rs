@@ -39,7 +39,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if let Some(span) = body.and_then(unconditional_break) {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-unconditional-break",
                 "This statement unconditionally interrupts every loop iteration; make the exit conditional.",
                 span,
             ));

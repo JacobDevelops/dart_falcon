@@ -85,17 +85,6 @@ pub(super) enum Naming {
     ProviderFile,
 }
 
-impl Naming {
-    fn id(self) -> &'static str {
-        match self {
-            Self::NotifierSuffix => "prefer-riverpod-notifier-suffix",
-            Self::ProviderSuffix => "prefer-riverpod-provider-suffix",
-            Self::NotifierFile => "prefer-correct-notifier-file-name",
-            Self::ProviderFile => "prefer-correct-provider-file-name",
-        }
-    }
-}
-
 pub(super) fn prepare<'a>(
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
@@ -158,7 +147,7 @@ impl<'a> Collector<'a> {
             )
         };
         self.diagnostics
-            .push(self.ctx.diagnostic(self.naming.id(), message, name.span()));
+            .push(self.ctx.diagnostic(message, name.span()));
     }
 
     fn providers(

@@ -62,7 +62,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let text = decoded_text(&lit, &literal_parts(&lit));
             if text.contains(own) && !text.contains(other) {
                 self.diags.push(self.ctx.diagnostic(
-                    "avoid-escaping-inner-quotes",
                     format!("Unnecessary escape of '{own}'; change the outer quotes to '{other}'."),
                     span,
                 ));

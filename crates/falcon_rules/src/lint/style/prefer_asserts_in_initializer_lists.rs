@@ -220,7 +220,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             self.signatures,
         ) {
             self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-asserts-in-initializer-lists",
                 "Assert should be in the initializer list.",
                 Span::new(assertion.span().start, assertion.span().start + "assert".len()),
             ));
@@ -465,7 +464,7 @@ mod tests {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = PreferAssertsInInitializerLists.analyze(program, &ctx);
+        let diagnostics = PreferAssertsInInitializerLists.analyze(PreferAssertsInInitializerLists::NAME, program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

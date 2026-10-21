@@ -42,8 +42,7 @@ impl Collector<'_> {
     fn check(&mut self, name: Identifier<'_>) {
         if !is_lower_camel_case(name.name()) {
             self.diags.push(
-                self.ctx
-                    .diagnostic("constant-identifier-names", MESSAGE, name.span()),
+                self.ctx.diagnostic(MESSAGE, name.span()),
             );
         }
     }
@@ -111,7 +110,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        ConstantIdentifierNames.analyze(program, &ctx).len()
+        ConstantIdentifierNames.analyze(ConstantIdentifierNames::NAME, program, &ctx).len()
     }
 
     #[test]

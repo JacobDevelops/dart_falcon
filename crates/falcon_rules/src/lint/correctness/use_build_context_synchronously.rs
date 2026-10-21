@@ -57,11 +57,10 @@ fn analyze_semantics(
     ctx: &AnalyzeContext,
     semantics: semantics::Semantics,
 ) -> Vec<Diagnostic> {
-    let rule = semantics.rule;
     let message = semantics.message;
     async_gap_spans(program, semantics)
         .into_iter()
-        .map(|span| ctx.diagnostic(rule, message, span))
+        .map(|span| ctx.diagnostic(message, span))
         .collect()
 }
 
@@ -990,7 +989,7 @@ mod test_directories {
             let ctx = AnalyzeContext::new(&path, &config, &parsed);
             let diagnostics =
                 crate::lint::style::always_declare_return_types::AlwaysDeclareReturnTypes
-                    .analyze(program, &ctx);
+                    .analyze(crate::lint::style::always_declare_return_types::AlwaysDeclareReturnTypes::NAME, program, &ctx);
             assert_eq!(
                 diagnostics.len(),
                 if expected { 0 } else { 2 },

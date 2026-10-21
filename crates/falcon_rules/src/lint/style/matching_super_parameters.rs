@@ -114,7 +114,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 for (param, expected) in super_params.zip(super_positional) {
                     if param.name().name() != expected {
                         self.diags.push(self.ctx.diagnostic(
-                    "matching-super-parameters",
                     format!(
                         "The super parameter named '{}' does not share the same name as the corresponding parameter in the super constructor, '{expected}'.",
                         param.name().name()

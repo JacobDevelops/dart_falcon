@@ -74,7 +74,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
 }
 
 fn parse_config_items<'a>(ctx: &'a AnalyzeContext<'_>) -> Vec<(&'a str, Option<&'a str>)> {
-    let Some(items_array) = crate::lint::options::for_rule(ctx, "use-design-system-item")
+    let Some(items_array) = crate::lint::options::for_rule(ctx, UseDesignSystemItem::NAME)
         .and_then(|opts| opts.get("items"))
         .and_then(|v| v.as_array())
     else {
@@ -122,7 +122,7 @@ fn emit_for_base(
                 )
             };
 
-            diags.push(ctx.diagnostic("use-design-system-item", message, span));
+            diags.push(ctx.diagnostic(message, span));
             break;
         }
     }

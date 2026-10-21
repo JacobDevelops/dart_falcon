@@ -58,11 +58,7 @@ impl<'a> Collector<'a> {
                 ))
                 || late_trust_pragma(annotation, &self.declared_names, self.ctx)
             {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "library-annotations",
-                    "Attach library annotations to a library directive.",
-                    annotation.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Attach library annotations to a library directive.", annotation.span()));
             }
         }
     }
@@ -89,7 +85,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for annotation in declaration_annotations(node) {
             if late_trust_pragma(annotation, &self.declared_names, self.ctx) {
                 self.diagnostics.push(self.ctx.diagnostic(
-                    "library-annotations",
                     "Attach library annotations to a library directive.",
                     annotation.span(),
                 ));
@@ -359,7 +354,7 @@ mod tests {
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
         assert!(
             LibraryAnnotations
-                .analyze(parsed.tree.program(source), &ctx)
+                .analyze(LibraryAnnotations::NAME, parsed.tree.program(source), &ctx)
                 .is_empty()
         );
     }

@@ -25,7 +25,7 @@ impl Rule for CognitiveComplexity {
             ctx,
             diags: Vec::new(),
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "cognitive-complexity"),
+                crate::lint::options::for_rule(ctx, CognitiveComplexity::NAME),
                 "max_complexity",
             )
             .unwrap_or(15),
@@ -61,7 +61,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
     fn exit_function_body(&mut self, node: FunctionBody<'a>) {
         if self.count > self.threshold {
-            self.diags.push(self.ctx.diagnostic("cognitive-complexity", format!("Function has cognitive complexity {} (max {}). Reduce nesting or extract helpers.", self.count, self.threshold), node.span()));
+            self.diags.push(self.ctx.diagnostic(format!("Function has cognitive complexity {} (max {}). Reduce nesting or extract helpers.", self.count, self.threshold), node.span()));
         }
         if let Some(saved) = self.bodies.pop() { (self.count, self.depth, self.else_if, self.logical) = saved; }
     }

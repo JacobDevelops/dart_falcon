@@ -36,7 +36,6 @@ use super::{ResolvedRef, canonical_or_lexical, enclosing_pubspec, resolve_direct
 #[derive(Default)]
 pub struct BannedImports;
 
-const NAME: &str = "banned-imports";
 const MATCH_OPTIONS: MatchOptions = MatchOptions {
     case_sensitive: true,
     require_literal_separator: true,
@@ -50,7 +49,7 @@ struct Boundary<'a> {
 }
 
 impl CrossFileRule for BannedImports {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         config: &FalconConfig,
@@ -61,7 +60,7 @@ impl CrossFileRule for BannedImports {
         let mut diagnostics = Vec::new();
         for file in files {
             let file_path = file.path.to_string_lossy();
-            let Some(settings) = options::cross_file_for_rule(config, &file_path, NAME) else {
+            let Some(settings) = options::cross_file_for_rule(config, &file_path, BannedImports::NAME) else {
                 continue;
             };
             let boundaries = compiled
@@ -110,7 +109,7 @@ impl CrossFileRule for BannedImports {
                                 .is_some_and(|path| matches(&entry.deny, path))
                         {
                             diagnostics.push(Diagnostic::new(
-                                NAME,
+                                "",
                                 Severity::Warning,
                                 entry.message,
                                 file_path.as_ref(),

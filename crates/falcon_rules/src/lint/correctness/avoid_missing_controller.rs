@@ -70,11 +70,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 && !matches!(argument.value().unparenthesized(), Expr::NullLit(_))
         });
         if !observed {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-missing-controller",
-                "Provide a controller or a callback that receives the updated field value.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diags.push(self.ctx.diagnostic("Provide a controller or a callback that receives the updated field value.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

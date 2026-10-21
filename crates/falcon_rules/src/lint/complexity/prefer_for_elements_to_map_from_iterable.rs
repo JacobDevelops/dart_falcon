@@ -57,7 +57,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && has_named(args, "value")
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "prefer-for-elements-to-map-from-iterable",
                         "Use a map literal with a 'for' element instead of 'Map.fromIterable'.",
                         field.field().span(),
                     ));
@@ -72,7 +71,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 && has_named(construction.args(), "value") =>
             {
                 self.diags.push(self.ctx.diagnostic(
-                    "prefer-for-elements-to-map-from-iterable",
                     "Use a map literal with a 'for' element instead of 'Map.fromIterable'.",
                     construction.span(),
                 ));

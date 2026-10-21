@@ -77,7 +77,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             };
             if is_plain_class {
                 diags.push(ctx.diagnostic(
-                    "prefer-mixin",
                     "Only mixins should be mixed in.",
                     mixin.span(),
                 ));
@@ -157,8 +156,7 @@ mod tests {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        PreferMixin
-            .analyze(program, &context)
+        PreferMixin.analyze(PreferMixin::NAME, program, &context)
             .into_iter()
             .map(|diagnostic| {
                 source[diagnostic.span.start..diagnostic.span.end]

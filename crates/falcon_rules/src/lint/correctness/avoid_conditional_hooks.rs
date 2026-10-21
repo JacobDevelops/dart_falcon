@@ -60,11 +60,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .iter()
             .filter(|expression| self.hooks.contains(**expression) && conditional(**expression))
             .map(|expression| {
-                self.ctx.diagnostic(
-                    "avoid-conditional-hooks",
-                    "Avoid calling hooks conditionally. Move this call outside the condition or loop.",
-                    expression.span(),
-                )
+                self.ctx.diagnostic("Avoid calling hooks conditionally. Move this call outside the condition or loop.", expression.span())
             })
             .collect()
     }

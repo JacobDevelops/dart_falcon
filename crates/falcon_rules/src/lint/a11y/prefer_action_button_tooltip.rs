@@ -74,14 +74,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => false,
         });
         if missing {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-action-button-tooltip",
-                "Provide a non-empty tooltip describing this action button.",
-                tooltip.map_or_else(
-                    || crate::lint::flutter::constructor_span(node),
-                    |argument| argument.value().span(),
-                ),
-            ));
+            self.diags.push(self.ctx.diagnostic("Provide a non-empty tooltip describing this action button.", tooltip.map_or_else(
+                || crate::lint::flutter::constructor_span(node),
+                |argument| argument.value().span(),
+            )));
         }
     }
 }

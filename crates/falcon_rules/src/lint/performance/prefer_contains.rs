@@ -23,7 +23,6 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
-const RULE: &str = "prefer-contains";
 
 #[derive(Default)]
 pub struct PreferContains;
@@ -95,7 +94,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             Some(Finding::AlwaysTrue) => "This comparison of 'indexOf' is always true.",
             None => return,
         };
-        self.diags.push(self.ctx.diagnostic(RULE, message, span));
+        self.diags.push(self.ctx.diagnostic(message, span));
     }
 }
 

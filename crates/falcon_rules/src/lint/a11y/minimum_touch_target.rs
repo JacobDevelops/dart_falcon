@@ -120,15 +120,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             literal_dimension(arg.value()).is_some_and(|value| value < minimum)
         });
         if undersized {
-            self.diags.push(self.ctx.diagnostic(
-                "minimum-touch-target",
-                if minimum == 44.0 {
-                    "Provide a touch target at least 44 logical pixels wide and high."
-                } else {
-                    "Provide a touch target at least 48 logical pixels wide and high."
-                },
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diags.push(self.ctx.diagnostic(if minimum == 44.0 {
+                "Provide a touch target at least 44 logical pixels wide and high."
+            } else {
+                "Provide a touch target at least 48 logical pixels wide and high."
+            }, crate::lint::flutter::constructor_span(node)));
         }
     }
 }

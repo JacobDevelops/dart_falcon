@@ -51,7 +51,6 @@ impl<'a> StructuralRuleVisitor<'a> for NestedIf<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.candidates.iter().filter(|candidate| candidate.count >= MAX_NESTING_LEVEL)
             .map(|candidate| self.ctx.diagnostic(
-                "avoid-nested-if",
                 "Avoid nesting if statements. Consider combining conditions or using early returns.",
                 candidate.span,
             )).collect()

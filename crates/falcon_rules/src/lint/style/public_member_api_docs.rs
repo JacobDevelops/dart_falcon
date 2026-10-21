@@ -453,7 +453,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     })
             })
             .map(|d| self.ctx.diagnostic(
-                "public-member-api-docs",
                 "Missing documentation for a public member.",
                 d.span,
             ))
@@ -485,7 +484,7 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/cr_only.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        let diagnostics = PublicMemberApiDocs.analyze(program, &ctx);
+        let diagnostics = PublicMemberApiDocs.analyze(PublicMemberApiDocs::NAME, program, &ctx);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
             &source[diagnostics[0].span.start..diagnostics[0].span.end],
@@ -562,8 +561,7 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/primary.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        let names: Vec<_> = PublicMemberApiDocs
-            .analyze(program, &ctx)
+        let names: Vec<_> = PublicMemberApiDocs.analyze(PublicMemberApiDocs::NAME, program, &ctx)
             .into_iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
             .collect();
@@ -606,7 +604,7 @@ int get top => 0;
         let ctx = AnalyzeContext::new(&path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = PublicMemberApiDocs.analyze(program, &ctx);
+        let diagnostics = PublicMemberApiDocs.analyze(PublicMemberApiDocs::NAME, program, &ctx);
         let spans: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))

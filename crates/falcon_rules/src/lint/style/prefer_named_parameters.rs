@@ -41,9 +41,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, params: FormalParamList<'_>) {
         if let Some(param) = params.positional().nth(self.maximum) {
-            self.diags.push(self.ctx.diagnostic(RULE,
-                format!("This declaration has more than {} positional parameters; convert the excess parameters to named parameters.", self.maximum),
-                param.span()));
+            self.diags.push(self.ctx.diagnostic(format!("This declaration has more than {} positional parameters; convert the excess parameters to named parameters.", self.maximum), param.span()));
         }
     }
 }

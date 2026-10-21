@@ -87,7 +87,8 @@ impl ProjectFile {
 
 pub trait CrossFileRule: Send + Sync {
     /// Provided indexes must describe the same Dart files and source revisions.
-    fn analyze_project(
+    /// Returns collector output; use a registry or [`CrossFileRuleAnalysis`] to assign ids.
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         config: &FalconConfig,
@@ -95,9 +96,36 @@ pub trait CrossFileRule: Send + Sync {
     ) -> Vec<Diagnostic>;
 }
 
+/// Standalone project analysis using the canonical id from the rule declaration.
+pub trait CrossFileRuleAnalysis: CrossFileRule {
+    fn analyze_project(
+        &self,
+        name: &'static str,
+        files: &[ProjectFile],
+        config: &FalconConfig,
+        indexes: Option<&SemanticIndexes>,
+    ) -> Vec<Diagnostic>;
+}
+
+impl<T: CrossFileRule + ?Sized> CrossFileRuleAnalysis for T {
+    fn analyze_project(
+        &self,
+        name: &'static str,
+        files: &[ProjectFile],
+        config: &FalconConfig,
+        indexes: Option<&SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = self.prepare_project(files, config, indexes);
+        for diagnostic in &mut diagnostics {
+            diagnostic.rule = name;
+        }
+        diagnostics
+    }
+}
+
 #[derive(Default)]
 pub struct CrossFileRuleRegistry {
-    rules: Vec<Box<dyn CrossFileRule>>,
+    rules: Vec<(&'static str, Box<dyn CrossFileRule>)>,
 }
 
 impl CrossFileRuleRegistry {
@@ -105,11 +133,11 @@ impl CrossFileRuleRegistry {
         Self { rules: Vec::new() }
     }
 
-    pub fn register(&mut self, rule: Box<dyn CrossFileRule>) {
-        self.rules.push(rule);
+    pub fn register(&mut self, name: &'static str, rule: Box<dyn CrossFileRule>) {
+        self.rules.push((name, rule));
     }
 
-    pub fn rules(&self) -> &[Box<dyn CrossFileRule>] {
+    pub fn rules(&self) -> &[(&'static str, Box<dyn CrossFileRule>)] {
         &self.rules
     }
 
@@ -132,7 +160,7 @@ impl CrossFileRuleRegistry {
         crate::registry::with_rules_stack(|| {
             self.rules
                 .iter()
-                .flat_map(|rule| rule.analyze_project(files, config, indexes))
+                .flat_map(|(name, rule)| rule.analyze_project(name, files, config, indexes))
                 .collect()
         })
     }

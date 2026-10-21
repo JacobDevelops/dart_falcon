@@ -54,7 +54,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && ONCE_PROVIDERS.contains(&id.name())
         {
             self.diags.push(self.ctx.diagnostic(
-                "use-once-constructors-once-provider",
                 "OnceProvider and similar Riverpod providers should use .once() factory method",
                 node.span(),
             ));

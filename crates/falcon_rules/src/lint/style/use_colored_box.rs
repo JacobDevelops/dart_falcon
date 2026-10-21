@@ -55,11 +55,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             })
             && only_colors_child(args, state)
         {
-            self.diags.push(self.ctx.diagnostic(
-                "use-colored-box",
-                "Use a 'ColoredBox' rather than a 'Container' with only a 'Color'.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use a 'ColoredBox' rather than a 'Container' with only a 'Color'.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }
@@ -120,6 +116,7 @@ void build(dynamic color, Widget child) {
 }
 ";
         let diagnostics = span_test_support::analyze(
+            UseColoredBox::NAME,
             &UseColoredBox,
             Path::new("test.dart"),
             source,

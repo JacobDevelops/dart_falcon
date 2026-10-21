@@ -20,7 +20,7 @@ impl Rule for AvoidIfWithManyBranches {
             ctx,
             diags: Vec::new(),
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "avoid-if-with-many-branches"),
+                crate::lint::options::for_rule(ctx, AvoidIfWithManyBranches::NAME),
                 "max_branches",
             )
             .unwrap_or(3),
@@ -56,7 +56,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 }
                 count += usize::from(branch.is_some());
                 if count > self.threshold {
-                    self.diags.push(self.ctx.diagnostic("avoid-if-with-many-branches", format!("If chain has {count} branches (max {}). Replace it with a switch or extracted helpers.", self.threshold), statement.span()));
+                    self.diags.push(self.ctx.diagnostic(format!("If chain has {count} branches (max {}). Replace it with a switch or extracted helpers.", self.threshold), statement.span()));
                 }
             }
         }

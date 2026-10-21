@@ -54,31 +54,15 @@ impl Collector<'_> {
         if has_blank_line_before(node) {
             return;
         }
-        let (rule, message) = match self.target {
-            Target::Method => (
-                "newline-before-method",
-                "Add a blank line before method declaration",
-            ),
-            Target::Case => ("newline-before-case", "Add a blank line before case clause"),
-            Target::Throw => (
-                "newline-before-throw",
-                "Add a blank line before throw statement",
-            ),
-            Target::Continue => (
-                "newline-before-continue",
-                "Add a blank line before continue statement",
-            ),
-            Target::Break => (
-                "newline-before-break",
-                "Add a blank line before break statement",
-            ),
-            Target::Constructor => (
-                "newline-before-constructor",
-                "Add a blank line before constructor declaration",
-            ),
+        let message = match self.target {
+            Target::Method => "Add a blank line before method declaration",
+            Target::Case => "Add a blank line before case clause",
+            Target::Throw => "Add a blank line before throw statement",
+            Target::Continue => "Add a blank line before continue statement",
+            Target::Break => "Add a blank line before break statement",
+            Target::Constructor => "Add a blank line before constructor declaration",
         };
-        self.diags
-            .push(self.ctx.diagnostic(rule, message, node.span()));
+        self.diags.push(self.ctx.diagnostic(message, node.span()));
     }
 
     fn statements(&mut self, stmts: AstChildren<'_, Stmt<'_>>, kind: StatementListKind) {

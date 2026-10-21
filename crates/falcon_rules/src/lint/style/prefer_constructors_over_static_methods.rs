@@ -158,7 +158,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && found
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-constructors-over-static-methods",
                 "Static method should be a constructor.",
                 span,
             ));

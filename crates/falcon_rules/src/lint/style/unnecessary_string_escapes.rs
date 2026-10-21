@@ -43,14 +43,10 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, start: usize) {
-        self.diags.push(self.ctx.diagnostic(
-            "unnecessary-string-escapes",
-            "Unnecessary escape; the backslash can be removed.",
-            DiagSpan {
-                start,
-                end: start + 1,
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Unnecessary escape; the backslash can be removed.", DiagSpan {
+            start,
+            end: start + 1,
+        }));
     }
 
     fn check_text(&mut self, text: &str, start: usize, lit: StringDelimiter<'_>, final_part: bool) {

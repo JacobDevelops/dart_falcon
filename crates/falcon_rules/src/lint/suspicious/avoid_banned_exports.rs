@@ -27,7 +27,6 @@ impl Rule for AvoidBannedExports {
                     report(
                         ctx,
                         &entries,
-                        "avoid-banned-exports",
                         &uri_value(uri),
                         uri.span(),
                         &mut diagnostics,

@@ -60,11 +60,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Expr::Assign(assign) = es.expr()
             && same_element(assign.target(), true, checked, false, state)
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-conditional-assignment",
-                "Prefer using a conditional assignment '??='.",
-                if_stmt.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Prefer using a conditional assignment '??='.", if_stmt.span()));
         }
     }
 }

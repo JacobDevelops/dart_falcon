@@ -27,7 +27,7 @@ impl Rule for WidgetTreeDepth {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let threshold = crate::lint::options::usize(
-            crate::lint::options::for_rule(ctx, "widget-tree-depth"),
+            crate::lint::options::for_rule(ctx, WidgetTreeDepth::NAME),
             "max_nesting",
         )
         .unwrap_or(8);
@@ -142,14 +142,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .iter()
             .filter(|tree| tree.maximum > self.threshold)
             .map(|tree| {
-                self.ctx.diagnostic(
-                    "widget-tree-depth",
-                    format!(
-                        "Widget tree has a depth of {} (max {}). Extract a subtree into a widget.",
-                        tree.maximum, self.threshold,
-                    ),
-                    tree.root,
-                )
+                self.ctx.diagnostic(format!(
+                    "Widget tree has a depth of {} (max {}). Extract a subtree into a widget.",
+                    tree.maximum, self.threshold,
+                ), tree.root)
             })
             .collect()
     }

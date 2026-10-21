@@ -47,11 +47,7 @@ impl<'a> Collector<'a> {
         }
         let ty = state.infer(value);
         if ty.interface("dart:async", "Future") && !ty.nullable() {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-return-await",
-                "Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead.",
-                value.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Returning this Future without awaiting lets asynchronous failures bypass the catch block. Return 'await' on the Future instead.", value.span()));
         }
     }
 }

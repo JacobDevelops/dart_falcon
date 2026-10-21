@@ -58,7 +58,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && is_bang_unary(unary.operand())
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-inverted-boolean-expressions",
                 "Avoid inverted boolean expressions. Simplify the double negation.",
                 unary.span(),
             ));

@@ -66,11 +66,7 @@ fn check_expanded(
     }
     for named in args.named() {
         if named.name().name() == "child" && is_empty_spacer_widget(named.value()) {
-            diags.push(ctx.diagnostic(
-                "use-spacer-as-expanded-child",
-                "Use Spacer() instead of an Expanded with an empty Container or SizedBox child.",
-                span,
-            ));
+            diags.push(ctx.diagnostic("Use Spacer() instead of an Expanded with an empty Container or SizedBox child.", span));
             return;
         }
     }

@@ -80,11 +80,7 @@ fn flag_initialized<'a>(
 ) {
     for decl in declarators {
         if decl.initializer().is_some() {
-            diags.push(ctx.diagnostic(
-                "unnecessary-late",
-                "Unnecessary 'late' on an already-lazy static or top-level variable.".to_string(),
-                decl.name().span(),
-            ));
+            diags.push(ctx.diagnostic("Unnecessary 'late' on an already-lazy static or top-level variable.".to_string(), decl.name().span()));
         }
     }
 }

@@ -68,11 +68,7 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "collection-methods-unrelated-type",
-            "The argument type is unrelated to this collection's element type.",
-            argument.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("The argument type is unrelated to this collection's element type.", argument.span()));
     }
 
     fn expected_argument(

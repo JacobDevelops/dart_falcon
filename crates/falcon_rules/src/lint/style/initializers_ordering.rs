@@ -102,7 +102,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 } else {
                     "Reorder field initializers to follow field declaration order."
                 };
-                self.diagnostics.push(self.ctx.diagnostic(RULE, message, name.span()));
+                self.diagnostics.push(self.ctx.diagnostic(message, name.span()));
             }
             previous = Some((name.name(), index));
         }

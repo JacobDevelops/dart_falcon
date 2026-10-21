@@ -92,7 +92,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 continue;
             }
             diags.push(ctx.diagnostic(
-                "no-logic-in-create-state",
                 "Avoid logic in createState; it should only return a new State instance.",
                 violation_span(body),
             ));

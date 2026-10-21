@@ -23,7 +23,6 @@ use falcon_syntax::cst::*;
 
 use crate::lint::core_imports::CoreImports;
 
-const RULE: &str = "avoid-annotating-with-dynamic";
 const MESSAGE: &str = "Unnecessary 'dynamic' type annotation.";
 
 #[derive(Default)]
@@ -52,7 +51,7 @@ struct Collector<'a, 'ctx> {
 
 impl Collector<'_, '_> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
+        self.diags.push(self.ctx.diagnostic(MESSAGE, span));
     }
 }
 

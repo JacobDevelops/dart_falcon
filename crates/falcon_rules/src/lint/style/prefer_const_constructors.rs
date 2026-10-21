@@ -113,11 +113,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             &self.deferred_prefixes,
             state,
         ) {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-const-constructors",
-                "Use 'const' with the constructor to improve performance.",
-                node.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use 'const' with the constructor to improve performance.", node.span()));
         }
     }
 }

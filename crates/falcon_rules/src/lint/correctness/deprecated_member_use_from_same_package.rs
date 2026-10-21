@@ -52,7 +52,6 @@ use falcon_syntax::cst::*;
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
-const ID: &str = "deprecated-member-use-from-same-package";
 
 #[derive(Default)]
 pub struct DeprecatedMemberUseFromSamePackage;
@@ -951,7 +950,7 @@ fn push_deprecation(
         format!("{base} {detail}")
     };
     if reported.insert((span.start, span.end, message.clone())) {
-        diagnostics.push(ctx.diagnostic(ID, message, span));
+        diagnostics.push(ctx.diagnostic(message, span));
     }
 }
 
@@ -1922,7 +1921,7 @@ mod tests {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        DeprecatedMemberUseFromSamePackage.analyze(program, &ctx)
+        DeprecatedMemberUseFromSamePackage.analyze(DeprecatedMemberUseFromSamePackage::NAME, program, &ctx)
     }
 
     #[test]

@@ -138,11 +138,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if self.is_enum_or_enum_like(&identity, state) {
             let span = self.default_member_span(case, index);
-            self.diags.push(self.ctx.diagnostic(
-                "no-default-cases",
-                "Invalid use of 'default' member in a switch.",
-                span,
-            ));
+            self.diags.push(self.ctx.diagnostic("Invalid use of 'default' member in a switch.", span));
         }
     }
 }
@@ -168,6 +164,7 @@ void use(E e) {
 }
 ";
         let diagnostics = span_test_support::analyze(
+            NoDefaultCases::NAME,
             &NoDefaultCases,
             Path::new("test.dart"),
             source,
@@ -193,6 +190,7 @@ void use(E e) {
         ] {
             let source = format!("enum E {{ a, b }}\nvoid use(E e) {{ {statement} }}");
             let diagnostics = span_test_support::analyze(
+                NoDefaultCases::NAME,
                 &NoDefaultCases,
                 Path::new("test.dart"),
                 &source,

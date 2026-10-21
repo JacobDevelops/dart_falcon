@@ -46,7 +46,7 @@ impl Rule for CyclomaticComplexity {
 /// Read the `max_complexity` option (default 20). Malformed/missing → default.
 fn max_complexity_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "cyclomatic-complexity"),
+        crate::lint::options::for_rule(ctx, CyclomaticComplexity::NAME),
         "max_complexity",
     )
     .unwrap_or(20)
@@ -107,7 +107,6 @@ impl<'a> StructuralRuleVisitor<'a> for DecisionPoints<'a> {
             let threshold = max_complexity_option(self.ctx);
             if complexity > threshold {
                 self.diags.push(self.ctx.diagnostic(
-                    "cyclomatic-complexity",
                     format!("Function has a cyclomatic complexity of {complexity} (max {threshold})."),
                     self.name.unwrap(),
                 ));

@@ -40,11 +40,7 @@ impl Collector<'_> {
             && let Stmt::Block(branch) = condition.then_branch()
             && (branch.stmts().len() >= 2 || matches!(branch.stmts().first(), Some(Stmt::If(_))))
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-early-return",
-                "Invert this condition and return early to reduce nesting.",
-                condition.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Invert this condition and return early to reduce nesting.", condition.span()));
         }
     }
 }

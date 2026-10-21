@@ -57,7 +57,7 @@ impl Rule for PreferMovingToVariable {
 
 fn allowed_duplicated_chains(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "prefer-moving-to-variable"),
+        crate::lint::options::for_rule(ctx, PreferMovingToVariable::NAME),
         "allowed_duplicated_chains",
     )
     .unwrap_or(2)
@@ -268,7 +268,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     let occurrence = counts.entry(source).and_modify(|count| *count += 1).or_insert(1);
                     if *occurrence >= self.threshold {
                         diagnostics.push(self.ctx.diagnostic(
-                            "prefer-moving-to-variable",
                             "Duplicate expression — extract to a shared variable",
                             *span,
                         ));

@@ -49,10 +49,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-ignoring-return-values",
-            "The return value is not being used",
-            call.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("The return value is not being used", call.span()));
     }
 }

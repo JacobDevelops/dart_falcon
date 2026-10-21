@@ -49,7 +49,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && !is_full_hex(literal.value())
         {
             self.diags.push(self.ctx.diagnostic(
-                "use-full-hex-values-for-flutter-colors",
                 "Use the full 8-digit hexadecimal value (0xAARRGGBB) for a Color.",
                 literal.span(),
             ));

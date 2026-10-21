@@ -39,7 +39,6 @@ use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
 use crate::lint::style::unnecessary_null_checks::declaration_initializers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, returned_expressions};
 
-const RULE: &str = "null-check-on-nullable-type-parameter";
 const MESSAGE: &str = "Avoid a null assertion on a nullable type parameter.";
 
 #[derive(Default)]
@@ -447,11 +446,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         id, nullable: true, ..
                     } if id == *expected_id)
                 {
-                    self.diagnostics.push(self.ctx.diagnostic(
-                        RULE,
-                        MESSAGE,
-                        Span::new(span.end - 1, span.end),
-                    ));
+                    self.diagnostics.push(self.ctx.diagnostic(MESSAGE, Span::new(span.end - 1, span.end)));
                 }
             }
             Expr::Assign(assignment) if assignment.op() == AssignOp::Eq => {
@@ -504,11 +499,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 Some(ResolvedType::TypeParameter { nullable: true, .. })
             )
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                RULE,
-                MESSAGE,
-                Span::new(assertion.span().end - 1, assertion.span().end),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(MESSAGE, Span::new(assertion.span().end - 1, assertion.span().end)));
         }
     }
 }

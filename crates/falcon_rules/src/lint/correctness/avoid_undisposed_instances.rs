@@ -136,7 +136,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(identity) = constructed_identity(node, &self.model, self.signatures) else { return StructuralTraversal::Continue; };
         let ty = ResolvedType::interface_identity(identity);
         if has_dispose(&ty, self.signatures, &self.model) {
-            self.diagnostics.push(self.ctx.diagnostic("avoid-undisposed-instances", "Retain this disposable instance and dispose it when its owner is released.", node.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Retain this disposable instance and dispose it when its owner is released.", node.span()));
         }
         StructuralTraversal::Continue
     }

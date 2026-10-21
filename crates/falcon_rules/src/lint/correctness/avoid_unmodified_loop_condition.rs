@@ -22,7 +22,6 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::for_each_expr;
 use falcon_syntax::cst::*;
 
-const RULE: &str = "avoid-unmodified-loop-condition";
 
 #[derive(Default)]
 pub struct AvoidUnmodifiedLoopCondition;
@@ -130,11 +129,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     && !candidate.inputs.iter().any(|input| self.captured.contains(input))
             })
             .map(|candidate| {
-                self.ctx.diagnostic(
-                    RULE,
-                    "None of the local variables in this condition are modified by the loop. Check for a missing update.",
-                    candidate.condition.span(),
-                )
+                self.ctx.diagnostic("None of the local variables in this condition are modified by the loop. Check for a missing update.", candidate.condition.span())
             })
             .collect()
     }

@@ -62,11 +62,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .unaliased(identity)
                 .is_sdk("dart:math", "Random")
         {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-random-secure",
-                "Use Random.secure() when reproducible randomness is not required.",
-                node.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Use Random.secure() when reproducible randomness is not required.", node.span()));
         }
     }
 

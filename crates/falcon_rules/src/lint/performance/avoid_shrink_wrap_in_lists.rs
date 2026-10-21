@@ -73,11 +73,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Some(argument) = args.named().find(|arg| arg.name().name() == "shrinkWrap")
             && matches!(argument.value().unparenthesized(), Expr::BoolLit(value) if value.value())
         {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-shrink-wrap-in-lists",
-                "Avoid shrink wrapping a nested list; use slivers instead.",
-                argument.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Avoid shrink wrapping a nested list; use slivers instead.", argument.span()));
         }
         if is_list
             || index.is_package_declaration(&identity, "flutter", "Column")

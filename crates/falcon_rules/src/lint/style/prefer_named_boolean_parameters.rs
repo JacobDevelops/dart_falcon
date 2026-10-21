@@ -29,7 +29,6 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const RULE: &str = "prefer-named-boolean-parameters";
 
 #[derive(Default)]
 pub struct PreferNamedBooleanParameters;
@@ -121,11 +120,7 @@ impl<'a> Collector<'a> {
             )
         });
         if let Some(param) = first {
-            self.diags.push(self.ctx.diagnostic(
-                RULE,
-                "Prefer a named boolean parameter instead of a positional parameter.",
-                param.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Prefer a named boolean parameter instead of a positional parameter.", param.span()));
         }
     }
 }

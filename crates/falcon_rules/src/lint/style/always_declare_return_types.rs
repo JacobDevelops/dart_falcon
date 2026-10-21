@@ -23,7 +23,6 @@ use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{in_test_directory, operator_span};
 
-const RULE: &str = "always-declare-return-types";
 
 #[derive(Default)]
 pub struct AlwaysDeclareReturnTypes;
@@ -51,25 +50,17 @@ struct Collector<'a, 'ctx> {
 
 impl Collector<'_, '_> {
     fn function(&mut self, name: Identifier<'_>) {
-        self.diags.push(self.ctx.diagnostic(
-            RULE,
-            format!(
-                "The function '{}' should have a return type but doesn't.",
-                name.name()
-            ),
-            name.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic(format!(
+            "The function '{}' should have a return type but doesn't.",
+            name.name()
+        ), name.span()));
     }
 
     fn method(&mut self, name: &str, span: Span) {
         if self.in_test_directory && (name.starts_with("test_") || name.starts_with("solo_test_")) {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            RULE,
-            format!("The method '{name}' should have a return type but doesn't."),
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic(format!("The method '{name}' should have a return type but doesn't."), span));
     }
 }
 

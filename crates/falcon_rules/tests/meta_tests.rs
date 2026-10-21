@@ -221,6 +221,14 @@ fn metadata_names_are_unique() {
 }
 
 #[test]
+fn aliases_do_not_shadow_live_rule_names() {
+    let names: HashSet<_> = RULE_METADATA.iter().map(|meta| meta.name).collect();
+    for (alias, _) in falcon_rules::meta::RULE_ALIASES {
+        assert!(!names.contains(alias), "alias shadows live rule: {alias}");
+    }
+}
+
+#[test]
 fn every_rule_has_a_source_with_a_non_empty_upstream_id() {
     for meta in RULE_METADATA {
         match meta.source {
@@ -629,7 +637,11 @@ void main() {
             .with_identities(&identities)
             .with_signatures(&signatures);
         for metadata in RULE_METADATA {
-            let RuleKind::File { make, .. } = metadata.kind else {
+            let RuleKind::File {
+                make,
+                needs_resolution,
+            } = metadata.kind
+            else {
                 continue;
             };
             match make().prepare(program, &context) {
@@ -642,6 +654,11 @@ void main() {
                     diagnostics_only.remove(metadata.name);
                 }
                 RulePreparation::Semantic(_) => {
+                    assert!(
+                        needs_resolution,
+                        "{} returns a semantic collector but is not declared resolved",
+                        metadata.name
+                    );
                     diagnostics_only.remove(metadata.name);
                 }
                 RulePreparation::Diagnostics(_) => {}

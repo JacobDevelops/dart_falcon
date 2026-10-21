@@ -26,7 +26,6 @@ impl Rule for PreferSealedBlocEvents {
             ctx,
             ModelKind::Event,
             ModelRequirement::Sealed,
-            "prefer-sealed-bloc-events",
         )
     }
 }

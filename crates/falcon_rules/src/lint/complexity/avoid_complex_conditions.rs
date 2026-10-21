@@ -28,7 +28,7 @@ impl Rule for AvoidComplexConditions {
         RulePreparation::Structural(Box::new(Conditions {
             ctx,
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "avoid-complex-conditions"),
+                crate::lint::options::for_rule(ctx, AvoidComplexConditions::NAME),
                 "threshold",
             )
             .unwrap_or(10),
@@ -76,7 +76,7 @@ impl<'a> StructuralRuleVisitor<'a> for Conditions<'a> {
             if !self.in_logical_tree {
                 let count = logical_operands(node);
                 if count > self.threshold {
-                    self.diags.push(self.ctx.diagnostic("avoid-complex-conditions", format!("Condition has {count} logical operands (max {}). Extract a named condition.", self.threshold), node.span()));
+                    self.diags.push(self.ctx.diagnostic(format!("Condition has {count} logical operands (max {}). Extract a named condition.", self.threshold), node.span()));
                 }
             }
             self.in_logical_tree = true;

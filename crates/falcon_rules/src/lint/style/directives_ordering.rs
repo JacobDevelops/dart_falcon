@@ -32,7 +32,6 @@ use super::conditional_uri_does_not_exist::uri_value;
 #[derive(Default)]
 pub struct DirectivesOrdering;
 
-const RULE: &str = "directives-ordering";
 
 /// A namespace directive (import, export, or `@docImport`) in source order.
 struct Namespace {
@@ -77,7 +76,7 @@ impl Rule for DirectivesOrdering {
         let mut diags = Vec::new();
         let mut report = |span: Span, message: String| {
             if linted.insert(span.start) {
-                diags.push(ctx.diagnostic(RULE, message, span));
+                diags.push(ctx.diagnostic(message, span));
             }
         };
 

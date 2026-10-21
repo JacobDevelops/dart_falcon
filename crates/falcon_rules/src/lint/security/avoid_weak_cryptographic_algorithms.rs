@@ -20,8 +20,6 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const ID: &str = "avoid-weak-cryptographic-algorithms";
-
 #[derive(Default)]
 pub struct AvoidWeakCryptographicAlgorithms;
 
@@ -127,11 +125,7 @@ impl<'a> SemanticRuleVisitor<'a> for WeakCrypto<'a> {
         if let Some(identity) = target
             && self.is_weak(&identity)
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                ID,
-                "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead.",
-                node.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Avoid weak cryptographic algorithms. Use a modern hash or cipher instead.", node.span()));
         }
     }
 

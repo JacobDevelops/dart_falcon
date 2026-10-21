@@ -16,7 +16,6 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct RecordFieldsOrdering;
 
-const NAME: &str = "record-fields-ordering";
 
 impl Rule for RecordFieldsOrdering {
     fn prepare<'a>(
@@ -24,7 +23,7 @@ impl Rule for RecordFieldsOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, NAME) else {
+        let Some(order) = Order::configured(ctx, Self::NAME) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
@@ -49,7 +48,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_dart_type(&mut self, ty: DartType<'a>) -> StructuralTraversal {
         if let DartType::Record(record) = ty {
-            self.order.check_names(self.ctx, NAME, record.named().map(|field| Some(field.name())), &mut self.diags);
+            self.order.check_names(self.ctx, record.named().map(|field| Some(field.name())), &mut self.diags);
         }
         StructuralTraversal::Continue
     }

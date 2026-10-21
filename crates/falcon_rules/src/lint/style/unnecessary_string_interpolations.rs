@@ -77,11 +77,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
             let ty = state.infer(interpolation.expr());
             if ty.interface("dart:core", "String") && !ty.nullable() {
-                self.diags.push(self.ctx.diagnostic(
-                    "unnecessary-string-interpolations",
-                    "Unnecessary string interpolation; use the expression directly.",
-                    span,
-                ));
+                self.diags.push(self.ctx.diagnostic("Unnecessary string interpolation; use the expression directly.", span));
             }
         }
     }
@@ -183,7 +179,7 @@ mod tests {
             }",
             |program, ctx| {
                 assert_eq!(
-                    UnnecessaryStringInterpolations.analyze(program, ctx).len(),
+                    UnnecessaryStringInterpolations.analyze(UnnecessaryStringInterpolations::NAME, program, ctx).len(),
                     3
                 )
             },
@@ -203,7 +199,7 @@ $text''');
             }"#,
             |program, ctx| {
                 assert_eq!(
-                    UnnecessaryStringInterpolations.analyze(program, ctx).len(),
+                    UnnecessaryStringInterpolations.analyze(UnnecessaryStringInterpolations::NAME, program, ctx).len(),
                     3
                 );
             },

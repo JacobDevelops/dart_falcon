@@ -34,15 +34,6 @@ pub(crate) enum DisposalKind {
     OtherFields,
 }
 
-impl DisposalKind {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Controller => "proper-controller-dispose",
-            Self::FocusAndTimer => "dispose-focus-node-and-timer",
-            Self::OtherFields => "dispose-fields",
-        }
-    }
-}
 
 pub(crate) fn prepare_disposal<'a>(
     ctx: &'a AnalyzeContext<'a>,
@@ -220,7 +211,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         } else {
                             "This owned field is never released; call its dispose() or cancel() method in dispose()."
                         };
-                        self.diagnostics.push(self.ctx.diagnostic(self.kind.name(), message, declarator.name().span()));
+                        self.diagnostics.push(self.ctx.diagnostic(message, declarator.name().span()));
                     }
                 }
             }

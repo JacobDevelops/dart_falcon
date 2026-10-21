@@ -143,11 +143,7 @@ impl Collector<'_> {
         {
             let guard = self.guards.pop().unwrap();
             if !guard.used && guard.replacement {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-unused-after-null-check",
-                    "This null-checked variable is unused; check whether the branch uses the wrong variable.",
-                    guard.checked,
-                ));
+                self.diags.push(self.ctx.diagnostic("This null-checked variable is unused; check whether the branch uses the wrong variable.", guard.checked));
             }
         }
     }

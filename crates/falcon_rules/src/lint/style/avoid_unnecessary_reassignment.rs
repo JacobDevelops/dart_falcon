@@ -58,8 +58,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             // Includes reads captured by a closure in the new initializer.
             if self.references.iter().any(|(offset, declaration)|
                 *declaration == id && rhs.start <= *offset && *offset < rhs.end) { continue; }
-            self.diagnostics.push(self.ctx.diagnostic("avoid-unnecessary-reassignment",
-                "Initialize this local with the assigned value instead of overwriting an unused initial value.", assign.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Initialize this local with the assigned value instead of overwriting an unused initial value.", assign.span()));
         }
         StructuralTraversal::Continue
     }

@@ -124,14 +124,10 @@ impl Collector<'_, '_> {
 
     fn report(&mut self, index: usize) {
         let token = self.tokens[index];
-        self.diags.push(self.ctx.diagnostic(
-            "require-trailing-commas",
-            "Missing a required trailing comma.",
-            DiagSpan {
-                start: token.offset(),
-                end: token.offset() + token.len(),
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Missing a required trailing comma.", DiagSpan {
+            start: token.offset(),
+            end: token.offset() + token.len(),
+        }));
     }
 
     /// Checks an argument list, assert, or collection literal opened at `open`.

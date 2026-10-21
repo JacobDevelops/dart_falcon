@@ -41,11 +41,7 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "use-rethrow-when-possible",
-            "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("Use `rethrow` to re-throw the caught exception and preserve its stack trace.", span));
     }
 }
 

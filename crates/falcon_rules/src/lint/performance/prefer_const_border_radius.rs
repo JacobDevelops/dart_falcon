@@ -68,11 +68,7 @@ fn check_border_radius_only_call(
             }
         };
 
-        diags.push(ctx.diagnostic(
-            "prefer-const-border-radius",
-            "BorderRadius.only() with all equal radii should use BorderRadius.circular().",
-            report_span,
-        ));
+        diags.push(ctx.diagnostic("BorderRadius.only() with all equal radii should use BorderRadius.circular().", report_span));
     }
 }
 

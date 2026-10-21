@@ -50,11 +50,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'_> {
                 return;
             }
         }
-        self.diags.push(self.ctx.diagnostic(
-            "avoid-non-null-assertion",
-            "Avoid using the null assertion operator '!'",
-            assertion.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic("Avoid using the null assertion operator '!'", assertion.span()));
     }
 }
 

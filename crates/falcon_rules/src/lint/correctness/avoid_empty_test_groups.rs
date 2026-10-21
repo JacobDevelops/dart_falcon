@@ -23,7 +23,7 @@ impl Rule for AvoidEmptyTestGroups {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             include_methods: crate::lint::options::strings(
-                crate::lint::options::for_rule(ctx, "avoid-empty-test-groups"),
+                crate::lint::options::for_rule(ctx, AvoidEmptyTestGroups::NAME),
                 "include_methods",
             )
             .into_iter()
@@ -98,11 +98,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     })
             })
             .map(|(span, _)| {
-                self.ctx.diagnostic(
-                    "avoid-empty-test-groups",
-                    "Add a test to this group or remove the empty group.",
-                    *span,
-                )
+                self.ctx.diagnostic("Add a test to this group or remove the empty group.", *span)
             })
             .collect()
     }

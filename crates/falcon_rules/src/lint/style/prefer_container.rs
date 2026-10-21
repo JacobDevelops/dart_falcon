@@ -34,7 +34,7 @@ impl Rule for PreferContainer {
             ctx,
             contexts: crate::lint::const_eval::ConstContexts::of(program),
             minimum: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "prefer-container"),
+                crate::lint::options::for_rule(ctx, PreferContainer::NAME),
                 "min_sequence",
             )
             .unwrap_or(3)
@@ -107,11 +107,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ) == falcon_analyze::Truth::No
         {
             self.covered = starts;
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-container",
-                "Replace this layout widget sequence with a single Container.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diags.push(self.ctx.diagnostic("Replace this layout widget sequence with a single Container.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }
@@ -223,7 +219,7 @@ Widget build(Widget child, dynamic matrix) =>
                 }}}
             }))
             .unwrap();
-            let diagnostics = crate::inference::analyze(&PreferContainer, &path, source, &config);
+            let diagnostics = crate::inference::analyze(PreferContainer::NAME, &PreferContainer, &path, source, &config);
             assert_eq!(diagnostics.len(), count, "minimum {minimum}");
             if let Some(diagnostic) = diagnostics.first() {
                 assert_eq!(

@@ -266,15 +266,7 @@ impl Collector<'_> {
                 return;
             }
         }
-        diags.push(ctx.diagnostic(
-            if state_only {
-                "avoid-unnecessary-overrides-in-state"
-            } else {
-                "unnecessary-overrides"
-            },
-            "Unnecessary override — this member only forwards to `super` unchanged",
-            name_span,
-        ));
+        diags.push(ctx.diagnostic("Unnecessary override — this member only forwards to `super` unchanged", name_span));
     }
 }
 

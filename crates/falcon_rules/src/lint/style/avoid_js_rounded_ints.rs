@@ -50,7 +50,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && literal_value(literal.value()).is_some_and(|value| (value as f64) as i64 != value)
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-js-rounded-ints",
                 "Integer literal can't be represented exactly when compiled to JavaScript.",
                 literal.span(),
             ));

@@ -98,11 +98,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 continue;
             };
             if seen.contains(&key) {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "avoid-duplicate-test-assertions",
-                    "This assertion is repeated; remove the duplicate assertion.",
-                    statement.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("This assertion is repeated; remove the duplicate assertion.", statement.span()));
             } else {
                 seen.push(key);
             }

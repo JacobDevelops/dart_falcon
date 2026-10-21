@@ -67,11 +67,7 @@ impl Collector<'_> {
             return;
         }
         if state.constant_owner.as_ref() != Some(&owner) && enclosing_type != Some(&owner) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-accessing-other-classes-private-members",
-                "Avoid accessing another class's private member.",
-                name.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Avoid accessing another class's private member.", name.span()));
         }
     }
 }

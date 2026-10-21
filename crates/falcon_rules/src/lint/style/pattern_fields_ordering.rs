@@ -16,7 +16,6 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct PatternFieldsOrdering;
 
-const NAME: &str = "pattern-fields-ordering";
 
 impl Rule for PatternFieldsOrdering {
     fn prepare<'a>(
@@ -24,7 +23,7 @@ impl Rule for PatternFieldsOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, NAME) else {
+        let Some(order) = Order::configured(ctx, Self::NAME) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {
@@ -50,7 +49,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_pattern(&mut self, pattern: Pattern<'a>) -> StructuralTraversal {
         match pattern {
             Pattern::Object(object) => self.order.check_names(
-                self.ctx, NAME,
+                self.ctx,
                 object.fields().map(|field| {
                     let name = field.name();
                     (!name.name().starts_with('<')).then_some(name)
@@ -58,7 +57,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 &mut self.diags,
             ),
             Pattern::Record(record) => self.order.check_names(
-                self.ctx, NAME, record.fields().map(|field| field.name()), &mut self.diags,
+                self.ctx, record.fields().map(|field| field.name()), &mut self.diags,
             ),
             _ => {}
         }

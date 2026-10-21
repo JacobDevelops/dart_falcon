@@ -131,11 +131,7 @@ impl<'a> Collector<'a> {
             return_statement,
         ) == Truth::No
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "void-checks",
-                "This value is not valid for a generic type instantiated with void.",
-                reported_span,
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("This value is not valid for a generic type instantiated with void.", reported_span));
         }
     }
 
@@ -438,11 +434,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             let expected = state.environment.declared_type(variable.name().name());
             if acceptable(&expected, actual, false, false) == Truth::No {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "void-checks",
-                    "This value is not valid for a generic type instantiated with void.",
-                    node.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("This value is not valid for a generic type instantiated with void.", node.span()));
             }
         }
     }
@@ -552,7 +544,7 @@ void use(Value value) {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        let diagnostics = VoidChecks.analyze(program, &ctx);
+        let diagnostics = VoidChecks.analyze(VoidChecks::NAME, program, &ctx);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
 
@@ -619,7 +611,7 @@ void use() {
             SemanticState::new(program, &ctx).unwrap(),
         );
         assert_eq!(probe.0, 1);
-        let diagnostics = VoidChecks.analyze(program, &ctx);
+        let diagnostics = VoidChecks.analyze(VoidChecks::NAME, program, &ctx);
         let mut actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -744,7 +736,7 @@ void use() {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = VoidChecks.analyze(program, &ctx);
+        let diagnostics = VoidChecks.analyze(VoidChecks::NAME, program, &ctx);
         let mut actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))

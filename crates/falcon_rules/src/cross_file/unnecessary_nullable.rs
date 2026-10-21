@@ -26,10 +26,8 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct UnnecessaryNullable;
 
-const NAME: &str = "unnecessary-nullable";
-
 impl CrossFileRule for UnnecessaryNullable {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         config: &FalconConfig,
@@ -122,7 +120,7 @@ impl CrossFileRule for UnnecessaryNullable {
                         continue;
                     }
                     diags.push(Diagnostic::new(
-                        NAME,
+                        "",
                         Severity::Warning,
                         format!(
                             "Parameter '{}' is never null at any call site; \
@@ -720,6 +718,7 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::CrossFileRuleAnalysis;
 
     fn count(source: &str) -> usize {
         let config = FalconConfig::default();
@@ -734,7 +733,7 @@ mod tests {
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         UnnecessaryNullable
-            .analyze_project(&files, &config, indexes.as_ref())
+            .analyze_project("unnecessary-nullable", &files, &config, indexes.as_ref())
             .len()
     }
 
@@ -819,7 +818,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "unnecessary-nullable requires semantic indexes")]
     fn semantic_indexes_are_required_even_for_empty_projects() {
-        UnnecessaryNullable.analyze_project(&[], &FalconConfig::default(), None);
+        UnnecessaryNullable.analyze_project("unnecessary-nullable", &[], &FalconConfig::default(), None);
     }
 
     #[test]
@@ -962,7 +961,7 @@ mod tests {
         std::fs::write(&manifest, "name: app\n").unwrap();
         let config = FalconConfig::default();
         let mut registry = falcon_analyze::CrossFileRuleRegistry::new();
-        registry.register(Box::new(UnnecessaryNullable));
+        registry.register("unnecessary-nullable", Box::new(UnnecessaryNullable));
         for (return_type, value, expected) in [("int", "1", 1), ("int?", "null", 0)] {
             let sources = vec![
                 (root.join("lib/a.dart"), format!("{return_type} value() => {value};")),
@@ -1005,7 +1004,7 @@ mod tests {
                 "{return_type}: {diagnostics:?}"
             );
             if expected == 1 {
-                assert_eq!(diagnostics[0].rule, NAME);
+                assert_eq!(diagnostics[0].rule, "unnecessary-nullable");
                 assert_eq!(diagnostics[0].file_path, sources[1].0.to_string_lossy());
             }
         }

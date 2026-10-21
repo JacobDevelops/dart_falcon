@@ -76,14 +76,10 @@ impl Collector<'_, '_> {
             .get(before)
             .filter(|token| token.offset() == body_start)
             .map_or(1, |token| token.len());
-        self.diags.push(self.ctx.diagnostic(
-            "always-put-control-body-on-new-line",
-            "Statement should be on a separate line.",
-            DiagSpan {
-                start: body_start,
-                end: body_start + begin_len,
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Statement should be on a separate line.", DiagSpan {
+            start: body_start,
+            end: body_start + begin_len,
+        }));
     }
 }
 

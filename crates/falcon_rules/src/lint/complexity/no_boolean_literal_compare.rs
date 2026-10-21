@@ -48,11 +48,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let ty = state.infer(operand);
         if ty.interface("dart:core", "bool") && !ty.nullable() {
-            self.diags.push(self.ctx.diagnostic(
-                "no-boolean-literal-compare",
-                "Avoid comparing boolean values to boolean literals",
-                binary.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Avoid comparing boolean values to boolean literals", binary.span()));
         }
     }
 }

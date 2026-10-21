@@ -13,10 +13,8 @@ use super::{project_pubspecs, yaml_string_span};
 #[derive(Default)]
 pub struct PackageNames;
 
-const NAME: &str = "package-names";
-
 impl CrossFileRule for PackageNames {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -39,7 +37,7 @@ fn check_pubspec(path: &Path) -> Option<Diagnostic> {
     }
     let span = yaml_string_span(&source, &root, name_value)?;
     let mut diagnostic = Diagnostic::new(
-        NAME,
+        "",
         Severity::Warning,
         format!("The package name '{name}' isn't a lower_case_with_underscores identifier."),
         path.to_string_lossy().into_owned(),

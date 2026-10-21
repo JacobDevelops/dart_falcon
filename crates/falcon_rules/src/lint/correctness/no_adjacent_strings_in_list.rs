@@ -53,11 +53,7 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "no-adjacent-strings-in-list",
-            "Don't use adjacent strings in a list literal.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("Don't use adjacent strings in a list literal.", span));
     }
 
     /// The span of an unparenthesized adjacent-strings element.

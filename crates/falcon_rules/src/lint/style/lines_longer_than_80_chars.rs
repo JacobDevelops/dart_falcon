@@ -153,7 +153,6 @@ impl<'a> StructuralRuleVisitor<'a> for AllowedStrings<'a> {
             .map(|&(index, wrap)| {
                 let (_, end) = self.lines.content_range(index);
                 self.ctx.diagnostic(
-                    "lines-longer-than-80-chars",
                     "The line length exceeds the 80-character limit.",
                     DiagSpan { start: wrap, end },
                 )

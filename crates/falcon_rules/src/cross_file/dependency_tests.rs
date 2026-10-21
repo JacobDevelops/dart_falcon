@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use falcon_analyze::{CrossFileRule, ParsedFile, ProjectFile};
+use falcon_analyze::{CrossFileRuleAnalysis, ParsedFile, ProjectFile};
 use falcon_config::FalconConfig;
 
 use super::depend_on_referenced_packages::DependOnReferencedPackages;
@@ -40,11 +40,16 @@ fn undeclared_rule_owns_overlap_but_not_executable_dev_dependencies() {
     .unwrap();
     assert_eq!(
         UndeclaredDependencies
-            .analyze_project(&files, &config, None)
+            .analyze_project("undeclared-dependencies", &files, &config, None)
             .len(),
         2
     );
-    let legacy = DependOnReferencedPackages.analyze_project(&files, &config, None);
+    let legacy = DependOnReferencedPackages.analyze_project(
+        "depend-on-referenced-packages",
+        &files,
+        &config,
+        None,
+    );
     assert_eq!(legacy.len(), 1);
     assert!(legacy[0].file_path.ends_with("bin/main.dart"));
     let standalone: FalconConfig = serde_json::from_value(serde_json::json!({
@@ -55,7 +60,7 @@ fn undeclared_rule_owns_overlap_but_not_executable_dev_dependencies() {
     .unwrap();
     assert_eq!(
         DependOnReferencedPackages
-            .analyze_project(&files, &standalone, None)
+            .analyze_project("depend-on-referenced-packages", &files, &standalone, None)
             .len(),
         3
     );

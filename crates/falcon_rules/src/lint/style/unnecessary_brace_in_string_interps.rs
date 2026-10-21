@@ -69,7 +69,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         if is_simple_identifier(inner) && !extends {
                             let start = span.start + lit.content_offset + i;
                             self.diags.push(self.ctx.diagnostic(
-                                "unnecessary-brace-in-string-interps",
                                 "Unnecessary braces in string interpolation; use `$name` instead.",
                                 DiagSpan {
                                     start,

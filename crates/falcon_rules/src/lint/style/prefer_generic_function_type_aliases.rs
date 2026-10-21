@@ -59,7 +59,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .next()
         {
             self.diags.push(ctx.diagnostic(
-                "prefer-generic-function-type-aliases",
                 "Use the generic function type syntax in typedefs.",
                 falcon_syntax::cst::Span {
                     start: keyword.offset(),
@@ -95,7 +94,7 @@ mod tests {
         let context = AnalyzeContext::new(std::path::Path::new("test.dart"), &config, &parsed);
         assert!(
             PreferGenericFunctionTypeAliases
-                .analyze(program, &context)
+                .analyze(PreferGenericFunctionTypeAliases::NAME, program, &context)
                 .is_empty()
         );
     }

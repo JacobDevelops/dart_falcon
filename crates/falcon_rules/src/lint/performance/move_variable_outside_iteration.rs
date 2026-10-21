@@ -294,11 +294,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 })
             })
             .map(|candidate| {
-                self.ctx.diagnostic(
-                    "move-variable-outside-iteration",
-                    "This computation is loop-invariant. Move the final variable before the loop.",
-                    candidate.span,
-                )
+                self.ctx.diagnostic("This computation is loop-invariant. Move the final variable before the loop.", candidate.span)
             })
             .collect()
     }

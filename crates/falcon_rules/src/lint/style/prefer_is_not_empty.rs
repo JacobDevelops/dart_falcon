@@ -47,11 +47,11 @@ mod tests {
     }
 
     fn count_no_types(source: &str) -> usize {
-        support::count(&PreferIsNotEmpty, source, false)
+        support::count("prefer-is-not-empty", &PreferIsNotEmpty, source, false)
     }
 
     fn count_with_types(source: &str) -> usize {
-        support::count(&PreferIsNotEmpty, source, true)
+        support::count("prefer-is-not-empty", &PreferIsNotEmpty, source, true)
     }
 
     #[test]

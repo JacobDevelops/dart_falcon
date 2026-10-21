@@ -113,11 +113,7 @@ impl Collector<'_> {
         });
         let mut constructors = primary.chain(constructors).peekable();
         if constructors.peek().is_none() {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "use-key-in-widget-constructors",
-                "Public widgets should have a constructor with a named 'key' parameter.",
-                class.name().span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Public widgets should have a constructor with a named 'key' parameter.", class.name().span()));
             return;
         }
 
@@ -190,11 +186,7 @@ impl Collector<'_> {
                 }
             }
             if known_target {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "use-key-in-widget-constructors",
-                    "Public widget constructors should accept and forward a named 'key' parameter.",
-                    span,
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Public widget constructors should accept and forward a named 'key' parameter.", span));
             }
         }
     }
@@ -281,10 +273,10 @@ mod tests {
     use super::*;
 
     fn diagnostics(source: &str) -> Vec<Diagnostic> {
-        analyze_rule(source, &UseKeyInWidgetConstructors)
+        analyze_rule("use-key-in-widget-constructors", source, &UseKeyInWidgetConstructors)
     }
 
-    fn analyze_rule(source: &str, rule: &dyn Rule) -> Vec<Diagnostic> {
+    fn analyze_rule(name: &'static str, source: &str, rule: &dyn Rule) -> Vec<Diagnostic> {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let app = root.join("app");
@@ -391,7 +383,7 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
             .with_types(&types)
             .with_identities(&identities)
             .with_signatures(&signatures);
-        rule.analyze(program, &context)
+        rule.analyze(name, program, &context)
     }
 
     #[test]
@@ -468,6 +460,7 @@ class Fake { Fake(_Private value); }
 class Real { Real(_Private value); }
 ";
         let diagnostics = analyze_rule(
+            "library-private-types-in-public-api",
             source,
             &crate::lint::correctness::library_private_types_in_public_api::LibraryPrivateTypesInPublicApi,
         );

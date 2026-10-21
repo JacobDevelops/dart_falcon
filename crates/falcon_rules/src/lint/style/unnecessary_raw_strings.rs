@@ -47,7 +47,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for (lit, span) in node.segments() {
             if lit.terminated && lit.is_raw && !lit.content.contains(['\\', '$']) {
                 self.diags.push(self.ctx.diagnostic(
-                    "unnecessary-raw-strings",
                     "Unnecessary use of a raw string.",
                     span,
                 ));

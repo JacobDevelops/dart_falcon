@@ -101,7 +101,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .filter(|(name, _)| !self.written.names.contains(*name))
             .map(|(name, span)| {
                 self.ctx.diagnostic(
-                    "prefer-final-fields",
                     format!("The private field '{name}' could be 'final'."),
                     span,
                 )
@@ -253,7 +252,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from(files[target].0);
         let ctx = AnalyzeContext::new(&path, &config, &parsed[target]).with_library(&unit);
-        PreferFinalFields.analyze(programs[target], &ctx).len()
+        PreferFinalFields.analyze(PreferFinalFields::NAME, programs[target], &ctx).len()
     }
 
     /// Run with no library context at all (standalone / degraded single-file).
@@ -265,7 +264,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        PreferFinalFields.analyze(parsed.program(), &ctx).len()
+        PreferFinalFields.analyze(PreferFinalFields::NAME, parsed.program(), &ctx).len()
     }
 
     #[test]

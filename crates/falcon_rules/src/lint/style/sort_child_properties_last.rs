@@ -67,11 +67,7 @@ impl<'a> SemanticRuleVisitor<'a> for ChildOrdering<'_, 'a> {
             .skip(index + 1)
             .any(|argument| !matches!(argument.value(), Expr::FuncExpr(_)))
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "sort-child-properties-last",
-                "The child/children argument should be last in a widget constructor call.",
-                child.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("The child/children argument should be last in a widget constructor call.", child.span()));
         }
     }
 }

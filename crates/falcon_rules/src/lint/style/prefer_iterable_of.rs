@@ -101,14 +101,12 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         match node {
             Expr::New(construction) if is_from_constructor(construction.dart_type(), construction.constructor_name()) => {
                 self.diags.push(self.ctx.diagnostic(
-                    "prefer-iterable-of",
                     "Prefer using the 'of' constructor instead of 'from'.",
                     construction.span(),
                 ));
             }
             Expr::Call(call) if is_from_static_call(call.callee()) => {
                 self.diags.push(self.ctx.diagnostic(
-                    "prefer-iterable-of",
                     "Prefer using the 'of' constructor instead of 'from'.",
                     call.span(),
                 ));

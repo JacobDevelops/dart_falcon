@@ -28,11 +28,7 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                 {
                     return None;
                 }
-                Some(ctx.diagnostic(
-                    "avoid-unnecessary-type-casts",
-                    "Unnecessary type cast — variable is already known to be this type",
-                    operation.span,
-                ))
+                Some(ctx.diagnostic("Unnecessary type cast — variable is already known to be this type", operation.span))
             },
         }))
     }

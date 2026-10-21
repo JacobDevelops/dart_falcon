@@ -51,7 +51,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .all(|n| matches!(n.name().name(), "width" | "height" | "child" | "key"))
         {
             self.diags.push(self.ctx.diagnostic(
-                "sized-box-for-whitespace",
                 "Use a SizedBox to add whitespace to a layout instead of a Container.",
                 crate::lint::flutter::constructor_span(node),
             ));
@@ -90,7 +89,7 @@ void build() {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = SizedBoxForWhitespace.analyze(parsed.program(), &ctx);
+        let diagnostics = SizedBoxForWhitespace.analyze(SizedBoxForWhitespace::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 3);
         for (diagnostic, invocation) in diagnostics.iter().zip([
             "Container(width:",

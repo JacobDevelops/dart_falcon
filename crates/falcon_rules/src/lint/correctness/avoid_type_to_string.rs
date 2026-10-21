@@ -129,11 +129,7 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-type-to-string",
-            "Using 'toString' on a 'Type' is not safe in production code.",
-            name.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Using 'toString' on a 'Type' is not safe in production code.", name.span()));
     }
 
     /// `receiver.name`, invoked or (`prefixed_only`) torn off through a

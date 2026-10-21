@@ -54,7 +54,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
                     && matches!(list.elements().next(), Some(cst::CollectionElement::Expr(_)))
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "avoid-single-child-column-or-row",
                         "Avoid a Column/Row/Flex with a single child; use the child directly.",
                         span,
                     ));

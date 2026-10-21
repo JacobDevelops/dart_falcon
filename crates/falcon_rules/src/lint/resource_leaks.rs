@@ -35,7 +35,6 @@ pub(crate) struct Release {
 
 #[derive(Clone, Copy)]
 pub(crate) struct LeakRule {
-    pub(crate) name: &'static str,
     pub(crate) message: &'static str,
     pub(crate) releases: &'static [Release],
 }
@@ -249,10 +248,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
         uses.candidates
             .iter()
             .filter(|candidate| !candidate.valid)
-            .map(|candidate| {
-                self.ctx
-                    .diagnostic(self.rule.name, self.rule.message, candidate.declarator)
-            })
+            .map(|candidate| self.ctx.diagnostic(self.rule.message, candidate.declarator))
             .collect()
     }
 

@@ -76,7 +76,7 @@ fn check_function_async(func_decl: FunctionDecl<'_>, ctx: &AnalyzeContext) -> Op
     }
 
     if is_redundant_async_body(func_decl.body()) {
-        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", func_decl.name().span()));
+        return Some(ctx.diagnostic("Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", func_decl.name().span()));
     }
 
     None
@@ -88,7 +88,7 @@ fn check_method_async(method_decl: MethodDecl<'_>, ctx: &AnalyzeContext) -> Opti
     }
 
     if is_redundant_async_body(method_decl.body()) {
-        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", method_decl.name().span()));
+        return Some(ctx.diagnostic("Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", method_decl.name().span()));
     }
 
     None

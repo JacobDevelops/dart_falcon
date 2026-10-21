@@ -47,11 +47,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, name: Identifier<'_>) {
         if !is_lower_camel_case(name.name()) {
-            self.diags.push(self.ctx.diagnostic(
-                "non-constant-identifier-names",
-                MESSAGE,
-                name.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, name.span()));
         }
     }
 
@@ -220,7 +216,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        NonConstantIdentifierNames.analyze(program, &ctx).len()
+        NonConstantIdentifierNames.analyze(NonConstantIdentifierNames::NAME, program, &ctx).len()
     }
 
     #[test]

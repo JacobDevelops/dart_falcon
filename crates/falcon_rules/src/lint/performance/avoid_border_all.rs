@@ -54,10 +54,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-border-all",
-            "Prefer Border.fromBorderSide with a const BorderSide instead of Border.all.",
-            crate::lint::flutter::constructor_span(node),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Prefer Border.fromBorderSide with a const BorderSide instead of Border.all.", crate::lint::flutter::constructor_span(node)));
     }
 }

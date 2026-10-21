@@ -260,11 +260,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     .any(|(required, disposed)| *required && !disposed)
             })
             .map(|provider| {
-                self.ctx.diagnostic(
-                    "dispose-providers",
-                    "Dispose the created value in this Provider's dispose callback.",
-                    provider.span,
-                )
+                self.ctx.diagnostic("Dispose the created value in this Provider's dispose callback.", provider.span)
             })
             .collect()
     }

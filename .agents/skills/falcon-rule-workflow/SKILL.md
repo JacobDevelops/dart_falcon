@@ -12,9 +12,7 @@ this skill covers the checks and generated surfaces it does not sequence.
 
 ## Establish the behavioral contract
 
-1. Locate the rule through `RULE_METADATA` in `crates/falcon_rules/src/meta.rs`.
-   For a new rule, use CONTRIBUTING's codegen command. Confirm its execution kind,
-   group, domain, and source before choosing an existing implementation to copy.
+1. Locate the rule in its declaration macro in `crates/falcon_rules/src/lint/<group>.rs`; project-wide rules are declared in `crates/falcon_rules/src/cross_file.rs`. For a new rule, use CONTRIBUTING's codegen command. Confirm its execution kind, group, domain, and source before choosing an existing implementation to copy.
 2. Read `crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md` for the relevant
    fixture branch and inspect neighboring fixtures.
 3. Pin the changed diagnostic behavior with positive and negative fixtures. For

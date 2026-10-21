@@ -69,11 +69,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "prefer-any-or-every",
-            "This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'.",
-            empty.span(),
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("This filtered iterable is only checked for emptiness. Use '.every((element) => !predicate(element))' instead of '.where(predicate).isEmpty'.", empty.span()));
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {

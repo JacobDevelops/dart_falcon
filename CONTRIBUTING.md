@@ -101,10 +101,25 @@ empty rule descriptions and bad examples that produce no diagnostics.
    cargo xtask codegen rule --group <a11y|complexity|correctness|performance|security|style|suspicious> --name <rule-id>
    ```
 
-   This writes the rule module and empty `bad.dart` / `good.dart` fixtures, then
-   prints the exact follow-up steps.
+   Rule ids must be canonical ASCII kebab-case: begin with a lowercase letter,
+   then use lowercase letters, digits, and single hyphens between nonempty
+   segments. Add `--cross-file` for a project-wide rule:
 
-2. **Implement** the rule. Derive `Default` and implement `Rule` from `falcon_analyze`, or `CrossFileRule` for project-wide analysis. The required `prepare` hook selects exactly one analysis kind:
+   ```sh
+   cargo xtask codegen rule --group correctness --name avoid-project-foo --cross-file
+   ```
+
+   This writes a `Rule` stub under `src/lint/<group>/`, or a
+   `CrossFileRule` stub under `src/cross_file/`, plus placeholder `bad.dart` /
+   `good.dart` fixtures. Cross-file scaffolding also creates a `cross-file/`
+   project with `main.dart` and `support.dart`. Replace every placeholder before
+   submitting; scaffolding is not corpus coverage. The command prints the
+   declaration entry and remaining steps.
+
+2. **Implement** the rule. Derive `Default` and implement `Rule` from
+   `falcon_analyze`, or implement `CrossFileRule::prepare_project` (or
+   `CrossFileRuleAnalysis::analyze_project`) for project-wide analysis.
+   File rules' required `prepare` hook selects exactly one analysis kind:
 
    - `RulePreparation::Structural`: syntax rules return an independent `StructuralRuleVisitor` collector. Wrap the complete trait implementation in `falcon_analyze::structural_visitor!` so callback subscriptions are derived from its methods, not maintained separately. All enabled collectors share the source-order structural walk. Inspect nodes in `visit_*` callbacks, restore scoped state in matching `exit_*` callbacks, and return diagnostics from consuming `finish`. Do not recurse from callbacks. `StructuralTraversal::SkipChildren` and `route_child` suppress callbacks only for that collector, never for other rules.
    - `RulePreparation::Semantic`: type- or flow-aware rules return a `SemanticRuleVisitor` collector for the shared evaluation-order semantic walk.
@@ -119,37 +134,68 @@ empty rule descriptions and bad examples that produce no diagnostics.
    > a **`Call` chain**, not `Expr::New`. A rule that detects object construction
    > must handle both shapes, or it will silently miss the common `X()` case.
 
-3. **Declare the module** in `crates/falcon_rules/src/lint/<group>.rs`
-   (or `src/cross_file.rs` for a cross-file rule).
+3. **Declare the rule once** inside `crate::declare_rules!` in
+   `crates/falcon_rules/src/lint/<group>.rs`. For example, within the existing
+   suspicious group declaration:
 
-4. **Register the rule** with one `RuleMeta` entry in
-   `crates/falcon_rules/src/meta.rs`, using `RuleMeta::file::<T>` for syntax-only
-   rules, `RuleMeta::resolved::<T>` for file rules requiring resolution, or
-   `RuleMeta::cross_file::<T>` for project-wide rules (`RuleMeta::resolved_cross_file::<T>`
-   when they require resolution). Pass the canonical name,
-   typed `RuleGroup`, optional `Domain`, `recommended` flag, and source. Sources are
-   `RuleSource::DartCodeLinter("...")`, `RuleSource::PyramidLint("...")`,
-   `RuleSource::Lints("...")`, or `RuleSource::Falcon` for original rules.
-   Constructors use `T::default()`. Execution identities, registries, and schemas
-   derive from this table; there is no separate registration list or rule name
-   method.
+   ```rust
+   crate::declare_rules! {
+       Suspicious;
+       avoid_foo::AvoidFoo => ("avoid-foo", file, None, false, RuleSource::Falcon);
+   }
+   ```
 
-5. **Add a showcase entry**: list the rule in the root `falcon.json` under its
+   Add the entry to the existing invocation, not a second invocation. For a
+   project-wide rule, use the invocation in `crates/falcon_rules/src/cross_file.rs`;
+   cross-file entries carry their group:
+
+   ```rust
+   avoid_project_foo::AvoidProjectFoo => ("avoid-project-foo", cross_file, Correctness, false, RuleSource::Falcon);
+   ```
+
+   Choose `file` for syntax-only rules, `resolved` for file rules requiring
+   resolution, `cross_file` for project-wide rules, or `resolved_cross_file` when
+   project-wide analysis requires resolution. File entries include an optional
+   domain (`None` or, for example, `Some(Domain::Flutter)`); cross-file entries
+   omit this field. Both end with the recommended flag and source. Sources are
+   `RuleSource::DartCodeLinter("...")`,
+   `RuleSource::PyramidLint("...")`, `RuleSource::Lints("...")`, or
+   `RuleSource::Falcon` for original rules.
+
+   The macro declares the module, supplies the rule type's inherent `NAME`, and
+   creates its metadata entry and default constructor. Execution identities,
+   registries, and schemas derive from these declarations. Do not add a separate
+   `pub mod`, `RuleMeta` entry, registration list, or rule name method.
+
+4. **Add a showcase entry**: list the rule in the root `falcon.json` under its
    group (`linter.rules.<group>` for file rules, `"cross-file".rules.<group>` for
    cross-file rules).
 
-   Compilation checks module declarations and constructors. `meta_tests.rs`
-   checks metadata name uniqueness, source ids, and the committed schema;
-   corpus tests check diagnostic identities against fixture expectations.
+   Compilation checks declarations and constructors. `meta_tests.rs` checks
+   metadata name uniqueness, source ids, and the committed schema; corpus tests
+   check diagnostic identities against fixture expectations.
    `root_config_tests.rs` requires the root `falcon.json` to list every rule
    exactly once.
 
-6. **Write the corpus** (`bad.dart` + `good.dart`, plus `config.json` if the rule
-   takes options), then run `cargo xtask validate-rules --rule <rule-id>` until green.
+5. **Write the corpus** (`bad.dart` + `good.dart`, plus `config.json` if the rule
+   takes options). Cross-file rules also need genuine multi-file positive and
+   negative cases in `cross-file/`, not only single-file lookalikes. Run
+   `cargo xtask validate-rules --rule <rule-id>`, then both `makers test` and
+   `makers validate_rules`. The in-process corpus tests enforce registration
+   coverage and reject orphan directories and placeholder fixtures; the CLI
+   harness alone does not establish these contracts.
+
+6. **Refresh generated contracts** with `cargo xtask schema` and
+   `cargo xtask docgen`, and commit their outputs. Write the rule's Rustdoc
+   description and real positive/negative examples before docgen: it extracts
+   implementation documentation and runs a freshly built Falcon on the corpus.
+
+7. **Add a changeset** with `makers changeset` for the new user-facing rule,
+   following **Commits & pull requests**, and run **The gates** before review.
 
 ### Rule options
 
-Read options with `crate::lint::options::for_rule(ctx, "<rule-id>")` and the typed `options::usize` / `options::strings` helpers. They look up the group from metadata and honor per-path overrides through `ctx.rule_options`. See `max_parameters_for_function` or `use_design_system_item` for examples. Document new options in [`docs/configuration.md`](./docs/configuration.md).
+Read options with `crate::lint::options::for_rule(ctx, Type::NAME)` and the typed `options::usize` / `options::strings` helpers. They look up the group from metadata and honor per-path overrides through `ctx.rule_options`. See `max_parameters_for_function` or `use_design_system_item` for examples. Document new options in [`docs/configuration.md`](./docs/configuration.md).
 
 ### Suppressions
 

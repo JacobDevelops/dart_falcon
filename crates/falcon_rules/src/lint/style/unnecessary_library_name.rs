@@ -28,14 +28,10 @@ impl Rule for UnnecessaryLibraryName {
         if let Some(lib) = program.library_directive()
             && let (Some(first), Some(last)) = (lib.name().next(), lib.name().last())
         {
-            diags.push(ctx.diagnostic(
-                "unnecessary-library-name",
-                "Library names are not necessary.",
-                DiagSpan {
-                    start: first.span().start,
-                    end: last.span().end,
-                },
-            ));
+            diags.push(ctx.diagnostic("Library names are not necessary.", DiagSpan {
+                start: first.span().start,
+                end: last.span().end,
+            }));
         }
         RulePreparation::Diagnostics(diags)
     }

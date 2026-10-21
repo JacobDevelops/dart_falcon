@@ -69,7 +69,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && let Some(method) = single_abstract_method(members)
         {
             self.diags.push(self.ctx.diagnostic(
-                "one-member-abstracts",
                 format!(
                     "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
                 ),

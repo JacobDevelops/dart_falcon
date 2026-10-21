@@ -12,10 +12,8 @@ use super::{project_pubspecs, yaml_string_span};
 #[derive(Default)]
 pub struct SecurePubspecUrls;
 
-const NAME: &str = "secure-pubspec-urls";
-
 impl CrossFileRule for SecurePubspecUrls {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -42,7 +40,7 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
             let protocol = insecure_protocol(value.as_str()?)?;
             let span = yaml_string_span(&source, &root, value)?;
             let mut diagnostic = Diagnostic::new(
-                NAME,
+                "",
                 Severity::Warning,
                 format!("The '{protocol}' protocol shouldn't be used because it isn't secure."),
                 path.to_string_lossy().into_owned(),

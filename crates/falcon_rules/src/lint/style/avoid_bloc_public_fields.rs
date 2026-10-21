@@ -65,7 +65,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && !crate::lint::declarations::annotation(method.annotations(), "override")
                     && !inherited(method.name().name(), MemberKind::Method)
                 {
-                    self.diagnostics.push(self.ctx.diagnostic("avoid-bloc-public-methods", "Keep Bloc command methods private; expose events instead.", method.name().span()));
+                    self.diagnostics.push(self.ctx.diagnostic("Keep Bloc command methods private; expose events instead.", method.name().span()));
                 }
             } else if let ClassMember::Field(field) = member
                 && !field.is_static()
@@ -75,7 +75,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     if !variable.name().name().starts_with('_')
                         && !inherited(variable.name().name(), MemberKind::field(field, variable))
                     {
-                        self.diagnostics.push(self.ctx.diagnostic("avoid-bloc-public-fields", "Keep Bloc instance fields private; expose state instead.", variable.name().span()));
+                        self.diagnostics.push(self.ctx.diagnostic("Keep Bloc instance fields private; expose state instead.", variable.name().span()));
                     }
                 }
             }

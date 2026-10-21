@@ -25,7 +25,6 @@ impl Rule for PreferPaddingOverContainer {
     ) -> RulePreparation<'a> {
         prepare(
             ctx,
-            "prefer-padding-over-container",
             "Container",
             "Prefer 'Padding' over a Container used only for padding or margin.",
             matches,

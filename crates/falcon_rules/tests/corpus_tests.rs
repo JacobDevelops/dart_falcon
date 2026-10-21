@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ParsedFile, ProjectFile, Rule,
-    RuleAnalysis, SignatureIndex, TypeIndex,
+    AnalyzeContext, CrossFileRuleRegistry, IdentityIndex, IdentitySource, LibrarySource,
+    ParsedFile, ProjectFile, Rule, RuleAnalysis, SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
@@ -55,14 +55,14 @@ fn byte_offset_to_line(source: &str, offset: usize) -> usize {
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
 fn run_rule(
-    rule_name: &str,
+    rule_name: &'static str,
     rule: &dyn Rule,
     file: &Path,
     source: &str,
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
     let diagnostics = if inference::requires_sdk(file) {
-        inference::analyze(rule, file, source, config)
+        inference::analyze(rule_name, rule, file, source, config)
     } else {
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         let parsed = Arc::new(ParsedFile {
@@ -112,7 +112,7 @@ fn run_rule(
         if let Some(signatures) = signatures.as_ref() {
             ctx = ctx.with_signatures(signatures);
         }
-        rule.analyze(program, &ctx)
+        rule.analyze(rule_name, program, &ctx)
     };
     diagnostics
         .into_iter()
@@ -468,7 +468,7 @@ fn corpus_matches_expectations() {
         }
 
         // Invariant: every corpus directory must correspond to a registered rule.
-        let Some(rule) = by_name.get(rule_name.as_str()) else {
+        let Some((registered_name, rule)) = by_name.get_key_value(rule_name.as_str()) else {
             failures.push(format!(
                 "ORPHAN corpus dir `{rule_name}` maps to no registered rule"
             ));
@@ -487,11 +487,19 @@ fn corpus_matches_expectations() {
                 .collect();
             total_expectations += expectations.len();
 
-            let mut diag_lines: Vec<usize> = run_rule(&rule_name, *rule, &file, &source, &config)
-                .into_iter()
-                .filter(|(r, _)| *r == rule_name)
-                .map(|(_, line)| line)
-                .collect();
+            let mut diag_lines: Vec<usize> =
+                run_rule(registered_name, *rule, &file, &source, &config)
+                    .into_iter()
+                    .map(|(name, line)| {
+                        assert_eq!(
+                            name,
+                            *registered_name,
+                            "diagnostic identity for {}",
+                            file.display()
+                        );
+                        line
+                    })
+                    .collect();
 
             // Greedily match each expectation to an as-yet-unused diagnostic on the same line.
             for exp in &expectations {
@@ -572,7 +580,8 @@ Widget build(BuildContext context) {
     let default_cfg = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
     assert!(
-        rule.analyze(program, &ctx).is_empty(),
+        rule.analyze(UseDesignSystemItem::NAME, program, &ctx)
+            .is_empty(),
         "rule must be a no-op without configuration"
     );
 
@@ -595,7 +604,7 @@ Widget build(BuildContext context) {
     }))
     .expect("valid config");
     let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
-    let diags = rule.analyze(program, &ctx);
+    let diags = rule.analyze(UseDesignSystemItem::NAME, program, &ctx);
     assert_eq!(
         diags.len(),
         1,
@@ -618,7 +627,8 @@ Widget build(BuildContext context) {
     let static_program = parsed.program();
     let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
     assert!(
-        rule.analyze(static_program, &ctx).is_empty(),
+        rule.analyze(UseDesignSystemItem::NAME, static_program, &ctx)
+            .is_empty(),
         "static access `Container.of(...)` must not be flagged"
     );
 }
@@ -652,7 +662,7 @@ class Bar {
     // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
     let default_cfg = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
-    let default_diags = rule.analyze(program, &ctx);
+    let default_diags = rule.analyze(ClassMembersOrdering::NAME, program, &ctx);
     assert!(
         !default_diags.is_empty(),
         "default order should flag Foo (method before field)"
@@ -682,7 +692,7 @@ class Bar {
     }))
     .expect("valid config");
     let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
-    let diags = rule.analyze(program, &ctx);
+    let diags = rule.analyze(ClassMembersOrdering::NAME, program, &ctx);
     assert_eq!(
         diags.len(),
         1,
@@ -713,6 +723,8 @@ fn cross_file_corpus_matches_expectations() {
             rule_name
         );
         let config = corpus_config(&corpus.join(rule_name));
+        let mut registry = CrossFileRuleRegistry::new();
+        registry.register(rule_name, rule);
 
         for project in cross_file_project_roots(&dir) {
             let fixture_sources: Vec<(PathBuf, String)> =
@@ -768,11 +780,12 @@ fn cross_file_corpus_matches_expectations() {
                 }
             }
 
-            let mut diag_keys: Vec<(String, usize)> = rule
-                .analyze_project(&files, &config, indexes.as_ref())
+            let mut diag_keys: Vec<(String, usize)> = registry
+                .run_all(&files, &config, indexes.as_ref())
+                .expect("cross-file rules thread starts")
                 .into_iter()
-                .filter(|d| d.rule == rule_name)
                 .map(|d| {
+                    assert_eq!(d.rule, rule_name, "diagnostic identity for {}", d.file_path);
                     (
                         d.file_path.clone(),
                         byte_offset_to_line(
@@ -950,10 +963,17 @@ fn resolver_dependent_per_file_project_corpus() {
                 .with_library(&unit)
                 .with_environment(Some(&environment));
             let mut diag_lines: Vec<usize> = rule
-                .analyze(programs[i], &ctx)
+                .analyze(rule_name, programs[i], &ctx)
                 .into_iter()
-                .filter(|d| d.rule == *rule_name)
-                .map(|d| byte_offset_to_line(&sources[i], d.span.start))
+                .map(|d| {
+                    assert_eq!(
+                        d.rule,
+                        *rule_name,
+                        "diagnostic identity for {}",
+                        source_paths[i].display()
+                    );
+                    byte_offset_to_line(&sources[i], d.span.start)
+                })
                 .collect();
 
             let expectations: Vec<usize> = parse_expectations(&sources[i])

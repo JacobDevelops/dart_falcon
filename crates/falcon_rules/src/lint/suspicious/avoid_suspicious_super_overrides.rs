@@ -119,7 +119,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn exit_getter_decl(&mut self, _getter: GetterDecl<'a>) {
         if let Some((name, false)) = self.active.take() {
-            self.diagnostics.push(self.ctx.diagnostic("avoid-suspicious-super-overrides", "This getter hides a field already supplied to the super constructor; remove it or reference the super field.", name.span()));
+            self.diagnostics.push(self.ctx.diagnostic("This getter hides a field already supplied to the super constructor; remove it or reference the super field.", name.span()));
         }
     }
 

@@ -145,11 +145,7 @@ impl<'a> Collector<'a> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "use-string-buffers",
-            "Use a string buffer rather than '+' to compose strings.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("Use a string buffer rather than '+' to compose strings.", span));
     }
 }
 

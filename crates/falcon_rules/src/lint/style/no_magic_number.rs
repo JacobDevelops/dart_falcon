@@ -39,7 +39,7 @@ mod dcl {
     }
 
     fn cfg(ctx: &AnalyzeContext) -> Cfg {
-        let allowed = crate::lint::options::for_rule(ctx, "no-magic-number")
+        let allowed = crate::lint::options::for_rule(ctx, NoMagicNumber::NAME)
             .and_then(|o| o.get("allowed"))
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
@@ -142,11 +142,7 @@ mod dcl {
             {
                 return;
             }
-            self.diags.push(self.ctx.diagnostic(
-                "no-magic-number",
-                "Avoid using magic numbers. Extract them to named constants or variables.",
-                *span,
-            ));
+            self.diags.push(self.ctx.diagnostic("Avoid using magic numbers. Extract them to named constants or variables.", *span));
         }
     }
 

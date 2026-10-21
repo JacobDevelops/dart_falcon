@@ -48,7 +48,7 @@ fn check_declarators(
             && !has_type
             && record_literal_has_positional(init)
         {
-            diags.push(ctx.diagnostic("avoid-positional-fields-in-records", MESSAGE, init.span()));
+            diags.push(ctx.diagnostic(MESSAGE, init.span()));
         }
     }
 }
@@ -67,7 +67,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && !rec.positional().is_empty()
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-positional-fields-in-records",
                 MESSAGE,
                 rec.span(),
             ));

@@ -164,8 +164,7 @@ impl Collector<'_> {
             }
             _ => "Move inherited-widget subscriptions from initState to didChangeDependencies.",
         };
-        self.diags
-            .push(self.ctx.diagnostic(self.rule, message, span));
+        self.diags.push(self.ctx.diagnostic(message, span));
     }
     fn framework_subscription(&self, receiver: Expr<'_>, state: &SemanticState<'_>) -> bool {
         let Some(parts) = falcon_analyze::expression_segments(receiver, false) else {

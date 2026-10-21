@@ -54,7 +54,6 @@ pub(super) fn entries<'a>(ctx: &'a AnalyzeContext<'a>, name: &str) -> Vec<Entry<
 pub(super) fn report(
     ctx: &AnalyzeContext<'_>,
     entries: &[Entry<'_>],
-    rule: &'static str,
     value: &str,
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
@@ -70,7 +69,7 @@ pub(super) fn report(
             .iter()
             .any(|pattern| pattern.matches_with(value, MATCH))
         {
-            diagnostics.push(ctx.diagnostic(rule, entry.message, span));
+            diagnostics.push(ctx.diagnostic(entry.message, span));
         }
     }
 }
@@ -107,7 +106,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 annotation.name().any(|name| name.name() == "override")
             })
         {
-            report(self.ctx, &self.entries, "avoid-banned-names", name.name(), name.span(), &mut self.diagnostics);
+            report(self.ctx, &self.entries, name.name(), name.span(), &mut self.diagnostics);
         }
         StructuralTraversal::Continue
     }
@@ -151,7 +150,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             return StructuralTraversal::Continue;
         }
-        report(self.ctx, &self.entries, "avoid-banned-names", node.name(), node.span(), &mut self.diagnostics);
+        report(self.ctx, &self.entries, node.name(), node.span(), &mut self.diagnostics);
         StructuralTraversal::Continue
     }
 

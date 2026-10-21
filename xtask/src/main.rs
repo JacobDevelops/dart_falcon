@@ -60,17 +60,24 @@ enum Codegen {
     Rule {
         #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(RuleGroup::ALL.iter().map(|group| group.as_str())))]
         group: String,
-        #[arg(long, help = "Rule id, used verbatim")]
+        #[arg(long, help = "Canonical kebab-case rule id", value_parser = codegen::validate_rule_id)]
         name: String,
+        #[arg(long, help = "Generate a project-wide CrossFileRule")]
+        cross_file: bool,
     },
 }
 
 fn main() {
     let result = match Cli::parse().task {
         Task::Codegen {
-            target: Codegen::Rule { group, name },
+            target:
+                Codegen::Rule {
+                    group,
+                    name,
+                    cross_file,
+                },
         } => {
-            codegen::run(group, name);
+            codegen::run(group, name, cross_file);
             Ok(())
         }
         Task::ValidateRules(options) => validate_rules::run(options),
@@ -100,4 +107,27 @@ fn main() {
 fn workspace_root() -> PathBuf {
     // When run via `cargo xtask`, CWD is the workspace root.
     std::env::current_dir().unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codegen_rejects_invalid_ids_before_generating_files() {
+        for name in ["../avoid-foo", "avoid_foo", "AvoidFoo", "avoid--foo"] {
+            assert!(
+                Cli::try_parse_from([
+                    "xtask",
+                    "codegen",
+                    "rule",
+                    "--group",
+                    "correctness",
+                    "--name",
+                    name,
+                ])
+                .is_err()
+            );
+        }
+    }
 }

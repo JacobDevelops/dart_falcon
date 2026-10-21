@@ -717,8 +717,11 @@ void run(Numeric number) {
         .with_identities(&identities)
         .with_types(&types)
         .with_signatures(&signatures);
-    let diagnostics =
-        crate::lint::style::prefer_int_literals::PreferIntLiterals.analyze(program, &context);
+    let diagnostics = crate::lint::style::prefer_int_literals::PreferIntLiterals.analyze(
+        crate::lint::style::prefer_int_literals::PreferIntLiterals::NAME,
+        program,
+        &context,
+    );
     let reported: Vec<_> = diagnostics
         .iter()
         .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -1029,7 +1032,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
             name,
             events: events.clone(),
         }
-        .analyze(program, &context);
+        .analyze(name, program, &context);
         let shared: Vec<_> = diagnostics
             .iter()
             .filter(|diag| diag.rule == name)
@@ -1096,7 +1099,7 @@ fn semantic_collectors_finish_without_identities() {
     let context = AnalyzeContext::new(&path, &config, &parsed);
     let finishes = Arc::new(AtomicUsize::new(0));
     let rule = FinishOnly(Arc::clone(&finishes));
-    let standalone = rule.analyze(program, &context);
+    let standalone = rule.analyze("finish-only", program, &context);
     assert_eq!(finishes.load(Ordering::Relaxed), 1);
     assert_eq!(standalone.len(), 1);
 
@@ -1172,7 +1175,7 @@ void f(dynamic target, Value value) {
         let mut expected: Vec<_> = registry
             .rules()
             .iter()
-            .flat_map(|(_, rule)| rule.analyze(program, &context))
+            .flat_map(|(name, rule)| rule.analyze(name, program, &context))
             .collect();
         let suppressions = FileSuppressions::parse(
             source,
@@ -1310,7 +1313,7 @@ void f() {
         let mut expected: Vec<_> = registry
             .rules()
             .iter()
-            .flat_map(|(_, rule)| rule.analyze(program, &context))
+            .flat_map(|(name, rule)| rule.analyze(name, program, &context))
             .collect();
         for (name, count) in [
             ("avoid-dynamic", 3),
@@ -1510,20 +1513,25 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
             registry.register("semantic-rule", Box::new(semantic));
             registry.run_all(program, &context)
         } else {
-            let mut diagnostics = syntax.analyze(program, &context);
-            diagnostics.extend(semantic.analyze(program, &context));
+            let mut diagnostics = syntax.analyze("syntax-rule", program, &context);
+            diagnostics.extend(semantic.analyze("semantic-rule", program, &context));
             diagnostics
         };
         assert_eq!(
             received.try_iter().collect::<Vec<_>>(),
             ["syntax", "prepare", "expression", "end", "finish"],
         );
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.rule, diagnostic.message.as_str()))
+            .collect();
         assert_eq!(
-            diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.message.as_str())
-                .collect::<Vec<_>>(),
-            ["syntax", "semantic"],
+            actual,
+            if shared {
+                [("semantic-rule", "semantic"), ("syntax-rule", "syntax")]
+            } else {
+                [("syntax-rule", "syntax"), ("semantic-rule", "semantic")]
+            },
         );
     }
 }

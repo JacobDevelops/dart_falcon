@@ -144,7 +144,6 @@ impl<'a> StructuralRuleVisitor<'a> for Finder<'_, 'a> {
         for context in &mut self.contexts[self.floor..] {
             if let Some(span) = context.escaping_span(node) {
                 self.diags.push(self.ctx.diagnostic(
-                    "control-flow-in-finally",
                     "Avoid control flow (return/break/continue) that escapes a finally block",
                     span,
                 ));

@@ -32,7 +32,6 @@ use crate::member_order::{category_rank, check_sequence, read_string_list};
 #[derive(Default)]
 pub struct MemberOrdering;
 
-const NAME: &str = "member-ordering";
 
 impl Rule for MemberOrdering {
     fn prepare<'a>(
@@ -42,8 +41,8 @@ impl Rule for MemberOrdering {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            order: read_string_list(ctx, NAME, "order"),
-            widgets_order: read_string_list(ctx, NAME, "widgets_order"),
+            order: read_string_list(ctx, MemberOrdering::NAME, "order"),
+            widgets_order: read_string_list(ctx, MemberOrdering::NAME, "widgets_order"),
             diags: Vec::new(),
         }))
     }
@@ -108,7 +107,6 @@ fn check_class(
             members,
             diags,
             ctx,
-            NAME,
             |m| widget_rank(m, seq),
             widgets_message(),
         );
@@ -117,7 +115,6 @@ fn check_class(
             members,
             diags,
             ctx,
-            NAME,
             |m| category_rank(m, seq),
             order_message(),
         );
@@ -206,7 +203,7 @@ fn check_default(
         }
         if cat < max_seen {
             let span = member.span();
-            diags.push(ctx.diagnostic("member-ordering", "Class members are out of order: expected static const → static fields → instance fields → constructors → static methods → instance methods", span));
+            diags.push(ctx.diagnostic("Class members are out of order: expected static const → static fields → instance fields → constructors → static methods → instance methods", span));
         } else {
             max_seen = cat;
         }

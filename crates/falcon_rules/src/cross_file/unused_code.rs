@@ -24,8 +24,6 @@ use super::{canonical_package_path, detect_package, is_under_lib, resolve_direct
 #[derive(Default)]
 pub struct UnusedCode;
 
-const NAME: &str = "unused-code";
-
 /// A public top-level declaration considered for the unused check.
 struct Candidate<'a> {
     name: &'a str,
@@ -39,7 +37,7 @@ struct Candidate<'a> {
 }
 
 impl CrossFileRule for UnusedCode {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -101,7 +99,7 @@ impl CrossFileRule for UnusedCode {
                     continue;
                 }
                 diags.push(Diagnostic::new(
-                    NAME,
+                    "",
                     Severity::Warning,
                     format!(
                         "Public {} '{}' is never referenced anywhere in the project; \
@@ -218,7 +216,7 @@ mod tests {
     fn virtual_symlinked_package_reports_unused_but_preserves_exports() {
         use std::path::PathBuf;
 
-        use falcon_analyze::{CrossFileRule, ProjectFile};
+        use falcon_analyze::{CrossFileRuleAnalysis, ProjectFile};
 
         let root = tempfile::tempdir().unwrap();
         let package = root.path().join("package");
@@ -253,6 +251,7 @@ mod tests {
         assert!(files.iter().all(|file| !file.path.exists()));
 
         let diagnostics = super::UnusedCode.analyze_project(
+            "unused-code",
             &files,
             &falcon_config::FalconConfig::default(),
             None,

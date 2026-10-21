@@ -23,7 +23,6 @@ use crate::lint::doc_comments::{
 };
 use falcon_analyze::semantic_scope::SemanticState;
 
-const ID: &str = "comment-references";
 
 #[derive(Default)]
 pub struct CommentReferences;
@@ -50,14 +49,10 @@ impl Rule for CommentReferences {
         );
         let mut diagnostics = Vec::new();
         let mut report = |offset: usize, text: &str| {
-            diagnostics.push(ctx.diagnostic(
-                ID,
-                format!("The referenced name '{text}' isn't visible in scope."),
-                DiagSpan {
-                    start: offset,
-                    end: offset + text.len(),
-                },
-            ));
+            diagnostics.push(ctx.diagnostic(format!("The referenced name '{text}' isn't visible in scope."), DiagSpan {
+                start: offset,
+                end: offset + text.len(),
+            }));
         };
         for block in ctx.tree().doc_blocks(ctx.source()) {
             let Some(scope) = scopes.scope_for(&block) else {

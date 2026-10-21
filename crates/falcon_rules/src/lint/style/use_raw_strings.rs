@@ -74,7 +74,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 continue;
             }
             self.diags.push(self.ctx.diagnostic(
-                "use-raw-strings",
                 "Use a raw string to avoid using escapes.",
                 span,
             ));

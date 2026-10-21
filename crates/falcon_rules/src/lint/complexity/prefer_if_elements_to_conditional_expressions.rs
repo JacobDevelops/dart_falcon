@@ -95,7 +95,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 if matches!(expr.unparenthesized(), Expr::Conditional(_)) =>
             {
                 diagnostics.push(self.ctx.diagnostic(
-                    "prefer-if-elements-to-conditional-expressions",
                     "Use an 'if' element to conditionally add elements.",
                     expr.unparenthesized().span(),
                 ));
@@ -168,7 +167,7 @@ mod tests {
         });
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = PreferIfElementsToConditionalExpressions.analyze(parsed.program(), &ctx);
+        let diagnostics = PreferIfElementsToConditionalExpressions.analyze(PreferIfElementsToConditionalExpressions::NAME, parsed.program(), &ctx);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

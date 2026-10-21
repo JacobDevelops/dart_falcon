@@ -53,7 +53,7 @@ impl<'a> StructuralRuleVisitor<'a> for CollapsibleIf<'a> {
                 && inner.else_branch().is_none()
                 && let IfCondition::Expr(condition) = inner.condition()
             {
-                self.diags.push(self.ctx.diagnostic("avoid-collapsible-if", "Merge this nested if with its outer condition using &&.", condition.span()));
+                self.diags.push(self.ctx.diagnostic("Merge this nested if with its outer condition using &&.", condition.span()));
             }
         }
         StructuralTraversal::Continue

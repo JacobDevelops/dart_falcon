@@ -149,11 +149,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     });
                 (references.next() == Some(&candidate.reference) && references.next().is_none())
                     .then(|| {
-                        ctx.diagnostic(
-                            "prefer-initializing-formals",
-                            "Use an initializing formal to assign a parameter to a field.",
-                            candidate.anchor,
-                        )
+                        ctx.diagnostic("Use an initializing formal to assign a parameter to a field.", candidate.anchor)
                     })
             })
             .collect()

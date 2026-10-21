@@ -27,7 +27,7 @@ impl Rule for AvoidComplexLoopConditions {
         RulePreparation::Structural(Box::new(LoopConditions {
             ctx,
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "avoid-complex-loop-conditions"),
+                crate::lint::options::for_rule(ctx, AvoidComplexLoopConditions::NAME),
                 "threshold",
             )
             .unwrap_or(1),
@@ -46,7 +46,7 @@ impl LoopConditions<'_> {
     fn check(&mut self, condition: Expr<'_>) {
         let count = logical_operands(condition);
         if count > self.threshold {
-            self.diags.push(self.ctx.diagnostic("avoid-complex-loop-conditions", format!("Loop condition has {count} logical operands (max {}). Extract a named condition.", self.threshold), condition.span()));
+            self.diags.push(self.ctx.diagnostic(format!("Loop condition has {count} logical operands (max {}). Extract a named condition.", self.threshold), condition.span()));
         }
     }
 }

@@ -53,7 +53,6 @@ impl Rule for DiscardedFutures {
             program,
             ctx,
             &UnusedFuturesRule {
-                name: "discarded-futures",
                 in_async_bodies: false,
                 future_message: "Asynchronous function invoked in a non-'async' function.",
                 future_or_message: Some(
@@ -68,7 +67,6 @@ impl Rule for DiscardedFutures {
 /// unused future-typed expressions and differ only in which bodies they watch
 /// and whether `FutureOr` counts.
 pub(crate) struct UnusedFuturesRule {
-    pub(crate) name: &'static str,
     /// `true` watches `async`/`async*` bodies, `false` synchronous ones.
     pub(crate) in_async_bodies: bool,
     pub(crate) future_message: &'static str,
@@ -119,7 +117,7 @@ impl<'a> Collector<'a> {
 
     fn report(&mut self, message: &'static str, span: Span) {
         self.diagnostics
-            .push(self.ctx.diagnostic(self.rule.name, message, span));
+            .push(self.ctx.diagnostic(message, span));
     }
 
     fn local_await_not_required(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
@@ -559,12 +557,9 @@ mod tests {
     #[test]
     fn callable_getters_report_the_callee_but_methods_report_the_name() {
         let source = "import 'dart:async'; class C { Future<void> Function() get callback => () async {}; Future<void> method() async {} } void f(C c) { c.callback(); c.method(); (c.method)(); }";
-        let diagnostics = inference::analyze(
-            &DiscardedFutures,
-            Path::new("future_spans.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(DiscardedFutures::NAME, &DiscardedFutures, Path::new("future_spans.dart"),
+        source,
+        &FalconConfig::default(),);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -575,12 +570,9 @@ mod tests {
     #[test]
     fn constructor_calls_report_the_constructor_name_without_arguments_or_new() {
         let source = "import 'dart:async'; void f() { Future.value(); Future<void>.value(); new Future.value(); new Future<void>.value(); }";
-        let diagnostics = inference::analyze(
-            &DiscardedFutures,
-            Path::new("constructor_spans.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(DiscardedFutures::NAME, &DiscardedFutures, Path::new("constructor_spans.dart"),
+        source,
+        &FalconConfig::default(),);
         let actual: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -622,12 +614,9 @@ mod reviewed_range_tests {
             );
             let rules = all_rules();
             let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
-            let diagnostics = inference::analyze(
-                rule.as_ref(),
-                Path::new("reviewed_future_ranges.dart"),
-                &source,
-                &FalconConfig::default(),
-            );
+            let diagnostics = inference::analyze(rule_name, rule.as_ref(), Path::new("reviewed_future_ranges.dart"),
+            &source,
+            &FalconConfig::default(),);
             let actual: Vec<_> = diagnostics
                 .iter()
                 .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

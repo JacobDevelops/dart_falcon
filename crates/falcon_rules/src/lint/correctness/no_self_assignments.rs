@@ -63,7 +63,6 @@ impl<'a> StructuralRuleVisitor<'a> for Finder<'a, 'a> {
             && left == right
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "no-self-assignments",
                 "The variable or property is being assigned to itself.",
                 assignment.span(),
             ));

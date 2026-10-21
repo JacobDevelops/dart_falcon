@@ -85,11 +85,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if instantiates(value.value(), state) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-instantiating-in-value-provider",
-                "Use create to construct a new provided instance instead of a value provider.",
-                constructor_span(expression),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Use create to construct a new provided instance instead of a value provider.", constructor_span(expression)));
         }
     }
 

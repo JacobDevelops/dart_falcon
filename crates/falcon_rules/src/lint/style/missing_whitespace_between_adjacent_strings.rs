@@ -135,7 +135,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 continue;
             }
             self.diags.push(self.ctx.diagnostic(
-                "missing-whitespace-between-adjacent-strings",
                 "Missing whitespace between adjacent strings.",
                 *span,
             ));

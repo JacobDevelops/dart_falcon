@@ -163,11 +163,7 @@ impl Collector<'_> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-unsafe-collection-methods",
-            "Collection access may throw — use a nullable lookup or an explicit fallback",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Collection access may throw — use a nullable lookup or an explicit fallback", span));
     }
 }
 

@@ -177,11 +177,7 @@ impl Collector<'_> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(
-            "avoid-print",
-            "Avoid using print in production code; use a logging framework instead.",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Avoid using print in production code; use a logging framework instead.", span));
     }
 }
 
@@ -195,12 +191,9 @@ mod tests {
     #[test]
     fn calls_report_the_print_identifier_only() {
         let source = "void f() { print('hello'); print('second'); }";
-        let diagnostics = inference::analyze(
-            &AvoidPrint,
-            Path::new("print_spans.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(AvoidPrint::NAME, &AvoidPrint, Path::new("print_spans.dart"),
+        source,
+        &FalconConfig::default(),);
         assert_eq!(diagnostics.len(), 2);
         for (diagnostic, (start, _)) in diagnostics.iter().zip(source.match_indices("print")) {
             assert_eq!(diagnostic.span.start, start);

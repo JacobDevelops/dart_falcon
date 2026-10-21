@@ -33,7 +33,7 @@ impl Rule for MissingTestAssertion {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let additional = options::strings(
-            options::for_rule(ctx, "missing-test-assertion"),
+            options::for_rule(ctx, MissingTestAssertion::NAME),
             "include_assertions",
         )
         .into_iter()
@@ -83,11 +83,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 })
             })
             .map(|(call, _)| {
-                self.ctx.diagnostic(
-                    "missing-test-assertion",
-                    "This test has no assertion; add an expectation or verification.",
-                    *call,
-                )
+                self.ctx.diagnostic("This test has no assertion; add an expectation or verification.", *call)
             })
             .collect()
     }

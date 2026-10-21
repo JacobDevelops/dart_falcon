@@ -26,7 +26,6 @@ impl Rule for PreferImmutableBlocEvents {
             ctx,
             ModelKind::Event,
             ModelRequirement::Immutable,
-            "prefer-immutable-bloc-events",
         )
     }
 }

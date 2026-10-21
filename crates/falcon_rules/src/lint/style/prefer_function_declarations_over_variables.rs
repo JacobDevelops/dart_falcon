@@ -46,7 +46,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
                     decl.initializer().map(Expr::unparenthesized)
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "prefer-function-declarations-over-variables",
                         "Use a function declaration to bind a function to a name.".to_string(),
                         decl.name().span(),
                     ));

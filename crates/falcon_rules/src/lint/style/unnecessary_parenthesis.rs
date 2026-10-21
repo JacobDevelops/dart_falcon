@@ -225,11 +225,7 @@ fn key(span: Span) -> (usize, usize) {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic(
-            "unnecessary-parenthesis",
-            "Unnecessary use of parentheses.",
-            span,
-        ));
+        self.diagnostics.push(self.ctx.diagnostic("Unnecessary use of parentheses.", span));
     }
 
     /// Check explicit grouping; surrounding grammar delimiters are not nodes.

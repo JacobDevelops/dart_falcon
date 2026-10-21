@@ -27,11 +27,7 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                 {
                     return None;
                 }
-                Some(ctx.diagnostic(
-                    "avoid-unrelated-type-assertions",
-                    "Type assertion can never be true — types are unrelated",
-                    operation.span,
-                ))
+                Some(ctx.diagnostic("Type assertion can never be true — types are unrelated", operation.span))
             },
         }))
     }

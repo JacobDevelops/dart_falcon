@@ -707,11 +707,7 @@ fn check_statements(
 }
 
 fn report(start: usize, end: usize, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    diags.push(ctx.diagnostic(
-        "cascade-invocations",
-        "Unnecessary duplication of receiver.",
-        DiagSpan { start, end },
-    ));
+    diags.push(ctx.diagnostic("Unnecessary duplication of receiver.", DiagSpan { start, end }));
 }
 
 #[cfg(test)]
@@ -779,7 +775,7 @@ mod tests {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        CascadeInvocations.analyze(program, &ctx)
+        CascadeInvocations.analyze(CascadeInvocations::NAME, program, &ctx)
     }
 
     #[test]

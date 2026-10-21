@@ -54,7 +54,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && !(left_is_null && right_is_literal)
                 {
                     self.diags.push(self.ctx.diagnostic(
-                "binary-expression-operand-order",
                 "Avoid placing literal or constant operand on the left side of a binary expression",
                 span,
             ));

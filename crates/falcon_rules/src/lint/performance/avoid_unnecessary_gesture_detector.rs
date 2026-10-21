@@ -83,15 +83,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         })
                 });
         if !has_handler || redundant_tap {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unnecessary-gesture-detector",
-                if redundant_tap {
-                    "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
-                } else {
-                    "Remove this GestureDetector or provide an event handler."
-                },
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(if redundant_tap {
+                "Handle taps in the button's onPressed callback instead of wrapping it in GestureDetector."
+            } else {
+                "Remove this GestureDetector or provide an event handler."
+            }, crate::lint::flutter::constructor_span(node)));
         }
     }
 }

@@ -59,12 +59,8 @@ fn check_constructor(ctor: ConstructorDecl<'_>, diags: &mut Vec<Diagnostic>, ctx
     if !block.stmts().is_empty() {
         return;
     }
-    diags.push(ctx.diagnostic(
-        "empty-constructor-bodies",
-        "Empty constructor body — use `;` instead of `{}`",
-        DiagSpan {
-            start: block.span().start,
-            end: block.span().start + 1,
-        },
-    ));
+    diags.push(ctx.diagnostic("Empty constructor body — use `;` instead of `{}`", DiagSpan {
+        start: block.span().start,
+        end: block.span().start + 1,
+    }));
 }

@@ -94,7 +94,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let context_required = self.suppressed.contains(&(span.start, span.end));
             if !user_shadow && !context_required {
                 self.diags.push(self.ctx.diagnostic(
-                    "prefer-collection-literals",
                     "Use a collection literal instead of a constructor invocation.",
                     span,
                 ));
@@ -290,7 +289,7 @@ mod tests {
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        PreferCollectionLiterals.analyze(program, &ctx).len()
+        PreferCollectionLiterals.analyze(PreferCollectionLiterals::NAME, program, &ctx).len()
     }
 
     fn count_with_types(source: &str) -> usize {
@@ -323,7 +322,7 @@ mod tests {
         let ctx = AnalyzeContext::new(&path, &config, &parsed)
             .with_types(&types)
             .with_identities(&identities);
-        PreferCollectionLiterals.analyze(program, &ctx).len()
+        PreferCollectionLiterals.analyze(PreferCollectionLiterals::NAME, program, &ctx).len()
     }
 
     #[test]
@@ -469,7 +468,7 @@ mod tests {
                 .with_types(&types)
                 .with_identities(&identities);
             assert!(
-                PreferCollectionLiterals.analyze(program, &ctx).is_empty(),
+                PreferCollectionLiterals.analyze(PreferCollectionLiterals::NAME, program, &ctx).is_empty(),
                 "{source}"
             );
         }

@@ -88,11 +88,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 let convertible =
                     positional || constructor.named.iter().any(|span| !referenced(*span));
                 convertible.then(|| {
-                    ctx.diagnostic(
-                        "use-super-parameters",
-                        "Use super parameters instead of forwarding parameters to super.",
-                        constructor.anchor,
-                    )
+                    ctx.diagnostic("Use super parameters instead of forwarding parameters to super.", constructor.anchor)
                 })
             })
             .collect()

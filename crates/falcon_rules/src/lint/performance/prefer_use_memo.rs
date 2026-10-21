@@ -63,11 +63,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 _ => false,
             };
             if allocated {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "prefer-use-memo",
-                    "Memoize this collection with 'useMemoized' before using it as a hook dependency key.",
-                    value.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Memoize this collection with 'useMemoized' before using it as a hook dependency key.", value.span()));
             }
         }
     }

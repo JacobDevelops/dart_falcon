@@ -81,7 +81,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if has_instance_member(&self.model, &self.signatures, &self.receiver, name.name()) {
             self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-shadowed-extension-methods",
                 "The extension target already has this member. Rename the extension member.",
                 name.span(),
             ));

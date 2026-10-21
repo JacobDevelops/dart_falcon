@@ -58,11 +58,7 @@ fn check_uri(uri: StringLitNode<'_>, own: &str, ctx: &AnalyzeContext, diags: &mu
     if package == own {
         return;
     }
-    diags.push(ctx.diagnostic(
-        "implementation-imports",
-        format!("Don't import implementation files from another package ('{package}')."),
-        uri.span(),
-    ));
+    diags.push(ctx.diagnostic(format!("Don't import implementation files from another package ('{package}')."), uri.span()));
 }
 
 fn implementation_package(uri: &str) -> Option<&str> {

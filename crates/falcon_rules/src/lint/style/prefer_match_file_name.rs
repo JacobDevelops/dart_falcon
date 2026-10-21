@@ -117,7 +117,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         let expected = file_stem(name.name());
         vec![self.ctx.diagnostic(
-            "prefer-match-file-name",
             format!(
                 "The sole class or enum '{}' does not match this filename. Rename the file to '{}.dart' or rename the declaration to match the file.",
                 name.name(), expected,

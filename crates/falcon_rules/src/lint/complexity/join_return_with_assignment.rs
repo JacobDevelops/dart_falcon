@@ -70,11 +70,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a, 'a> {
         }) && same_element(returned, false, assigned, write, state)
             && let Stmt::Expr(statement) = second_last
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "join-return-with-assignment",
-                "Assignment could be inlined in 'return' statement.",
-                statement.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Assignment could be inlined in 'return' statement.", statement.span()));
         }
     }
 }
@@ -313,12 +309,9 @@ mod tests {
     #[test]
     fn assignment_range_includes_the_statement_semicolon() {
         let source = "int f(int x) { x += 1; return x; }";
-        let diagnostics = inference::analyze(
-            &JoinReturnWithAssignment,
-            Path::new("join_span.dart"),
-            source,
-            &FalconConfig::default(),
-        );
+        let diagnostics = inference::analyze(JoinReturnWithAssignment::NAME, &JoinReturnWithAssignment, Path::new("join_span.dart"),
+        source,
+        &FalconConfig::default(),);
         assert_eq!(diagnostics.len(), 1);
         let span = diagnostics[0].span;
         assert_eq!(span.start, source.find("x +=").unwrap());

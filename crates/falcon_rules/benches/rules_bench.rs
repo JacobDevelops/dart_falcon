@@ -184,8 +184,8 @@ fn run_all_rules_on_source(rules: &[(&'static str, Box<dyn Rule>)], path: &Path,
     let program = parsed.program();
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(path, &config, &parsed);
-    for (_, rule) in rules {
-        let _ = rule.analyze(program, &ctx);
+    for (name, rule) in rules {
+        let _ = rule.analyze(name, program, &ctx);
     }
 }
 
@@ -256,7 +256,7 @@ fn bench_per_rule(c: &mut Criterion) {
         c.bench_with_input(BenchmarkId::new("rule", rule_name), rule_name, |b, _| {
             b.iter(|| {
                 let ctx = AnalyzeContext::new(&path, &config, &parsed);
-                let _ = rule.analyze(program, &ctx);
+                let _ = rule.analyze(rule_name, program, &ctx);
             });
         });
     }

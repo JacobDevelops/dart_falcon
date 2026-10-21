@@ -53,11 +53,7 @@ impl Collector<'_> {
         if let Some(FunctionBody::Arrow(arrow)) = body
             && matches!(arrow.expr(), Expr::NullLit(_))
         {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-returning-null-for-void",
-                "Don't return null from a function with a void return type.",
-                arrow.expr().span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Don't return null from a function with a void return type.", arrow.expr().span()));
         }
     }
 }
@@ -155,7 +151,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && matches!(r.value(), Some(Expr::NullLit(_)))
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "avoid-returning-null-for-void",
                         "Don't return null from a function with a void return type.",
                         r.span(),
                     ));

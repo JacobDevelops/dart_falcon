@@ -66,11 +66,7 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(
-            "avoid-returning-this",
-            "Don't return 'this' from a method.",
-            span,
-        ));
+        self.diags.push(self.ctx.diagnostic("Don't return 'this' from a method.", span));
     }
 }
 

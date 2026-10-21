@@ -111,11 +111,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 return;
             }
         }
-        self.diags.push(self.ctx.diagnostic(
-            "accessible-widget-labels",
-            "Provide an accessible label for this interactive widget.",
-            crate::lint::flutter::constructor_span(node),
-        ));
+        self.diags.push(self.ctx.diagnostic("Provide an accessible label for this interactive widget.", crate::lint::flutter::constructor_span(node)));
     }
 }
 

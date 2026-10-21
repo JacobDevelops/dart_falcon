@@ -24,11 +24,10 @@ use super::{character_to_byte, project_pubspecs, scalar_source_span};
 #[derive(Default)]
 pub struct SortPubDependencies;
 
-const NAME: &str = "sort-pub-dependencies";
 const SECTIONS: [&str; 3] = ["dependencies", "dev_dependencies", "dependency_overrides"];
 
 impl CrossFileRule for SortPubDependencies {
-    fn analyze_project(
+    fn prepare_project(
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
@@ -66,7 +65,7 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
             let start = character_to_byte(&source, character)?;
             let span = scalar_source_span(&source, start)?;
             let mut diagnostic = Diagnostic::new(
-                NAME,
+                "",
                 Severity::Warning,
                 format!("Dependencies not sorted alphabetically: '{name}' is out of order."),
                 path.to_string_lossy().into_owned(),

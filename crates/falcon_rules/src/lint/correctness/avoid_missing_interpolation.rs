@@ -80,11 +80,7 @@ impl<'a> Collector<'a> {
             if already_used {
                 continue;
             }
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-missing-interpolation",
-                "This string is a visible String variable's name; use the variable or interpolate its value.",
-                string.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("This string is a visible String variable's name; use the variable or interpolate its value.", string.span()));
         }
     }
 }
@@ -162,11 +158,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 Some(Span::new(expression_span.start - 1, end + suffix_len))
             });
             if let Some(span) = incomplete {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-missing-interpolation",
-                    "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
-                    span,
-                ));
+                self.diags.push(self.ctx.diagnostic("Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.", span));
             }
         }
     }

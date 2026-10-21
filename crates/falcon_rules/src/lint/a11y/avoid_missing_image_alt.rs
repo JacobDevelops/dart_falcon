@@ -57,10 +57,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 && !matches!(arg.value().unparenthesized(), Expr::BoolLit(value) if !value.value()))
         };
         if matches {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-missing-image-alt", "Provide a semantic label for this image, or explicitly exclude decorative images from semantics.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Provide a semantic label for this image, or explicitly exclude decorative images from semantics.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

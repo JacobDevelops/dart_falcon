@@ -27,7 +27,6 @@ use falcon_syntax::token::TokenKind;
 
 use crate::lint::tokens::significant_tokens_in;
 
-const RULE: &str = "avoid-final-parameters";
 const MESSAGE: &str = "Parameters should not be marked as 'final'.";
 
 #[derive(Default)]
@@ -69,11 +68,7 @@ impl Collector<'_> {
             .keywords_in(self.ctx.source(), Span::new(start, end), TokenKind::Final)
             .next()
         {
-            self.diags.push(self.ctx.diagnostic(
-                RULE,
-                MESSAGE,
-                Span::new(token.offset(), token.offset() + token.len()),
-            ));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, Span::new(token.offset(), token.offset() + token.len())));
         }
     }
 
@@ -98,7 +93,7 @@ impl Collector<'_> {
             }
         }
         if let Some(span) = final_span {
-            self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, span));
         }
     }
 }

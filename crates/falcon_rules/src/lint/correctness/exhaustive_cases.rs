@@ -167,11 +167,7 @@ impl Collector<'_> {
                 continue;
             }
             let preferred = &facts.static_consts[preferred];
-            self.diagnostics.push(self.ctx.diagnostic(
-                "exhaustive-cases",
-                format!("Add a case for '{}.{}'.", identity.name(), preferred.name),
-                Span::new(node.span().start, end),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(format!("Add a case for '{}.{}'.", identity.name(), preferred.name), Span::new(node.span().start, end)));
         }
     }
 }
@@ -328,7 +324,7 @@ mod tests {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types);
-        let diagnostics = ExhaustiveCases.analyze(program, &ctx);
+        let diagnostics = ExhaustiveCases.analyze(ExhaustiveCases::NAME, program, &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].message, "Add a case for 'Token.second'.");
         let span = &diagnostics[0].span;
@@ -363,7 +359,7 @@ mod tests {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&identities)
             .with_types(&types);
-        let diagnostics = ExhaustiveCases.analyze(program, &ctx);
+        let diagnostics = ExhaustiveCases.analyze(ExhaustiveCases::NAME, program, &ctx);
         let messages: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.message.as_str())

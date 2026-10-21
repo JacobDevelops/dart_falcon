@@ -7,14 +7,12 @@ use falcon_syntax::cst::*;
 
 pub(super) fn prepare<'a>(
     ctx: &'a AnalyzeContext<'a>,
-    rule: &'static str,
     widget: &'static str,
     message: &'static str,
     matches: fn(ArgList<'_>, &SemanticState<'_>, &AnalyzeContext<'_>) -> bool,
 ) -> RulePreparation<'a> {
     RulePreparation::Semantic(Box::new(Collector {
         ctx,
-        rule,
         widget,
         message,
         matches,
@@ -24,7 +22,6 @@ pub(super) fn prepare<'a>(
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    rule: &'static str,
     widget: &'static str,
     message: &'static str,
     matches: fn(ArgList<'_>, &SemanticState<'_>, &AnalyzeContext<'_>) -> bool,
@@ -60,11 +57,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 index.is_package_declaration(&identity, "flutter", self.widget)
             })
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                self.rule,
-                self.message,
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diagnostics.push(
+                self.ctx
+                    .diagnostic(self.message, crate::lint::flutter::constructor_span(node)),
+            );
         }
     }
 }

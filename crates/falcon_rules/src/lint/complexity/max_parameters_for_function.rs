@@ -36,7 +36,7 @@ impl Rule for MaxParametersForFunction {
 
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "max-parameters-for-function"),
+        crate::lint::options::for_rule(ctx, MaxParametersForFunction::NAME),
         "max_parameters",
     )
     .unwrap_or(5)
@@ -53,11 +53,7 @@ impl Collector<'_> {
         if count <= self.threshold {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            "max-parameters-for-function",
-            format!("Function has too many parameters (max {}).", self.threshold),
-            *span,
-        ));
+        self.diags.push(self.ctx.diagnostic(format!("Function has too many parameters (max {}).", self.threshold), *span));
     }
 
     fn check_formals(&mut self, params: FormalParamList<'_>, span: &Span) {

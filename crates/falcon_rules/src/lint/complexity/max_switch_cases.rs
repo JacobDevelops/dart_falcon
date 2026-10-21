@@ -45,7 +45,7 @@ fn count_non_default_cases(switch_stmt: SwitchStmt<'_>) -> usize {
 /// Read the `max_cases` option (default 10). Malformed/missing → default.
 fn max_cases_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, "max-switch-cases"),
+        crate::lint::options::for_rule(ctx, MaxSwitchCases::NAME),
         "max_cases",
     )
     .unwrap_or(10)
@@ -68,7 +68,6 @@ impl<'a, 'ctx> StructuralRuleVisitor<'ctx> for Collector<'a, 'ctx> {
             && count_non_default_cases(switch_stmt) > self.threshold
         {
             self.diags.push(self.ctx.diagnostic(
-                "max-switch-cases",
                 format!(
                     "Switch statement has too many cases (max {}).",
                     self.threshold

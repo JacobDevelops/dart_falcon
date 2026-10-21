@@ -55,8 +55,6 @@ use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
-const RULE: &str = "unreachable-from-main";
-
 /// Members every class inherits from `Object`; declaring one is an override.
 const OBJECT_MEMBERS: &[&str] = &["==", "hashCode", "toString", "noSuchMethod", "runtimeType"];
 
@@ -169,14 +167,10 @@ impl<'a> Reachability<'a> {
                             .is_none_or(|container| reached[tables.containers[container].decl]))
             })
             .map(|(_, decl)| {
-                ctx.diagnostic(
-                    RULE,
-                    format!(
-                        "Unreachable member '{}' in an executable library.",
-                        decl.label
-                    ),
-                    decl.name_span,
-                )
+                ctx.diagnostic(format!(
+                    "Unreachable member '{}' in an executable library.",
+                    decl.label
+                ), decl.name_span)
             })
             .collect();
         diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
@@ -2115,8 +2109,7 @@ mod tests {
         let program = parsed.program();
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), &config, &parsed);
-        UnreachableFromMain
-            .analyze(program, &ctx)
+        UnreachableFromMain.analyze(UnreachableFromMain::NAME, program, &ctx)
             .into_iter()
             .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_string())
             .collect()
@@ -2282,7 +2275,7 @@ mod tests {
             .with_library(&library);
         assert!(
             UnreachableFromMain
-                .analyze(parsed.program(), &ctx)
+                .analyze(UnreachableFromMain::NAME, parsed.program(), &ctx)
                 .is_empty()
         );
     }

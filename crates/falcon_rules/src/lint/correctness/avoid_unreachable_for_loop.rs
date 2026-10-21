@@ -83,11 +83,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if self.declarations.get(&iterated.span().start) == Some(checked_declaration) {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-unreachable-for-loop",
-                "This condition requires the collection to be empty, so the iteration body cannot run.",
-                condition.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("This condition requires the collection to be empty, so the iteration body cannot run.", condition.span()));
         }
     }
 

@@ -54,11 +54,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if !equivalent(left, right, self.ctx) {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            "no-self-comparisons",
-            "Both operands of this comparison are identical.",
-            binary.span(),
-        ));
+        self.diags.push(self.ctx.diagnostic("Both operands of this comparison are identical.", binary.span()));
     }
 }
 
@@ -189,7 +185,7 @@ class Child extends Values {
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
-        let diagnostics = NoSelfComparisons.analyze(program, &ctx);
+        let diagnostics = NoSelfComparisons.analyze(NoSelfComparisons::NAME, program, &ctx);
         let lines: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| source[..diagnostic.span.start].matches('\n').count() + 1)

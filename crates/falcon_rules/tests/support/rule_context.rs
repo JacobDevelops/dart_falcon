@@ -6,7 +6,7 @@ use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
 use std::path::Path;
 
-pub fn count(rule: &dyn Rule, source: &str, with_types: bool) -> usize {
+pub fn count(name: &'static str, rule: &dyn Rule, source: &str, with_types: bool) -> usize {
     let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile { source: source.into(), tree });
     let program = parsed.program();
@@ -41,5 +41,5 @@ pub fn count(rule: &dyn Rule, source: &str, with_types: bool) -> usize {
     if let Some(types) = &types {
         ctx = ctx.with_types(types);
     }
-    rule.analyze(program, &ctx).len()
+    rule.analyze(name, program, &ctx).len()
 }

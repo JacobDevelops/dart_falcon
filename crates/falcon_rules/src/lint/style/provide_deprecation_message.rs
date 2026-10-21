@@ -62,7 +62,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if flagged {
             self.diags.push(self.ctx.diagnostic(
-                "provide-deprecation-message",
                 "Provide a deprecation message, via @Deprecated(\"message\").",
                 node.span(),
             ));

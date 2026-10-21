@@ -43,7 +43,6 @@ use crate::lint::declarations::{documented_node_span, member_names, members_of};
 use crate::lint::tokens::significant_tokens_in;
 use falcon_analyze::semantic_scope::SemanticState;
 
-const RULE: &str = "always-specify-types";
 const MESSAGE: &str = "Missing type annotation.";
 
 /// Includes the setter's full parameter range rather than just its name.
@@ -181,7 +180,7 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
+        self.diags.push(self.ctx.diagnostic(MESSAGE, span));
     }
 
     fn first_token(&self, span: Span) -> Span {

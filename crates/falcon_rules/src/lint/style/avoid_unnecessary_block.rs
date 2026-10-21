@@ -44,7 +44,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             ))
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unnecessary-block",
                 "Remove this unnecessary block without changing the enclosed statements.",
                 block.span(),
             ));

@@ -18,7 +18,7 @@ impl Rule for AvoidNestedAssignments {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let ignore_null_aware = crate::lint::options::for_rule(ctx, "avoid-nested-assignments")
+        let ignore_null_aware = crate::lint::options::for_rule(ctx, AvoidNestedAssignments::NAME)
             .and_then(|options| options.get("ignore_null_aware_assignments"))
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
@@ -63,7 +63,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 NodeKind::ExprStmt | NodeKind::ArrowBody | NodeKind::ForExprsInit | NodeKind::ForUpdates))
             {
                 self.diags.push(self.ctx.diagnostic(
-                    "avoid-nested-assignments", "Move this assignment out of the surrounding expression.", assign.span(),
+                    "Move this assignment out of the surrounding expression.", assign.span(),
                 ));
             }
         }

@@ -114,11 +114,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && call.args().named().is_empty()
             && self.current_state(argument, state)
         {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "emit-new-bloc-state-instances",
-                "Create a new state instance instead of emitting the current state.",
-                argument.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Create a new state instance instead of emitting the current state.", argument.span()));
         }
     }
 

@@ -7,6 +7,13 @@ use falcon_analyze::{
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
+use falcon_rules::lint::{
+    correctness::diagnostic_describe_all_properties::DiagnosticDescribeAllProperties,
+    style::{
+        avoid_catches_without_on_clauses::AvoidCatchesWithoutOnClauses,
+        use_late_for_private_fields_and_variables::UseLateForPrivateFieldsAndVariables,
+    },
+};
 
 fn parsed(source: &str) -> Arc<ParsedFile> {
     let result = parse(source);
@@ -85,12 +92,11 @@ fn colliding_package_names_do_not_gain_project_or_sdk_semantics() {
     assert!(matches!(identity, DeclarationIdentity::Library { .. }));
     assert!(!identities.is_project(&identity));
     let diagnostics =
-        falcon_rules::lint::correctness::diagnostic_describe_all_properties::DiagnosticDescribeAllProperties
-            .analyze(parsed.program(), &ctx);
+        falcon_rules::lint::correctness::diagnostic_describe_all_properties::DiagnosticDescribeAllProperties.analyze(DiagnosticDescribeAllProperties::NAME, parsed.program(), &ctx);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     let diagnostics =
         falcon_rules::lint::style::avoid_catches_without_on_clauses::AvoidCatchesWithoutOnClauses
-            .analyze(parsed.program(), &ctx);
+            .analyze(AvoidCatchesWithoutOnClauses::NAME, parsed.program(), &ctx);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
 }
 
@@ -193,22 +199,23 @@ fn unresolved_error_forwarding_stays_silent() {
             .with_types(&types)
             .with_signatures(&signatures);
         let diagnostics =
-            falcon_rules::lint::style::avoid_catches_without_on_clauses::AvoidCatchesWithoutOnClauses
-                .analyze(parsed.program(), &ctx);
+            falcon_rules::lint::style::avoid_catches_without_on_clauses::AvoidCatchesWithoutOnClauses.analyze(AvoidCatchesWithoutOnClauses::NAME, parsed.program(), &ctx);
         assert!(diagnostics.is_empty(), "{directive}: {diagnostics:?}");
     }
 }
 
 fn assert_dependency_rule(
+    name: &'static str,
     dependencies: &[(&str, &str, &str)],
     source: &str,
     rule: &dyn Rule,
     expected: usize,
 ) {
-    assert_dependency_rule_with(dependencies, source, rule, expected, |_, _| {});
+    assert_dependency_rule_with(name, dependencies, source, rule, expected, |_, _| {});
 }
 
 fn assert_dependency_rule_with(
+    name: &'static str,
     dependencies: &[(&str, &str, &str)],
     source: &str,
     rule: &dyn Rule,
@@ -285,7 +292,7 @@ fn assert_dependency_rule_with(
         .with_signatures(&signatures);
     let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
     check(&model, &signatures);
-    let diagnostics = rule.analyze(parsed.program(), &ctx);
+    let diagnostics = rule.analyze(name, parsed.program(), &ctx);
     assert_eq!(diagnostics.len(), expected, "{source}\n{diagnostics:?}");
 }
 
@@ -351,8 +358,7 @@ fn late_candidates_use_part_loop_writes_not_owner_loop_writes() {
         .with_signatures(&signatures)
         .with_library(&unit);
     let diagnostics =
-        falcon_rules::lint::style::use_late_for_private_fields_and_variables::UseLateForPrivateFieldsAndVariables
-            .analyze(files[0].program(), &ctx);
+        falcon_rules::lint::style::use_late_for_private_fields_and_variables::UseLateForPrivateFieldsAndVariables.analyze(UseLateForPrivateFieldsAndVariables::NAME, files[0].program(), &ctx);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(
         diagnostics[0].span.start,
@@ -384,13 +390,39 @@ fn colliding_dependency_bloc_models_are_not_project_roots() {
             assert!(!model.identities().is_project(&identity));
         }
     };
-    assert_dependency_rule_with(&dependencies, &source, &PreferSealedBlocEvents, 0, check);
-    assert_dependency_rule_with(&dependencies, &source, &PreferSealedBlocState, 0, check);
+    assert_dependency_rule_with(
+        "prefer-sealed-bloc-events",
+        &dependencies,
+        &source,
+        &PreferSealedBlocEvents,
+        0,
+        check,
+    );
+    assert_dependency_rule_with(
+        "prefer-sealed-bloc-state",
+        &dependencies,
+        &source,
+        &PreferSealedBlocState,
+        0,
+        check,
+    );
     let source = format!(
         "{imports} class LocalEvent {{}} class LocalState {{}} class Owner extends Bloc<LocalEvent, LocalState> {{}}"
     );
-    assert_dependency_rule(&dependencies, &source, &PreferSealedBlocEvents, 1);
-    assert_dependency_rule(&dependencies, &source, &PreferSealedBlocState, 1);
+    assert_dependency_rule(
+        "prefer-sealed-bloc-events",
+        &dependencies,
+        &source,
+        &PreferSealedBlocEvents,
+        1,
+    );
+    assert_dependency_rule(
+        "prefer-sealed-bloc-state",
+        &dependencies,
+        &source,
+        &PreferSealedBlocState,
+        1,
+    );
 }
 
 #[test]
@@ -408,6 +440,7 @@ fn colliding_dependency_hook_ancestry_remains_unknown() {
     ];
     let imports = "import 'package:flutter_hooks/flutter_hooks.dart'; import 'package:dep/a.dart'; import 'package:dep/b.dart' as other;";
     assert_dependency_rule_with(
+        "avoid-hooks-outside-build",
         &dependencies,
         &format!("{imports} class Owner extends Base {{ void build() {{ useState(0); }} }}"),
         &AvoidHooksOutsideBuild,
@@ -420,6 +453,7 @@ fn colliding_dependency_hook_ancestry_remains_unknown() {
         },
     );
     assert_dependency_rule(
+        "avoid-hooks-outside-build",
         &dependencies,
         &format!("{imports} class Owner {{ void build() {{ useState(0); }} }}"),
         &AvoidHooksOutsideBuild,
@@ -444,6 +478,7 @@ fn colliding_dependency_blocs_do_not_register_project_events() {
     ];
     let source = "import 'package:flutter/widgets.dart'; import 'package:dep/a.dart'; import 'package:dep/b.dart' as other; class Event { Event(BuildContext context); } void f(BuildContext context) { Event(context); }";
     assert_dependency_rule_with(
+        "avoid-passing-build-context-to-blocs",
         &dependencies,
         source,
         &AvoidPassingBuildContextToBlocs,
@@ -470,7 +505,13 @@ fn colliding_dependency_blocs_do_not_register_project_events() {
     let source = format!(
         "import 'package:bloc/bloc.dart'; {source} class LocalBloc extends Bloc<Event, int> {{}}"
     );
-    assert_dependency_rule(&dependencies, &source, &AvoidPassingBuildContextToBlocs, 1);
+    assert_dependency_rule(
+        "avoid-passing-build-context-to-blocs",
+        &dependencies,
+        &source,
+        &AvoidPassingBuildContextToBlocs,
+        1,
+    );
 }
 
 #[test]
@@ -489,6 +530,7 @@ fn colliding_dependency_events_are_not_registered_by_project_blocs() {
     ];
     let imports = "import 'package:bloc/bloc.dart'; import 'package:flutter/widgets.dart'; import 'package:dep/a.dart'; import 'package:dep/b.dart' as other;";
     assert_dependency_rule_with(
+        "avoid-passing-build-context-to-blocs",
         &dependencies,
         &format!(
             "{imports} class Owner extends Bloc<Event, int> {{}} void f(BuildContext context) {{ Event(context); }}"
@@ -510,6 +552,7 @@ fn colliding_dependency_events_are_not_registered_by_project_blocs() {
         },
     );
     assert_dependency_rule(
+        "avoid-passing-build-context-to-blocs",
         &dependencies,
         &format!(
             "{imports} class LocalEvent {{ LocalEvent(BuildContext context); }} class Owner extends Bloc<LocalEvent, int> {{}} void f(BuildContext context) {{ LocalEvent(context); }}"
@@ -529,6 +572,7 @@ fn unique_dependency_future_does_not_forward_caught_errors() {
         "class Future { static dynamic error(Object error) {} }",
     )];
     assert_dependency_rule_with(
+        "avoid-catches-without-on-clauses",
         &dependencies,
         "import 'package:dep/future.dart'; void f() { try {} catch (error) { Future.error(error); } }",
         &AvoidCatchesWithoutOnClauses,
@@ -540,6 +584,7 @@ fn unique_dependency_future_does_not_forward_caught_errors() {
         },
     );
     assert_dependency_rule(
+        "avoid-catches-without-on-clauses",
         &dependencies,
         "void f() { try {} catch (error) { Future.error(error); } }",
         &AvoidCatchesWithoutOnClauses,

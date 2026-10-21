@@ -94,11 +94,7 @@ impl<'a> Collector<'a> {
                 same_pattern(*previous_pattern, pattern, self.ctx)
                     && equivalent(*previous_guard, guard, self.ctx)
             }) {
-                self.diagnostics.push(self.ctx.diagnostic(
-                    "avoid-duplicate-switch-case-conditions",
-                    "Duplicate switch pattern and condition. Remove or change the repeated guard.",
-                    guard.span(),
-                ));
+                self.diagnostics.push(self.ctx.diagnostic("Duplicate switch pattern and condition. Remove or change the repeated guard.", guard.span()));
             } else {
                 seen.push((pattern, guard));
             }

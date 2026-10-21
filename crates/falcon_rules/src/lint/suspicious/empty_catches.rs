@@ -40,11 +40,7 @@ fn check_catch(catch: CatchClause<'_>, diags: &mut Vec<Diagnostic>, ctx: &Analyz
     let Some(span) = super::no_empty_block::empty_block_end(catch.body()) else {
         return;
     };
-    diags.push(ctx.diagnostic(
-        "empty-catches",
-        "Empty catch block — handle the exception, add a comment, or name it `_`",
-        span,
-    ));
+    diags.push(ctx.diagnostic("Empty catch block — handle the exception, add a comment, or name it `_`", span));
 }
 
 struct Collector<'a, 'ctx> {

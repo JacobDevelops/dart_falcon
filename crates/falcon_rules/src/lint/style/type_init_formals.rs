@@ -187,11 +187,7 @@ fn check_param(
     let Some(target) = target else { return };
 
     if same_type(ctx, target, annotation) {
-        diags.push(ctx.diagnostic(
-            "type-init-formals",
-            "Don't type annotate initializing formals.".to_string(),
-            annotation.span(),
-        ));
+        diags.push(ctx.diagnostic("Don't type annotate initializing formals.".to_string(), annotation.span()));
     }
 }
 
@@ -301,7 +297,7 @@ mod tests {
         });
         let config = falcon_config::FalconConfig::default();
         let context = AnalyzeContext::new(std::path::Path::new("test.dart"), &config, &parsed);
-        let diagnostics = TypeInitFormals.analyze(parsed.program(), &context);
+        let diagnostics = TypeInitFormals.analyze(TypeInitFormals::NAME, parsed.program(), &context);
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
         assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "int");

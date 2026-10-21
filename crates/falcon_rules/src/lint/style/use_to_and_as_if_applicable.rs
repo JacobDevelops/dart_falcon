@@ -123,7 +123,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
                 });
                 if inherited != Some(true) {
                     self.diags.push(self.ctx.diagnostic(
-                        "use-to-and-as-if-applicable",
                         "Start the name of the method with 'to' or 'as'.",
                         span,
                     ));
@@ -201,6 +200,7 @@ class Convert {
 }
 ";
         let diagnostics = span_test_support::analyze(
+            UseToAndAsIfApplicable::NAME,
             &UseToAndAsIfApplicable,
             Path::new("test.dart"),
             source,

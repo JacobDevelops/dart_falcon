@@ -20,7 +20,7 @@ struct Cfg {
 }
 
 fn cfg(ctx: &AnalyzeContext) -> Cfg {
-    let opts = crate::lint::options::for_rule(ctx, "prefer-extracting-callbacks");
+    let opts = crate::lint::options::for_rule(ctx, PreferExtractingCallbacks::NAME);
     Cfg {
         allowed_line_count: crate::lint::options::usize(opts, "allowed_line_count"),
         ignored: crate::lint::options::strings(opts, "ignored_named_arguments")
@@ -78,7 +78,6 @@ impl<'a> StructuralRuleVisitor<'a> for CallbackCollector<'a> {
         self.candidates.iter()
             .filter(|callback| !(callback.builder_parameter && callback.returns_widget))
             .map(|callback| self.ctx.diagnostic(
-                "prefer-extracting-callbacks",
                 "Prefer extracting the callback to a separate widget method.",
                 callback.span,
             )).collect()

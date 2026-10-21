@@ -18,7 +18,7 @@ use falcon_rules::lint::style::unnecessary_null_checks::UnnecessaryNullChecks;
 use falcon_rules::lint::style::unnecessary_parenthesis::UnnecessaryParenthesis;
 use falcon_rules::lint::suspicious::no_equal_arguments::NoEqualArguments;
 
-fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
+fn reports(name: &'static str, rule: &dyn Rule, source: &str) -> Vec<String> {
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
         source: source.into(),
@@ -37,7 +37,7 @@ fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
     );
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
-    rule.analyze(program, &context)
+    rule.analyze(name, program, &context)
         .into_iter()
         .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_owned())
         .collect()
@@ -47,6 +47,7 @@ fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
 fn comments_do_not_hide_grouping_or_create_grouping() {
     assert!(
         reports(
+            "no-adjacent-strings-in-list",
             &NoAdjacentStringsInList,
             "var values = [( /* note */ 'a' 'b' /* note */ )];"
         )
@@ -54,6 +55,7 @@ fn comments_do_not_hide_grouping_or_create_grouping() {
     );
     assert_eq!(
         reports(
+            "no-adjacent-strings-in-list",
             &NoAdjacentStringsInList,
             "var values = [ /* ( */ 'a' 'b' /* ) */ ];"
         ),
@@ -61,13 +63,18 @@ fn comments_do_not_hide_grouping_or_create_grouping() {
     );
     assert_eq!(
         reports(
+            "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "void f(int value) { print(( /* note */ value)); }"
         ),
         ["( /* note */ value)"]
     );
     assert_eq!(
-        reports(&UnnecessaryStatements, "void f() { ( /* note */ f()); }"),
+        reports(
+            "unnecessary-statements",
+            &UnnecessaryStatements,
+            "void f() { ( /* note */ f()); }"
+        ),
         ["( /* note */ f())"]
     );
 }
@@ -76,20 +83,28 @@ fn comments_do_not_hide_grouping_or_create_grouping() {
 fn cascade_null_assertion_keeps_following_call_and_standalone_tearoffs_distinct() {
     let source = "class C { C? parent; void clear() {} void go(C c) {} }\n\
                   void f(C c) { c..clear()..parent!.go(c); c.go; c..go; }";
-    assert_eq!(reports(&UnnecessaryStatements, source), ["c.go", "..go"]);
+    assert_eq!(
+        reports("unnecessary-statements", &UnnecessaryStatements, source),
+        ["c.go", "..go"]
+    );
 }
 
 #[test]
 fn legacy_cases_and_wildcard_patterns_retain_parentheses() {
     assert_eq!(
         reports(
+            "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "// @dart=2.19\nvoid f(int x) { switch (x) { case (1): break; } }"
         ),
         ["(1)"]
     );
     assert_eq!(
-        reports(&UnnecessaryParenthesis, "void f() { var (_) = ('a'); }"),
+        reports(
+            "unnecessary-parenthesis",
+            &UnnecessaryParenthesis,
+            "void f() { var (_) = ('a'); }"
+        ),
         ["('a')"]
     );
 }
@@ -98,6 +113,7 @@ fn legacy_cases_and_wildcard_patterns_retain_parentheses() {
 fn extension_type_representation_formals_are_implicitly_final() {
     assert_eq!(
         reports(
+            "prefer-final-parameters",
             &PreferFinalParameters,
             "// @dart=3.12\nextension type E(int value) {\n\
              E.from(int input) : this(input);\n\
@@ -108,6 +124,7 @@ fn extension_type_representation_formals_are_implicitly_final() {
     );
     assert!(
         reports(
+            "prefer-final-parameters",
             &PreferFinalParameters,
             "// @dart=3.12\nextension type const E._((int, int) value) {}"
         )
@@ -115,6 +132,7 @@ fn extension_type_representation_formals_are_implicitly_final() {
     );
     assert!(
         reports(
+            "prefer-final-parameters",
             &PreferFinalParameters,
             "// @dart=3.13\nclass C(int value) { int plus(int amount) => amount; }"
         )
@@ -126,6 +144,7 @@ fn extension_type_representation_formals_are_implicitly_final() {
 fn wildcard_pattern_grouping_does_not_hide_expression_grouping() {
     assert_eq!(
         reports(
+            "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "int f(Object? value) => switch ((value)) { ((/* grouping */ _)) => (1) };"
         ),
@@ -133,6 +152,7 @@ fn wildcard_pattern_grouping_does_not_hide_expression_grouping() {
     );
     assert!(
         reports(
+            "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "void f(Object? value) { if (value case (_)) {} switch (value) { case (_): break; } }"
         )
@@ -148,7 +168,12 @@ fn legacy_typedefs_and_primary_constructors_reach_parameter_checks() {
         "// @dart=3.13\nclass C(int a, {required int b, int c = 0, required int d});",
     ] {
         assert_eq!(
-            reports(&AlwaysPutRequiredNamedParametersFirst, source).len(),
+            reports(
+                "always-put-required-named-parameters-first",
+                &AlwaysPutRequiredNamedParametersFirst,
+                source
+            )
+            .len(),
             1,
             "{source}"
         );
@@ -158,13 +183,22 @@ fn legacy_typedefs_and_primary_constructors_reach_parameter_checks() {
 #[test]
 fn primary_constructor_assertions_reach_constructor_checks() {
     let source = "// @dart=3.13\nclass C(final int value) { this : assert(value > 0); }";
-    assert_eq!(reports(&PreferAssertsWithMessage, source).len(), 1);
+    assert_eq!(
+        reports(
+            "prefer-asserts-with-message",
+            &PreferAssertsWithMessage,
+            source
+        )
+        .len(),
+        1
+    );
 }
 
 #[test]
 fn grouped_null_assertions_keep_their_nullable_context() {
     assert_eq!(
         reports(
+            "unnecessary-null-checks",
             &UnnecessaryNullChecks,
             "class C {} void take(C? value) {} void f(C? value) { take(((value!))); C? copy = ((value!)); }"
         ),
@@ -176,6 +210,7 @@ fn grouped_null_assertions_keep_their_nullable_context() {
 fn grouped_positional_null_assertions_keep_their_type_parameter_context() {
     assert_eq!(
         reports(
+            "null-check-on-nullable-type-parameter",
             &NullCheckOnNullableTypeParameter,
             "void g<T>(T value) {} void f<T>(T? value) { g<T>(((value!))); }"
         ),
@@ -198,7 +233,11 @@ void outer(Future<int> value) {
 Future<int> notReturned(Future<int> value) async => 1 + (await value);
 "#;
     assert_eq!(
-        reports(&UnnecessaryAwaitInReturn, source),
+        reports(
+            "unnecessary-await-in-return",
+            &UnnecessaryAwaitInReturn,
+            source
+        ),
         ["await", "await", "await", "await", "await"]
     );
 }
@@ -218,13 +257,17 @@ class Ordinary {
   Ordinary(int unused) {}
 }
 "#;
-    assert_eq!(reports(&AvoidUnusedParameters, source), ["unused"]);
+    assert_eq!(
+        reports("avoid-unused-parameters", &AvoidUnusedParameters, source),
+        ["unused"]
+    );
 }
 
 #[test]
 fn grouped_arrow_assertions_keep_their_nullable_context() {
     assert_eq!(
         reports(
+            "unnecessary-null-checks",
             &UnnecessaryNullChecks,
             "class C {} C? f(C? value) => ((value!));"
         ),
@@ -232,6 +275,7 @@ fn grouped_arrow_assertions_keep_their_nullable_context() {
     );
     assert_eq!(
         reports(
+            "null-check-on-nullable-type-parameter",
             &NullCheckOnNullableTypeParameter,
             "T? f<T>(T? value) => ((value!));"
         ),
@@ -265,7 +309,11 @@ void pattern<T>(T? value) {
     );
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
-    let diagnostics = NullCheckOnNullableTypeParameter.analyze(program, &context);
+    let diagnostics = NullCheckOnNullableTypeParameter.analyze(
+        NullCheckOnNullableTypeParameter::NAME,
+        program,
+        &context,
+    );
     let positions: Vec<_> = diagnostics
         .iter()
         .map(|diagnostic| {
@@ -286,6 +334,7 @@ void pattern<T>(T? value) {
 fn pattern_initializers_keep_non_expression_parent_exemptions() {
     assert!(
         reports(
+            "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "Future<void> f(int a, int b, Object value, Future<(int, int)> Function() fetch) async {\n\
              var (sum) = (a + b);\n\
@@ -307,7 +356,7 @@ fn cascade_result_invocations_reach_argument_checks() {
         "void f(dynamic target, int value) { target..factory()(nested(value, value)); }",
     ] {
         assert_eq!(
-            reports(&NoEqualArguments, source),
+            reports("no-equal-arguments", &NoEqualArguments, source),
             vec!["value"],
             "{source}"
         );
@@ -318,6 +367,7 @@ fn cascade_result_invocations_reach_argument_checks() {
 fn cascade_result_invocations_reach_grouped_arguments() {
     assert_eq!(
         reports(
+            "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "void f(dynamic target, int value) { target..factory()((value)); }",
         ),
@@ -329,6 +379,7 @@ fn cascade_result_invocations_reach_grouped_arguments() {
 fn cascade_result_invocations_reach_trailing_comma_checks() {
     assert_eq!(
         reports(
+            "prefer-trailing-comma",
             &PreferTrailingComma,
             "void f(dynamic target, int value) { target..factory()(\nvalue\n); }",
         ),
@@ -336,6 +387,7 @@ fn cascade_result_invocations_reach_trailing_comma_checks() {
     );
     assert!(
         reports(
+            "prefer-trailing-comma",
             &PreferTrailingComma,
             "void f(dynamic target, int value) { target..factory()(\nvalue,\n); }",
         )

@@ -6,19 +6,24 @@
 //! This module root holds the shared cross-file plumbing every rule needs:
 //! package/pubspec discovery, directive-URI resolution, and path normalization.
 
-pub mod banned_imports;
-pub mod depend_on_referenced_packages;
 #[cfg(test)]
 mod dependency_tests;
-pub mod no_import_cycles;
-pub mod package_names;
-pub mod secure_pubspec_urls;
-pub mod sort_pub_dependencies;
-pub mod undeclared_dependencies;
-pub mod unnecessary_nullable;
-pub mod unused_code;
-pub mod unused_dependencies;
-pub mod unused_files;
+
+use crate::meta::RuleSource;
+
+crate::declare_rules! {
+    unused_files::UnusedFiles => ("unused-files", cross_file, Correctness, false, RuleSource::DartCodeLinter("check-unused-files"));
+    unused_code::UnusedCode => ("unused-code", cross_file, Correctness, false, RuleSource::DartCodeLinter("check-unused-code"));
+    unnecessary_nullable::UnnecessaryNullable => ("unnecessary-nullable", resolved_cross_file, Correctness, false, RuleSource::DartCodeLinter("check-unnecessary-nullable"));
+    depend_on_referenced_packages::DependOnReferencedPackages => ("depend-on-referenced-packages", cross_file, Correctness, true, RuleSource::Lints("depend_on_referenced_packages"));
+    package_names::PackageNames => ("package-names", cross_file, Style, true, RuleSource::Lints("package_names"));
+    secure_pubspec_urls::SecurePubspecUrls => ("secure-pubspec-urls", cross_file, Security, true, RuleSource::Lints("secure_pubspec_urls"));
+    unused_dependencies::UnusedDependencies => ("unused-dependencies", cross_file, Correctness, false, RuleSource::Falcon);
+    undeclared_dependencies::UndeclaredDependencies => ("undeclared-dependencies", cross_file, Correctness, false, RuleSource::Falcon);
+    no_import_cycles::NoImportCycles => ("no-import-cycles", cross_file, Correctness, false, RuleSource::Falcon);
+    banned_imports::BannedImports => ("banned-imports", cross_file, Correctness, false, RuleSource::Falcon);
+    sort_pub_dependencies::SortPubDependencies => ("sort-pub-dependencies", cross_file, Correctness, false, RuleSource::Lints("sort_pub_dependencies"));
+}
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -509,7 +514,7 @@ use falcon_analyze::RuleAnalysis;
 /// `/* expect: <rule> */` annotations line by line. The in-process corpus runner
 /// only exercises top-level fixtures for non-resolving rules.
 #[cfg(test)]
-pub(crate) fn assert_project_fixture(rule_name: &str, rule: &dyn falcon_analyze::Rule) {
+pub(crate) fn assert_project_fixture(rule_name: &'static str, rule: &dyn falcon_analyze::Rule) {
     fn dart_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
@@ -553,14 +558,21 @@ pub(crate) fn assert_project_fixture(rule_name: &str, rule: &dyn falcon_analyze:
             .with_environment(Some(&environment));
         let line_of = |offset: usize| source[..offset].matches('\n').count() + 1;
         let diagnostics = if inference::requires_sdk(&path) {
-            inference::analyze(rule, &path, source, &config)
+            inference::analyze(rule_name, rule, &path, source, &config)
         } else {
-            rule.analyze(program, &ctx)
+            rule.analyze(rule_name, program, &ctx)
         };
         let mut actual: Vec<usize> = diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.rule == rule_name)
-            .map(|diagnostic| line_of(diagnostic.span.start))
+            .map(|diagnostic| {
+                assert_eq!(
+                    diagnostic.rule,
+                    rule_name,
+                    "diagnostic identity for {}",
+                    path.display()
+                );
+                line_of(diagnostic.span.start)
+            })
             .collect();
         actual.sort_unstable();
         let expected: Vec<usize> = source

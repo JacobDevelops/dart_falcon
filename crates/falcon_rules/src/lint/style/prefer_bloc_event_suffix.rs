@@ -14,7 +14,6 @@ impl Rule for PreferBlocEventSuffix {
             ctx,
             crate::lint::bloc::ModelKind::Event,
             crate::lint::bloc::ModelRequirement::Suffix,
-            "prefer-bloc-event-suffix",
         )
     }
 }

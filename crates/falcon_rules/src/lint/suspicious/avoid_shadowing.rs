@@ -113,11 +113,7 @@ impl<'a> Collector<'a> {
                 has_instance_member(&self.model, &self.signatures, receiver, name.name())
             });
         if declared || inherited {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-shadowing",
-                "This binding shadows an enclosing member. Rename the binding.",
-                name.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("This binding shadows an enclosing member. Rename the binding.", name.span()));
         }
     }
 }

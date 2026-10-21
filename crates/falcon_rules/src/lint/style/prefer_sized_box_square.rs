@@ -64,11 +64,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
         };
         if matches {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "prefer-sized-box-square",
-                "Use SizedBox.square when width and height are the same.",
-                crate::lint::flutter::constructor_span(node),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic("Use SizedBox.square when width and height are the same.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

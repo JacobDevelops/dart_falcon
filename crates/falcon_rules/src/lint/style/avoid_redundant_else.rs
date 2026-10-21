@@ -57,7 +57,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             if exits && !normalize(self.ctx, branch.then_branch().span())
                 .eq(normalize(self.ctx, otherwise.span())) {
                 self.diags.push(self.ctx.diagnostic(
-                    "avoid-redundant-else",
                     "This else is redundant after an exiting branch; move its body after the if.",
                     otherwise.span(),
                 ));

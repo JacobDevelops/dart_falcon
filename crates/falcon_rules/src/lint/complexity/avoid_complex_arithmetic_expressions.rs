@@ -20,7 +20,7 @@ impl Rule for AvoidComplexArithmeticExpressions {
             ctx,
             diags: Vec::new(),
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "avoid-complex-arithmetic-expressions"),
+                crate::lint::options::for_rule(ctx, AvoidComplexArithmeticExpressions::NAME),
                 "max_terms",
             )
             .unwrap_or(6),
@@ -95,11 +95,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if numeric && !connected {
             let count = operations(node, state) + 1;
             if count > self.threshold {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-complex-arithmetic-expressions",
-                    format!("Expression has {count} arithmetic terms (max {}). Extract intermediate values.", self.threshold),
-                    span,
-                ));
+                self.diags.push(self.ctx.diagnostic(format!("Expression has {count} arithmetic terms (max {}). Extract intermediate values.", self.threshold), span));
             }
         }
         let transparent = matches!(node, Expr::Paren(_) | Expr::Unary(_));

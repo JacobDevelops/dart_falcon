@@ -59,7 +59,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let TopLevelDecl::Function(function) = declaration
             && function.name().name() == "main"
         {
-            self.diags.push(self.ctx.diagnostic("prefer-correct-test-file-name", "Use the _test.dart suffix for a test entry-point file.", function.name().span()));
+            self.diags.push(self.ctx.diagnostic("Use the _test.dart suffix for a test entry-point file.", function.name().span()));
         }
         StructuralTraversal::SkipChildren
     }
@@ -116,7 +116,7 @@ mod tests {
             let config = falcon_config::FalconConfig::default();
             let path = root.join(path);
             let ctx = AnalyzeContext::new(&path, &config, &parsed);
-            let diagnostics = PreferCorrectTestFileName.analyze(parsed.program(), &ctx);
+            let diagnostics = PreferCorrectTestFileName.analyze(PreferCorrectTestFileName::NAME, parsed.program(), &ctx);
             assert_eq!(diagnostics.len(), expected, "{path:?}: {diagnostics:?}");
         }
     }

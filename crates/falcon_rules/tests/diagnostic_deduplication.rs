@@ -32,6 +32,7 @@ fn overlapping_primitive_checks_emit_one_report_per_span() {
     );
     let source = "void f(String s) { print(s.toString()); print('${s.toString()}'); }";
     let diagnostics = inference::analyze(
+        "noop-primitive-operations",
         &RegisteredRules(registry),
         Path::new("dedup.dart"),
         source,

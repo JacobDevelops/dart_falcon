@@ -17,7 +17,7 @@ impl Rule for AvoidNegatedConditions {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let ignore_null_checks = crate::lint::options::for_rule(ctx, "avoid-negated-conditions")
+        let ignore_null_checks = crate::lint::options::for_rule(ctx, AvoidNegatedConditions::NAME)
             .and_then(|options| options.get("ignore_null_checks"))
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
@@ -49,11 +49,7 @@ impl Collector<'_> {
             _ => false,
         };
         if negated {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-negated-conditions",
-                "Prefer a positive condition and swap the branches.",
-                condition.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic("Prefer a positive condition and swap the branches.", condition.span()));
         }
     }
 }

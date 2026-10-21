@@ -36,7 +36,6 @@ impl Rule for PreferSingleQuotes {
         RulePreparation::Structural(Box::new(QuoteVisitor::new(
             ctx,
             QuotePreference {
-                rule: "prefer-single-quotes",
                 message: "Unnecessary use of double quotes.",
                 preferred: b'\'',
             },
@@ -46,7 +45,6 @@ impl Rule for PreferSingleQuotes {
 
 /// The quote style a rule enforces; shared with `prefer-double-quotes`.
 pub(crate) struct QuotePreference {
-    pub(crate) rule: &'static str,
     pub(crate) message: &'static str,
     pub(crate) preferred: u8,
 }
@@ -104,7 +102,6 @@ impl<'a> StructuralRuleVisitor<'a> for QuoteVisitor<'a> {
                 continue;
             }
             self.diags.push(self.ctx.diagnostic(
-                self.preference.rule,
                 self.preference.message,
                 span,
             ));

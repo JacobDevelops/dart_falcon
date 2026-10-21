@@ -56,7 +56,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if redundant {
             self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unnecessary-negations",
                 "Simplify these unnecessary logical negations.",
                 node.span(),
             ));

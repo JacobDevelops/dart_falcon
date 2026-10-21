@@ -31,7 +31,7 @@ struct Collector<'a> {
 impl<'a> Collector<'a> {
     fn check(&mut self, subject: Expr<'a>, state: &SemanticState<'a>) {
         if constant_value(subject, state, self.ctx).is_some() {
-            self.diagnostics.push(self.ctx.diagnostic("avoid-constant-switches", "Switch subject is statically constant; replace the switch with the matching branch.", subject.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Switch subject is statically constant; replace the switch with the matching branch.", subject.span()));
         }
     }
 }

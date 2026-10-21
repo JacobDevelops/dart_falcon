@@ -36,11 +36,7 @@ impl<'a> Collector<'a> {
             } else {
                 "Assertion always fails; fix the condition or replace it with an explicit failure."
             };
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-constant-assert-conditions",
-                message,
-                condition.span(),
-            ));
+            self.diagnostics.push(self.ctx.diagnostic(message, condition.span()));
         }
     }
 }

@@ -22,7 +22,7 @@ impl Rule for MoveVariableCloserToItsUsage {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, "move-variable-closer-to-its-usage");
+        let options = crate::lint::options::for_rule(ctx, MoveVariableCloserToItsUsage::NAME);
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             references: local_declarations(program),
@@ -142,15 +142,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 uses.iter().all(|identifier| branch(identifier.syntax(), candidate.block) == Some(first))
             });
             let after_if = !self.ignore_after_if && can_move_after_if(candidate, uses);
-            (in_branch || after_if).then(|| self.ctx.diagnostic(
-                "move-variable-closer-to-its-usage",
-                if in_branch {
-                    "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
-                } else {
-                    "This variable is only used after an intervening if. Move its declaration after the if, closer to its uses."
-                },
-                candidate.span,
-            ))
+            (in_branch || after_if).then(|| self.ctx.diagnostic(if in_branch {
+                "This variable is used in only one branch. Move its declaration into that branch, closer to its uses."
+            } else {
+                "This variable is only used after an intervening if. Move its declaration after the if, closer to its uses."
+            }, candidate.span))
         }).collect()
     }
 }

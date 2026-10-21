@@ -56,7 +56,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         && crate::lint::expressions::equivalent(inside.unparenthesized(), after.unparenthesized(), self.ctx)
                     {
                         self.diags.push(self.ctx.diagnostic(
-                            "avoid-unnecessary-if",
                             "This branch returns the same value as the following return; check or remove the redundant branch.",
                             branch.span(),
                         ));

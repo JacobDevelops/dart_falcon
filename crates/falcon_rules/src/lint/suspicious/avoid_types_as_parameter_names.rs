@@ -93,11 +93,7 @@ impl<'a> Collector<'a> {
             if self.resolves_to_library_type(param.name().name())
                 || (!method && self.type_names.contains(&param.name().name()))
             {
-                self.diags.push(self.ctx.diagnostic(
-                    "avoid-types-as-parameter-names",
-                    "Avoid using an existing type as a type parameter name.",
-                    param.name().span(),
-                ));
+                self.diags.push(self.ctx.diagnostic("Avoid using an existing type as a type parameter name.", param.name().span()));
             }
         }
         self.type_names.extend(
@@ -186,7 +182,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && self.resolves_to_type(name.name())
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "avoid-types-as-parameter-names",
                         "Avoid using an existing type as a parameter name.",
                         name.span(),
                     ));
@@ -223,7 +218,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && self.resolves_to_type(node.name().name())
         {
             self.diags.push(self.ctx.diagnostic(
-                "avoid-types-as-parameter-names",
                 "Avoid using an existing type as a parameter name.",
                 node.name().span(),
             ));

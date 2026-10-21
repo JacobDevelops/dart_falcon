@@ -37,7 +37,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && is_loop_tail(node)
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-unnecessary-continue",
                 "Remove this trailing continue; the loop already advances here.",
                 statement.span(),
             ));

@@ -157,14 +157,10 @@ impl<'a> Collector<'a> {
         else {
             return;
         };
-        self.diags.push(self.ctx.diagnostic(
-            "unnecessary-null-aware-operator-on-extension-on-nullable",
-            "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.",
-            DiagSpan {
-                start: token.offset(),
-                end: token.offset() + len,
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.", DiagSpan {
+            start: token.offset(),
+            end: token.offset() + len,
+        }));
     }
 
     /// Reports the `?..` or `..` operator opening the cascade section at `start`.
@@ -184,14 +180,10 @@ impl<'a> Collector<'a> {
         else {
             return;
         };
-        self.diags.push(self.ctx.diagnostic(
-            "unnecessary-null-aware-operator-on-extension-on-nullable",
-            "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.",
-            DiagSpan {
-                start: token.offset(),
-                end: token.offset() + token.len(),
-            },
-        ));
+        self.diags.push(self.ctx.diagnostic("Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.", DiagSpan {
+            start: token.offset(),
+            end: token.offset() + token.len(),
+        }));
     }
 
     fn is_assigned(&self, span: &Span) -> bool {

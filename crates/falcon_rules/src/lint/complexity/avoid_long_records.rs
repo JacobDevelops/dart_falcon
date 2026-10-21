@@ -20,7 +20,7 @@ impl Rule for AvoidLongRecords {
             ctx,
             diags: Vec::new(),
             threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, "avoid-long-records"),
+                crate::lint::options::for_rule(ctx, AvoidLongRecords::NAME),
                 "max_fields",
             )
             .unwrap_or(6),
@@ -35,14 +35,10 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, count: usize, span: Span) {
         if count > self.threshold {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-long-records",
-                format!(
-                    "Record has {count} fields (max {}). Replace it with a named class.",
-                    self.threshold
-                ),
-                span,
-            ));
+            self.diags.push(self.ctx.diagnostic(format!(
+                "Record has {count} fields (max {}). Replace it with a named class.",
+                self.threshold
+            ), span));
         }
     }
 }

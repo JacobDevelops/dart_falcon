@@ -103,7 +103,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && !checks.rebound
         {
             self.diags.extend(checks.spans.into_iter().map(|span| {
-                self.ctx.diagnostic("avoid-null-checks-in-equality-operators", MESSAGE, span)
+                self.ctx.diagnostic(MESSAGE, span)
             }));
         }
     }
@@ -219,7 +219,7 @@ mod tests {
         let program = parsed.tree.program(source);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-        let diagnostics = AvoidNullChecksInEqualityOperators.analyze(program, &ctx);
+        let diagnostics = AvoidNullChecksInEqualityOperators.analyze(AvoidNullChecksInEqualityOperators::NAME, program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

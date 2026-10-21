@@ -16,6 +16,7 @@ use falcon_analyze::{
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
 use falcon_rules::all_rules;
+use falcon_rules::lint::correctness::discarded_futures::DiscardedFutures;
 
 use inference::{assert_diagnostics, assert_lints};
 
@@ -187,6 +188,7 @@ void f(C c, C c2, C? n, bool b, Gen g) {
         .1;
     for (source, expected) in cases {
         let diagnostics = inference::analyze(
+            "omit-local-variable-types",
             rule.as_ref(),
             Path::new("historical_callable_contexts.dart"),
             source,
@@ -226,6 +228,7 @@ void locals() {
         .unwrap()
         .1;
     let diagnostics = inference::analyze(
+        "prefer-const-declarations",
         rule.as_ref(),
         Path::new("historical_const_span.dart"),
         source,
@@ -395,7 +398,7 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
         .with_types(&types)
         .with_identities(&identities)
         .with_signatures(&signatures);
-    let diagnostics = rule.analyze(parsed[0].program(), &context);
+    let diagnostics = rule.analyze(rule_name, parsed[0].program(), &context);
     assert_diagnostics(inputs[0].1, rule_name, &diagnostics, 4);
 }
 
@@ -490,6 +493,7 @@ Future<void> use(Receiver receiver, (Future<void> Function(),) record) async {
         .unwrap()
         .1;
     let diagnostics = inference::analyze(
+        "unawaited-futures",
         rule.as_ref(),
         Path::new("future_spans.dart"),
         source,
@@ -546,7 +550,13 @@ Future<void> use() async {
         .find(|(name, _)| *name == "unawaited-futures")
         .unwrap()
         .1;
-    let diagnostics = inference::analyze(rule.as_ref(), &path, source, &FalconConfig::default());
+    let diagnostics = inference::analyze(
+        "unawaited-futures",
+        rule.as_ref(),
+        &path,
+        source,
+        &FalconConfig::default(),
+    );
     let actual: Vec<_> = diagnostics
         .iter()
         .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
@@ -591,10 +601,11 @@ void use(Holder holder) {
     let rules = all_rules();
     let rule = &rules
         .iter()
-        .find(|(name, _)| *name == "discarded-futures")
+        .find(|(name, _)| *name == DiscardedFutures::NAME)
         .unwrap()
         .1;
     let diagnostics = inference::analyze(
+        DiscardedFutures::NAME,
         rule.as_ref(),
         Path::new("main.dart"),
         source,
