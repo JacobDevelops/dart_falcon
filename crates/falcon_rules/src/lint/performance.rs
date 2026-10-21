@@ -27,7 +27,7 @@ crate::declare_rules! {
     use_is_even_rather_than_modulo::UseIsEvenRatherThanModulo => ("use-is-even-rather-than-modulo", resolved, None, false, RuleSource::Lints("use_is_even_rather_than_modulo"));
     use_string_buffers::UseStringBuffers => ("use-string-buffers", resolved, None, true, RuleSource::Lints("use_string_buffers"));
     avoid_unnecessary_collections::AvoidUnnecessaryCollections => ("avoid-unnecessary-collections", resolved, None, false, RuleSource::Falcon);
-    move_variable_closer_to_its_usage::MoveVariableCloserToItsUsage => ("move-variable-closer-to-its-usage", resolved, None, false, RuleSource::Falcon);
+    move_variable_closer_to_its_usage::MoveVariableCloserToItsUsage => ("move-variable-closer-to-its-usage", resolved, None, false, RuleSource::Falcon, options = move_variable_closer_to_its_usage::Options);
     avoid_unnecessary_futures::AvoidUnnecessaryFutures => ("avoid-unnecessary-futures", resolved, None, false, RuleSource::Falcon);
     prefer_return_await::PreferReturnAwait => ("prefer-return-await", resolved, None, false, RuleSource::Falcon);
 }

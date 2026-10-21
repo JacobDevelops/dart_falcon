@@ -85,6 +85,295 @@ fn every_rule_option_schema_property_has_a_description() {
 }
 
 #[test]
+fn every_options_type_is_declared_and_loaded_options_execute() {
+    use falcon_analyze::{Workspace, analyze_sequential_collecting_resolving};
+    use serde_json::json;
+
+    let schemas = falcon_rules::schema::rule_options_schemas();
+    let names: HashSet<_> = schemas.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names.len(), schemas.len());
+    let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let option_modules: HashSet<_> = walkdir::WalkDir::new(source_root)
+        .into_iter()
+        .map(Result::unwrap)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "rs")
+        })
+        .filter(|entry| {
+            std::fs::read_to_string(entry.path())
+                .unwrap()
+                .contains("impl_options!(Options)")
+        })
+        .map(|entry| {
+            entry
+                .path()
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace('_', "-")
+        })
+        .collect();
+    assert_eq!(names, option_modules.iter().map(String::as_str).collect());
+
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("falcon.json");
+    let mut value = json!({
+        "linter": {"rules": {"recommended": false}},
+        "cross-file": {"rules": {"recommended": false}}
+    });
+    for name in names {
+        let metadata = meta_for(name).expect("options-bearing rule is registered");
+        let section = if metadata.is_cross_file() {
+            "cross-file"
+        } else {
+            "linter"
+        };
+        let groups = value[section]["rules"].as_object_mut().unwrap();
+        let group = groups
+            .entry(metadata.group.as_str())
+            .or_insert_with(|| json!({}));
+        group[name] = json!({"level": "warn", "options": {}});
+    }
+    std::fs::write(&config_path, serde_json::to_string(&value).unwrap()).unwrap();
+    let loaded = falcon_rules::load_config(&config_path).unwrap();
+    let registry = falcon_rules::build_registry(&loaded.config);
+    let files = [(
+        directory.path().join("main.dart"),
+        "class Probe { int value = 1; }\nvoid main() { print(1); }\n".to_owned(),
+    )];
+    let (diagnostics, files, indexes) = analyze_sequential_collecting_resolving(
+        &registry,
+        &files,
+        &loaded.config,
+        true,
+        true,
+        Workspace::default(),
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule != "config")
+    );
+    let registry = falcon_rules::build_cross_file_registry(&loaded.config);
+    let diagnostics =
+        falcon_rules::run_cross_file(&registry, &files, &loaded.config, indexes.as_ref()).unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule != "config")
+    );
+}
+
+#[test]
+fn invalid_unloaded_options_report_config_errors_instead_of_panicking() {
+    use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
+    use serde_json::json;
+
+    let config = serde_json::from_value(json!({
+        "linter": {"rules": {"complexity": {"max-lines-for-file": {
+            "level": "warn", "options": {"max-lines": "bad"}
+        }}}}
+    }))
+    .unwrap();
+    let source = "void main() {}";
+    let parsed = std::sync::Arc::new(ParsedFile {
+        source: source.into(),
+        tree: falcon_dart_parser::parser::parse(source).tree,
+    });
+    let path = std::path::Path::new("main.dart");
+    let context = AnalyzeContext::new(path, &config, &parsed);
+    let falcon_rules::meta::RuleKind::File { make, .. } =
+        meta_for("max-lines-for-file").unwrap().kind
+    else {
+        unreachable!()
+    };
+    let diagnostics = make().analyze("max-lines-for-file", parsed.program(), &context);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "config");
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("linter.rules.complexity.max-lines-for-file.options.max-lines")
+    );
+    let registry = falcon_rules::build_registry(&config);
+    let diagnostics = registry.run_all(parsed.program(), &context);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "config");
+}
+
+#[test]
+fn repeated_lazy_option_errors_are_reported_once_with_their_origin() {
+    use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
+    use serde_json::json;
+
+    let source = concat!(
+        "void first(bool flag) { if (flag) {} }\n",
+        "void second(bool flag) { if (flag) {} }\n",
+        "void third(bool flag) { if (flag) {} }\n",
+        "void fourth(bool flag) { if (flag) {} }\n",
+        "void fifth(bool flag) { if (flag) {} }\n",
+    );
+    let parsed = std::sync::Arc::new(ParsedFile {
+        source: source.into(),
+        tree: falcon_dart_parser::parser::parse(source).tree,
+    });
+    let path = std::path::Path::new("lib/main.dart");
+    let falcon_rules::meta::RuleKind::File { make, .. } =
+        meta_for("cyclomatic-complexity").unwrap().kind
+    else {
+        unreachable!()
+    };
+    for in_override in [false, true] {
+        let mut value = json!({
+            "linter": {"rules": {
+                "recommended": false,
+                "complexity": {"cyclomatic-complexity": {
+                    "level": "warn", "options": {"max-complexity": 0}
+                }}
+            }}
+        });
+        let invalid = json!({
+            "level": "warn", "options": {"max-complexity": "bad"}
+        });
+        if in_override {
+            value["overrides"] = json!([{
+                "includes": ["lib/**"],
+                "linter": {"rules": {"complexity": {"cyclomatic-complexity": invalid}}}
+            }]);
+        } else {
+            value["linter"]["rules"]["complexity"]["cyclomatic-complexity"] = invalid;
+        }
+        let config = serde_json::from_value(value).unwrap();
+        let prefix = if in_override { "overrides[0]." } else { "" };
+        let expected = format!(
+            "`{prefix}linter.rules.complexity.cyclomatic-complexity.options.max-complexity`"
+        );
+        for direct in [true, false] {
+            let context = AnalyzeContext::new(path, &config, &parsed);
+            let diagnostics = if direct {
+                make().analyze("cyclomatic-complexity", parsed.program(), &context)
+            } else {
+                falcon_rules::build_registry(&config).run_all(parsed.program(), &context)
+            };
+            assert_eq!(
+                diagnostics.len(),
+                1,
+                "{in_override}, {direct}: {diagnostics:?}"
+            );
+            let diagnostic = &diagnostics[0];
+            assert_eq!(diagnostic.rule, "config");
+            assert_eq!(diagnostic.severity, falcon_diagnostics::Severity::Error);
+            assert!(diagnostic.message.contains(&expected), "{diagnostic:?}");
+            assert_eq!(diagnostic.file_path, "lib/main.dart");
+        }
+    }
+}
+
+#[test]
+fn cross_file_lazy_option_errors_report_base_and_override_origins() {
+    use falcon_analyze::{ParsedFile, ProjectFile};
+    use serde_json::json;
+
+    let source = "import 'dart:async';\nvoid main() {}\n";
+    let files = [ProjectFile {
+        path: "lib/main.dart".into(),
+        parsed: std::sync::Arc::new(ParsedFile {
+            source: source.into(),
+            tree: falcon_dart_parser::parser::parse(source).tree,
+        }),
+        has_parse_errors: false,
+    }];
+    for in_override in [false, true] {
+        let mut value = json!({
+            "cross-file": {"rules": {
+                "recommended": false,
+                "correctness": {"banned-imports": {
+                    "level": "warn", "options": {"rules": []}
+                }}
+            }}
+        });
+        let invalid = json!({
+            "level": "warn",
+            "options": {"rules": [{
+                "files": ["lib/**"], "deny": ["dart:async", 42], "message": "Avoid async."
+            }]}
+        });
+        if in_override {
+            value["overrides"] = json!([{
+                "includes": ["lib/**"],
+                "cross-file": {"rules": {"correctness": {"banned-imports": invalid}}}
+            }]);
+        } else {
+            value["cross-file"]["rules"]["correctness"]["banned-imports"] = invalid;
+        }
+        let config = serde_json::from_value(value).unwrap();
+        let registry = falcon_rules::build_cross_file_registry(&config);
+        let diagnostics = falcon_rules::run_cross_file(&registry, &files, &config, None).unwrap();
+        assert_eq!(diagnostics.len(), 1, "{in_override}: {diagnostics:?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.rule, "config");
+        assert_eq!(diagnostic.severity, falcon_diagnostics::Severity::Error);
+        assert_eq!(diagnostic.file_path, "lib/main.dart");
+        assert_eq!(
+            diagnostic.span,
+            falcon_diagnostics::Span { start: 0, end: 0 }
+        );
+        let prefix = if in_override { "overrides[0]." } else { "" };
+        let expected = format!(
+            "`{prefix}cross-file.rules.correctness.banned-imports.options.rules[0].deny[1]`"
+        );
+        assert!(diagnostic.message.contains(&expected), "{diagnostic:?}");
+    }
+}
+
+#[test]
+fn rule_sections_reference_shared_options_definitions() {
+    let schema = falcon_rules::schema::config_schema();
+    let exceptions = &schema["definitions"]["prefer-correct-identifier-length"]["oneOf"][1]["properties"]
+        ["options"]["properties"]["exceptions"];
+    assert_eq!(exceptions["type"], "array");
+    assert!(exceptions.get("uniqueItems").is_none());
+    let names: HashSet<_> = falcon_rules::schema::rule_options_schemas()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    for metadata in RULE_METADATA {
+        let definition = if names.contains(metadata.name) {
+            metadata.name
+        } else {
+            "ruleWithoutOptions"
+        };
+        let expected = format!("#/definitions/{definition}");
+        let section = if metadata.is_cross_file() {
+            "cross-file"
+        } else {
+            "linter"
+        };
+        assert_eq!(
+            schema["properties"][section]["properties"]["rules"]["properties"]
+                [metadata.group.as_str()]["properties"][metadata.name]["$ref"],
+            expected
+        );
+        let section = if metadata.is_cross_file() {
+            "overrideCrossFile"
+        } else {
+            "overrideLinter"
+        };
+        assert_eq!(
+            schema["definitions"][section]["properties"]["rules"]["properties"]
+                [metadata.group.as_str()]["properties"][metadata.name]["$ref"],
+            expected
+        );
+        assert!(schema["definitions"].get(definition).is_some());
+    }
+}
+
+#[test]
 fn rule_named_changesets_mention_rule_ids() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.changeset");
     let entries = match std::fs::read_dir(&directory) {
@@ -828,7 +1117,7 @@ fn typed_and_json_canonicalization_share_severity_options_and_tie_policy() {
                     "linter": { "rules": { "suspicious": entries } }
                 }))
                 .unwrap();
-                let json_warnings = canonicalize_rule_map(&mut entries);
+                let json_warnings = canonicalize_rule_map(&mut entries, "linter.rules.suspicious");
                 let typed_warnings = canonicalize_config(&mut typed);
                 assert_eq!(json_warnings.len(), 2);
                 assert_eq!(typed_warnings.len(), 2);
@@ -847,7 +1136,7 @@ fn typed_and_json_canonicalization_share_severity_options_and_tie_policy() {
                     serde_json::Value::Object(entries.clone()),
                     "{alias_level}/{canonical_level}, alias first: {alias_first}"
                 );
-                assert!(canonicalize_rule_map(&mut entries).is_empty());
+                assert!(canonicalize_rule_map(&mut entries, "linter.rules.suspicious").is_empty());
             }
         }
     }

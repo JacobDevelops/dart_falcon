@@ -163,6 +163,10 @@ impl RuleRegistry {
         }
         // Append after filtering so malformed suppressions cannot suppress themselves.
         diagnostics.extend(suppressions.into_diagnostics());
+        let config_errors = ctx.take_config_errors();
+        if !config_errors.is_empty() {
+            return config_errors;
+        }
         diagnostics.sort_by(|left, right| {
             left.rule
                 .cmp(right.rule)

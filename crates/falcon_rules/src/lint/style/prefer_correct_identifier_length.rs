@@ -38,6 +38,7 @@ pub(crate) struct Options {
     /// Longest permitted identifier length, excluding one leading privacy underscore.
     max_length: usize,
     /// Identifier names exempt from length checks, compared after removing one leading privacy underscore.
+    #[schemars(with = "Vec<String>")]
     exceptions: HashSet<String>,
 }
 

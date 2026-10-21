@@ -9,17 +9,17 @@ use falcon_config::{FalconConfig, RulePlainConfiguration, Rules};
 use crate::{cross_file, lint};
 
 macro_rules! declare_rules {
-    ($group:ident; $($module:ident::$rule:ident => ($name:literal, $kind:ident, $domain:expr, $recommended:literal, $source:expr);)*) => {
+    ($group:ident; $($module:ident::$rule:ident => ($name:literal, $kind:ident, $domain:expr, $recommended:literal, $source:expr $(, options = $options:ty)?);)*) => {
         $crate::declare_rules! {
-            $($module::$rule => ($name, $kind, $group, $domain, $recommended, $source);)*
+            $($module::$rule => ($name, $kind, $group, $domain, $recommended, $source $(, options = $options)?);)*
         }
     };
-    ($($module:ident::$rule:ident => ($name:literal, $kind:ident, $group:ident, $recommended:literal, $source:expr);)*) => {
+    ($($module:ident::$rule:ident => ($name:literal, $kind:ident, $group:ident, $recommended:literal, $source:expr $(, options = $options:ty)?);)*) => {
         $crate::declare_rules! {
-            $($module::$rule => ($name, $kind, $group, None, $recommended, $source);)*
+            $($module::$rule => ($name, $kind, $group, None, $recommended, $source $(, options = $options)?);)*
         }
     };
-    ($($module:ident::$rule:ident => ($name:literal, $kind:ident, $group:ident, $domain:expr, $recommended:literal, $source:expr);)*) => {
+    ($($module:ident::$rule:ident => ($name:literal, $kind:ident, $group:ident, $domain:expr, $recommended:literal, $source:expr $(, options = $options:ty)?);)*) => {
         $(
             pub mod $module;
             impl $module::$rule {
@@ -27,9 +27,13 @@ macro_rules! declare_rules {
             }
         )*
         pub(crate) const METADATA: &[$crate::meta::RuleMeta] = &[
-            $( $crate::declare_rules!(@meta $kind, $module::$rule, $group, $domain, $recommended, $source), )*
+            $( $crate::declare_rules!(@meta $kind, $module::$rule, $group, $domain, $recommended, $source).with_options($crate::declare_rules!(@options $($options)?)), )*
         ];
     };
+    (@options $options:ty) => {
+        Some($crate::lint::options::OptionDefinition::new::<$options>())
+    };
+    (@options) => { None };
     (@meta cross_file, $rule:path, $group:ident, $domain:expr, $recommended:literal, $source:expr) => {
         $crate::meta::RuleMeta::cross_file::<$rule>(<$rule>::NAME, $crate::meta::RuleGroup::$group, $recommended, $source)
     };
@@ -126,6 +130,7 @@ pub struct RuleMeta {
     /// Upstream provenance (biome-style): which linter the rule was ported from,
     /// or `Falcon` for original rules.
     pub source: RuleSource,
+    pub(crate) options: Option<crate::lint::options::OptionDefinition>,
 }
 
 impl RuleMeta {
@@ -142,6 +147,7 @@ impl RuleMeta {
             domain,
             recommended,
             source,
+            options: None,
             kind: RuleKind::File {
                 make: make_rule::<T>,
                 needs_resolution: false,
@@ -176,6 +182,7 @@ impl RuleMeta {
             domain: None,
             recommended,
             source,
+            options: None,
             kind: RuleKind::CrossFile {
                 make: make_cross_file_rule::<T>,
                 needs_resolution: false,
@@ -195,6 +202,13 @@ impl RuleMeta {
             needs_resolution: true,
         };
         meta
+    }
+    pub(crate) const fn with_options(
+        mut self,
+        options: Option<crate::lint::options::OptionDefinition>,
+    ) -> Self {
+        self.options = options;
+        self
     }
 
     pub fn domain_names(&self) -> &'static [&'static str] {
@@ -417,6 +431,7 @@ fn canonicalize_rules(rules: &mut Rules, path: &str, warnings: &mut Vec<String>)
             if let falcon_config::RuleConfiguration::WithOptions { options, .. } = configuration {
                 warnings.extend(crate::canonicalize_option_keys(
                     options.value_mut(),
+                    name,
                     &format!("{path}.{group}.{name}.options"),
                 ));
             }
@@ -429,10 +444,12 @@ fn canonicalize_rules(rules: &mut Rules, path: &str, warnings: &mut Vec<String>)
 /// The first occurrence determines the key's position. Highest severity wins;
 /// canonical names win ties, then the first alias in [`RULE_ALIASES`] wins.
 /// Unknown names and their values are preserved.
+/// `path` is the enclosing section and group, used in every warning.
 pub fn canonicalize_rule_map(
     entries: &mut serde_json::Map<String, serde_json::Value>,
+    path: &str,
 ) -> Vec<String> {
-    let (canonical, warnings) = canonicalize_rule_entries(std::mem::take(entries));
+    let (canonical, warnings) = canonicalize_rule_entries(std::mem::take(entries), path);
     *entries = canonical;
     warnings
 }
@@ -441,8 +458,10 @@ pub fn canonicalize_rule_map(
 ///
 /// Uses the same severity, canonical-name tie priority, and insertion ordering
 /// as [`canonicalize_rule_map`].
+/// `path` is the enclosing section and group, used in every warning.
 pub fn canonicalize_rule_entries(
     entries: impl IntoIterator<Item = (String, serde_json::Value)>,
+    path: &str,
 ) -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
     let mut warnings = Vec::new();
     let canonical = canonicalize_entries(
@@ -456,13 +475,13 @@ pub fn canonicalize_rule_entries(
                 .map(rule_level_rank)
                 .unwrap_or(0)
         },
-        "",
+        path,
         &mut warnings,
     );
     (canonical.into_iter().collect(), warnings)
 }
 
-fn canonicalize_entries<T: std::fmt::Debug>(
+fn canonicalize_entries<T: serde::Serialize>(
     entries: impl IntoIterator<Item = (String, T)>,
     rank: impl Fn(&T) -> u8,
     path: &str,
@@ -483,7 +502,7 @@ fn canonicalize_entries<T: std::fmt::Debug>(
                 format!("{path}.{name}")
             };
             warnings.push(format!(
-                "deprecated rule key `{key_path}`; use `{canonical}` — \
+                "deprecated rule key `{key_path}`; use `{canonical}`; \
                  run `falcon migrate` to update"
             ));
         }
@@ -503,8 +522,10 @@ fn canonicalize_entries<T: std::fmt::Debug>(
             } else {
                 format!("{path}.{canonical}")
             };
+            let discarded =
+                serde_json::to_string(discarded).expect("rule configurations serialize as JSON");
             warnings.push(format!(
-                "duplicate rule key `{key_path}`: discarded configuration {discarded:?}; \
+                "duplicate rule key `{key_path}`: discarded configuration {discarded}; \
                  highest severity wins, then canonical names, then legacy alias priority"
             ));
             if priority > priorities[index] {

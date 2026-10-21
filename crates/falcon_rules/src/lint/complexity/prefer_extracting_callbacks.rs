@@ -21,7 +21,7 @@ pub struct PreferExtractingCallbacks;
 #[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Options {
-    /// Callback body line threshold; `None` disables the length filter.
+    /// Callback body line threshold; unset disables the length filter.
     allowed_line_count: Option<usize>,
     /// Named widget-constructor arguments whose callbacks are ignored.
     ignored_named_arguments: Vec<String>,

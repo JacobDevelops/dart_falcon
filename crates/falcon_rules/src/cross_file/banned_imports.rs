@@ -26,12 +26,10 @@ use std::path::{Path, PathBuf};
 use falcon_analyze::{CrossFileRule, PackageIdentity, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
+use falcon_syntax::cst::Span;
 use glob::MatchOptions;
 
-use crate::lint::options;
-use crate::lint::suspicious::avoid_banned_names::{
-    Glob, nonblank_message, nonempty_patterns,
-};
+use crate::lint::options::{self, Glob, nonblank_message, nonempty_patterns};
 
 use super::{ResolvedRef, canonical_or_lexical, enclosing_pubspec, resolve_directive_uri};
 
@@ -80,7 +78,19 @@ impl CrossFileRule for BannedImports {
         let mut diagnostics = Vec::new();
         for file in files {
             let file_path = file.path.to_string_lossy();
-            let boundaries = &options::cross_file::<Options>(config, &file_path, Self::NAME).rules;
+            let boundaries = match options::cross_file::<Options>(config, &file_path, Self::NAME) {
+                Ok(options) => &options.rules,
+                Err(error) => {
+                    diagnostics.push(Diagnostic::new(
+                        "config",
+                        Severity::Error,
+                        error.to_string(),
+                        file_path.as_ref(),
+                        Span::new(0, 0),
+                    ));
+                    continue;
+                }
+            };
             if boundaries.is_empty() {
                 continue;
             }
@@ -162,22 +172,6 @@ fn package_relative(path: &Path, root: &Path, package: &PackageIdentity) -> Opti
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn malformed_entries_are_rejected() {
-        for entry in [
-            json!({"deny": ["*"], "message": "blocked"}),
-            json!({"files": [], "deny": ["*"], "message": "blocked"}),
-            json!({"files": ["**", null], "deny": ["*"], "message": "blocked"}),
-            json!({"files": ["**"], "deny": ["*", false], "message": "blocked"}),
-            json!({"files": ["["], "deny": ["*"], "message": "blocked"}),
-            json!({"files": ["**"], "deny": ["["], "message": "blocked"}),
-            json!({"files": ["**"], "deny": [""], "message": "blocked"}),
-            json!({"files": ["**"], "deny": ["*"], "message": " "}),
-        ] {
-            assert!(serde_json::from_value::<Options>(json!({"rules": [entry]})).is_err());
-        }
-    }
 
     #[test]
     fn globs_respect_case_and_directory_boundaries() {

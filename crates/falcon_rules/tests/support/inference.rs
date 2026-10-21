@@ -202,16 +202,18 @@ mod config_tests {
         let projected = config_for_source_file(&original, &root.join("bad.dart"));
         assert_eq!(projected.overrides.len(), 2);
         assert_eq!(
-            projected.rule_options_for(
-                &staged_path.to_string_lossy(),
-                "performance",
-                "move-variable-closer-to-its-usage",
-            ),
+            projected
+                .rule_options_data_for(
+                    &staged_path.to_string_lossy(),
+                    "performance",
+                    "move-variable-closer-to-its-usage",
+                )
+                .map(falcon_config::RuleOptions::value),
             Some(&json!({ "ignore_after_if": false })),
         );
         assert!(
             original
-                .rule_options_for(
+                .rule_options_data_for(
                     &staged_path.to_string_lossy(),
                     "performance",
                     "move-variable-closer-to-its-usage",

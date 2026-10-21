@@ -117,7 +117,9 @@ impl<T: CrossFileRule + ?Sized> CrossFileRuleAnalysis for T {
     ) -> Vec<Diagnostic> {
         let mut diagnostics = self.prepare_project(files, config, indexes);
         for diagnostic in &mut diagnostics {
-            diagnostic.rule = name;
+            if diagnostic.rule != "config" {
+                diagnostic.rule = name;
+            }
         }
         diagnostics
     }

@@ -8,8 +8,9 @@
 //! (see [`CrossFileConfig::resolve_rule`]).
 
 use glob::Pattern;
-use serde::de::{self, MapAccess, Visitor};
+use serde::de::{self, DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -56,7 +57,7 @@ pub struct Override {
     /// Partial linter (file-rule) configuration applied to matching files. Rule
     /// levels, per-rule `options`, and an optional `enabled` master switch are
     /// honored. Options replace the base rule's options for matching files (see
-    /// [`FalconConfig::rule_options_for`]).
+    /// [`FalconConfig::rule_options_data_for`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linter: Option<OverrideRules>,
     /// Partial cross-file rule configuration applied to matching files. Same
@@ -569,15 +570,6 @@ pub struct RuleOptions {
     parsed: OnceLock<Arc<dyn Any + Send + Sync>>,
 }
 
-impl From<serde_json::Value> for RuleOptions {
-    fn from(value: serde_json::Value) -> Self {
-        Self {
-            value,
-            parsed: OnceLock::new(),
-        }
-    }
-}
-
 impl RuleOptions {
     /// The original JSON options.
     pub fn value(&self) -> &serde_json::Value {
@@ -595,7 +587,7 @@ impl RuleOptions {
     /// # Panics
     ///
     /// Panics if this wrapper was already initialized with a different type.
-    pub fn get_or_init<T: Any + Send + Sync>(
+    fn get_or_init<T: Any + Send + Sync>(
         &self,
         initializer: impl FnOnce(&serde_json::Value) -> T,
     ) -> &T {
@@ -605,30 +597,16 @@ impl RuleOptions {
             .expect("rule options initialized with a different parsed type")
     }
 
-    /// Initialize parsed data after successful validation, leaving errors uncached.
-    ///
-    /// Concurrent first accesses may run more than one initializer; the first
-    /// successful value stored is shared by all callers.
+    /// Initialize parsed data or a validation error once, sharing either result.
     ///
     /// # Panics
     ///
     /// Panics if this wrapper was already initialized with a different type.
-    pub fn get_or_try_init<T: Any + Send + Sync, E>(
+    pub fn get_or_try_init<T: Any + Send + Sync, E: Any + Send + Sync>(
         &self,
         initializer: impl FnOnce(&serde_json::Value) -> Result<T, E>,
-    ) -> Result<&T, E> {
-        let parsed = if let Some(parsed) = self.parsed.get() {
-            parsed
-        } else {
-            let value = initializer(&self.value)?;
-            let _ = self.parsed.set(Arc::new(value));
-            self.parsed
-                .get()
-                .expect("successful rule options initialization must populate the cache")
-        };
-        Ok(parsed
-            .downcast_ref()
-            .expect("rule options initialized with a different parsed type"))
+    ) -> Result<&T, &E> {
+        self.get_or_init(initializer).as_ref()
     }
 }
 
@@ -656,12 +634,6 @@ impl RuleConfiguration {
             RuleConfiguration::Plain(level) => *level,
             RuleConfiguration::WithOptions { level, .. } => *level,
         }
-    }
-
-    /// The configured options, or `None` if absent. The options-less
-    /// `{ "level": "warn" }` form normalizes to `None`, matching the plain form.
-    pub fn options(&self) -> Option<&serde_json::Value> {
-        self.options_data().map(RuleOptions::value)
     }
 
     /// The configured options and parsed cache, or `None` if absent or null.
@@ -782,43 +754,12 @@ impl FalconConfig {
         self.linter.resolve_rule(group, name, recommended, domains)
     }
 
-    /// Return `rule_name`'s base (non-path-scoped) options if it is configured
-    /// under `group` with the `WithOptions` form. Scoped to the rule's own group
-    /// so lookup stays consistent with [`LinterConfig::resolve_rule`]: an entry
-    /// placed under the wrong group is ignored here just as its level is ignored
-    /// there. Ignores overrides — see [`Self::rule_options_for`] for the
-    /// path-aware resolution rules actually use.
-    pub fn rule_options(&self, group: &str, rule_name: &str) -> Option<&serde_json::Value> {
-        self.linter
-            .rules
-            .groups
-            .get(group)
-            .and_then(|g| g.get(rule_name))
-            .and_then(RuleConfiguration::options)
-    }
-
-    /// Return `rule_name`'s effective options for a specific `path`: the base
-    /// options ([`Self::rule_options`]) replaced by every override whose
-    /// `includes` match `path` and that specifies options for the rule, applied
-    /// in order (later wins).
+    /// Return effective file-rule options and their parsed cache for `path`.
     ///
-    /// Semantics mirror per-path level resolution ([`Self::resolve_rule_for`]):
-    /// a matching override's `options` block **replaces** the base options
-    /// wholesale — options are not deep-merged. An override that sets only a
-    /// level (no `options`) leaves the base options intact.
-    pub fn rule_options_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-    ) -> Option<&serde_json::Value> {
-        self.rule_options_data_for(path, group, rule_name)
-            .map(RuleOptions::value)
-    }
-
-    /// Return effective file-rule options and their parsed cache.
-    ///
-    /// Uses the same whole-value replacement semantics as [`Self::rule_options_for`].
+    /// Lookup is scoped to the rule's own group, like level resolution.
+    /// Matching overrides replace the whole options value in order, not individual
+    /// fields. An override with absent or null options leaves earlier options intact,
+    /// independently of its level.
     pub fn rule_options_data_for(
         &self,
         path: &str,
@@ -826,6 +767,7 @@ impl FalconConfig {
         rule_name: &str,
     ) -> Option<&RuleOptions> {
         self.options_data_for(path, group, rule_name, Section::Linter)
+            .0
     }
 
     /// Return effective cross-file-rule options and their parsed cache.
@@ -839,6 +781,35 @@ impl FalconConfig {
         rule_name: &str,
     ) -> Option<&RuleOptions> {
         self.options_data_for(path, group, rule_name, Section::CrossFile)
+            .0
+    }
+
+    /// Return the full configuration path of effective file-rule options.
+    pub fn rule_options_location_for(&self, path: &str, group: &str, rule_name: &str) -> String {
+        self.options_location_for(path, group, rule_name, Section::Linter, "linter")
+    }
+
+    /// Return the full configuration path of effective cross-file-rule options.
+    pub fn cross_file_options_location_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+    ) -> String {
+        self.options_location_for(path, group, rule_name, Section::CrossFile, "cross-file")
+    }
+
+    fn options_location_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+        section: Section,
+        key: &str,
+    ) -> String {
+        let (_, index) = self.options_data_for(path, group, rule_name, section);
+        let prefix = index.map_or_else(String::new, |index| format!("overrides[{index}]."));
+        format!("{prefix}{key}.rules.{group}.{rule_name}.options")
     }
 
     fn options_data_for(
@@ -847,7 +818,7 @@ impl FalconConfig {
         group: &str,
         rule_name: &str,
         section: Section,
-    ) -> Option<&RuleOptions> {
+    ) -> (Option<&RuleOptions>, Option<usize>) {
         let rules = match section {
             Section::Linter => &self.linter.rules,
             Section::CrossFile => &self.cross_file.rules,
@@ -857,7 +828,13 @@ impl FalconConfig {
             .get(group)
             .and_then(|g| g.get(rule_name))
             .and_then(RuleConfiguration::options_data);
-        for ov in self.overrides.iter().filter(|ov| ov.matches(path)) {
+        let mut index = None;
+        for (override_index, ov) in self
+            .overrides
+            .iter()
+            .enumerate()
+            .filter(|(_, ov)| ov.matches(path))
+        {
             if let Some(options) = section
                 .override_rules(ov)
                 .and_then(|block| block.rules.groups.get(group))
@@ -865,9 +842,10 @@ impl FalconConfig {
                 .and_then(RuleConfiguration::options_data)
             {
                 result = Some(options);
+                index = Some(override_index);
             }
         }
-        result
+        (result, index)
     }
 
     /// Resolve file-rule severity, applying matching overrides in order (later wins).
@@ -1060,6 +1038,75 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// Locate a deserialization failure within a JSON value, rooted at `path`.
+pub fn deserialize_error_path<T: DeserializeOwned>(value: &Value, path: &str) -> String {
+    let mut source = String::new();
+    let mut locations = Vec::new();
+    write_value_locations(value, path, &mut source, &mut locations);
+    let Err(error) = serde_json::from_str::<T>(&source) else {
+        return path.to_owned();
+    };
+    let offset = error.column().saturating_sub(1);
+    // Missing-field errors consume the closing brace, not the last property's value.
+    let missing_field = error.to_string().starts_with("missing field ");
+    locations
+        .into_iter()
+        .rev()
+        .find(|(start, end, _)| {
+            *start <= offset
+                && if missing_field {
+                    offset < *end
+                } else {
+                    offset <= *end
+                }
+        })
+        .map_or_else(|| path.to_owned(), |(_, _, path)| path)
+}
+
+fn write_value_locations(
+    value: &Value,
+    path: &str,
+    source: &mut String,
+    locations: &mut Vec<(usize, usize, String)>,
+) {
+    let start = source.len();
+    let location = locations.len();
+    locations.push((start, start, path.to_owned()));
+    match value {
+        Value::Object(entries) => {
+            source.push('{');
+            for (index, (key, value)) in entries.iter().enumerate() {
+                if index > 0 {
+                    source.push(',');
+                }
+                let path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                let key_start = source.len();
+                source.push_str(&serde_json::to_string(key).expect("JSON key serializes"));
+                locations.push((key_start, source.len(), path.clone()));
+                source.push(':');
+                write_value_locations(value, &path, source, locations);
+            }
+            source.push('}');
+        }
+        Value::Array(entries) => {
+            source.push('[');
+            for (index, value) in entries.iter().enumerate() {
+                if index > 0 {
+                    source.push(',');
+                }
+                write_value_locations(value, &format!("{path}[{index}]"), source, locations);
+            }
+            source.push(']');
+        }
+        _ => source.push_str(&serde_json::to_string(value).expect("JSON value serializes")),
+    }
+    locations[location].1 = source.len();
+}
+
 /// Canonical top-level keys of a falcon.json.
 pub const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "$schema",
@@ -1128,6 +1175,26 @@ fn validate_keys(
     kind: ConfigObject,
     warnings: &mut Vec<String>,
 ) -> Result<(), ConfigError> {
+    if matches!(kind, ConfigObject::Rule) {
+        let (level, level_path) = if let Some(object) = value.as_object() {
+            let level = object.get("level").ok_or_else(|| {
+                ConfigError(format!(
+                    "invalid configuration `{path}`: missing field `level`"
+                ))
+            })?;
+            (level, format!("{path}.level"))
+        } else {
+            (value, path.to_owned())
+        };
+        RulePlainConfiguration::deserialize(level).map_err(|error| {
+            ConfigError(format!("invalid configuration `{level_path}`: {error}"))
+        })?;
+    }
+    if !matches!(kind, ConfigObject::Rule) && !value.is_object() {
+        return Err(ConfigError(format!(
+            "invalid configuration `{path}`: expected an object"
+        )));
+    }
     let Some(object) = value.as_object() else {
         return Ok(()); // Serde reports wrong value types.
     };
@@ -1152,7 +1219,7 @@ fn validate_keys(
         if canonical != key {
             warnings.push(format!(
                 "falcon.json uses deprecated key `{full_path}` (`{key}`); \
-                 use `{canonical}` — run `falcon migrate` to update"
+                 use `{canonical}`; run `falcon migrate` to update"
             ));
         }
         use ConfigObject as Object;
@@ -1219,7 +1286,18 @@ pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
         .map_err(|e| ConfigError(format!("failed to read config file: {}", e)))?;
     let value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
+    deserialize_config_value(&value, path)
+}
 
+/// Parse structural configuration from JSON using `path` as its configuration location.
+///
+/// # Errors
+///
+/// Returns an error for invalid configuration keys, values, or the legacy flat schema.
+pub fn deserialize_config_value(
+    value: &serde_json::Value,
+    path: &Path,
+) -> Result<LoadedConfig, ConfigError> {
     if let Some(obj) = value.as_object()
         && ["rules", "exclude_patterns", "severity_override"]
             .iter()
@@ -1233,10 +1311,12 @@ pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
     }
 
     let mut warnings = Vec::new();
-    validate_keys(&value, "", ConfigObject::Root, &mut warnings)?;
+    validate_keys(value, "", ConfigObject::Root, &mut warnings)?;
 
-    let mut config: FalconConfig = serde_json::from_value(value)
-        .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
+    let mut config = FalconConfig::deserialize(value).map_err(|error| {
+        let path = deserialize_error_path::<FalconConfig>(value, "");
+        ConfigError(format!("invalid configuration `{path}`: {error}"))
+    })?;
 
     if config.max_errors == Some(0) {
         return Err(ConfigError(
@@ -1517,6 +1597,66 @@ mod warning_tests {
         assert!(loaded.config.overrides[0].matches("anywhere.dart"));
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    #[test]
+    fn invalid_structural_values_identify_the_exact_path() {
+        for (value, path) in [
+            (json!({"linter": {"enabled": "bad"}}), "linter.enabled"),
+            (
+                json!({"files": {"includes": ["lib/**", 4]}}),
+                "files.includes[1]",
+            ),
+            (
+                json!({"overrides": [{"linter": {"enabled": []}}]}),
+                "overrides[0].linter.enabled",
+            ),
+        ] {
+            let error =
+                super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+                    .unwrap_err();
+            assert!(
+                error
+                    .0
+                    .starts_with(&format!("invalid configuration `{path}`:")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_rule_levels_identify_the_entry_before_flattened_deserialization() {
+        for (entry, suffix) in [
+            (json!("warning"), ""),
+            (json!({"options": {}}), ""),
+            (json!(true), ""),
+            (json!({"level": "warning"}), ".level"),
+        ] {
+            for overridden in [false, true] {
+                let mut value = json!({
+                    "linter": {"rules": {
+                        "complexity": {"max-lines-for-file": entry},
+                        "style": {"prefer-first": "warn"}
+                    }}
+                });
+                let prefix = if overridden {
+                    value = json!({"overrides": [value]});
+                    "overrides[0]."
+                } else {
+                    ""
+                };
+                let error =
+                    super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+                        .unwrap_err();
+                let path = format!("{prefix}linter.rules.complexity.max-lines-for-file{suffix}");
+                assert!(
+                    error
+                        .0
+                        .starts_with(&format!("invalid configuration `{path}`:")),
+                    "{error}"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1525,28 +1665,27 @@ mod option_tests {
     use serde_json::json;
 
     #[test]
-    fn failed_initialization_is_not_cached_and_success_is_reused() {
-        let options = RuleOptions::from(json!({ "limit": 4 }));
+    fn failed_initialization_is_cached_until_the_value_changes() {
+        let mut options: RuleOptions = serde_json::from_value(json!({ "limit": "bad" })).unwrap();
         assert_eq!(
             options.get_or_try_init::<u64, _>(|_| Err("invalid options")),
-            Err("invalid options"),
+            Err(&"invalid options"),
         );
-        let parsed = options
-            .get_or_try_init::<u64, &str>(|value| Ok(value["limit"].as_u64().unwrap()))
-            .unwrap();
-        assert_eq!(*parsed, 4);
-        assert!(std::ptr::eq(
-            parsed,
-            options
-                .get_or_try_init::<u64, &str>(|_| panic!("must reuse validated data"))
-                .unwrap(),
-        ));
+        assert_eq!(
+            options.get_or_try_init::<u64, &str>(|_| panic!("must reuse validation error")),
+            Err(&"invalid options"),
+        );
+        options.value_mut()["limit"] = json!(4);
+        assert_eq!(
+            options.get_or_try_init::<u64, &str>(|value| Ok(value["limit"].as_u64().unwrap())),
+            Ok(&4),
+        );
     }
 
     #[test]
     fn parsed_options_are_cached_shared_on_clone_and_invalidated_on_mutation() {
         let value = json!({ "limit": 4 });
-        let options = RuleOptions::from(value.clone());
+        let options: RuleOptions = serde_json::from_value(value.clone()).unwrap();
         let parsed = options.get_or_init(|value| value["limit"].as_u64().unwrap());
         assert_eq!(*parsed, 4);
         assert!(std::ptr::eq(
@@ -1584,10 +1723,6 @@ mod option_tests {
         ] {
             let config: RuleConfiguration = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(&config).unwrap(), value);
-            assert_eq!(
-                config.options(),
-                config.options_data().map(RuleOptions::value),
-            );
         }
         let config: RuleConfiguration = serde_json::from_value(json!({ "level": "warn" })).unwrap();
         assert!(config.options_data().is_none());
@@ -1646,10 +1781,6 @@ mod option_tests {
                 };
                 assert_eq!(selected.map(RuleOptions::value), Some(&expected));
                 assert!(other.is_none());
-                assert_eq!(
-                    config.rule_options_for(path, "style", "example"),
-                    file.map(RuleOptions::value),
-                );
             }
             assert!(
                 config

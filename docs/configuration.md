@@ -191,84 +191,102 @@ is treated like omitting options and uses the rule defaults.
 }
 ```
 
-Option names use `kebab-case`. Historical `snake_case` option keys still load
-with a deprecation warning, including keys nested in arrays and objects.
-When an alias and canonical key are both present, the canonical key wins.
-`falcon migrate` rewrites these keys. The JSON schema provides rule-specific
-option completion, types, descriptions, and defaults.
+Option names use `kebab-case`. Recognized historical `snake_case` option keys
+still load with a deprecation warning, including keys nested in arrays and
+objects. When an alias and canonical key are both present, the canonical key wins
+and a collision warning reports the discarded alias value. Unknown `snake_case`
+keys are left unchanged, not guessed into new names, and remain subject to
+unknown-field validation. `falcon migrate` rewrites recognized keys and reports
+collisions as warnings. The JSON schema provides rule-specific option completion,
+types, descriptions, and defaults.
 
 The table below is generated from the typed rule options by `cargo xtask docgen`.
 
 <!-- rule-options:start -->
 
-| Rule | Option | Type | Default | Description |
-|------|--------|------|---------|-------------|
-| `arguments-ordering` | `alphabetize` | boolean | `false` | Alphabetizes named arguments in ascending order when true. |
-| `arguments-ordering` | `order` | string &#124; null | `null` | Alphabetical ordering direction for named arguments; unset uses parameter declaration order. |
-| `avoid-banned-annotations` | `rules` | object[] | `[]` | Banned annotation-name globs and the diagnostic message to report on a match. |
-| `avoid-banned-exports` | `rules` | object[] | `[]` | Banned export-URI globs and the diagnostic message to report on a match. |
-| `avoid-banned-names` | `rules` | object[] | `[]` | Banned declaration-name globs and the diagnostic message to report on a match. |
-| `avoid-banned-types` | `rules` | object[] | `[]` | Banned type-name globs and the diagnostic message to report on a match. |
-| `avoid-complex-arithmetic-expressions` | `max-terms` | integer | `6` | Maximum number of arithmetic operands in one connected expression. |
-| `avoid-complex-conditions` | `threshold` | integer | `10` | Maximum number of logical operands in a condition. |
-| `avoid-complex-loop-conditions` | `threshold` | integer | `1` | Maximum number of logical operands in a loop condition. |
-| `avoid-empty-test-groups` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |
-| `avoid-if-with-many-branches` | `max-branches` | integer | `3` | Maximum number of branches in an &#96;if&#96;/&#96;else if&#96; chain. |
-| `avoid-long-records` | `max-fields` | integer | `6` | Maximum number of fields in a record. |
-| `avoid-negated-conditions` | `ignore-null-checks` | boolean | `false` | Exempt null comparisons from the negated-condition diagnostic. |
-| `avoid-nested-assignments` | `ignore-null-aware-assignments` | boolean | `false` | Exempt null-aware assignments (&#96;??=&#96;) from the nested-assignment diagnostic. |
-| `avoid-nested-switch-expressions` | `max-nesting` | integer | `1` | Maximum number of nested switch expressions. |
-| `avoid-nested-switches` | `max-nesting` | integer | `1` | Maximum number of nested switch statements. |
-| `avoid-nested-try-statements` | `max-nesting` | integer | `2` | Maximum number of nested &#96;try&#96; statements. |
-| `avoid-referencing-subclasses` | `ignored-annotations` | string[] | `["freezed","Freezed","unfreezed"]` | Annotation names that exempt a class from subclass-reference checks. |
-| `avoid-unnecessary-getter` | `ignore-upcast` | boolean | `true` | Ignore getters whose value is explicitly upcast to a broader type. |
-| `banned-imports` | `rules` | object[] | `[]` | Package-relative import boundaries applied to matching source files. |
-| `banned-usage` | `rules` | object[] | `[]` | Banned API-name globs and the diagnostic message to report on a match. |
-| `boolean-prefixes` | `valid-prefixes` | string[] | `[]` | Additional accepted prefixes for boolean names; these extend built-ins. |
-| `class-members-ordering` | `order` | array &#124; null | `null` | Optional member category sequence; unset uses the built-in ordering. |
-| `cognitive-complexity` | `max-complexity` | integer | `15` | Maximum cognitive complexity allowed for a function. |
-| `cyclomatic-complexity` | `max-complexity` | integer | `20` | Maximum cyclomatic complexity allowed for a function. |
-| `enum-constants-ordering` | `order` | string &#124; null | `null` | Alphabetical order for enum constants; unset leaves this rule inactive. |
-| `extend-equatable` | `class-name-pattern` | string &#124; null | `null` | Regex selecting class names that must use Equatable semantics. |
-| `extend-equatable` | `file-name-pattern` | string &#124; null | `null` | Regex selecting file names whose classes must use Equatable semantics. |
-| `format-comment` | `ignored-patterns` | string[] | `[]` | Regex patterns that exclude matching comments from formatting checks. |
-| `format-comment` | `only-doc-comments` | boolean | `false` | When true, checks only documentation comments (&#96;///&#96;). |
-| `initializers-ordering` | `order` | string &#124; null | `null` | Alphabetical initializer order; unset follows field declaration order. |
-| `map-keys-ordering` | `order` | string &#124; null | `null` | Alphabetical key order; unset leaves this rule inactive. |
-| `max-lines-for-file` | `max-lines` | integer | `200` | Maximum number of source lines allowed in a file. |
-| `max-lines-for-function` | `max-lines` | integer | `100` | Maximum number of source lines allowed in a function. |
-| `max-parameters-for-function` | `max-parameters` | integer | `5` | Maximum number of parameters allowed in a function. |
-| `max-statements` | `max-statements` | integer | `20` | Maximum number of statements allowed in a function. |
-| `max-switch-cases` | `max-cases` | integer | `10` | Maximum number of non-default cases in a switch. |
-| `maximum-nesting-level` | `max-nesting` | integer | `5` | Maximum nesting depth allowed in a function. |
-| `member-ordering` | `order` | array &#124; null | `null` | Optional member category sequence; unset uses the built-in ordering. |
-| `member-ordering` | `widgets-order` | array &#124; null | `null` | Optional lifecycle sequence for classes extending &#96;State&#96;. |
-| `missing-test-assertion` | `include-assertions` | string[] | `[]` | Additional assertion function names recognized within test callbacks. |
-| `move-variable-closer-to-its-usage` | `ignore-after-if` | boolean | `true` | Skip moving declarations that follow an &#96;if&#96; statement. |
-| `move-variable-closer-to-its-usage` | `ignore-const` | boolean | `false` | Skip const variables even when their literal initializer has no side effects. |
-| `no-magic-number` | `allowed` | number[] | `[-1.0,0.0,1.0]` | Numeric values that are exempt from magic-number diagnostics. |
-| `no-magic-string` | `allow-only-once` | boolean | `false` | Allow string literal values that occur only once. |
-| `no-magic-string` | `ignored-invocations` | string[] | `["print","debugPrint"]` | Invocation names whose direct string arguments are exempt from this rule. |
-| `parameters-ordering` | `order` | string &#124; null | `null` | Alphabetical order for named parameters; unset leaves this rule inactive. |
-| `pattern-fields-ordering` | `order` | string &#124; null | `null` | Alphabetical order for named pattern fields; unset leaves this rule inactive. |
-| `prefer-commenting-analyzer-ignores` | `ignore-global` | boolean | `true` | Do not require explanations for file-wide analyzer ignore directives. |
-| `prefer-container` | `min-sequence` | integer | `3` | Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three. |
-| `prefer-correct-callback-field-name` | `name-pattern` | string &#124; null | `null` | Regular expression matching callback field names; absent or empty patterns disable this rule. |
-| `prefer-correct-error-name` | `allowed-names` | string[] | `[]` | Accepted names for exception variables and error parameters; an empty list disables this rule. |
-| `prefer-correct-error-name` | `ignored-names` | string[] | `[]` | Names exempt from the accepted-name check. |
-| `prefer-correct-handler-name` | `ignore-public` | boolean | `false` | Whether to skip public handler methods. |
-| `prefer-correct-handler-name` | `name-pattern` | string &#124; null | `null` | Regular expression matching handler method names; absent or empty patterns disable this rule. |
-| `prefer-correct-identifier-length` | `exceptions` | string[] | `[]` | Identifier names exempt from length checks, compared after removing one leading privacy underscore. |
-| `prefer-correct-identifier-length` | `max-length` | integer | `300` | Longest permitted identifier length, excluding one leading privacy underscore. |
-| `prefer-correct-identifier-length` | `min-length` | integer | `3` | Shortest permitted identifier length, excluding one leading privacy underscore. |
-| `prefer-extracting-callbacks` | `allowed-line-count` | integer &#124; null | `null` | Callback body line threshold; &#96;None&#96; disables the length filter. |
-| `prefer-extracting-callbacks` | `ignored-named-arguments` | string[] | `[]` | Named widget-constructor arguments whose callbacks are ignored. |
-| `prefer-moving-to-variable` | `allowed-duplicated-chains` | integer | `2` | Minimum repeated expression-chain count for extraction (clamped to at least two). |
-| `prefer-named-parameters` | `max-number` | integer | `1` | Maximum number of positional parameters allowed before named parameters are preferred. |
-| `prefer-unique-test-names` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |
-| `record-fields-ordering` | `order` | string &#124; null | `null` | Lexicographic direction in which named fields in each record type must be ordered. |
-| `use-design-system-item` | `items` | object[] | `[]` | Class names whose construction should be replaced with a design-system equivalent. |
-| `widget-tree-depth` | `max-nesting` | integer | `8` | Maximum depth of nested widget construction allowed in a widget tree. |
+| Rule | Option | Type | Default | Description | Allowed values |
+|------|--------|------|---------|-------------|----------------|
+| `arguments-ordering` | `alphabetize` | boolean | `false` | Alphabetizes named arguments in ascending order when true. |  |
+| `arguments-ordering` | `order` | string &#124; null | `null` | Alphabetical ordering direction for named arguments; unset uses parameter declaration order. | `"ascending"`, `"descending"`, `null` |
+| `avoid-banned-annotations` | `rules` | object[] | `[]` | Banned annotation-name globs and the diagnostic message to report on a match. |  |
+| `avoid-banned-annotations` | `rules[].deny` | string[] | required | Non-empty glob patterns (JSON key &#96;deny&#96;) that trigger this entry. |  |
+| `avoid-banned-annotations` | `rules[].message` | string | required | Diagnostic text emitted when any pattern in this entry matches. |  |
+| `avoid-banned-exports` | `rules` | object[] | `[]` | Banned export-URI globs and the diagnostic message to report on a match. |  |
+| `avoid-banned-exports` | `rules[].deny` | string[] | required | Non-empty glob patterns (JSON key &#96;deny&#96;) that trigger this entry. |  |
+| `avoid-banned-exports` | `rules[].message` | string | required | Diagnostic text emitted when any pattern in this entry matches. |  |
+| `avoid-banned-names` | `rules` | object[] | `[]` | Banned declaration-name globs and the diagnostic message to report on a match. |  |
+| `avoid-banned-names` | `rules[].deny` | string[] | required | Non-empty glob patterns (JSON key &#96;deny&#96;) that trigger this entry. |  |
+| `avoid-banned-names` | `rules[].message` | string | required | Diagnostic text emitted when any pattern in this entry matches. |  |
+| `avoid-banned-types` | `rules` | object[] | `[]` | Banned type-name globs and the diagnostic message to report on a match. |  |
+| `avoid-banned-types` | `rules[].deny` | string[] | required | Non-empty glob patterns (JSON key &#96;deny&#96;) that trigger this entry. |  |
+| `avoid-banned-types` | `rules[].message` | string | required | Diagnostic text emitted when any pattern in this entry matches. |  |
+| `avoid-complex-arithmetic-expressions` | `max-terms` | integer | `6` | Maximum number of arithmetic operands in one connected expression. |  |
+| `avoid-complex-conditions` | `threshold` | integer | `10` | Maximum number of logical operands in a condition. |  |
+| `avoid-complex-loop-conditions` | `threshold` | integer | `1` | Maximum number of logical operands in a loop condition. |  |
+| `avoid-empty-test-groups` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |  |
+| `avoid-if-with-many-branches` | `max-branches` | integer | `3` | Maximum number of branches in an &#96;if&#96;/&#96;else if&#96; chain. |  |
+| `avoid-long-records` | `max-fields` | integer | `6` | Maximum number of fields in a record. |  |
+| `avoid-negated-conditions` | `ignore-null-checks` | boolean | `false` | Exempt null comparisons from the negated-condition diagnostic. |  |
+| `avoid-nested-assignments` | `ignore-null-aware-assignments` | boolean | `false` | Exempt null-aware assignments (&#96;??=&#96;) from the nested-assignment diagnostic. |  |
+| `avoid-nested-switch-expressions` | `max-nesting` | integer | `1` | Maximum number of nested switch expressions. |  |
+| `avoid-nested-switches` | `max-nesting` | integer | `1` | Maximum number of nested switch statements. |  |
+| `avoid-nested-try-statements` | `max-nesting` | integer | `2` | Maximum number of nested &#96;try&#96; statements. |  |
+| `avoid-referencing-subclasses` | `ignored-annotations` | string[] | `["freezed","Freezed","unfreezed"]` | Annotation names that exempt a class from subclass-reference checks. |  |
+| `avoid-unnecessary-getter` | `ignore-upcast` | boolean | `true` | Ignore getters whose value is explicitly upcast to a broader type. |  |
+| `banned-imports` | `rules` | object[] | `[]` | Package-relative import boundaries applied to matching source files. |  |
+| `banned-imports` | `rules[].deny` | string[] | required | Import URI or package-relative target globs prohibited within &#96;files&#96;. |  |
+| `banned-imports` | `rules[].files` | string[] | required | Source-file globs selecting where this boundary applies. |  |
+| `banned-imports` | `rules[].message` | string | required | Warning text emitted when a prohibited import matches. |  |
+| `banned-usage` | `rules` | object[] | `[]` | Banned API-name globs and the diagnostic message to report on a match. |  |
+| `banned-usage` | `rules[].deny` | string[] | required | Non-empty glob patterns (JSON key &#96;deny&#96;) that trigger this entry. |  |
+| `banned-usage` | `rules[].message` | string | required | Diagnostic text emitted when any pattern in this entry matches. |  |
+| `boolean-prefixes` | `valid-prefixes` | string[] | `[]` | Additional accepted prefixes for boolean names; these extend built-ins. |  |
+| `class-members-ordering` | `order` | string[] &#124; null | `null` | Optional member category sequence; unset uses the built-in ordering. | `"public-fields"`, `"private-fields"`, `"fields"`, `"static-fields"`, `"constructors"`, `"named-constructors"`, `"static-methods"`, `"private-methods"`, `"public-methods"`, `"methods"`, `"getters"`, `"setters"`, `null` |
+| `cognitive-complexity` | `max-complexity` | integer | `15` | Maximum cognitive complexity allowed for a function. |  |
+| `cyclomatic-complexity` | `max-complexity` | integer | `20` | Maximum cyclomatic complexity allowed for a function. |  |
+| `enum-constants-ordering` | `order` | string &#124; null | `null` | Alphabetical order for enum constants; unset leaves this rule inactive. | `"ascending"`, `"descending"`, `null` |
+| `extend-equatable` | `class-name-pattern` | string &#124; null | `null` | Regex selecting class names that must use Equatable semantics. |  |
+| `extend-equatable` | `file-name-pattern` | string &#124; null | `null` | Regex selecting file names whose classes must use Equatable semantics. |  |
+| `format-comment` | `ignored-patterns` | string[] | `[]` | Regex patterns that exclude matching comments from formatting checks. |  |
+| `format-comment` | `only-doc-comments` | boolean | `false` | When true, checks only documentation comments (&#96;///&#96;). |  |
+| `initializers-ordering` | `order` | string &#124; null | `null` | Alphabetical initializer order; unset follows field declaration order. | `"ascending"`, `"descending"`, `null` |
+| `map-keys-ordering` | `order` | string &#124; null | `null` | Alphabetical key order; unset leaves this rule inactive. | `"ascending"`, `"descending"`, `null` |
+| `max-lines-for-file` | `max-lines` | integer | `200` | Maximum number of source lines allowed in a file. |  |
+| `max-lines-for-function` | `max-lines` | integer | `100` | Maximum number of source lines allowed in a function. |  |
+| `max-parameters-for-function` | `max-parameters` | integer | `5` | Maximum number of parameters allowed in a function. |  |
+| `max-statements` | `max-statements` | integer | `20` | Maximum number of statements allowed in a function. |  |
+| `max-switch-cases` | `max-cases` | integer | `10` | Maximum number of non-default cases in a switch. |  |
+| `maximum-nesting-level` | `max-nesting` | integer | `5` | Maximum nesting depth allowed in a function. |  |
+| `member-ordering` | `order` | string[] &#124; null | `null` | Optional member category sequence; unset uses the built-in ordering. | `"public-fields"`, `"private-fields"`, `"fields"`, `"static-fields"`, `"constructors"`, `"named-constructors"`, `"static-methods"`, `"private-methods"`, `"public-methods"`, `"methods"`, `"getters"`, `"setters"`, `null` |
+| `member-ordering` | `widgets-order` | string[] &#124; null | `null` | Optional lifecycle sequence for classes extending &#96;State&#96;. | `"constructor"`, `"init-state"`, `"did-change-dependencies"`, `"did-update-widget"`, `"dispose"`, `"build"`, `"overridden-methods"`, `null` |
+| `missing-test-assertion` | `include-assertions` | string[] | `[]` | Additional assertion function names recognized within test callbacks. |  |
+| `move-variable-closer-to-its-usage` | `ignore-after-if` | boolean | `true` | Skip moving declarations that follow an &#96;if&#96; statement. |  |
+| `move-variable-closer-to-its-usage` | `ignore-const` | boolean | `false` | Skip const variables even when their literal initializer has no side effects. |  |
+| `no-magic-number` | `allowed` | number[] | `[-1.0,0.0,1.0]` | Numeric values that are exempt from magic-number diagnostics. |  |
+| `no-magic-string` | `allow-only-once` | boolean | `false` | Allow string literal values that occur only once. |  |
+| `no-magic-string` | `ignored-invocations` | string[] | `["print","debugPrint"]` | Invocation names whose direct string arguments are exempt from this rule. |  |
+| `parameters-ordering` | `order` | string &#124; null | `null` | Alphabetical order for named parameters; unset leaves this rule inactive. | `"ascending"`, `"descending"`, `null` |
+| `pattern-fields-ordering` | `order` | string &#124; null | `null` | Alphabetical order for named pattern fields; unset leaves this rule inactive. | `"ascending"`, `"descending"`, `null` |
+| `prefer-commenting-analyzer-ignores` | `ignore-global` | boolean | `true` | Do not require explanations for file-wide analyzer ignore directives. |  |
+| `prefer-container` | `min-sequence` | integer | `3` | Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three. |  |
+| `prefer-correct-callback-field-name` | `name-pattern` | string &#124; null | `null` | Regular expression matching callback field names; absent or empty patterns disable this rule. |  |
+| `prefer-correct-error-name` | `allowed-names` | string[] | `[]` | Accepted names for exception variables and error parameters; an empty list disables this rule. |  |
+| `prefer-correct-error-name` | `ignored-names` | string[] | `[]` | Names exempt from the accepted-name check. |  |
+| `prefer-correct-handler-name` | `ignore-public` | boolean | `false` | Whether to skip public handler methods. |  |
+| `prefer-correct-handler-name` | `name-pattern` | string &#124; null | `null` | Regular expression matching handler method names; absent or empty patterns disable this rule. |  |
+| `prefer-correct-identifier-length` | `exceptions` | string[] | `[]` | Identifier names exempt from length checks, compared after removing one leading privacy underscore. |  |
+| `prefer-correct-identifier-length` | `max-length` | integer | `300` | Longest permitted identifier length, excluding one leading privacy underscore. |  |
+| `prefer-correct-identifier-length` | `min-length` | integer | `3` | Shortest permitted identifier length, excluding one leading privacy underscore. |  |
+| `prefer-extracting-callbacks` | `allowed-line-count` | integer &#124; null | `null` | Callback body line threshold; unset disables the length filter. |  |
+| `prefer-extracting-callbacks` | `ignored-named-arguments` | string[] | `[]` | Named widget-constructor arguments whose callbacks are ignored. |  |
+| `prefer-moving-to-variable` | `allowed-duplicated-chains` | integer | `2` | Minimum repeated expression-chain count for extraction (clamped to at least two). |  |
+| `prefer-named-parameters` | `max-number` | integer | `1` | Maximum number of positional parameters allowed before named parameters are preferred. |  |
+| `prefer-unique-test-names` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |  |
+| `record-fields-ordering` | `order` | string &#124; null | `null` | Lexicographic direction in which named fields in each record type must be ordered. | `"ascending"`, `"descending"`, `null` |
+| `use-design-system-item` | `items` | object[] | `[]` | Class names whose construction should be replaced with a design-system equivalent. |  |
+| `use-design-system-item` | `items[].class-name` | string | required | Class name of the construction to flag. |  |
+| `use-design-system-item` | `items[].use-instead` | string &#124; null | unset | Suggested design-system replacement name, shown in the diagnostic when provided. |  |
+| `widget-tree-depth` | `max-nesting` | integer | `8` | Maximum depth of nested widget construction allowed in a widget tree. |  |
 
 <!-- rule-options:end -->
 
@@ -626,9 +644,11 @@ The generated `linter.rules` sets `recommended: false`. If cross-file rules are 
 
 Notes:
 
-- Option keys are normalized to **kebab-case**, including nested keys. If both legacy and canonical spellings exist, the canonical value wins. Unsupported options or invalid option values reject the migration before any output is written; review upstream options against falcon's option schema.
+- Recognized option keys are normalized to **kebab-case**, including nested keys. If both legacy and canonical spellings exist, the canonical value wins and a collision warning reports the discarded alias value. Unknown keys, invalid values, and options on rules that accept none are dropped with warnings naming their full configuration paths and discarded values. Migration writes a configuration that falcon can load; review the warnings to restore any intended settings with supported values.
 - Upstream rules with no falcon equivalent are reported as warnings on stderr and
   omitted from the output.
+- Rule and option warnings use canonical falcon paths after key rewrites.
+  Unrecognized upstream rules retain their YAML source paths.
 - The former twin rules (`no_empty_block`/`avoid_empty_blocks`, `no_magic_number`,
   `avoid_unused_parameters`) were unified into a single canonical rule each
   (`no-empty-block`, `no-magic-number`, `avoid-unused-parameters`); their upstream
@@ -645,10 +665,11 @@ level. The input kind is auto-detected.
 Upgrades preserve the order of configuration keys. Duplicate entries use the
 same severity ranking and canonical-name tie breaking as normal config loading.
 
-Unknown falcon rule ids and unsupported or invalid options reject the upgrade
-before writing; unlike unrecognized upstream YAML rules, unknown falcon ids are
-not skipped. Migration validates registered rule names and options, not the full
-structural configuration checks performed when falcon loads a file.
+Unknown falcon rule ids, unsupported keys, and invalid values are dropped with
+warnings naming their full configuration paths and discarded values. Supported
+settings remain unchanged, and the resulting configuration passes falcon's loader.
+Migration applies the loader's structural, rule-name, and options checks.
+Malformed JSON or YAML still fails before writing.
 
 Glob matching now uses the configuration file's directory in both the CLI and
 the editor, rather than paths as walked. User-level `~/.falcon.json` globs instead

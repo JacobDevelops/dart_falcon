@@ -435,18 +435,27 @@ fn schema_type_label(root: &Value, node: &Value) -> String {
         types.dedup();
         return types.join(" | ");
     }
-    match resolved.get("type") {
-        Some(Value::String(s)) if s == "array" => {
+    let type_label = |kind: &str| {
+        if kind == "array" {
             let item = resolved
                 .get("items")
-                .map(|i| schema_type_label(root, i))
+                .map(|item| schema_type_label(root, item))
                 .unwrap_or_else(|| "value".to_string());
-            format!("{item}[]")
+            if item.contains(" | ") {
+                format!("({item})[]")
+            } else {
+                format!("{item}[]")
+            }
+        } else {
+            kind.to_string()
         }
-        Some(Value::String(s)) => s.clone(),
+    };
+    match resolved.get("type") {
+        Some(Value::String(kind)) => type_label(kind),
         Some(Value::Array(parts)) => parts
             .iter()
-            .filter_map(|v| v.as_str())
+            .filter_map(Value::as_str)
+            .map(type_label)
             .collect::<Vec<_>>()
             .join(" | "),
         _ if resolved.get("enum").is_some() => "string".to_string(),
@@ -457,18 +466,44 @@ fn schema_type_label(root: &Value, node: &Value) -> String {
 /// The accepted enum values, including a rule entry's severity branch.
 fn schema_allowed_values(root: &Value, node: &Value) -> Vec<Value> {
     let resolved = schema_resolve(root, node);
-    if let Some(Value::Array(e)) = resolved.get("enum") {
-        return e.clone();
-    }
-    if let Some(Value::Array(branches)) = resolved.get("oneOf") {
-        for branch in branches {
-            let b = schema_resolve(root, branch);
-            if let Some(Value::Array(e)) = b.get("enum") {
-                return e.clone();
-            }
+    let branches = resolved
+        .get("oneOf")
+        .or_else(|| resolved.get("anyOf"))
+        .and_then(Value::as_array);
+    let values = if let Some(Value::Array(values)) = resolved.get("enum") {
+        values.clone()
+    } else if let Some(branches) = branches {
+        branches
+            .iter()
+            .flat_map(|branch| schema_allowed_values(root, branch))
+            .collect()
+    } else if let Some(items) = resolved.get("items") {
+        schema_allowed_values(root, items)
+    } else {
+        Vec::new()
+    };
+    let mut allowed = values;
+    for index in (0..allowed.len()).rev() {
+        if allowed[..index].contains(&allowed[index]) {
+            allowed.remove(index);
         }
     }
-    Vec::new()
+    let nullable = match resolved.get("type") {
+        Some(Value::String(kind)) => kind == "null",
+        Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind.as_str() == Some("null")),
+        _ => false,
+    } || branches.is_some_and(|branches| {
+        branches.iter().any(|branch| {
+            schema_resolve(root, branch)
+                .get("type")
+                .and_then(Value::as_str)
+                == Some("null")
+        })
+    });
+    if !allowed.is_empty() && nullable && !allowed.contains(&Value::Null) {
+        allowed.push(Value::Null);
+    }
+    allowed
 }
 
 /// Build one flat config-reference entry for a leaf key.
@@ -508,6 +543,63 @@ fn markdown_cell(value: &str) -> String {
         .replace(['\r', '\n'], " ")
 }
 
+fn render_option_rows(root: &Value, node: &Value, rule: &str, path: &str, output: &mut String) {
+    let resolved = schema_resolve(root, node);
+    if let Some(properties) = resolved.get("properties").and_then(Value::as_object) {
+        let mut properties: Vec<_> = properties.iter().collect();
+        properties.sort_unstable_by_key(|(name, _)| *name);
+        for (name, property) in properties {
+            let child_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
+            };
+            let leaf = config_leaf(root, property, &child_path);
+            let default = leaf
+                .get("default")
+                .map(|value| format!("`{}`", markdown_cell(&value.to_string())))
+                .unwrap_or_else(|| {
+                    let required = resolved
+                        .get("required")
+                        .and_then(Value::as_array)
+                        .is_some_and(|fields| {
+                            fields
+                                .iter()
+                                .any(|field| field.as_str() == Some(name.as_str()))
+                        });
+                    if required { "required" } else { "unset" }.to_string()
+                });
+            let allowed = leaf
+                .get("allowedValues")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .map(|value| format!("`{}`", markdown_cell(&value.to_string())))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            output.push_str(&format!(
+                "| `{rule}` | `{child_path}` | {} | {default} | {} | {allowed} |\n",
+                markdown_cell(leaf["type"].as_str().unwrap_or("")),
+                markdown_cell(leaf["description"].as_str().unwrap_or("")),
+            ));
+            render_option_rows(root, property, rule, &child_path, output);
+        }
+    } else if let Some(items) = resolved.get("items") {
+        render_option_rows(root, items, rule, &format!("{path}[]"), output);
+    } else if let Some(branches) = resolved
+        .get("oneOf")
+        .or_else(|| resolved.get("anyOf"))
+        .and_then(Value::as_array)
+    {
+        for branch in branches {
+            render_option_rows(root, branch, rule, path, output);
+        }
+    }
+}
+
 fn rule_options_markdown(document: &str, schemas: &[(&str, Value)]) -> Result<String, String> {
     let (before, rest) = document
         .split_once(OPTIONS_START)
@@ -516,26 +608,13 @@ fn rule_options_markdown(document: &str, schemas: &[(&str, Value)]) -> Result<St
         .split_once(OPTIONS_END)
         .ok_or_else(|| format!("configuration.md is missing {OPTIONS_END}"))?;
     let mut output = format!(
-        "{before}{OPTIONS_START}\n\n| Rule | Option | Type | Default | Description |\n|------|--------|------|---------|-------------|\n"
+        "{before}{OPTIONS_START}\n\n| Rule | Option | Type | Default | Description | Allowed values |\n|------|--------|------|---------|-------------|----------------|\n"
     );
     for (rule, schema) in schemas {
-        let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        if !schema.get("properties").is_some_and(Value::is_object) {
             return Err(format!("{rule}: options schema has no object properties"));
-        };
-        let mut properties: Vec<_> = properties.iter().collect();
-        properties.sort_unstable_by_key(|(name, _)| *name);
-        for (name, property) in properties {
-            let leaf = config_leaf(schema, property, name);
-            let default = leaf
-                .get("default")
-                .map(|value| format!("`{}`", markdown_cell(&value.to_string())))
-                .unwrap_or_else(|| "unset".to_string());
-            output.push_str(&format!(
-                "| `{rule}` | `{name}` | {} | {default} | {} |\n",
-                markdown_cell(leaf["type"].as_str().unwrap_or("")),
-                markdown_cell(leaf["description"].as_str().unwrap_or("")),
-            ));
         }
+        render_option_rows(schema, schema, rule, "", &mut output);
     }
     output.push_str(&format!("\n{OPTIONS_END}{after}"));
     Ok(output)
@@ -952,6 +1031,138 @@ mod tests {
         assert_eq!(
             rule_options_markdown(&generated, &schemas).unwrap(),
             generated
+        );
+    }
+
+    #[test]
+    fn rule_options_table_renders_nested_fields_and_enum_values() {
+        let document = format!("{OPTIONS_START}{OPTIONS_END}");
+        let schema = json!({
+            "properties": {
+                "rules": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/Entry"},
+                    "default": []
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["class-name"],
+                        "properties": {
+                            "class-name": {"type": "string"},
+                            "replacement": {"type": "string"}
+                        }
+                    }
+                },
+                "settings": {
+                    "anyOf": [
+                        {"$ref": "#/definitions/Entry"},
+                        {"type": "null"}
+                    ],
+                    "default": null
+                },
+                "directions": {
+                    "type": ["array", "null"],
+                    "items": {"$ref": "#/definitions/Direction"},
+                    "default": null
+                },
+                "optional-directions": {
+                    "anyOf": [
+                        {"type": "array", "items": {"$ref": "#/definitions/Direction"}},
+                        {"type": "null"}
+                    ]
+                },
+                "optional-rules": {
+                    "oneOf": [
+                        {"type": "array", "items": {"$ref": "#/definitions/Entry"}},
+                        {"type": "null"}
+                    ]
+                },
+                "order": {
+                    "anyOf": [
+                        {"$ref": "#/definitions/Direction"},
+                        {"type": "null"}
+                    ],
+                    "default": null
+                }
+            },
+            "definitions": {
+                "Entry": {
+                    "type": "object",
+                    "required": ["deny", "message", "files"],
+                    "properties": {
+                        "deny": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Names to reject."
+                        },
+                        "message": {"type": "string"},
+                        "files": {"type": "array", "items": {"type": "string"}}
+                    }
+                },
+                "Direction": {
+                    "type": "string",
+                    "enum": ["ascending", "descending"]
+                }
+            }
+        });
+        let generated = rule_options_markdown(&document, &[("example", schema)]).unwrap();
+        assert!(generated.contains("| `example` | `rules` | object[] | `[]` |  |  |"));
+        assert!(generated.contains(
+            "| `example` | `rules[].deny` | string[] | required | Names to reject. |  |"
+        ));
+        assert!(generated.contains("| `example` | `rules[].message` | string | required |  |  |"));
+        assert!(generated.contains("| `example` | `rules[].files` | string[] | required |  |  |"));
+        assert!(
+            generated.contains("| `example` | `items[].class-name` | string | required |  |  |")
+        );
+        assert!(generated.contains("| `example` | `items[].replacement` | string | unset |  |  |"));
+        assert!(generated.contains("| `example` | `settings.deny` | string[] | required |"));
+        assert!(generated.contains(
+            "| `example` | `order` | null &#124; string | `null` |  | `\"ascending\"`, `\"descending\"`, `null` |"
+        ));
+        assert!(generated.contains(
+            "| `example` | `directions` | string[] &#124; null | `null` |  | `\"ascending\"`, `\"descending\"`, `null` |"
+        ));
+        assert!(generated.contains(
+            "| `example` | `optional-directions` | null &#124; string[] | unset |  | `\"ascending\"`, `\"descending\"`, `null` |"
+        ));
+        assert!(generated.contains(
+            "| `example` | `optional-rules[].deny` | string[] | required | Names to reject. |  |"
+        ));
+    }
+
+    #[test]
+    fn rule_options_table_renders_nullable_arrays_consistently() {
+        let document = format!("{OPTIONS_START}{OPTIONS_END}");
+        for array in [
+            json!({"type": ["array", "null"], "items": {"type": "string"}}),
+            json!({"anyOf": [
+                {"type": "array", "items": {"type": "string"}},
+                {"type": "null"}
+            ]}),
+        ] {
+            let schema = json!({"properties": {"order": array}});
+            let generated = rule_options_markdown(&document, &[("example", schema)]).unwrap();
+            assert!(generated.contains("string[]"));
+            assert!(!generated.contains("array"));
+        }
+        let schema = json!({
+            "type": "array",
+            "items": {"type": ["string", "null"]}
+        });
+        assert_eq!(schema_type_label(&schema, &schema), "(string | null)[]");
+        let schema = json!({
+            "anyOf": [
+                {"type": "string", "enum": ["ascending", "descending", "ascending"]},
+                {"type": "string", "enum": ["descending"]},
+                {"type": "null"}
+            ]
+        });
+        assert_eq!(
+            schema_allowed_values(&schema, &schema),
+            vec![json!("ascending"), json!("descending"), Value::Null]
         );
     }
 

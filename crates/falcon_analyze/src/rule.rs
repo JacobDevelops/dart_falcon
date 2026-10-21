@@ -57,6 +57,10 @@ impl<T: Rule + ?Sized> RuleAnalysis for T {
                     .collect()
             }
         };
+        let config_errors = ctx.take_config_errors();
+        if !config_errors.is_empty() {
+            return config_errors;
+        }
         for diagnostic in &mut diagnostics {
             diagnostic.rule = name;
         }

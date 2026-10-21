@@ -22,12 +22,12 @@ pub fn rule_options_schemas() -> Vec<(&'static str, Value)> {
     crate::lint::options::schemas()
 }
 
-fn rule_config(name: &str) -> Value {
-    let options = crate::lint::options::schema_for(name).unwrap_or_else(|| {
-        json!({
-            "type": "object", "additionalProperties": false, "properties": {}
-        })
-    });
+/// Options schema for a canonical rule, or no schema when the rule has no options.
+pub fn rule_options_schema(name: &str) -> Option<Value> {
+    crate::lint::options::schema_for(name).cloned()
+}
+
+fn rule_config(options: Value) -> Value {
     json!({
         "description": "A severity level, or an object with a severity level and rule-specific options.",
         "oneOf": [
@@ -74,7 +74,9 @@ fn section_rules(cross_file: bool, preset_allowed: bool) -> Value {
         entry["properties"]
             .as_object_mut()
             .expect("properties object")
-            .insert(meta.name.to_string(), rule_config(meta.name));
+            .insert(meta.name.to_string(), json!({
+                "$ref": format!("#/definitions/{}", if meta.options.is_some() { meta.name } else { "ruleWithoutOptions" })
+            }));
     }
     let mut props = Map::new();
     if preset_allowed {
@@ -129,7 +131,7 @@ pub fn config_schema() -> Value {
         })
     };
 
-    json!({
+    let mut schema = json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
         "$id": SCHEMA_URL,
         "title": "falcon.json",
@@ -253,7 +255,20 @@ pub fn config_schema() -> Value {
                 }
             }
         }
-    })
+    });
+    let definitions = schema["definitions"]
+        .as_object_mut()
+        .expect("schema definitions");
+    definitions.insert(
+        "ruleWithoutOptions".into(),
+        rule_config(json!({
+            "type": "object", "additionalProperties": false, "properties": {}
+        })),
+    );
+    for (name, options) in rule_options_schemas() {
+        definitions.insert(name.into(), rule_config(options));
+    }
+    schema
 }
 
 /// The schema serialized exactly as it is written to disk: pretty-printed with a

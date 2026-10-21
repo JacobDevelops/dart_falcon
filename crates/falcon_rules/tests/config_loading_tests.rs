@@ -160,7 +160,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             "complexity",
             "max-parameters-for-function",
             json!({ "unknown_key": 1 }),
-            "unknown-key",
+            "unknown_key",
         ),
         (
             "linter",
@@ -195,7 +195,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
             "style",
             "use-design-system-item",
             json!({ "items": [{ "class-name": "Container", "unknown_key": true }] }),
-            "items[0].unknown-key",
+            "items[0].unknown_key",
         ),
         (
             "linter",
@@ -219,7 +219,7 @@ fn typed_options_reject_invalid_values_with_canonical_full_paths() {
                 "files": ["lib/**"], "deny": ["package:flutter/**"],
                 "message": "No Flutter", "unknown_key": true
             }] }),
-            "rules[0].unknown-key",
+            "rules[0].unknown_key",
         ),
         (
             "cross-file",
@@ -280,7 +280,7 @@ fn deprecated_option_keys_warn_with_paths_and_canonical_keys_win() {
     )
     .unwrap();
     let loaded = load_config(&path).unwrap();
-    assert_eq!(loaded.warnings.len(), 3);
+    assert_eq!(loaded.warnings.len(), 5);
     for expected in [
         "linter.rules.complexity.max-parameters-for-function.options.max_parameters",
         "linter.rules.style.prefer-correct-handler-name.options.name_pattern",
@@ -294,26 +294,82 @@ fn deprecated_option_keys_warn_with_paths_and_canonical_keys_win() {
             loaded.warnings
         );
     }
+    for expected in [
+        "duplicate option key `linter.rules.style.prefer-correct-handler-name.options.name-pattern`: discarded \"[\"",
+        "duplicate option key `overrides[0].linter.rules.complexity.max-parameters-for-function.options.max-parameters`: discarded -1",
+    ] {
+        assert!(loaded.warnings.iter().any(|warning| warning == expected));
+    }
     assert_eq!(
         loaded
             .config
-            .rule_options("complexity", "max-parameters-for-function"),
+            .rule_options_data_for(
+                &directory.join("lib/a.dart").to_string_lossy(),
+                "complexity",
+                "max-parameters-for-function",
+            )
+            .map(falcon_config::RuleOptions::value),
         Some(&json!({ "max-parameters": 2 }))
     );
     assert_eq!(
         loaded
             .config
-            .rule_options("style", "prefer-correct-handler-name"),
+            .rule_options_data_for(
+                &directory.join("lib/a.dart").to_string_lossy(),
+                "style",
+                "prefer-correct-handler-name",
+            )
+            .map(falcon_config::RuleOptions::value),
         Some(&json!({ "name-pattern": "^handle" }))
     );
     assert_eq!(
-        loaded.config.rule_options_for(
-            &directory.join("test/a.dart").to_string_lossy(),
-            "complexity",
-            "max-parameters-for-function"
-        ),
+        loaded
+            .config
+            .rule_options_data_for(
+                &directory.join("test/a.dart").to_string_lossy(),
+                "complexity",
+                "max-parameters-for-function"
+            )
+            .map(falcon_config::RuleOptions::value),
         Some(&json!({ "max-parameters": 3 }))
     );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn unknown_snake_case_option_keys_keep_their_spelling() {
+    let mut options = json!({ "not_a_setting": 4 });
+    assert!(
+        falcon_rules::canonicalize_option_keys(
+            &mut options,
+            "max-parameters-for-function",
+            "linter.rules.complexity.max-parameters-for-function.options",
+        )
+        .is_empty()
+    );
+    assert_eq!(options, json!({ "not_a_setting": 4 }));
+
+    let directory = directory();
+    let path = directory.join("falcon.json");
+    fs::write(
+        &path,
+        json!({
+            "linter": { "rules": { "complexity": {
+                "max-parameters-for-function": { "level": "warn", "options": options }
+            } } }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let error = load_config(&path).unwrap_err();
+    assert!(
+        error.0.contains(
+            "`linter.rules.complexity.max-parameters-for-function.options.not_a_setting`"
+        ),
+        "{error}"
+    );
+    assert!(error.0.contains("unknown field `not_a_setting`"), "{error}");
+    assert!(!error.0.contains("not-a-setting"), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -385,11 +441,14 @@ fn typed_options_follow_matching_overrides_and_preserve_level_only_changes() {
     ] {
         let file_path = directory.join(file);
         assert_eq!(
-            loaded.config.rule_options_for(
-                &file_path.to_string_lossy(),
-                "complexity",
-                "max-parameters-for-function"
-            ),
+            loaded
+                .config
+                .rule_options_data_for(
+                    &file_path.to_string_lossy(),
+                    "complexity",
+                    "max-parameters-for-function"
+                )
+                .map(falcon_config::RuleOptions::value),
             Some(&json!({ "max-parameters": maximum }))
         );
         let ctx = AnalyzeContext::new(&file_path, &loaded.config, &parsed);
@@ -401,11 +460,14 @@ fn typed_options_follow_matching_overrides_and_preserve_level_only_changes() {
         );
     }
     assert_eq!(
-        loaded.config.rule_options_for(
-            &directory.join("test/a.dart").to_string_lossy(),
-            "style",
-            "prefer-correct-handler-name"
-        ),
+        loaded
+            .config
+            .rule_options_data_for(
+                &directory.join("test/a.dart").to_string_lossy(),
+                "style",
+                "prefer-correct-handler-name"
+            )
+            .map(falcon_config::RuleOptions::value),
         Some(&json!({ "name-pattern": "^on" })),
         "override options replace the entire object, not just supplied fields"
     );
@@ -440,11 +502,14 @@ fn null_options_remain_absent_and_do_not_clear_previous_options() {
     let loaded = load_config(&path).unwrap();
     assert!(loaded.warnings.is_empty());
     assert_eq!(
-        loaded.config.rule_options_for(
-            &directory.join("test/a.dart").to_string_lossy(),
-            "complexity",
-            "max-parameters-for-function"
-        ),
+        loaded
+            .config
+            .rule_options_data_for(
+                &directory.join("test/a.dart").to_string_lossy(),
+                "complexity",
+                "max-parameters-for-function"
+            )
+            .map(falcon_config::RuleOptions::value),
         Some(&json!({ "max-parameters": 2 }))
     );
     assert!(
@@ -541,7 +606,7 @@ fn nested_option_aliases_normalize_inside_arrays_with_canonical_precedence() {
     )
     .unwrap();
     let loaded = load_config(&path).unwrap();
-    assert_eq!(loaded.warnings.len(), 2);
+    assert_eq!(loaded.warnings.len(), 3);
     for field in ["class_name", "use_instead"] {
         let expected =
             format!("linter.rules.style.use-design-system-item.options.items[0].{field}");
@@ -553,10 +618,18 @@ fn nested_option_aliases_normalize_inside_arrays_with_canonical_precedence() {
             loaded.warnings
         );
     }
+    assert!(loaded.warnings.iter().any(|warning| warning ==
+        "duplicate option key `linter.rules.style.use-design-system-item.options.items[0].class-name`: discarded 42"
+    ));
     assert_eq!(
         loaded
             .config
-            .rule_options("style", "use-design-system-item"),
+            .rule_options_data_for(
+                &directory.join("lib/a.dart").to_string_lossy(),
+                "style",
+                "use-design-system-item",
+            )
+            .map(falcon_config::RuleOptions::value),
         Some(&json!({ "items": [{
             "class-name": "Container", "use-instead": "AppContainer"
         }] }))
@@ -619,10 +692,16 @@ fn banned_rules_reject_previously_ignored_invalid_entries() {
         "avoid-banned-types",
         "banned-usage",
     ] {
-        for entry in [
-            json!({"deny": ["*", null], "message": "Invalid mixed list"}),
-            json!({"deny": ["["], "message": "Invalid glob"}),
-            json!({"deny": ["**"], "message": " "}),
+        for (entry, suffix) in [
+            (
+                json!({"deny": ["*", null], "message": "Invalid mixed list"}),
+                ".deny[1]",
+            ),
+            (
+                json!({"deny": ["["], "message": "Invalid glob"}),
+                ".deny[0]",
+            ),
+            (json!({"deny": ["**"], "message": " "}), ".message"),
         ] {
             fs::write(
                 &path,
@@ -635,7 +714,7 @@ fn banned_rules_reject_previously_ignored_invalid_entries() {
             )
             .unwrap();
             let error = load_config(&path).unwrap_err();
-            let expected = format!("linter.rules.suspicious.{rule}.options");
+            let expected = format!("`linter.rules.suspicious.{rule}.options.rules[0]{suffix}`");
             assert!(error.0.contains(&expected), "{error}");
         }
     }

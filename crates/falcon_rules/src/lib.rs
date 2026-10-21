@@ -128,37 +128,91 @@ fn validate_rule_names(rules: &Rules, path: &str, section: Section) -> Result<()
     Ok(())
 }
 
-/// Rewrite legacy snake_case option keys recursively, preserving canonical keys.
-pub fn canonicalize_option_keys(options: &mut serde_json::Value, path: &str) -> Vec<String> {
+/// Rewrite declared legacy option keys, preserving canonical keys and user data.
+pub fn canonicalize_option_keys(
+    options: &mut serde_json::Value,
+    name: &str,
+    path: &str,
+) -> Vec<String> {
+    fn normalize(
+        value: &mut serde_json::Value,
+        schema: &serde_json::Value,
+        path: &str,
+        warnings: &mut Vec<String>,
+    ) {
+        let schema = schema
+            .get("anyOf")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|branches| {
+                branches.iter().find(|branch| {
+                    branch.get("properties").is_some() || branch.get("items").is_some()
+                })
+            })
+            .unwrap_or(schema);
+        match value {
+            serde_json::Value::Object(entries) => {
+                let Some(properties) = schema
+                    .get("properties")
+                    .and_then(serde_json::Value::as_object)
+                else {
+                    return;
+                };
+                let aliases: Vec<_> = entries
+                    .keys()
+                    .filter(|key| {
+                        key.contains('_') && properties.contains_key(&key.replace('_', "-"))
+                    })
+                    .cloned()
+                    .collect();
+                for alias in aliases {
+                    let canonical = alias.replace('_', "-");
+                    let value = entries.shift_remove(&alias).expect("existing option key");
+                    warnings.push(format!(
+                        "deprecated option key `{path}.{alias}`; use `{canonical}`; \
+                         run `falcon migrate` to update"
+                    ));
+                    if entries.contains_key(&canonical) {
+                        warnings.push(format!(
+                            "duplicate option key `{path}.{canonical}`: discarded {value}"
+                        ));
+                    } else {
+                        entries.insert(canonical, value);
+                    }
+                }
+                for (key, value) in entries {
+                    if let Some(schema) = properties.get(key) {
+                        normalize(value, schema, &format!("{path}.{key}"), warnings);
+                    }
+                }
+            }
+            serde_json::Value::Array(entries) => {
+                if let Some(schema) = schema.get("items") {
+                    for (index, value) in entries.iter_mut().enumerate() {
+                        normalize(value, schema, &format!("{path}[{index}]"), warnings);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     let mut warnings = Vec::new();
-    match options {
-        serde_json::Value::Object(entries) => {
-            let aliases: Vec<_> = entries
-                .keys()
-                .filter(|key| key.contains('_'))
-                .cloned()
-                .collect();
-            for alias in aliases {
-                let canonical = alias.replace('_', "-");
-                let value = entries.shift_remove(&alias).expect("existing option key");
-                warnings.push(format!(
-                    "deprecated option key `{path}.{alias}`; use `{canonical}` — \
-                     run `falcon migrate` to update"
-                ));
-                entries.entry(canonical).or_insert(value);
-            }
-            for (key, value) in entries {
-                warnings.extend(canonicalize_option_keys(value, &format!("{path}.{key}")));
-            }
-        }
-        serde_json::Value::Array(entries) => {
-            for (index, value) in entries.iter_mut().enumerate() {
-                warnings.extend(canonicalize_option_keys(value, &format!("{path}[{index}]")));
-            }
-        }
-        _ => {}
+    if let Some(schema) = lint::options::schema_for(name) {
+        normalize(options, schema, path, &mut warnings);
     }
     warnings
+}
+
+/// Validate one rule's options, reporting the supplied configuration path.
+///
+/// # Errors
+///
+/// Returns an error when an option key or value is unsupported.
+pub fn validate_rule_options(
+    name: &str,
+    options: &falcon_config::RuleOptions,
+    path: &str,
+) -> Result<(), ConfigError> {
+    lint::options::validate_rule(name, options, path)
 }
 
 fn validate_config_options(config: &FalconConfig) -> Result<(), ConfigError> {

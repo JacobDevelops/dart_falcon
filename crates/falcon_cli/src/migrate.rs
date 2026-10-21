@@ -7,18 +7,18 @@
 //! `cross_file`) and route every configured upstream rule to its falcon slot.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use falcon_config::{
-    FalconConfig, KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, LoadedConfig, RulePlainConfiguration,
+    KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, RuleOptions, RulePlainConfiguration,
+    deserialize_config_value,
 };
 use falcon_rules::meta::{
     RULE_METADATA, RuleMeta, RuleSource, canonical_rule_name, canonicalize_rule_entries,
     canonicalize_rule_map, meta_for,
 };
 use falcon_rules::schema::SCHEMA_URL;
-use falcon_rules::{canonicalize_loaded_config, canonicalize_option_keys};
-use serde::Deserialize;
+use falcon_rules::{canonicalize_loaded_config, canonicalize_option_keys, validate_rule_options};
 use serde_json::{Map, Value, json};
 
 /// Upstream pyramid_lint ids whose rules were merged into a surviving
@@ -38,10 +38,14 @@ const MERGED_PYRAMID_UPSTREAM: &[(&str, &str)] = &[
 pub struct MigrationResult {
     /// Pretty-printed falcon.json with a trailing newline.
     pub json: String,
-    /// Upstream rule ids that matched no falcon rule (reported, not emitted).
+    /// Rule ids that matched no falcon rule and were discarded.
     pub unrecognized: Vec<String>,
-    /// Number of upstream rules successfully mapped into the output.
+    /// Number of mapped upstream rules or rewritten legacy rule ids in an upgrade.
     pub migrated_count: usize,
+    /// Loader and canonicalization warnings requiring manual review.
+    pub warnings: Vec<String>,
+    /// Deprecated option-key warnings, one per rewritten key.
+    pub option_key_rewrites: Vec<String>,
 }
 
 /// The falcon config for one upstream entry, before JSON serialization.
@@ -54,8 +58,8 @@ impl From<&Value> for RuleConfig {
     fn from(value: &Value) -> Self {
         match value {
             Value::Bool(false) => Self::Disabled,
-            Value::Object(_) => Self::Enabled(Some(value.clone())),
-            _ => Self::Enabled(None),
+            Value::Bool(true) | Value::Null => Self::Enabled(None),
+            _ => Self::Enabled(Some(value.clone())),
         }
     }
 }
@@ -92,46 +96,73 @@ fn build_lookups() -> (RuleLookup, RuleLookup, RuleLookup) {
     (dcl, pyramid, lints)
 }
 
-/// Parse one `rules:` list entry into its upstream id and falcon config. Entries
-/// are a bare string, `{id: false}` (disabled), `{id: true}`/`{id: null}`
-/// (enabled), or `{id: {options}}`.
-fn parse_entry(entry: &Value) -> Option<(String, RuleConfig)> {
-    match entry {
-        Value::String(id) => Some((id.clone(), RuleConfig::Enabled(None))),
-        Value::Object(map) => {
-            // Single-key map keyed by the rule id; take the first key.
-            let (id, val) = map.iter().next()?;
-            Some((id.clone(), RuleConfig::from(val)))
-        }
-        _ => None,
-    }
-}
-
-/// Normalize a `package:lints`-style `linter.rules` node into (id, config)
-/// pairs. It is either a YAML list of ids (`- avoid_print`) or a map of
-/// id → `true`/`false`/`null`/`{options}` (`avoid_print: true`).
-fn parse_linter_rules(rules: &Value) -> Vec<(String, RuleConfig)> {
-    match rules {
-        Value::Array(entries) => entries.iter().filter_map(parse_entry).collect(),
-        Value::Object(map) => map
-            .iter()
-            .map(|(id, val)| (id.clone(), RuleConfig::from(val)))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 #[derive(Default)]
 struct Migration {
     linter_groups: BTreeMap<String, Vec<(String, Value)>>,
     cross_file_groups: BTreeMap<String, Vec<(String, Value)>>,
     unrecognized: Vec<String>,
     migrated_count: usize,
+    warnings: Vec<String>,
+    option_key_rewrites: Vec<String>,
 }
 
 impl Migration {
-    fn place(&mut self, id: String, cfg: RuleConfig, lookup: &RuleLookup) {
+    fn place_rules(&mut self, rules: &Value, source: &str, lookup: &RuleLookup) {
+        match rules {
+            Value::Array(entries) => {
+                for (index, entry) in entries.iter().enumerate() {
+                    match entry {
+                        Value::String(id) => self.place(
+                            id.clone(), RuleConfig::Enabled(None), entry, lookup, source, Some(index),
+                        ),
+                        Value::Object(map) if !map.is_empty() => {
+                            for (id, value) in map {
+                                self.place(
+                                    id.clone(), RuleConfig::from(value), value, lookup, source, Some(index),
+                                );
+                            }
+                        }
+                        _ => self.warnings.push(format!(
+                            "unsupported upstream rule entry `{source}.rules[{index}]`; discarded value {entry}"
+                        )),
+                    }
+                }
+            }
+            Value::Object(map) => {
+                for (id, value) in map {
+                    self.place(
+                        id.clone(),
+                        RuleConfig::from(value),
+                        value,
+                        lookup,
+                        source,
+                        None,
+                    );
+                }
+            }
+            _ => self.warnings.push(format!(
+                "unsupported upstream rules `{source}.rules`; discarded value {rules}"
+            )),
+        }
+    }
+
+    fn place(
+        &mut self,
+        id: String,
+        cfg: RuleConfig,
+        value: &Value,
+        lookup: &RuleLookup,
+        source: &str,
+        index: Option<usize>,
+    ) {
         let Some(meta) = lookup.get(id.as_str()) else {
+            let path = match index {
+                Some(index) => format!("{source}.rules[{index}].{id}"),
+                None => format!("{source}.rules.{id}"),
+            };
+            self.warnings.push(format!(
+                "unknown upstream rule `{path}`; discarded value {value}"
+            ));
             self.unrecognized.push(id);
             return;
         };
@@ -169,13 +200,19 @@ fn config_to_json(cfg: RuleConfig) -> Value {
 
 /// Assemble a section's `rules` object: `recommended: false` plus each non-empty
 /// group. Groups are omitted when they contain no migrated rules.
-fn build_rules_object(groups: BTreeMap<String, Vec<(String, Value)>>, path: &str) -> Value {
+fn build_rules_object(
+    groups: BTreeMap<String, Vec<(String, Value)>>,
+    path: &str,
+    report: &mut Migration,
+) -> Value {
     let mut rules = Map::new();
     rules.insert("recommended".into(), json!(false));
     for (group, entries) in groups {
         if !entries.is_empty() {
-            let (mut entries, _warnings) = canonicalize_rule_entries(entries);
-            canonicalize_group_options(&mut entries, &format!("{path}.rules.{group}"));
+            let group_path = format!("{path}.rules.{group}");
+            let (mut entries, warnings) = canonicalize_rule_entries(entries, &group_path);
+            report.warnings.extend(warnings);
+            canonicalize_group_options(&mut entries, &group_path, report);
             rules.insert(group, Value::Object(entries));
         }
     }
@@ -186,8 +223,9 @@ fn build_rules_object(groups: BTreeMap<String, Vec<(String, Value)>>, path: &str
 ///
 /// # Errors
 ///
-/// Returns an error string if the YAML cannot be parsed, the migrated
-/// configuration is invalid, or the result cannot be serialized.
+/// Returns an error string if the YAML cannot be parsed or the result cannot be
+/// serialized. Unsupported or invalid options are discarded with their full
+/// paths and values reported, so the written config passes canonical loading.
 pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     let doc: Value =
         serde_yaml::from_str(yaml).map_err(|e| format!("failed to parse YAML: {e}"))?;
@@ -200,49 +238,48 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     // the YAML list form.
     let sections = [("dart_code_linter", &dcl), ("custom_lint", &pyramid)];
     for (section, lookup) in sections {
-        let Some(rules) = doc
-            .get(section)
-            .and_then(|s| s.get("rules"))
-            .and_then(|r| r.as_array())
-        else {
+        let Some(rules) = doc.get(section).and_then(|s| s.get("rules")) else {
             continue;
         };
-        for entry in rules {
-            let Some((id, cfg)) = parse_entry(entry) else {
-                continue;
-            };
-            migration.place(id, cfg, lookup);
-        }
+        migration.place_rules(rules, section, lookup);
     }
 
     // Official `package:lints` / `package:flutter_lints` rules live under the
     // top-level `linter.rules` key (list or map form).
     if let Some(rules) = doc.get("linter").and_then(|s| s.get("rules")) {
-        for (id, cfg) in parse_linter_rules(rules) {
-            migration.place(id, cfg, &lints);
-        }
+        migration.place_rules(rules, "linter", &lints);
     }
 
     let mut root = Map::new();
     root.insert("$schema".into(), json!(SCHEMA_URL));
     root.insert(
         "linter".into(),
-        build_rules_object(migration.linter_groups, "linter"),
+        build_rules_object(
+            std::mem::take(&mut migration.linter_groups),
+            "linter",
+            &mut migration,
+        ),
     );
     // Only emit the cross-file block when a cross-file rule was actually migrated.
     if !migration.cross_file_groups.is_empty() {
         root.insert(
             "cross-file".into(),
-            build_rules_object(migration.cross_file_groups, "cross-file"),
+            build_rules_object(
+                std::mem::take(&mut migration.cross_file_groups),
+                "cross-file",
+                &mut migration,
+            ),
         );
     }
 
-    let json = serialize_config(&Value::Object(root))?;
+    let json = serialize_config(Value::Object(root), &mut migration.warnings)?;
 
     Ok(MigrationResult {
         json,
         unrecognized: migration.unrecognized,
         migrated_count: migration.migrated_count,
+        warnings: migration.warnings,
+        option_key_rewrites: migration.option_key_rewrites,
     })
 }
 
@@ -265,35 +302,45 @@ fn looks_like_falcon_json(content: &str) -> bool {
 }
 
 /// Upgrade an existing falcon.json in place: canonicalize legacy top-level key
-/// spellings to kebab-case — the cross-file section (`project`/`cross_file` →
-/// `cross-file`, including each override's block) and `max_errors` → `max-errors`
-/// — then rewrite legacy rule ids (the pre-1.0 `snake_case` ids and the removed
+/// spellings to kebab-case: the cross-file section (`project`/`cross_file` →
+/// `cross-file`, including each override's block) and `max_errors` → `max-errors`,
+/// then rewrite legacy rule ids (the pre-1.0 `snake_case` ids and the removed
 /// twin variants) to their canonical ids across `linter`/`cross-file` rule maps
 /// and every override, preserving each rule's level and canonicalizing nested
-/// option keys to kebab-case. When a legacy id and its canonical id (or two legacy
-/// twins) collide in the same group, the more severe level wins.
+/// declared option keys to kebab-case. When a legacy id and its canonical id (or
+/// two legacy twins) collide in the same group, the more severe level wins.
 ///
 /// # Errors
 ///
-/// Returns an error string if the input is not valid JSON, the migrated
-/// configuration is invalid, or the result cannot be serialized.
+/// Returns an error string if the input is not valid JSON or the result cannot be
+/// serialized. Unsupported or invalid entries are discarded with their full
+/// paths and values reported, so the written config passes canonical loading.
 pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     let mut root: Value =
         serde_json::from_str(json).map_err(|e| format!("failed to parse falcon.json: {e}"))?;
-    let mut renamed = 0usize;
+    let mut report = Migration::default();
+    if let Some(object) = root.as_object_mut() {
+        for key in ["rules", "exclude_patterns", "severity_override"] {
+            if let Some(value) = object.shift_remove(key) {
+                report.warnings.push(format!(
+                    "unsupported legacy flat configuration `{key}`; discarded value {value}"
+                ));
+            }
+        }
+    }
 
     for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
-        rename_key(&mut root, legacy, canonical);
+        rename_key(&mut root, legacy, canonical, "", &mut report.warnings);
     }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
-        for ov in overrides.iter_mut() {
-            rename_cross_file_section(ov);
+        for (index, ov) in overrides.iter_mut().enumerate() {
+            rename_cross_file_section(ov, &format!("overrides[{index}]"), &mut report.warnings);
         }
     }
 
     for section in ["linter", "cross-file"] {
         if let Some(s) = root.get_mut(section) {
-            canonicalize_section_rules(s, section, &mut renamed);
+            canonicalize_section_rules(s, section, &mut report);
         }
     }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
@@ -303,50 +350,93 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
                     canonicalize_section_rules(
                         s,
                         &format!("overrides[{index}].{section}"),
-                        &mut renamed,
+                        &mut report,
                     );
                 }
             }
         }
     }
 
-    let out = serialize_config(&root)?;
+    let out = serialize_config(root, &mut report.warnings)?;
     Ok(MigrationResult {
         json: out,
-        unrecognized: Vec::new(),
-        migrated_count: renamed,
+        unrecognized: report.unrecognized,
+        migrated_count: report.migrated_count,
+        warnings: report.warnings,
+        option_key_rewrites: report.option_key_rewrites,
     })
 }
 
-/// Validate registered rule names and options before emitting the normalized config.
-///
-/// Structural key checks and `max-errors` validation remain the file loader's job;
-/// its deserialization entry point requires a path rather than an in-memory value.
-fn serialize_config(value: &Value) -> Result<String, String> {
-    let config = FalconConfig::deserialize(value)
-        .map_err(|e| format!("invalid migrated falcon.json: {e}"))?;
-    canonicalize_loaded_config(LoadedConfig {
-        config,
-        warnings: Vec::new(),
-    })
-    .map_err(|e| format!("invalid migrated falcon.json: {e}"))?;
-    let mut json = serde_json::to_string_pretty(value)
+/// Repair invalid entries using the canonical loader before serializing.
+fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<String, String> {
+    let mut removals = Vec::new();
+    loop {
+        let loaded = deserialize_config_value(&value, Path::new("falcon.json"))
+            .and_then(canonicalize_loaded_config);
+        match loaded {
+            Ok(loaded) => {
+                for warning in loaded.warnings {
+                    if !warnings.contains(&warning) {
+                        warnings.push(warning);
+                    }
+                }
+                break;
+            }
+            Err(error) => {
+                let path = error.0.split('`').nth(1).unwrap_or("");
+                let original_path = original_option_path(path, &removals);
+                let suffix = if path.is_empty() || path == "." {
+                    String::new()
+                } else {
+                    format!(".{path}")
+                };
+                let (discarded_path, discarded, array_entry) =
+                    discard_option(&mut value, &suffix, "")
+                        .unwrap_or_else(|| (String::new(), std::mem::take(&mut value), false));
+                let original_discarded_path = original_option_path(&discarded_path, &removals);
+                warnings.push(format!(
+                    "{}; discarded value {discarded} at `{}`",
+                    error.0.replace(path, &original_path),
+                    if original_discarded_path.is_empty() {
+                        "$"
+                    } else {
+                        &original_discarded_path
+                    }
+                ));
+                if array_entry {
+                    let (prefix, index) =
+                        discarded_path.rsplit_once('[').expect("array entry path");
+                    removals.push((
+                        prefix.to_owned(),
+                        index
+                            .trim_end_matches(']')
+                            .parse::<usize>()
+                            .expect("array entry index"),
+                    ));
+                }
+                if value.is_null() {
+                    value = Value::Object(Map::new());
+                }
+            }
+        }
+    }
+    let mut json = serde_json::to_string_pretty(&value)
         .map_err(|e| format!("failed to serialize falcon.json: {e}"))?;
     json.push('\n');
     Ok(json)
 }
 
-fn rename_cross_file_section(value: &mut Value) {
+fn rename_cross_file_section(value: &mut Value, path: &str, warnings: &mut Vec<String>) {
     for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
         if canonical == "cross-file" {
-            rename_key(value, legacy, canonical);
+            rename_key(value, legacy, canonical, path, warnings);
         }
     }
 }
 
 /// Rename a top-level key on a JSON object, unless the canonical key already
 /// exists (it wins). No-op for non-objects and objects without the legacy key.
-fn rename_key(value: &mut Value, from: &str, to: &str) {
+fn rename_key(value: &mut Value, from: &str, to: &str, path: &str, warnings: &mut Vec<String>) {
     let Some(obj) = value.as_object_mut() else {
         return;
     };
@@ -354,9 +444,25 @@ fn rename_key(value: &mut Value, from: &str, to: &str) {
         return;
     }
     if obj.contains_key(to) {
-        obj.shift_remove(from);
+        let discarded = obj.shift_remove(from).expect("existing legacy key");
+        let full_path = if path.is_empty() {
+            from.to_owned()
+        } else {
+            format!("{path}.{from}")
+        };
+        warnings.push(format!(
+            "duplicate configuration key `{full_path}`: discarded value {discarded}; `{to}` wins"
+        ));
         return;
     }
+    let full_path = if path.is_empty() {
+        from.to_owned()
+    } else {
+        format!("{path}.{from}")
+    };
+    warnings.push(format!(
+        "deprecated configuration key `{full_path}`: use `{to}`"
+    ));
     let entries = std::mem::take(obj);
     for (key, value) in entries {
         obj.insert(if key == from { to.to_string() } else { key }, value);
@@ -365,38 +471,170 @@ fn rename_key(value: &mut Value, from: &str, to: &str) {
 
 /// Canonicalize the rule keys of one `linter`/`cross-file` section's `rules`
 /// object (each group is an object of rule id → configuration).
-fn canonicalize_section_rules(section: &mut Value, path: &str, renamed: &mut usize) {
+fn canonicalize_section_rules(section: &mut Value, path: &str, report: &mut Migration) {
     let Some(rules) = section.get_mut("rules").and_then(Value::as_object_mut) else {
         return;
     };
     for (name, group_val) in rules.iter_mut() {
         if let Some(group) = group_val.as_object_mut() {
-            canonicalize_group(group, renamed);
-            canonicalize_group_options(group, &format!("{path}.rules.{name}"));
+            canonicalize_group(group, &format!("{path}.rules.{name}"), report);
+            canonicalize_group_options(group, &format!("{path}.rules.{name}"), report);
         }
     }
 }
 
 /// Rewrite every rule key in one group map to its canonical id, merging
 /// collisions by keeping the more severe level.
-fn canonicalize_group(group: &mut Map<String, Value>, renamed: &mut usize) {
+fn canonicalize_group(group: &mut Map<String, Value>, path: &str, report: &mut Migration) {
+    let mut unknown = Vec::with_capacity(group.len());
     for key in group.keys() {
         let canonical = canonical_rule_name(key);
-        if canonical != key {
-            *renamed += 1;
+        if meta_for(key).is_none() {
+            report.unrecognized.push(key.clone());
+            unknown.push(key.clone());
+        } else if canonical != key {
+            report.migrated_count += 1;
         }
     }
-    let _warnings = canonicalize_rule_map(group);
+    for key in unknown {
+        let value = group.shift_remove(&key).expect("existing unknown rule");
+        report.warnings.push(format!(
+            "unknown rule key `{path}.{key}`; discarded value {value}"
+        ));
+    }
+    report.warnings.extend(canonicalize_rule_map(group, path));
 }
 
 /// Rewrite option payload keys using the shared loader alias policy.
-fn canonicalize_group_options(group: &mut Map<String, Value>, path: &str) {
+fn canonicalize_group_options(group: &mut Map<String, Value>, path: &str, report: &mut Migration) {
     for (name, config) in group {
-        if let Some(options) = config.get_mut("options") {
-            // These keys are already rewritten; loader deprecation advice to run
-            // this same migration would be misleading here.
-            let _warnings = canonicalize_option_keys(options, &format!("{path}.{name}.options"));
+        if meta_for(name).is_none() {
+            continue;
         }
+        if let Some(options) = config.get_mut("options") {
+            if options.is_null() {
+                continue;
+            }
+            let path = format!("{path}.{name}.options");
+            let warnings = canonicalize_option_keys(options, name, &path);
+            report.option_key_rewrites.extend(
+                warnings
+                    .iter()
+                    .filter(|warning| warning.starts_with("deprecated option key "))
+                    .cloned(),
+            );
+            report.warnings.extend(warnings);
+            // Validation consumes a temporary wrapper, not a copy of the payload.
+            let mut data: RuleOptions = serde_json::from_value(std::mem::take(options))
+                .expect("any JSON value deserializes as a rule options payload");
+            let mut removals = Vec::new();
+            let mut optionless = false;
+            while let Err(error) = validate_rule_options(name, &data, &path) {
+                optionless |= error.0.contains("this rule has no options");
+                let invalid_path = error.0.split('`').nth(1).unwrap_or(&path);
+                let suffix = invalid_path.strip_prefix(&path).unwrap_or("");
+                let original_path = original_option_path(invalid_path, &removals);
+                let (discarded_path, discarded, array_entry) =
+                    discard_option(data.value_mut(), suffix, &path)
+                        .unwrap_or_else(|| (path.clone(), std::mem::take(data.value_mut()), false));
+                let original_discarded_path = original_option_path(&discarded_path, &removals);
+                report.warnings.push(format!(
+                    "{}; discarded value {discarded} at `{original_discarded_path}`",
+                    error.0.replace(invalid_path, &original_path)
+                ));
+                if array_entry {
+                    let (prefix, index) =
+                        discarded_path.rsplit_once('[').expect("array entry path");
+                    removals.push((
+                        prefix.to_owned(),
+                        index
+                            .trim_end_matches(']')
+                            .parse::<usize>()
+                            .expect("array entry index"),
+                    ));
+                }
+                if data.value().is_null() {
+                    break;
+                }
+            }
+            *options = std::mem::take(data.value_mut());
+            if options.is_null() || optionless {
+                config
+                    .as_object_mut()
+                    .expect("options belongs to an object")
+                    .shift_remove("options");
+            }
+        }
+    }
+}
+
+fn original_option_path(path: &str, removals: &[(String, usize)]) -> String {
+    let mut path = path.to_owned();
+    for (prefix, removed) in removals.iter().rev() {
+        let Some(suffix) = path
+            .strip_prefix(prefix)
+            .and_then(|suffix| suffix.strip_prefix('['))
+        else {
+            continue;
+        };
+        let Some((index, rest)) = suffix.split_once(']') else {
+            continue;
+        };
+        let Ok(index) = index.parse::<usize>() else {
+            continue;
+        };
+        if index >= *removed {
+            path = format!("{prefix}[{}]{rest}", index + 1);
+        }
+    }
+    path
+}
+
+fn discard_option(value: &mut Value, suffix: &str, path: &str) -> Option<(String, Value, bool)> {
+    if suffix.is_empty() {
+        return Some((path.to_owned(), std::mem::take(value), false));
+    }
+    match value {
+        Value::Object(entries) => {
+            let suffix = suffix.strip_prefix('.')?;
+            let key = entries
+                .keys()
+                .filter(|key| {
+                    suffix == key.as_str()
+                        || suffix
+                            .strip_prefix(key.as_str())
+                            .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
+                })
+                .max_by_key(|key| key.len())?
+                .clone();
+            let rest = suffix.strip_prefix(&key)?;
+            let path = if path.is_empty() {
+                key.clone()
+            } else {
+                format!("{path}.{key}")
+            };
+            if rest.is_empty() {
+                Some((path, entries.shift_remove(&key)?, false))
+            } else {
+                discard_option(entries.get_mut(&key)?, rest, &path)
+                    .or_else(|| Some((path, entries.shift_remove(&key)?, false)))
+            }
+        }
+        Value::Array(entries) => {
+            let (index, rest) = suffix.strip_prefix('[')?.split_once(']')?;
+            let index = index.parse::<usize>().ok()?;
+            if index >= entries.len() {
+                return None;
+            }
+            let path = format!("{path}[{index}]");
+            if rest.is_empty() {
+                Some((path, entries.remove(index), true))
+            } else {
+                discard_option(&mut entries[index], rest, &path)
+                    .or_else(|| Some((path, entries.remove(index), true)))
+            }
+        }
+        _ => None,
     }
 }
 
@@ -437,15 +675,30 @@ pub fn run_migrate(input: Option<PathBuf>, write: bool, output: Option<PathBuf>)
 
     if upgrade {
         eprintln!(
-            "upgraded {} legacy rule id(s) to canonical form",
-            result.migrated_count
+            "upgraded {} legacy rule id(s) and {} option key(s) to canonical form",
+            result.migrated_count,
+            result.option_key_rewrites.len()
         );
     } else {
         eprintln!("migrated {} rule(s)", result.migrated_count);
     }
+    if !result.option_key_rewrites.is_empty() {
+        eprintln!(
+            "rewrote {} option key(s):",
+            result.option_key_rewrites.len()
+        );
+        for rewrite in &result.option_key_rewrites {
+            eprintln!("  - {rewrite}");
+        }
+    }
+    for warning in &result.warnings {
+        if !warning.starts_with("deprecated option key ") {
+            eprintln!("warning: {warning}");
+        }
+    }
     if !result.unrecognized.is_empty() {
         eprintln!(
-            "warning: {} unrecognized upstream rule(s) skipped:",
+            "warning: {} unrecognized rule(s) discarded:",
             result.unrecognized.len()
         );
         for id in &result.unrecognized {

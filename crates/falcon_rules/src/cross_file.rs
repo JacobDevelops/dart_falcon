@@ -21,7 +21,7 @@ crate::declare_rules! {
     unused_dependencies::UnusedDependencies => ("unused-dependencies", cross_file, Correctness, false, RuleSource::Falcon);
     undeclared_dependencies::UndeclaredDependencies => ("undeclared-dependencies", cross_file, Correctness, false, RuleSource::Falcon);
     no_import_cycles::NoImportCycles => ("no-import-cycles", cross_file, Correctness, false, RuleSource::Falcon);
-    banned_imports::BannedImports => ("banned-imports", cross_file, Correctness, false, RuleSource::Falcon);
+    banned_imports::BannedImports => ("banned-imports", cross_file, Correctness, false, RuleSource::Falcon, options = banned_imports::Options);
     sort_pub_dependencies::SortPubDependencies => ("sort-pub-dependencies", cross_file, Correctness, false, RuleSource::Lints("sort_pub_dependencies"));
 }
 

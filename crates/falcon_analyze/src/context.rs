@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Fix, FixKind, Severity, Span, TextEdit};
@@ -22,6 +22,7 @@ pub struct AnalysisCache<'a> {
     local_writes: OnceLock<LocalWrites>,
     globals: OnceLock<HashMap<&'a str, ResolvedType>>,
     constants: ConstantCache,
+    config_errors: Mutex<Vec<Diagnostic>>,
 }
 
 struct LocalWrites {
@@ -103,6 +104,29 @@ impl<'a> AnalyzeContext<'a> {
     pub fn file_path(&self) -> &'a std::path::Path {
         self.file_path
     }
+
+    /// Record a configuration error discovered by a lazy rule-options read.
+    pub fn report_config_error(&self, message: String) {
+        let mut errors = self.cache.config_errors.lock().unwrap();
+        if errors
+            .iter()
+            .any(|diagnostic| diagnostic.message == message)
+        {
+            return;
+        }
+        errors.push(Diagnostic::new(
+            "config",
+            Severity::Error,
+            message,
+            self.file_path.to_string_lossy().into_owned(),
+            Span { start: 0, end: 0 },
+        ));
+    }
+
+    pub(crate) fn take_config_errors(&self) -> Vec<Diagnostic> {
+        std::mem::take(&mut *self.cache.config_errors.lock().unwrap())
+    }
+
     pub fn source(&self) -> &'a str {
         self.source
     }
@@ -299,5 +323,11 @@ impl<'a> AnalyzeContext<'a> {
     ) -> Option<&falcon_config::RuleOptions> {
         self.config
             .rule_options_data_for(&self.file_path.to_string_lossy(), group, rule_name)
+    }
+
+    /// Locate effective options for configuration diagnostics.
+    pub fn rule_options_location(&self, group: &str, rule_name: &str) -> String {
+        self.config
+            .rule_options_location_for(&self.file_path.to_string_lossy(), group, rule_name)
     }
 }

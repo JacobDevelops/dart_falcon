@@ -6,8 +6,9 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
-use glob::{MatchOptions, Pattern};
-use serde::{Deserialize, Deserializer};
+use glob::MatchOptions;
+
+use crate::lint::options::{Glob, nonblank_message, nonempty_patterns};
 
 #[derive(Default)]
 pub struct AvoidBannedNames;
@@ -20,55 +21,6 @@ pub(crate) struct Options {
 }
 
 crate::lint::options::impl_options!(Options);
-
-#[derive(Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-#[serde(try_from = "String", into = "String")]
-#[schemars(with = "String")]
-pub(crate) struct Glob(Pattern);
-
-/// A validated glob pattern used to match a banned name or API.
-impl TryFrom<String> for Glob {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty() {
-            return Err("glob must not be empty".into());
-        }
-        Pattern::new(&value).map(Self).map_err(|error| error.to_string())
-    }
-}
-
-impl From<Glob> for String {
-    fn from(value: Glob) -> Self {
-        value.0.as_str().to_owned()
-    }
-}
-
-impl Glob {
-    pub(crate) fn matches_with(&self, value: &str, options: MatchOptions) -> bool {
-        self.0.matches_with(value, options)
-    }
-}
-
-pub(crate) fn nonempty_patterns<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<Glob>, D::Error> {
-    let patterns = Vec::<Glob>::deserialize(deserializer)?;
-    if patterns.is_empty() {
-        return Err(serde::de::Error::custom("glob list must not be empty"));
-    }
-    Ok(patterns)
-}
-
-pub(crate) fn nonblank_message<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<String, D::Error> {
-    let message = String::deserialize(deserializer)?;
-    if message.trim().is_empty() {
-        return Err(serde::de::Error::custom("message must not be blank"));
-    }
-    Ok(message)
-}
 
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -210,13 +162,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn entries_preserve_patterns_and_messages() {
-        let options: Options = serde_json::from_value(json!({
-            "rules": [{"deny": ["Legacy*"], "message": "Use the supported API."}]
-        })).unwrap();
-        assert_eq!(options.rules[0].patterns[0].0.as_str(), "Legacy*");
-        assert_eq!(options.rules[0].message, "Use the supported API.");
-        assert!(Options::default().rules.is_empty());
-    }
 }

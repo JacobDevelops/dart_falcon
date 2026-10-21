@@ -95,7 +95,7 @@ fn test_rule_configuration_both_forms() {
     let plain: RuleConfiguration = serde_json::from_value(serde_json::json!("warn")).unwrap();
     assert!(matches!(plain, RuleConfiguration::Plain(_)));
     assert_eq!(plain.level(), RulePlainConfiguration::Warn);
-    assert!(plain.options().is_none());
+    assert!(plain.options_data().is_none());
 
     // Object form with options.
     let with_options: RuleConfiguration =
@@ -104,8 +104,8 @@ fn test_rule_configuration_both_forms() {
     assert_eq!(with_options.level(), RulePlainConfiguration::Error);
     assert_eq!(
         with_options
-            .options()
-            .and_then(|o| o.get("k"))
+            .options_data()
+            .and_then(|options| options.value().get("k"))
             .and_then(|v| v.as_i64()),
         Some(1)
     );
@@ -114,7 +114,7 @@ fn test_rule_configuration_both_forms() {
     let no_options: RuleConfiguration =
         serde_json::from_value(serde_json::json!({ "level": "on" })).unwrap();
     assert_eq!(no_options.level(), RulePlainConfiguration::On);
-    assert!(no_options.options().is_none());
+    assert!(no_options.options_data().is_none());
 }
 
 #[test]
@@ -303,8 +303,9 @@ fn test_rule_options_scoped_to_group() {
         } } }
     }));
     let opts = cfg
-        .rule_options("style", "use-design-system-item")
-        .expect("options present");
+        .rule_options_data_for("lib/main.dart", "style", "use-design-system-item")
+        .expect("options present")
+        .value();
     assert_eq!(
         opts.get("items")
             .and_then(|v| v.as_array())
@@ -312,7 +313,10 @@ fn test_rule_options_scoped_to_group() {
         Some(2)
     );
     // Plain form or absent rule → no options.
-    assert!(cfg.rule_options("suspicious", "avoid-dynamic").is_none());
+    assert!(
+        cfg.rule_options_data_for("lib/main.dart", "suspicious", "avoid-dynamic")
+            .is_none()
+    );
 }
 
 #[test]
@@ -328,7 +332,7 @@ fn test_rule_options_ignores_wrong_group_entry() {
     }));
     // Options are ignored when queried under the rule's real group.
     assert!(
-        cfg.rule_options("style", "use-design-system-item")
+        cfg.rule_options_data_for("lib/main.dart", "style", "use-design-system-item")
             .is_none()
     );
     // And the misplaced `"off"` does not disable it: still on at default (Warn).
@@ -857,15 +861,15 @@ fn test_override_options_replace_base_per_path() {
 
     // Non-matching path: base options.
     assert_eq!(
-        cfg.rule_options_for("lib/main.dart", "complexity", "max_lines_for_file")
-            .and_then(|o| o.get("max_lines"))
+        cfg.rule_options_data_for("lib/main.dart", "complexity", "max_lines_for_file")
+            .and_then(|options| options.value().get("max_lines"))
             .and_then(|v| v.as_u64()),
         Some(400)
     );
     // Matching path: override options replace the base wholesale.
     assert_eq!(
-        cfg.rule_options_for("test/widget_test.dart", "complexity", "max_lines_for_file")
-            .and_then(|o| o.get("max_lines"))
+        cfg.rule_options_data_for("test/widget_test.dart", "complexity", "max_lines_for_file")
+            .and_then(|options| options.value().get("max_lines"))
             .and_then(|v| v.as_u64()),
         Some(10)
     );
@@ -884,8 +888,8 @@ fn test_override_without_options_keeps_base_options() {
         } ]
     }));
     assert_eq!(
-        cfg.rule_options_for("test/widget_test.dart", "complexity", "max_lines_for_file")
-            .and_then(|o| o.get("max_lines"))
+        cfg.rule_options_data_for("test/widget_test.dart", "complexity", "max_lines_for_file")
+            .and_then(|options| options.value().get("max_lines"))
             .and_then(|v| v.as_u64()),
         Some(400)
     );

@@ -33,7 +33,7 @@ crate::declare_rules! {
     avoid_missing_interpolation::AvoidMissingInterpolation => ("avoid-missing-interpolation", resolved, None, true, RuleSource::Falcon);
     avoid_contradictory_expressions::AvoidContradictoryExpressions => ("avoid-contradictory-expressions", resolved, None, true, RuleSource::Falcon);
     avoid_unmodified_loop_condition::AvoidUnmodifiedLoopCondition => ("avoid-unmodified-loop-condition", resolved, None, true, RuleSource::Falcon);
-    avoid_empty_test_groups::AvoidEmptyTestGroups => ("avoid-empty-test-groups", resolved, Some(Domain::Test), false, RuleSource::Falcon);
+    avoid_empty_test_groups::AvoidEmptyTestGroups => ("avoid-empty-test-groups", resolved, Some(Domain::Test), false, RuleSource::Falcon, options = avoid_empty_test_groups::Options);
     prefer_expect_later::PreferExpectLater => ("prefer-expect-later", resolved, Some(Domain::Test), false, RuleSource::Falcon);
     avoid_web_libraries_in_flutter::AvoidWebLibrariesInFlutter => ("avoid-web-libraries-in-flutter", file, Some(Domain::Flutter), true, RuleSource::Lints("avoid_web_libraries_in_flutter"));
     no_logic_in_create_state::NoLogicInCreateState => ("no-logic-in-create-state", resolved, Some(Domain::Flutter), true, RuleSource::Lints("no_logic_in_create_state"));
@@ -83,7 +83,7 @@ crate::declare_rules! {
     library_private_types_in_public_api::LibraryPrivateTypesInPublicApi => ("library-private-types-in-public-api", resolved, None, true, RuleSource::Lints("library_private_types_in_public_api"));
     invalid_runtime_check_with_js_interop_types::InvalidRuntimeCheckWithJsInteropTypes => ("invalid-runtime-check-with-js-interop-types", resolved, None, true, RuleSource::Lints("invalid_runtime_check_with_js_interop_types"));
     avoid_duplicate_test_assertions::AvoidDuplicateTestAssertions => ("avoid-duplicate-test-assertions", resolved, Some(Domain::Test), true, RuleSource::Falcon);
-    missing_test_assertion::MissingTestAssertion => ("missing-test-assertion", resolved, Some(Domain::Test), true, RuleSource::Falcon);
+    missing_test_assertion::MissingTestAssertion => ("missing-test-assertion", resolved, Some(Domain::Test), true, RuleSource::Falcon, options = missing_test_assertion::Options);
     list_all_equatable_fields::ListAllEquatableFields => ("list-all-equatable-fields", resolved, Some(Domain::Equatable), true, RuleSource::Falcon);
     add_equatable_props::AddEquatableProps => ("add-equatable-props", resolved, Some(Domain::Equatable), true, RuleSource::Falcon);
     avoid_mutable_equatable_subclass_fields::AvoidMutableEquatableSubclassFields => ("avoid-mutable-equatable-subclass-fields", resolved, Some(Domain::Equatable), true, RuleSource::Falcon);

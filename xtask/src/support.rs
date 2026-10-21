@@ -540,21 +540,25 @@ mod tests {
                 assert!(config.files.includes.admits(&bad.to_string_lossy()));
                 assert_eq!(config.overrides.len(), 2);
                 assert_eq!(
-                    config.rule_options_for(
-                        &bad.to_string_lossy(),
-                        "performance",
-                        "move-variable-closer-to-its-usage",
-                    ),
+                    config
+                        .rule_options_data_for(
+                            &bad.to_string_lossy(),
+                            "performance",
+                            "move-variable-closer-to-its-usage",
+                        )
+                        .map(|options| options.value()),
                     Some(&json!({ "ignore-after-if": false })),
                 );
                 let good =
                     sdk_fixture::staged_file(staged.path(), &original, &original.join("good.dart"));
                 assert_eq!(
-                    config.rule_options_for(
-                        &good.to_string_lossy(),
-                        "performance",
-                        "move-variable-closer-to-its-usage",
-                    ),
+                    config
+                        .rule_options_data_for(
+                            &good.to_string_lossy(),
+                            "performance",
+                            "move-variable-closer-to-its-usage",
+                        )
+                        .map(|options| options.value()),
                     target
                         .is_dir()
                         .then_some(&json!({ "ignore-after-if": true })),

@@ -157,10 +157,11 @@ empty rule descriptions and bad examples that produce no diagnostics.
    resolution, `cross_file` for project-wide rules, or `resolved_cross_file` when
    project-wide analysis requires resolution. File entries include an optional
    domain (`None` or, for example, `Some(Domain::Flutter)`); cross-file entries
-   omit this field. Both end with the recommended flag and source. Sources are
+   omit this field. Both include the recommended flag and source. Sources are
    `RuleSource::DartCodeLinter("...")`,
    `RuleSource::PyramidLint("...")`, `RuleSource::Lints("...")`, or
-   `RuleSource::Falcon` for original rules.
+   `RuleSource::Falcon` for original rules. Rules with options append
+   `, options = module::Options` inside the declaration tuple, after the source.
 
    The macro declares the module, supplies the rule type's inherent `NAME`, and
    creates its metadata entry and default constructor. Execution identities,
@@ -204,11 +205,18 @@ can use a manual `Default` implementation.
 
 Implement the options contract with `options::impl_options!(Options)` and read
 the typed value with `options::get::<Options>(ctx, Self::NAME)`, using
-`crate::lint::options`. Register the rule and its options type in
-`crates/falcon_rules/src/lint/options.rs`'s registry. The loader validates options
-and reports invalid values at their configuration path; the typed lookup honors
-per-path overrides. Nested option models also derive `Serialize`, `Deserialize`,
-and `JsonSchema`, with kebab-case field names and unknown-field rejection where
+`crate::lint::options`. Declare the options type beside the rule in its existing
+per-group `crate::declare_rules!` invocation:
+
+```rust
+avoid_foo::AvoidFoo => ("avoid-foo", file, None, false, RuleSource::Falcon, options = avoid_foo::Options);
+```
+
+The declaration supplies options registration and schema metadata. Do not add a
+second registry in `lint/options.rs`. The loader validates options and reports
+invalid values at their configuration path; the typed lookup honors per-path
+overrides. Nested option models also derive `Serialize`, `Deserialize`, and
+`JsonSchema`, with kebab-case field names and unknown-field rejection where
 applicable.
 
 Run `cargo xtask schema` and `cargo xtask docgen` after changing options. Their
