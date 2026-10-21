@@ -8,6 +8,7 @@ pub struct Lexer<'src> {
     pos: usize,
     /// A shebang may follow a leading BOM.
     logical_start: usize,
+    failed_interpolations: Vec<bool>,
 }
 
 impl<'src> Lexer<'src> {
@@ -26,6 +27,7 @@ impl<'src> Lexer<'src> {
             src,
             pos,
             logical_start: pos,
+            failed_interpolations: Vec::new(),
         }
     }
 
@@ -191,7 +193,16 @@ impl<'src> Lexer<'src> {
         self.advance();
         match self.cur() {
             Some('{') => {
-                let close = scan::interp_close(self.src.as_bytes(), self.pos, self.src.len());
+                let close = if self.failed_interpolations.get(self.pos) == Some(&true) {
+                    None
+                } else {
+                    scan::interp_close_cached(
+                        self.src.as_bytes(),
+                        self.pos,
+                        self.src.len(),
+                        Some(&mut self.failed_interpolations),
+                    )
+                };
                 if let Some(close) = close {
                     self.pos = close + 1;
                     return true;

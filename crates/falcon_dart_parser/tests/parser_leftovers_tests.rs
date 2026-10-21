@@ -64,6 +64,25 @@ fn nested_strings_allow_multiline_interpolations() {
 }
 
 #[test]
+fn repeated_unclosed_interpolations_recover_in_linear_time() {
+    for source in [
+        "var value = \"${\n".repeat(64_000),
+        "\"${ r'''\n".repeat(64_000),
+        ["\"${", &"\" \"${".repeat(64_000)].concat(),
+    ] {
+        let len = source.len();
+        let (send, recv) = std::sync::mpsc::channel();
+        std::thread::spawn(move || send.send(Lexer::new(&source).tokenize()).unwrap());
+        let tokens = recv
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("malformed interpolation recovery must finish within ten seconds");
+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Error));
+        assert_eq!(tokens.iter().map(|token| token.len()).sum::<usize>(), len);
+        assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
+    }
+}
+
+#[test]
 fn abandoned_member_parses_do_not_leak_diagnostics() {
     let source = "class C { method<T extends Object>(T value) {} }";
     let parsed = parse(source);

@@ -29,17 +29,32 @@ pub(crate) fn skip_block_comment(bytes: &[u8], open: usize, end: usize) -> Optio
 
 /// From `{` at `open_brace`, return its closing `}` index, or `None` before exclusive `end`.
 pub(crate) fn interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Option<usize> {
+    interp_close_cached(bytes, open_brace, end, None)
+}
+
+pub(crate) fn interp_close_cached(
+    bytes: &[u8],
+    open_brace: usize,
+    end: usize,
+    failed: Option<&mut Vec<bool>>,
+) -> Option<usize> {
     enum Frame {
         Interpolation(usize),
         String { quote: u8, raw: bool, triple: bool },
     }
     let mut frames = Vec::new();
     let mut frame = Frame::Interpolation(1);
+    let mut opens = Vec::new();
     let mut pos = open_brace + 1;
     while pos < end {
         match &mut frame {
             Frame::Interpolation(depth) => match bytes[pos] {
-                b'{' => *depth += 1,
+                b'{' => {
+                    *depth += 1;
+                    if failed.is_some() {
+                        opens.push(pos);
+                    }
+                }
                 b'}' => {
                     *depth -= 1;
                     if *depth == 0 {
@@ -49,13 +64,17 @@ pub(crate) fn interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Optio
                             return Some(pos);
                         }
                     }
+                    opens.pop();
                 }
                 b'/' if pos + 1 < end && bytes[pos + 1] == b'/' => {
                     pos = skip_line(bytes, pos + 2, end);
                     continue;
                 }
                 b'/' if pos + 1 < end && bytes[pos + 1] == b'*' => {
-                    pos = skip_block_comment(bytes, pos, end)?;
+                    let Some(close) = skip_block_comment(bytes, pos, end) else {
+                        break;
+                    };
+                    pos = close;
                     continue;
                 }
                 quote @ (b'\'' | b'"') => {
@@ -73,17 +92,20 @@ pub(crate) fn interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Optio
             },
             Frame::String { quote, raw, triple } => {
                 if !*triple && matches!(bytes[pos], b'\n' | b'\r') {
-                    return None;
+                    break;
                 }
                 if bytes[pos] == b'\\' && !*raw {
                     if !*triple && pos + 1 < end && matches!(bytes[pos + 1], b'\n' | b'\r') {
-                        return None;
+                        break;
                     }
                     pos += 2;
                     continue;
                 }
                 if !*raw && bytes[pos] == b'$' && pos + 1 < end && bytes[pos + 1] == b'{' {
                     frames.push(std::mem::replace(&mut frame, Frame::Interpolation(1)));
+                    if failed.is_some() {
+                        opens.push(pos + 1);
+                    }
                     pos += 2;
                     continue;
                 }
@@ -98,6 +120,14 @@ pub(crate) fn interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Optio
             }
         }
         pos += 1;
+    }
+    // Recovery can revisit any still-open brace, including one inside a nested string.
+    if let Some(failed) = failed {
+        failed.resize(bytes.len(), false);
+        failed[open_brace] = true;
+        for open in opens {
+            failed[open] = true;
+        }
     }
     None
 }
