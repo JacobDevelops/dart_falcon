@@ -1,5 +1,5 @@
 ---
-default: patch
+default: minor
 ---
 
 Reject unknown configuration keys, rule names, rule groups, and domains with their full key paths, including inside overrides, instead of silently ignoring typos. Legacy spellings remain accepted with returned deprecation warnings. Configuration loading now consistently canonicalizes rule aliases, using the same severity and options collision policy as migration. Library loading and registry validation no longer print warnings directly; the CLI reports them and the language server delivers configuration warnings and errors to the editor.

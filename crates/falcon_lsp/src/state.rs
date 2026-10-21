@@ -1724,10 +1724,10 @@ fn resolve_dependency(
     by_path.get(&import_path(from, uri, packages)?).copied()
 }
 
-/// A HOME fallback config supplies settings, not a workspace to traverse.
-fn workspace_root_for(config_path: Option<&Path>, explicit: bool, start_dir: &Path) -> PathBuf {
+/// The HOME config supplies settings, not a workspace to traverse.
+fn workspace_root_for(config_path: Option<&Path>, start_dir: &Path) -> PathBuf {
     let root = config_path
-        .filter(|path| explicit || path.file_name().is_some_and(|name| name == "falcon.json"))
+        .filter(|path| !falcon_config::is_home_config(path))
         .and_then(Path::parent)
         .unwrap_or(start_dir);
     canonical_or_lexical(root)
@@ -1740,25 +1740,30 @@ fn load_from(
     let discovered = path
         .map(Path::to_path_buf)
         .or_else(|| falcon_config::find_config(start_dir));
-    let workspace_root = workspace_root_for(discovered.as_deref(), path.is_some(), start_dir);
+    let workspace_root = workspace_root_for(discovered.as_deref(), start_dir);
     let loaded = match discovered.as_deref() {
         Some(path) => load_config(path),
         None => load_or_default(start_dir),
     };
     let label = discovered.as_deref().unwrap_or(start_dir).display();
     match loaded {
-        Ok(loaded) => (
-            Some(loaded.config),
-            workspace_root,
-            loaded
-                .warnings
-                .into_iter()
-                .map(|message| ShowMessageParams {
-                    typ: MessageType::WARNING,
-                    message: format!("Falcon: {}: {message}", label),
-                })
-                .collect(),
-        ),
+        Ok(mut loaded) => {
+            if loaded.config.root_dir() != Some(workspace_root.as_path()) {
+                loaded.config.resolve_paths(&workspace_root);
+            }
+            (
+                Some(loaded.config),
+                workspace_root,
+                loaded
+                    .warnings
+                    .into_iter()
+                    .map(|message| ShowMessageParams {
+                        typ: MessageType::WARNING,
+                        message: format!("Falcon: {}: {message}", label),
+                    })
+                    .collect(),
+            )
+        }
         Err(error) => {
             let message = format!("Falcon: failed to load config {}: {error}", label);
             warn!("{message}");
@@ -1978,30 +1983,85 @@ mod config_tests {
 
     #[test]
     fn home_fallback_settings_do_not_expand_workspace_to_home() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join("home");
-        let workspace = home.join("project");
-        std::fs::create_dir_all(&workspace).unwrap();
-        let config_path = home.join(".falcon.json");
-        std::fs::write(&config_path, r#"{"files":{"includes":["project/**"]}}"#).unwrap();
-        let loaded = load_config(&config_path).unwrap();
-        let root = workspace_root_for(Some(&config_path), false, &workspace);
-        assert_eq!(root, canonical_or_lexical(&workspace));
+        const CHILD: &str = "FALCON_TEST_LSP_HOME_CONFIG_ROOT";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let workspace = dir.path().join("project");
+            std::fs::create_dir_all(&workspace).unwrap();
+            std::fs::write(
+                dir.path().join(".falcon.json"),
+                r#"{
+                    "files":{"includes":["lib/**", "!lib/generated/**"]},
+                    "linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"warn"}}},
+                    "cross-file":{"enabled":false},
+                    "overrides":[{
+                        "includes":["lib/quiet/**"],
+                        "linter":{"rules":{"suspicious":{"avoid-dynamic":"off"}}}
+                    }]
+                }"#,
+            )
+            .unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "state::config_tests::home_fallback_settings_do_not_expand_workspace_to_home",
+                ])
+                .env(CHILD, "1")
+                .env("HOME", dir.path())
+                .current_dir(&workspace)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let workspace = std::env::current_dir().unwrap();
+        let home_config = workspace.parent().unwrap().join(".falcon.json");
+        let other_workspace = workspace.join("other");
+        std::fs::create_dir_all(&other_workspace).unwrap();
+        for (config_path, workspace) in [
+            (None, workspace.clone()),
+            (Some(home_config.clone()), workspace.clone()),
+            (Some(PathBuf::from("../.falcon.json")), workspace.clone()),
+            (Some(home_config), other_workspace),
+        ] {
+            let mut state = LspState::new_from(config_path, |_| None, workspace.clone());
+            assert_eq!(state.workspace_root, canonical_or_lexical(&workspace));
+            assert_eq!(
+                state.config.root_dir(),
+                Some(state.workspace_root.as_path())
+            );
+            for (relative, expected) in [
+                ("lib/main.dart", true),
+                ("lib/quiet/main.dart", false),
+                ("lib/generated/main.dart", false),
+                ("test/main.dart", false),
+            ] {
+                let uri = format!("file://{}", workspace.join(relative).display());
+                let diagnostics = state.open(&uri, SOURCE.to_string(), Some(1));
+                assert_eq!(
+                    diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.rule == "avoid-dynamic"),
+                    expected,
+                    "{relative}: {diagnostics:?}"
+                );
+            }
+        }
+
+        let local = workspace.join("settings/.falcon.json");
+        std::fs::create_dir_all(local.parent().unwrap()).unwrap();
+        std::fs::write(&local, "{}").unwrap();
+        let state = LspState::new_from(Some(local), |_| None, workspace.clone());
         assert_eq!(
-            loaded.config.root_dir(),
-            Some(canonical_or_lexical(&home).as_path())
-        );
-        assert!(
-            loaded
-                .config
-                .files
-                .includes
-                .admits(&workspace.join("main.dart").to_string_lossy())
-        );
-        assert_eq!(
-            workspace_root_for(Some(&config_path), true, &workspace),
-            canonical_or_lexical(&home),
-            "an explicitly selected config still determines the workspace root"
+            state.workspace_root,
+            canonical_or_lexical(&workspace.join("settings")),
+            "a non-HOME config still determines the workspace root"
         );
     }
 

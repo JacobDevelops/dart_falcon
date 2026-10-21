@@ -213,6 +213,32 @@ fn test_walk_nonexistent_path_reports_missing() {
     assert_eq!(output.missing_paths, [nonexistent]);
 }
 
+#[test]
+fn explicit_filtered_files_are_reported_even_with_an_admitted_input() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("main.dart");
+    let filtered = temp.path().join("other.dart");
+    fs::write(&source, "void main() {}").unwrap();
+    fs::write(&filtered, "void other() {}").unwrap();
+    let mut filter = PathFilter::from_includes(&["main.dart".into()]);
+    filter.set_base_dir(temp.path());
+    let output = walk_project(&[source.clone(), filtered.clone()], &filter, false).unwrap();
+    assert_eq!(output.files, [(source, "void main() {}".into())]);
+    assert_eq!(output.filtered_paths, [filtered]);
+    assert!(output.missing_paths.is_empty());
+}
+
+#[test]
+fn unsupported_explicit_files_do_not_discover_ancestor_manifests() {
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("pubspec.yaml"), "name: example\n").unwrap();
+    let readme = temp.path().join("README.txt");
+    fs::write(&readme, "package notes").unwrap();
+    let output = walk_project(&[readme], &PathFilter::default(), true).unwrap();
+    assert!(output.files.is_empty());
+    assert!(output.manifests.is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn test_walk_does_not_follow_symlinked_dirs() {

@@ -49,7 +49,6 @@ fn secure_pubspec_urls_uses_security_configuration_and_rejects_old_group() {
         "name: insecure_package\nhomepage: http://example.com\n",
     )
     .unwrap();
-    fs::write(temp.path().join("main.dart"), "void main() {}").unwrap();
     let config_path = temp.path().join("falcon.json");
     for (group, level, expected_severity) in [
         (
@@ -123,6 +122,163 @@ fn manifest_discovery_does_not_turn_non_dart_inputs_into_processed_files() {
             .iter()
             .all(|d| d.rule != "unmatched-path")
     );
+}
+
+#[test]
+fn manifest_only_inputs_are_processed_without_unmatched_diagnostics() {
+    let temp = tempdir().unwrap();
+    let manifest = temp.path().join("pubspec.yaml");
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"error"}}}}"#,
+    )
+    .unwrap();
+    for (source, expected_findings) in [
+        ("name: example\n", 0),
+        ("name: example\nhomepage: http://example.com\n", 1),
+    ] {
+        fs::write(&manifest, source).unwrap();
+        for path in [temp.path(), manifest.as_path()] {
+            let output = collect_check(&options_for(path, Some(config.clone()))).unwrap();
+            assert_eq!(output.exit_code, i32::from(expected_findings != 0));
+            assert_eq!(output.diagnostics.len(), expected_findings);
+            assert!(
+                output
+                    .diagnostics
+                    .iter()
+                    .all(|d| d.rule == "secure-pubspec-urls")
+            );
+        }
+    }
+}
+
+#[test]
+fn filtered_explicit_inputs_explain_why_they_are_unmatched() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("project");
+    fs::create_dir(&root).unwrap();
+    let config = root.join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"files":{"includes":["lib/**/*.dart"]},"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let valid = root.join("lib/main.dart");
+    fs::create_dir(root.join("lib")).unwrap();
+    fs::write(&valid, "void main() {}").unwrap();
+    for path in [root.join("other.dart"), temp.path().join("outside.dart")] {
+        fs::write(&path, "void main() {}").unwrap();
+        for with_valid in [false, true] {
+            let mut options = options_for(&path, Some(config.clone()));
+            options.paths.push(path.clone());
+            if with_valid {
+                options.paths.push(valid.clone());
+            }
+            let output = collect_check(&options).unwrap();
+            assert_eq!(output.exit_code, 1);
+            assert_eq!(output.diagnostics.len(), 1);
+            let diagnostic = &output.diagnostics[0];
+            assert_eq!(diagnostic.rule, "unmatched-path");
+            assert_eq!(diagnostic.file_path, path.to_string_lossy());
+            assert!(
+                diagnostic.message.contains("excluded by files.includes"),
+                "{}",
+                diagnostic.message
+            );
+            assert_eq!((diagnostic.line, diagnostic.col), (0, 0));
+            options.no_errors_on_unmatched = true;
+            let output = collect_check(&options).unwrap();
+            assert_eq!(output.exit_code, 0);
+            assert!(output.diagnostics.is_empty());
+        }
+    }
+}
+
+#[test]
+fn manifest_only_inputs_are_processed_with_cross_file_rules_disabled() {
+    let temp = tempdir().unwrap();
+    let manifest = temp.path().join("pubspec.yaml");
+    fs::write(&manifest, "name: example\n").unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    for path in [temp.path(), manifest.as_path()] {
+        let output = collect_check(&options_for(path, Some(config.clone()))).unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.diagnostics.is_empty());
+    }
+}
+
+#[test]
+fn empty_directories_and_unsupported_files_keep_generic_unmatched_reason() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"files":{"includes":["lib/**/*.dart"]},"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let empty = temp.path().join("lib");
+    fs::create_dir(&empty).unwrap();
+    let readme = temp.path().join("README.txt");
+    fs::write(&readme, "package notes").unwrap();
+    let outside = tempdir().unwrap();
+    for path in [empty.as_path(), readme.as_path(), outside.path()] {
+        let output = collect_check(&options_for(path, Some(config.clone()))).unwrap();
+        assert_eq!(output.exit_code, 1);
+        assert_eq!(output.diagnostics.len(), 1);
+        assert_eq!(output.diagnostics[0].message, "No files were processed.");
+    }
+}
+
+#[test]
+fn ancestor_manifests_do_not_make_empty_or_filtered_directories_processed() {
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("pubspec.yaml"), "name: example\n").unwrap();
+    let empty = temp.path().join("lib");
+    let filtered = temp.path().join("test");
+    fs::create_dir(&empty).unwrap();
+    fs::create_dir(&filtered).unwrap();
+    fs::write(filtered.join("example.dart"), "void main() {}").unwrap();
+    let config = temp.path().join("falcon.json");
+    for enabled in [false, true] {
+        fs::write(
+            &config,
+            serde_json::json!({
+                "files": {"includes": ["lib/**/*.dart"]},
+                "linter": {"enabled": false},
+                "cross-file": {
+                    "enabled": enabled,
+                    "rules": {
+                        "recommended": false,
+                        "security": {"secure-pubspec-urls": "error"}
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        for path in [&empty, &filtered] {
+            let mut options = options_for(path, Some(config.clone()));
+            let output = collect_check(&options).unwrap();
+            assert_eq!(output.exit_code, 1);
+            assert_eq!(output.total_files, 0);
+            assert_eq!(output.diagnostics.len(), 1);
+            let diagnostic = &output.diagnostics[0];
+            assert_eq!(diagnostic.rule, "unmatched-path");
+            assert_eq!(diagnostic.message, "No files were processed.");
+            assert_eq!(diagnostic.file_path, path.to_string_lossy());
+            assert_eq!((diagnostic.line, diagnostic.col), (0, 0));
+            options.no_errors_on_unmatched = true;
+            let output = collect_check(&options).unwrap();
+            assert_eq!(output.exit_code, 0);
+            assert!(output.diagnostics.is_empty());
+        }
+    }
 }
 
 #[test]

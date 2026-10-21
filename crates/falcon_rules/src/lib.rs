@@ -44,7 +44,13 @@ pub fn load_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
 /// Returns an error when a discovered configuration cannot be loaded.
 pub fn load_or_default(start_dir: &Path) -> Result<LoadedConfig, ConfigError> {
     match falcon_config::find_config(start_dir) {
-        Some(path) => load_config(&path),
+        Some(path) => {
+            let mut loaded = load_config(&path)?;
+            if falcon_config::is_home_config(&path) {
+                loaded.config.resolve_paths(start_dir);
+            }
+            Ok(loaded)
+        }
         None => {
             let mut config = FalconConfig::default();
             config.resolve_paths(start_dir);
@@ -500,6 +506,115 @@ mod tests {
         );
         assert_eq!(warnings.len(), 2, "unexpected warnings: {warnings:?}");
     }
+    #[test]
+    fn home_config_globs_follow_the_project_for_discovered_and_explicit_loads() {
+        const CHILD: &str = "FALCON_TEST_HOME_CONFIG_ROOT";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let workspace = dir.path().join("project");
+            std::fs::create_dir_all(&workspace).unwrap();
+            std::fs::write(
+                dir.path().join(".falcon.json"),
+                r#"{
+                    "files":{"includes":["lib/**", "!lib/generated/**"]},
+                    "linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"warn"}}},
+                    "overrides":[{
+                        "includes":["lib/quiet/**"],
+                        "linter":{"rules":{"suspicious":{"avoid-dynamic":"off"}}}
+                    }]
+                }"#,
+            )
+            .unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::home_config_globs_follow_the_project_for_discovered_and_explicit_loads",
+                ])
+                .env(CHILD, "1")
+                .env("HOME", dir.path())
+                .current_dir(&workspace)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let workspace = std::env::current_dir().unwrap();
+        for loaded in [
+            super::load_or_default(&workspace).unwrap(),
+            super::load_config(std::path::Path::new("../.falcon.json")).unwrap(),
+        ] {
+            assert_eq!(loaded.config.root_dir(), Some(workspace.as_path()));
+            for (relative, admitted, enabled) in [
+                ("lib/main.dart", true, true),
+                ("lib/generated/main.dart", false, true),
+                ("lib/quiet/main.dart", true, false),
+                ("test/main.dart", false, true),
+            ] {
+                let path = workspace.join(relative);
+                let path = path.to_string_lossy();
+                assert_eq!(
+                    loaded.config.files.includes.admits(&path),
+                    admitted,
+                    "{relative}"
+                );
+                assert_eq!(
+                    loaded
+                        .config
+                        .resolve_rule_for(&path, "suspicious", "avoid-dynamic", false, &[])
+                        .is_some(),
+                    enabled,
+                    "{relative}"
+                );
+            }
+        }
+        let other_workspace = workspace.join("other");
+        std::fs::create_dir_all(&other_workspace).unwrap();
+        let loaded = super::load_or_default(&other_workspace).unwrap();
+        assert_eq!(loaded.config.root_dir(), Some(other_workspace.as_path()));
+        assert!(
+            loaded
+                .config
+                .files
+                .includes
+                .admits(&other_workspace.join("lib/main.dart").to_string_lossy())
+        );
+        let local_config = other_workspace.join(".falcon.json");
+        let home_config = workspace.parent().unwrap().join(".falcon.json");
+        std::fs::copy(&home_config, &local_config).unwrap();
+        let loaded = super::load_config(&local_config).unwrap();
+        assert_eq!(loaded.config.root_dir(), Some(other_workspace.as_path()));
+        assert!(
+            loaded
+                .config
+                .files
+                .includes
+                .admits(&other_workspace.join("lib/main.dart").to_string_lossy())
+        );
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&home_config, other_workspace.join("falcon.json")).unwrap();
+            std::fs::create_dir(other_workspace.join(".git")).unwrap();
+            let nested = other_workspace.join("nested");
+            std::fs::create_dir(&nested).unwrap();
+            let loaded = super::load_or_default(&nested).unwrap();
+            assert_eq!(loaded.config.root_dir(), Some(other_workspace.as_path()));
+            assert!(
+                loaded
+                    .config
+                    .files
+                    .includes
+                    .admits(&other_workspace.join("lib/main.dart").to_string_lossy())
+            );
+        }
+    }
+
     #[test]
     fn unified_loader_returns_legacy_path_and_registry_warnings() {
         let path = std::env::temp_dir().join(format!(

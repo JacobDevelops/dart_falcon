@@ -195,10 +195,17 @@ impl Diagnostic {
     }
 
     pub fn format_text(&self) -> String {
-        format!(
-            "{}:{}:{}: [{}] ({}) {}",
-            self.file_path, self.line, self.col, self.severity, self.rule, self.message
-        )
+        if self.line == 0 || self.col == 0 {
+            format!(
+                "{}: [{}] ({}) {}",
+                self.file_path, self.severity, self.rule, self.message
+            )
+        } else {
+            format!(
+                "{}:{}:{}: [{}] ({}) {}",
+                self.file_path, self.line, self.col, self.severity, self.rule, self.message
+            )
+        }
     }
 
     /// Serialize to an LSP `Diagnostic`, computing line/column from `source`.

@@ -98,7 +98,7 @@ Diagnostics may include a `fix` object with a `kind` of `safe` (preserves progra
 falcon discovers `falcon.json` automatically: the current directory, then the
 enclosing git root, then `~/.falcon.json`.
 
-**Exit codes:** `falcon check` exits `0` when clean and `1` when diagnostics (including info or warnings) are reported. `--exit-code` changes the findings exit code. Configuration and analysis pipeline failures exit `1` regardless of that flag. A missing path or a run with no matching Dart files reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. Omitting paths checks the current directory. Unreadable or non-UTF-8 files are skipped with a warning. `--max-errors` limits printing only, not the exit code:
+**Exit codes:** `falcon check` exits `0` when clean and `1` when diagnostics (including info or warnings) are reported. `--exit-code` changes the findings exit code. Configuration and analysis pipeline failures exit `1` regardless of that flag. A missing or explicitly filtered path, or a run that selects neither Dart files nor package manifests, reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. A manifest counts when named explicitly or found within an input directory, not merely discovered in an ancestor directory. Omitting paths checks the current directory. Unreadable or non-UTF-8 files are skipped with a warning. `--max-errors` limits printing only, not the exit code:
 
 ```sh
 falcon check . --exit-code 2    # use exit code 2 on findings

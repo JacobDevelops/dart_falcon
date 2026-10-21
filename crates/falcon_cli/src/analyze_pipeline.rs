@@ -140,11 +140,16 @@ pub fn collect_check_with_sdk_locator(
     let cross_file_registry = build_cross_file_registry(&config);
     let collect_programs = !cross_file_registry.is_empty();
     let resolve = requires_resolution(&registry) || cross_file_requires_resolution(&config);
-    let walked = walk_project(paths, filter, collect_programs || resolve)?;
+    let walked = walk_project(paths, filter, true)?;
     let mut files = walked.files;
     let mut manifests = walked.manifests;
     let mut unmatched = Vec::new();
     if !options.no_errors_on_unmatched {
+        // Ancestor manifests support cross-file analysis but do not select an
+        // otherwise empty input directory. Only manifests within inputs count.
+        let has_selected_manifest = manifests
+            .iter()
+            .any(|(manifest, _)| paths.iter().any(|path| manifest.starts_with(path)));
         unmatched.extend(walked.missing_paths.iter().map(|path| {
             Diagnostic::new(
                 "unmatched-path",
@@ -154,7 +159,16 @@ pub fn collect_check_with_sdk_locator(
                 Span { start: 0, end: 0 },
             )
         }));
-        if files.is_empty() && unmatched.is_empty() {
+        unmatched.extend(walked.filtered_paths.iter().map(|path| {
+            Diagnostic::new(
+                "unmatched-path",
+                Severity::Error,
+                "Input path is excluded by files.includes or command-line excludes.",
+                path.to_string_lossy(),
+                Span { start: 0, end: 0 },
+            )
+        }));
+        if files.is_empty() && !has_selected_manifest && unmatched.is_empty() {
             unmatched.push(Diagnostic::new(
                 "unmatched-path",
                 Severity::Error,

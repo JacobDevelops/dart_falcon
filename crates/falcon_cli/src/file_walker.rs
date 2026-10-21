@@ -17,6 +17,8 @@ pub struct WalkOutput {
     pub files: Vec<(PathBuf, String)>,
     pub manifests: Vec<(PathBuf, String)>,
     pub missing_paths: Vec<PathBuf>,
+    /// Explicit supported files rejected by the configured path filter.
+    pub filtered_paths: Vec<PathBuf>,
 }
 
 /// Collect matching Dart sources and, when requested, package manifests.
@@ -53,6 +55,22 @@ pub fn walk_project(
                 continue;
             }
         };
+        if metadata.is_file() {
+            let is_dart = path.extension().and_then(|extension| extension.to_str()) == Some("dart");
+            let is_manifest = collect_manifests
+                && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
+            if !is_dart && !is_manifest {
+                continue;
+            }
+            let admitted = if is_manifest {
+                !filter.excludes(&path.to_string_lossy())
+            } else {
+                filter.admits(&path.to_string_lossy())
+            };
+            if !admitted && seen.insert(path.clone()) {
+                output.filtered_paths.push(path.clone());
+            }
+        }
         if collect_manifests && !filter.excludes_directory(path) {
             let start = if metadata.is_file() {
                 path.parent().unwrap_or(path)

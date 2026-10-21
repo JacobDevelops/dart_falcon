@@ -308,6 +308,45 @@ fn config_warnings_reach_editor_on_startup_and_watched_reload_without_open_docum
     client.shutdown();
 }
 
+#[test]
+fn config_warnings_are_batched_and_unchanged_reload_is_quiet() {
+    let mut client = TestClient::start(
+        Duration::ZERO,
+        Some(r#"{"max_errors": 10, "cross_file": {"enabled": false}}"#),
+    );
+    let Message::Notification(notification) = client.recv() else {
+        panic!("expected configuration notification");
+    };
+    assert_eq!(
+        notification.method,
+        lsp_types::notification::ShowMessage::METHOD
+    );
+    let warning =
+        serde_json::from_value::<lsp_types::ShowMessageParams>(notification.params).unwrap();
+    assert_eq!(warning.typ, lsp_types::MessageType::WARNING);
+    let lines: Vec<_> = warning.message.lines().collect();
+    assert_eq!(lines[0], "Falcon: 2 configuration warnings");
+    assert_eq!(lines.len(), 3, "{warning:?}");
+    assert!(lines[1..].iter().any(|line| line.contains("max_errors")));
+    assert!(lines[1..].iter().any(|line| line.contains("cross_file")));
+    for line in &lines[1..] {
+        assert!(line.contains(&client.config_path().display().to_string()));
+    }
+    client.assert_quiet(Duration::from_millis(50));
+
+    client.notify(
+        lsp_types::notification::DidChangeWatchedFiles::METHOD,
+        DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Uri::from_str(&format!("file://{}", client.config_path().display())).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        },
+    );
+    client.assert_quiet(Duration::from_millis(50));
+    client.shutdown();
+}
+
 /// didOpen publishes diagnostics for a violating file.
 #[test]
 fn did_open_publishes_diagnostics() {

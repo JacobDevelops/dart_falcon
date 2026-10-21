@@ -39,7 +39,7 @@ fn test_format_text_omits_unresolved_position() {
         Severity::Error,
         "Path does not exist.",
         "missing.dart",
-        Span::new(0, 0),
+        Span { start: 0, end: 0 },
     );
     assert_eq!(
         diag.format_text(),

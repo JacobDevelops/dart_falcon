@@ -986,9 +986,27 @@ pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
         ));
     }
 
-    config.resolve_paths(path.parent().unwrap_or(Path::new(".")));
+    let cwd;
+    let root = if is_home_config(path) {
+        cwd = std::env::current_dir()
+            .map_err(|e| ConfigError(format!("failed to read current directory: {e}")))?;
+        cwd.as_path()
+    } else {
+        path.parent().unwrap_or(Path::new("."))
+    };
+    config.resolve_paths(root);
     warnings.extend(config.path_warnings());
     Ok(LoadedConfig { config, warnings })
+}
+
+/// Whether `path` spells `$HOME/.falcon.json`, without following config symlinks.
+pub fn is_home_config(path: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let home_config = PathBuf::from(home).join(".falcon.json");
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    normalize_path(&cwd.join(path)) == normalize_path(&cwd.join(home_config))
 }
 
 /// Find a config file starting from `start_dir`, following this priority order:

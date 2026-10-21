@@ -92,9 +92,12 @@ file selection, LSP selection, and overrides. If no valid positive patterns
 remain, positive filtering is unrestricted; valid exclusions still win.
 
 All globs resolve relative to the directory containing `falcon.json`, including
-CLI `--exclude` patterns and override filters. With no config, the current
-directory is the base. CLI relative paths, absolute paths, and LSP document paths
-therefore select the same files. `*` never crosses `/`; `**` crosses directories.
+CLI `--exclude` patterns and override filters. User-level `~/.falcon.json` is
+settings rather than a workspace: its globs resolve from the CLI current working
+directory or the LSP workspace root, not the home directory. With no config,
+the current directory is the base. CLI relative paths, absolute paths, and LSP
+document paths therefore select the same files. `*` never crosses `/`; `**`
+crosses directories.
 For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also
 matches nested files. An exclusion matching a directory excludes its whole
 subtree, and that directory is pruned before traversal. For example, `!build`
@@ -658,7 +661,8 @@ Upgrades preserve the order of configuration keys. Duplicate entries use the
 same severity ranking and canonical-name tie breaking as normal config loading.
 
 Glob matching now uses the configuration file's directory in both the CLI and
-the editor, rather than paths as walked. Review filters when upgrading:
+the editor, rather than paths as walked. User-level `~/.falcon.json` globs instead
+use the CLI current directory or LSP workspace root. Review filters when upgrading:
 `!build/**` now excludes the project's build directory with `falcon check .`,
 and `*` no longer spans directory separators. Replace `lib/*.dart` with
 `lib/**/*.dart` when nested files should match. `migrate` preserves glob text;

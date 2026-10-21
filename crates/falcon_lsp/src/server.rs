@@ -557,11 +557,46 @@ fn run_with_state(
     }
 }
 
+/// Deliver the state's deduplicated messages, batching warning lines into one popup.
 fn publish_config_messages(
     connection: &Connection,
     state: &mut LspState,
 ) -> Result<(), ServerError> {
-    for params in state.take_config_messages() {
+    let messages = state.take_config_messages();
+    let (warning_count, warning_bytes) = messages
+        .iter()
+        .filter(|params| params.typ == lsp_types::MessageType::WARNING)
+        .fold((0, 0), |(count, bytes), params| {
+            (count + 1, bytes + params.message.len() + 1)
+        });
+    // Leave room for the count header as well as every warning line.
+    let mut warning = String::with_capacity(if warning_count == 0 {
+        0
+    } else {
+        warning_bytes + 64
+    });
+    if warning_count > 0 {
+        write!(
+            warning,
+            "Falcon: {warning_count} configuration warning{}",
+            if warning_count == 1 { "" } else { "s" }
+        )?;
+    }
+    for params in messages {
+        if params.typ == lsp_types::MessageType::WARNING {
+            warning.push('\n');
+            warning.push_str(&params.message);
+        } else {
+            connection
+                .sender
+                .send(ServerNotification::new(ShowMessage::METHOD.to_string(), params).into())?;
+        }
+    }
+    if warning_count > 0 {
+        let params = lsp_types::ShowMessageParams {
+            typ: lsp_types::MessageType::WARNING,
+            message: warning,
+        };
         connection
             .sender
             .send(ServerNotification::new(ShowMessage::METHOD.to_string(), params).into())?;
