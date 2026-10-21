@@ -2001,13 +2001,21 @@ mod config_tests {
                 }"#,
             )
             .unwrap();
+            #[cfg(not(unix))]
+            let home = dir.path().to_path_buf();
+            #[cfg(unix)]
+            let home = {
+                let alias = dir.path().join("home-alias");
+                std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+                alias
+            };
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
                     "state::config_tests::home_fallback_settings_do_not_expand_workspace_to_home",
                 ])
                 .env(CHILD, "1")
-                .env("HOME", dir.path())
+                .env("HOME", home)
                 .current_dir(&workspace)
                 .output()
                 .unwrap();

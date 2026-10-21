@@ -150,17 +150,14 @@ impl PathFilter {
         self.exclude.clear();
         self.warnings.clear();
         for pattern in &self.patterns {
-            let (target, raw) = match pattern.strip_prefix('!') {
-                Some(raw) => (&mut self.exclude, raw),
-                None => (&mut self.include, pattern.as_str()),
+            let (is_exclusion, raw) = match pattern.strip_prefix('!') {
+                Some(raw) => (true, raw),
+                None => (false, pattern.as_str()),
             };
             let resolved = if Path::new(raw).is_absolute() {
                 let path = normalize_path(Path::new(raw));
-                let path = if let (Some(lexical), Some(canonical)) =
-                    (&self.lexical_base, &self.base_dir)
-                    && let Ok(suffix) = path
-                        .strip_prefix(lexical)
-                        .or_else(|_| path.strip_prefix(canonical))
+                let path = if let Some(lexical) = &self.lexical_base
+                    && let Some(suffix) = self.relative_to_base(&path)
                 {
                     Path::new(&Pattern::escape(&lexical.to_string_lossy())).join(suffix)
                 } else {
@@ -175,7 +172,13 @@ impl PathFilter {
                 })
             };
             match Pattern::new(resolved.as_deref().unwrap_or(raw)) {
-                Ok(pattern) => target.push(pattern),
+                Ok(pattern) => {
+                    if is_exclusion {
+                        self.exclude.push(pattern);
+                    } else {
+                        self.include.push(pattern);
+                    }
+                }
                 Err(error) => self
                     .warnings
                     .push(format!("invalid path pattern `{raw}`: {error}")),
@@ -188,6 +191,32 @@ impl PathFilter {
         {
             self.include.clear();
         }
+    }
+
+    fn relative_to_base<'a>(&self, path: &'a Path) -> Option<&'a Path> {
+        let lexical = self.lexical_base.as_ref()?;
+        let canonical = self.base_dir.as_ref()?;
+        if let Ok(suffix) = path
+            .strip_prefix(lexical)
+            .or_else(|_| path.strip_prefix(canonical))
+        {
+            return Some(suffix);
+        }
+        // Resolve root aliases (including macOS /var) without requiring the
+        // document or the literal prefix of an absolute glob to exist.
+        for ancestor in path.ancestors() {
+            if let Ok(resolved) = std::fs::canonicalize(ancestor) {
+                if resolved == *canonical {
+                    return path.strip_prefix(ancestor).ok();
+                }
+                // With no aliases left in this prefix, none of its parents
+                // can resolve back to the configuration root.
+                if resolved == ancestor {
+                    return None;
+                }
+            }
+        }
+        None
     }
 
     fn matching_path<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
@@ -208,10 +237,9 @@ impl PathFilter {
         } else {
             std::borrow::Cow::Borrowed(input)
         };
-        if let (Some(lexical), Some(canonical)) = (&self.lexical_base, &self.base_dir)
-            && lexical != canonical
+        if let Some(lexical) = &self.lexical_base
             && !normalized.starts_with(lexical)
-            && let Ok(suffix) = normalized.strip_prefix(canonical)
+            && let Some(suffix) = self.relative_to_base(&normalized)
         {
             return lexical.join(suffix).to_string_lossy().into_owned().into();
         }
@@ -998,14 +1026,26 @@ pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
     Ok(LoadedConfig { config, warnings })
 }
 
-/// Whether `path` spells `$HOME/.falcon.json`, without following config symlinks.
+/// Whether `path` names `$HOME/.falcon.json`, resolving directory aliases but not config symlinks.
 pub fn is_home_config(path: &Path) -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return false;
     };
     let home_config = PathBuf::from(home).join(".falcon.json");
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    normalize_path(&cwd.join(path)) == normalize_path(&cwd.join(home_config))
+    let path = normalize_path(&cwd.join(path));
+    let home_config = normalize_path(&cwd.join(home_config));
+    path == home_config
+        || (path.file_name() == home_config.file_name()
+            && path
+                .parent()
+                .and_then(|parent| std::fs::canonicalize(parent).ok())
+                .zip(
+                    home_config
+                        .parent()
+                        .and_then(|parent| std::fs::canonicalize(parent).ok()),
+                )
+                .is_some_and(|(path, home)| path == home))
 }
 
 /// Find a config file starting from `start_dir`, following this priority order:

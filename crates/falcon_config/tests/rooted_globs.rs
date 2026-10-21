@@ -73,18 +73,37 @@ fn configuration_symlink_and_document_paths_share_a_root() {
     assert!(filter.admits(&alias.join("lib/main.dart").to_string_lossy()));
     assert!(filter.admits(&real.join("lib/main.dart").to_string_lossy()));
     assert!(filter.admits(&alias.join("lib/unsaved.dart").to_string_lossy()));
+    assert!(filter.admits(&real.join("lib/unsaved.dart").to_string_lossy()));
+    let canonical = std::fs::canonicalize(&real).unwrap();
+    assert!(filter.admits(&canonical.join("lib/main.dart").to_string_lossy()));
+    assert!(filter.admits(&canonical.join("lib/unsaved.dart").to_string_lossy()));
     let mut parent = PathFilter::from_includes(&["../shared/**".into()]);
     parent.set_base_dir(&alias);
     assert!(parent.admits(&root.path().join("shared/main.dart").to_string_lossy()));
     let mut parent_exclusion = PathFilter::from_includes(&["!../**/build/**".into()]);
     parent_exclusion.set_base_dir(&alias);
     assert!(!parent_exclusion.admits(&real.join("build/main.dart").to_string_lossy()));
-    for base in [&alias, &real] {
+    for base in [&alias, &real, &canonical] {
         let mut absolute = PathFilter::from_includes(&[format!("!{}/build/**", base.display())]);
         absolute.set_base_dir(&alias);
         assert!(!absolute.admits(&real.join("build/main.dart").to_string_lossy()));
         assert!(absolute.excludes_directory(&alias.join("build")));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn document_root_aliases_resolve_missing_descendants() {
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("real");
+    std::fs::create_dir_all(real.join("lib")).unwrap();
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let mut filter = PathFilter::from_includes(&["lib/**".into(), "!lib/generated/**".into()]);
+    filter.set_base_dir(&real);
+    assert!(filter.admits(&alias.join("lib/unsaved.dart").to_string_lossy()));
+    assert!(!filter.admits(&alias.join("lib/generated/unsaved.dart").to_string_lossy()));
+    assert!(filter.excludes_directory(&alias.join("lib/generated")));
 }
 
 #[test]

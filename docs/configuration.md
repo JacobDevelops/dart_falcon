@@ -95,10 +95,13 @@ remain, positive filtering is unrestricted; valid exclusions still win.
 All globs resolve relative to the directory containing `falcon.json`, including
 CLI `--exclude` patterns and override filters. User-level `~/.falcon.json` is
 settings rather than a workspace: its globs resolve from the CLI current working
-directory or the LSP workspace root, not the home directory. With no config,
-the current directory is the base. CLI relative paths, absolute paths, and LSP
-document paths therefore select the same files. `*` never crosses `/`; `**`
-crosses directories.
+directory or the LSP workspace root, not the home directory. This also applies
+when the home directory is reached through a symlink or another directory alias;
+a config symlink in another directory still uses that directory as its root.
+With no config, the current directory is the base. CLI relative paths, absolute paths, and LSP
+document paths therefore select the same files, including symlinked configuration
+or document roots and not-yet-created document paths beneath those roots.
+`*` never crosses `/`; `**` crosses directories.
 For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also
 matches nested files. An exclusion matching a directory excludes its whole
 subtree, and that directory is pruned before traversal. For example, `!build`
