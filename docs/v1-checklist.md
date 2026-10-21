@@ -6,46 +6,13 @@ Every hardening item and rule row below must be resolved before falcon 1.0; ther
 
 Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
 
-### Stage 2: start now
+### Stage 3: start now
 
-These batches can run in parallel unless a batch says otherwise.
-
-#### 7. Syntax model
-
-Owns `crates/falcon_syntax`, `crates/falcon_dart_parser`, and the feature-gate check in `falcon_analyze/src/environment/external.rs`.
-
-- [ ] **Generated syntax kind mapping.** `Expr::cast` ends in `_ => None` and the visitor schema test asserts hand counts. Generate `cast`/`syntax` from `expression_enum!` and test that the default walk reaches every node.
-- [ ] **One parameter-kind encoding.** Parameter kinds are encoded both as marker nodes and as tree-builder flags (`tree.rs:98-414`).
-- [ ] **Typed feature-gate parse errors.** `external.rs:1276` decides external-library resolution by matching the message prefix `"This requires the '"`. Add a `ParseErrorKind`.
-- [ ] **Lexer and parser leftovers.** Unclosed `${` swallows the rest of the file; the nested-comment scan in `language_version.rs` is quadratic; the `in_ctor_init_value` latch isn't restored; the cascade selector loop has drifted from `parse_postfix`; `parse_field_or_method` keeps errors from the abandoned attempt.
-- [ ] **Exponential nullable-declaration speculation.** A statement starting `a ? b = …` is first tried as the declaration `a? b = …`, which parses the whole initializer, fails at `:`, and reparses it as a conditional (`stmt.rs:535-557`). Nesting block lambdas doubles the work: `"a ? b = () {" * N + "0;" + "} : c;" * N` takes 0.57 s at N=20, 36 s at N=26 and times out at N=29 (534 bytes). Decide declaration vs conditional from the tokens before parsing the initializer.
-
-#### 8. CLI and config behaviour
-
-Owns `crates/falcon_cli`, `crates/falcon_config`, `crates/falcon_diagnostics` output, and path matching in `falcon_lsp`.
-
-- [ ] **Relative globs don't match walked paths.** `falcon check .` yields `./build/…`, so the documented `"!build/**"` excludes nothing (reproduced). The LSP matches absolute paths, so CLI and editor select different files. Resolve every glob relative to the config file's directory before matching files, overrides and diagnostics. `*` stops matching at `/` and `**` crosses directories; that changes how some existing configs match, so it ships with a changeset and a migrate note.
-- [ ] **Exit code holes.** A missing path is skipped, no paths lints nothing, and `--max-errors 0` exits 0 because the code is computed after truncation (`analyze_pipeline.rs:142-148,243-282`). No paths lints the current directory. A missing path, or a run that processes no files, is an error diagnostic with a non-zero exit, with a `--no-errors-on-unmatched` flag for tools like lint-staged that may pass nothing. Pipeline failures exit 1 like lint errors. `--max-errors` only limits what's printed, so the exit code comes from every diagnostic.
-- [ ] **Silent config typos.** Nested unknown keys are ignored, an override with a mistyped `includes` applies to every file, and domain names aren't validated (`falcon_config/src/lib.rs:47-85,167,353,664-732`). An unknown key at any depth, or an unknown domain, is an error naming the full key path, and the config doesn't load. Legacy spellings stay accepted with a deprecation warning. A mistyped `includes` then fails to load, so overrides without `includes` keep applying everywhere.
-- [ ] **Library code returns warnings.** `falcon_config` and `falcon_rules` `eprintln!` on every registry build, so the LSP never shows them. Return warnings, and provide one loader that canonicalises.
-- [ ] **One canonicalisation.** `meta::canonicalize_rules` and `migrate::canonicalize_group` rank and merge differently; every loader must remember to call it.
-- [ ] **Migrate coverage.** `run_migrate` has no tests and an in-place upgrade reorders keys (`serde_json` without `preserve_order`).
-- [ ] **JSON output contract.** Severity serialises as `"Error"` while text prints lowercase, and `0` means unresolved line/col. Emit lowercase severities and omit unresolved positions, then snapshot a non-empty output.
-- [ ] **Single pruning walk.** Excluded directories are fully traversed and manifests are found by a second walk.
-
-#### 9. Fix model
-
-Owns `crates/falcon_diagnostics` and `AnalyzeContext`'s diagnostic API. After batch 8, which changes how `Diagnostic` serialises. Design only; rules adopt it in batch 10.
-
-- [ ] **Fix model.** `Diagnostic` has no fix field today. Add a fix carrying text edits over the lossless CST and a kind, safe or unsafe, declared by the rule. A safe fix preserves the program's behaviour; a fix that changes behaviour is unsafe even when the diagnostic is correct. Add the rule-facing API to attach one, so the diagnostic API changes once together with batch 10.
-
-### Stage 3: rule API
-
-These change the API every rule uses, so they run one at a time and no stage 4 batch starts until batch 10 lands.
+These change the rule API every rule uses, so they run one at a time and no stage 4 batch starts until batch 10 lands.
 
 #### 10. Rule declaration and ids
 
-Owns `crates/falcon_rules/src/meta.rs`, the `lint/<group>.rs` files, `registry.rs`, every rule's `ctx.diagnostic` call, and codegen in xtask. After batch 9.
+Owns `crates/falcon_rules/src/meta.rs`, the `lint/<group>.rs` files, `registry.rs`, every rule's `ctx.diagnostic` call, and codegen in xtask. Rules attach fixes with `AnalyzeContext::with_fix` from here on.
 
 - [ ] **Single rule declaration.** Adding a rule touches about 15 places, more than half unchecked. Replace the hand-written `RULE_METADATA` entries and `pub mod` lines with a per-group declaration macro that emits the module, metadata and `const NAME`, and split `meta.rs` into per-group tables.
 - [ ] **Diagnostic rule ids aren't enforced.** Rules retype their id in every `ctx.diagnostic("…")`, and the corpus test drops foreign ids (`corpus_tests.rs:489`), so a typo gives a warning nobody can configure or suppress. Have the registry stamp the id per slot.
@@ -127,6 +94,7 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 - [ ] **Terminating fixpoint.** `converge`/`infer_programs` (`semantic.rs:4641-4695`) rescan every program, SDK included, each round, and only end if every pass makes monotone progress, which nothing enforces. Add a worklist that requeues only declarations whose inputs changed. Enforce at the type-map writes that a step only fills an unknown type or tightens a partial one, never replaces a concrete type. Keep a round cap as a backstop; hitting it is an internal error naming the declarations still changing, not silently half-inferred types.
 - [ ] **Long chains in overriding walkers.** The default `Visitor` walks expression chains with an explicit stack, but walkers that override `visit_expr` and recurse through `walk_expr` (`FlowWrites`, `for_each_stmt_list`), plus `SemanticScope::visit_expr` and `state.infer`, still recurse once per link: `falcon check` on a 100,000-operand `a + a + …` aborts with a stack overflow in `FlowWrites`. Give them an iterative chain walk too.
 - [ ] **Super-quadratic inference on binary chains.** Cost grows about 8× per doubling of `a + a + … + a`: `falcon check` takes 1.2 s at 250 operands, 10.4 s at 500, 79 s at 1,000 and over 120 s at 2,000 (same on 0.4.3). The profile is dominated by `TypeEnvironment::infer_non_call` and `SignatureIndex::interface_candidates`. Find the repeated work and make it linear.
+- [ ] **Exponential inference on nested closures.** Each nested closure body is inferred again for every enclosing one: `"b = () {" * N + "0;" + "};" * N` takes 0.09 s at N=14, 1.5 s at N=18 and 10 s at N=20 with only `void-checks` enabled. The profile is `TypeEnvironment::infer_function` and `ClosureReturns::visit_expr` under `infer_with_context`. Infer each closure once per context.
 
 #### 18. Analyze infrastructure
 
@@ -141,7 +109,7 @@ Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports
 
 #### 19. Shared pipeline and incremental LSP
 
-Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. After batch 8.
+Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. Can start any time.
 
 - [ ] **One project pipeline.** The CLI and LSP load config, walk files, build `ProjectFile`s, build indexes and sort diagnostics differently. Share one pipeline and test that both produce the same diagnostics.
 - [ ] **Incremental LSP.** Every edit pause re-walks and re-parses the workspace twice on one thread, with `$/cancelRequest` ignored. Cache disk parses, invalidate via watched files, rebuild only what changed.
@@ -152,13 +120,13 @@ Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. Af
 
 #### 20. Autofix delivery
 
-Owns the CLI fix commands and LSP code actions. After batches 9 and 19.
+Owns the CLI fix commands and LSP code actions. After batch 19.
 
 - [ ] **Safe autofixes.** `--write` applies safe fixes and `--write --unsafe` also applies unsafe ones, with a preview mode. Fixes apply one at a time with re-analysis in between until nothing changes, so overlapping edits never merge. If a file's text repeats, fixes are undoing each other: stop and report the rules involved. An iteration cap stays as a backstop for fixes that grow the file without repeating, and hitting it is reported, not silent. A per-rule `fix: "none" | "safe" | "unsafe"` option, also allowed in overrides, turns a fix off or reclassifies it. Editors offer both kinds as quick fixes plus fix-all; fix-on-save applies safe fixes only.
 
 #### 21. CI adoption
 
-Owns CLI reporting and exit policy. After batch 8.
+Owns CLI reporting and exit policy. Can start any time.
 
 - [ ] **Existing-debt baselines.** Let teams adopt falcon without fixing historical findings, matching findings robustly across line changes rather than by rule/path/line/message.
 - [ ] **Severity-based CI thresholds.** Today any diagnostic, warnings included, fails the run (`analyze_pipeline.rs:247-251`). Make warnings non-failing by default and add `--error-on-warnings` plus a config equivalent; this changes CI results for existing users, so it ships with a changeset.
