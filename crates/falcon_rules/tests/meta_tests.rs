@@ -421,7 +421,7 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
 
     use falcon_analyze::{
         AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, RulePreparation,
-        SemanticModel, SignatureIndex, TypeIndex,
+        SemanticModel, SignatureIndex, TypeIndex, group_libraries, library_unit,
     };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
@@ -640,8 +640,13 @@ void main() {
 }
 // This deliberately long source line makes the line-length collector eligible for its shared callback traversal.
 "#;
-    for language_override in ["", "// @dart = 2.19\n"] {
-        let source = format!("{language_override}{source}");
+    for (language_override, part_directive) in [
+        ("", ""),
+        ("// @dart = 2.19\n", ""),
+        ("", "part 'probe_part.dart';\n"),
+        ("", "part of 'probe_owner.dart';\n"),
+    ] {
+        let source = format!("{language_override}{part_directive}{source}");
         let parsed = parse(&source);
         assert!(parsed.errors.is_empty());
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
@@ -649,6 +654,21 @@ void main() {
             tree: parsed.tree,
         });
         let program = parsed.program();
+        let (sibling_name, sibling_source) = if part_directive.is_empty() {
+            ("probe_part.dart", "")
+        } else if program.part_of_directive().is_some() {
+            ("probe_owner.dart", "part 'structural_collectors.dart';")
+        } else {
+            ("probe_part.dart", "part of 'structural_collectors.dart';")
+        };
+        let sibling_path = path.with_file_name(sibling_name);
+        let sibling = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: sibling_source.into(),
+            tree: parse(sibling_source).tree,
+        });
+        let grouping =
+            group_libraries(&[(path.clone(), program), (sibling_path, sibling.program())]);
+        let unit = library_unit(&grouping, &[&parsed, &sibling], 0);
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
@@ -673,7 +693,9 @@ void main() {
         let context = AnalyzeContext::new(&path, &config, &parsed)
             .with_types(&types)
             .with_identities(&identities)
-            .with_signatures(&signatures);
+            .with_signatures(&signatures)
+            .with_library(&unit);
+        let unresolved_context = AnalyzeContext::new(&path, &config, &parsed);
         for metadata in RULE_METADATA {
             let RuleKind::File {
                 make,
@@ -682,14 +704,25 @@ void main() {
             else {
                 continue;
             };
-            match make().prepare(program, &context) {
+            let preparation = make().prepare(program, &context);
+            if !needs_resolution {
+                assert_eq!(
+                    std::mem::discriminant(&make().prepare(program, &unresolved_context)),
+                    std::mem::discriminant(&preparation),
+                    "{} changes preparation kind without resolution but is not declared resolved",
+                    metadata.name
+                );
+            }
+            match preparation {
                 RulePreparation::Structural(collector) => {
                     assert!(
                         collector.has_derived_interests(),
                         "{} must derive callback interests with structural_visitor!",
                         metadata.name
                     );
-                    diagnostics_only.remove(metadata.name);
+                    if part_directive.is_empty() {
+                        diagnostics_only.remove(metadata.name);
+                    }
                 }
                 RulePreparation::Semantic(_) => {
                     assert!(
@@ -697,13 +730,73 @@ void main() {
                         "{} returns a semantic collector but is not declared resolved",
                         metadata.name
                     );
-                    diagnostics_only.remove(metadata.name);
+                    if part_directive.is_empty() {
+                        diagnostics_only.remove(metadata.name);
+                    }
                 }
                 RulePreparation::Diagnostics(_) => {}
             }
         }
     }
     assert_eq!(diagnostics_only, expected);
+}
+
+#[test]
+fn library_dependent_rules_analyze_parts_when_enabled_alone() {
+    use falcon_analyze::{RuleRegistry, Workspace, analyze_sequential_collecting_resolving};
+    use falcon_config::FalconConfig;
+    use falcon_rules::meta::RuleKind;
+
+    for (name, owner, part, expected) in [
+        (
+            "avoid-duplicate-mixins",
+            include_str!("corpus/avoid-duplicate-mixins/project/owner.dart"),
+            include_str!("corpus/avoid-duplicate-mixins/project/part.dart"),
+            2,
+        ),
+        (
+            "avoid-private-typedef-functions",
+            include_str!("corpus/avoid-private-typedef-functions/project/owner.dart"),
+            include_str!("corpus/avoid-private-typedef-functions/project/part.dart"),
+            1,
+        ),
+    ] {
+        let metadata = RULE_METADATA
+            .iter()
+            .find(|metadata| metadata.name == name)
+            .unwrap();
+        let RuleKind::File { make, .. } = metadata.kind else {
+            panic!("{name} must be a per-file rule");
+        };
+        let mut registry = RuleRegistry::with_lookup(falcon_rules::meta::suppression_lookup);
+        registry.register(name, make());
+        let files = [
+            (
+                std::path::PathBuf::from("/project/lib/owner.dart"),
+                owner.to_owned(),
+            ),
+            (
+                std::path::PathBuf::from("/project/lib/part.dart"),
+                part.to_owned(),
+            ),
+        ];
+        let (diagnostics, _, _) = analyze_sequential_collecting_resolving(
+            &registry,
+            &files,
+            &FalconConfig::default(),
+            false,
+            falcon_rules::requires_resolution(&registry),
+            Workspace::default(),
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.rule)
+                .collect::<Vec<_>>(),
+            vec![name; expected],
+            "{name} must see sibling declarations when enabled alone"
+        );
+    }
 }
 
 #[test]

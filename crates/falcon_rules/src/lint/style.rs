@@ -143,7 +143,7 @@ crate::declare_rules! {
     avoid_final_parameters::AvoidFinalParameters => ("avoid-final-parameters", file, None, false, RuleSource::Lints("avoid_final_parameters"));
     avoid_multiple_declarations_per_line::AvoidMultipleDeclarationsPerLine => ("avoid-multiple-declarations-per-line", file, None, true, RuleSource::Lints("avoid_multiple_declarations_per_line"));
     avoid_positional_boolean_parameters::AvoidPositionalBooleanParameters => ("avoid-positional-boolean-parameters", resolved, None, false, RuleSource::Lints("avoid_positional_boolean_parameters"));
-    avoid_private_typedef_functions::AvoidPrivateTypedefFunctions => ("avoid-private-typedef-functions", file, None, false, RuleSource::Lints("avoid_private_typedef_functions"));
+    avoid_private_typedef_functions::AvoidPrivateTypedefFunctions => ("avoid-private-typedef-functions", resolved, None, false, RuleSource::Lints("avoid_private_typedef_functions"));
     avoid_setters_without_getters::AvoidSettersWithoutGetters => ("avoid-setters-without-getters", resolved, None, false, RuleSource::Lints("avoid_setters_without_getters"));
     sort_constructors_first::SortConstructorsFirst => ("sort-constructors-first", file, None, false, RuleSource::Lints("sort_constructors_first"));
     avoid_bloc_public_fields::AvoidBlocPublicFields => ("avoid-bloc-public-fields", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);

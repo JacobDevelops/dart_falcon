@@ -20,7 +20,7 @@ crate::declare_rules! {
     avoid_duplicate_cascades::AvoidDuplicateCascades => ("avoid-duplicate-cascades", file, None, false, RuleSource::Falcon);
     avoid_duplicate_exports::AvoidDuplicateExports => ("avoid-duplicate-exports", file, None, false, RuleSource::Falcon);
     avoid_duplicate_named_imports::AvoidDuplicateNamedImports => ("avoid-duplicate-named-imports", file, None, false, RuleSource::Falcon);
-    avoid_duplicate_mixins::AvoidDuplicateMixins => ("avoid-duplicate-mixins", file, None, false, RuleSource::Falcon);
+    avoid_duplicate_mixins::AvoidDuplicateMixins => ("avoid-duplicate-mixins", resolved, None, false, RuleSource::Falcon);
     avoid_duplicate_factories::AvoidDuplicateFactories => ("avoid-duplicate-factories", file, None, false, RuleSource::Falcon);
     avoid_duplicate_initializers::AvoidDuplicateInitializers => ("avoid-duplicate-initializers", file, None, false, RuleSource::Falcon);
     function_always_returns_null::FunctionAlwaysReturnsNull => ("function-always-returns-null", resolved, None, false, RuleSource::Falcon);
