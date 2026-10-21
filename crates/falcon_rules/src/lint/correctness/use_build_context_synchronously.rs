@@ -834,6 +834,13 @@ impl AsyncStateVisitor<'_> {
             Kind::Any => self.any(children),
         }
     }
+    fn constant(&self, mut key: Key) -> Option<&bool> {
+        while matches!(self.tree.nodes[&key].kind, Kind::Revisit) {
+            key = *self.tree.nodes[&key].children.first()?;
+        }
+        self.semantics.constants.get(&key.0)
+    }
+
     fn binary(&self, op: BinaryOp, children: &[Key]) -> State {
         let [left, right] = children else {
             return self.any(children);
@@ -863,9 +870,9 @@ impl AsyncStateVisitor<'_> {
                     return Some(AsyncState::Async);
                 }
                 let (state, constant) = if l.is_some() {
-                    (l, self.semantics.constants.get(&right.0))
+                    (l, self.constant(*right))
                 } else {
-                    (r, self.semantics.constants.get(&left.0))
+                    (r, self.constant(*left))
                 };
                 constant.and_then(|&value| {
                     if value == (op == BinaryOp::EqEq) {

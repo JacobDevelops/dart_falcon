@@ -60,4 +60,12 @@ abstract class ConstantGuard extends Notifier<int> {
     await pause();
     if (ref.mounted == alive) state = 1;
   }
+  Future<void> parenthesized() async {
+    await pause();
+    if (ref.mounted == (alive)) state = 1;
+  }
+  Future<void> nestedParenthesized() async {
+    await pause();
+    if (ref.mounted == ((alive))) state = 1;
+  }
 }

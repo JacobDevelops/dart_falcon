@@ -689,11 +689,12 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
         if let Expr::Assign(assign) = node {
             match assign.target().unparenthesized() {
                 Expr::Ident(id) => {
-                    if self
-                        .nullability
-                        .get(&(assign.value().span().start, assign.value().span().end))
-                        .copied()
-                        .unwrap_or(true)
+                    if !matches!(assign.op(), AssignOp::Eq | AssignOp::NullCoalesceEq)
+                        || self
+                            .nullability
+                            .get(&(assign.value().span().start, assign.value().span().end))
+                            .copied()
+                            .unwrap_or(true)
                     {
                         self.names.insert(id.name());
                     }
@@ -701,6 +702,16 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
                 Expr::Field(_) | Expr::Index(_) => {}
                 target => PatternWrites(&mut self.names).visit_expr(target),
             }
+        }
+        let increment_target = match node {
+            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                Some(unary.operand())
+            }
+            Expr::PostfixIncDec(increment) => Some(increment.operand()),
+            _ => None,
+        };
+        if let Some(Expr::Ident(identifier)) = increment_target.map(Expr::unparenthesized) {
+            self.names.insert(identifier.name());
         }
         walk_expr(self, node);
     }

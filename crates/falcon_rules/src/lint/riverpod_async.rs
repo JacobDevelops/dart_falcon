@@ -106,6 +106,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             self.facts.never.insert(id);
         }
         for operand in equality_operands(expression).into_iter().flatten() {
+            let operand = operand.unparenthesized();
             if let Some(value) = constant_bool(operand, state, self.ctx.constant_cache()) {
                 self.facts.constants.insert(operand.syntax().id(), value);
             }

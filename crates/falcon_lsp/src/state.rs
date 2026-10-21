@@ -186,19 +186,13 @@ struct CrossFileExternalCache {
     roots: Vec<(PathBuf, Vec<String>)>,
     libraries: ExternalLibraries,
     indexes: Option<ExternalIndexCache>,
+    watched_paths: HashSet<PathBuf>,
 }
 
 impl CrossFileExternalCache {
     /// Whether `path` is a watched source this cache loaded or tried to load.
     fn loaded(&self, path: &Path) -> bool {
-        self.libraries
-            .libraries()
-            .iter()
-            .flat_map(|library| library.files.iter())
-            .map(|file| file.path.as_path())
-            .chain(self.libraries.attempted_project_paths())
-            .chain(self.libraries.project_companions())
-            .any(|loaded| watched_path(loaded) == *path)
+        self.watched_paths.contains(path)
     }
 }
 
@@ -1035,10 +1029,20 @@ impl LspState {
                     environment: &self.environment,
                 })
             });
+            let watched_paths = libraries
+                .libraries()
+                .iter()
+                .flat_map(|library| library.files.iter())
+                .map(|file| file.path.as_path())
+                .chain(libraries.attempted_project_paths())
+                .chain(libraries.project_companions())
+                .map(watched_path)
+                .collect();
             self.cross_file_external_cache = Some(CrossFileExternalCache {
                 roots: graph_roots,
                 libraries,
                 indexes,
+                watched_paths,
             });
             self.cross_file_external_load_count += 1;
         }
@@ -2304,6 +2308,19 @@ mod dependency_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn cross_file_external_cache_uses_watched_path_snapshot() {
+        let path = PathBuf::from("/missing/dependency.dart");
+        let cache = CrossFileExternalCache {
+            roots: Vec::new(),
+            libraries: ExternalLibraries::default(),
+            indexes: None,
+            watched_paths: HashSet::from([path.clone()]),
+        };
+        assert!(cache.loaded(&path));
+        assert!(!cache.loaded(Path::new("/missing/other.dart")));
     }
 
     #[test]

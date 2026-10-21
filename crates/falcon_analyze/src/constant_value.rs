@@ -510,16 +510,23 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let value = match expression {
             Expr::Ident(identifier) => {
                 let value = self.resolve_name_shared(&[identifier.name()])?;
-                let bytes = value_size(&value, self.remaining_bytes)?;
-                self.remaining_bytes -= bytes;
+                Self::charge_value(&value, &mut self.remaining_bytes)?;
                 return Some(Arc::unwrap_or_clone(value));
             }
             Expr::Paren(paren) => return self.evaluate_with_context(paren.expr(), expected),
             _ => self.evaluate_inner(expression, expected)?,
         };
-        let bytes = value_size(&value, self.remaining_bytes)?;
-        self.remaining_bytes -= bytes;
+        Self::charge_value(&value, &mut self.remaining_bytes)?;
         Some(value)
+    }
+
+    fn charge_value(value: &ConstantValue, remaining_bytes: &mut usize) -> Option<()> {
+        let Some(bytes) = value_size(value, *remaining_bytes) else {
+            *remaining_bytes = 0;
+            return None;
+        };
+        *remaining_bytes -= bytes;
+        Some(())
     }
 
     fn evaluate_shared(
@@ -729,7 +736,8 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             && let (ConstantValue::String(left), ConstantValue::String(right)) =
                 (left.as_ref(), right.as_ref())
         {
-            if left.len().checked_add(right.len())? > self.remaining_bytes {
+            if left.len().saturating_add(right.len()) > self.remaining_bytes {
+                self.remaining_bytes = 0;
                 return None;
             }
             return Some(ConstantValue::String(format!("{left}{right}")));
@@ -923,8 +931,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 .and_then(|parameters| parameters.get(*local_name))
         {
             let value = value.as_ref()?;
-            let bytes = value_size(value, self.remaining_bytes)?;
-            self.remaining_bytes -= bytes;
+            Self::charge_value(value, &mut self.remaining_bytes)?;
             return Some(Arc::new(value.clone()));
         }
         if names.len() == 1
@@ -937,8 +944,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 None
             } else {
                 let value = (*value).as_ref()?;
-                let bytes = value_size(value, self.remaining_bytes)?;
-                self.remaining_bytes -= bytes;
+                Self::charge_value(value, &mut self.remaining_bytes)?;
                 Some(Arc::new(value.clone()))
             };
         }
@@ -1123,6 +1129,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             if self.pending_constants.is_empty() {
                 let cached = CachedConstant { value, failed };
                 if let Some(cache) = self.shared_cache
+                    && self.remaining_bytes != 0
                     && let Some(key) = Self::shared_key(&current)
                 {
                     cache
@@ -3036,6 +3043,22 @@ const futureOrCast = null as FutureOr<int?>;
             assert!(evaluator.pending_constants.is_empty());
             let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
             assert!(evaluator.resolve_name_shared(&["value"]).is_some());
+        });
+    }
+
+    #[test]
+    fn exhausted_budget_does_not_poison_shared_constants() {
+        with_source("const value = [1, 2, 3];", |_, model, signatures| {
+            let fields = HashMap::new();
+            let cache = ConstantCache::default();
+            let mut first = ConstEvaluator::new(None, &fields, model, signatures);
+            first.shared_cache = Some(&cache);
+            first.remaining_bytes = 1;
+            assert!(first.resolve_name_shared(&["value"]).is_none());
+            assert!(cache.values.lock().unwrap().values.is_empty());
+            let mut second = ConstEvaluator::new(None, &fields, model, signatures);
+            second.shared_cache = Some(&cache);
+            assert!(second.resolve_name_shared(&["value"]).is_some());
         });
     }
 

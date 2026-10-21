@@ -533,11 +533,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             self.semantics.never.insert(key(expression));
         }
-        // Parenthesized operands are skipped like every other parenthesis.
         for operand in equality_operands(expression).into_iter().flatten() {
-            if !matches!(operand, Expr::Paren(_))
-                && let Some(value) = constant_bool(operand, state, self.ctx.constant_cache())
-            {
+            let operand = operand.unparenthesized();
+            if let Some(value) = constant_bool(operand, state, self.ctx.constant_cache()) {
                 self.semantics.constants.insert(key(operand), value);
             }
         }
@@ -790,7 +788,10 @@ void use(Holder holder, BuildContext context) {
             for _ in 0..2 {
                 let mut values: Vec<_> = collect(program, ctx).constants.into_values().collect();
                 values.sort_unstable();
-                assert_eq!(values, [false, true, true, true, true]);
+                assert_eq!(
+                    values,
+                    [false, true, true, true, true, true, true, true, true]
+                );
             }
             RulePreparation::Diagnostics(Vec::new())
         }
@@ -805,6 +806,8 @@ const aliased = negated;
 bool compare() => aliased == false;
 bool again() => aliased != true;
 bool shadowed(bool aliased) => aliased == true;
+bool parenthesized() => aliased == (negated);
+bool nestedParenthesized() => aliased == ((negated));
 ";
         inference::analyze(
             &CheckEqualityConstants,
