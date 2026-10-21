@@ -666,10 +666,21 @@ Upgrades preserve the order of configuration keys. Duplicate entries use the
 same severity ranking and canonical-name tie breaking as normal config loading.
 
 Unknown falcon rule ids, unsupported keys, and invalid values are dropped with
-warnings naming their full configuration paths and discarded values. Supported
-settings remain unchanged, and the resulting configuration passes falcon's loader.
-Migration applies the loader's structural, rule-name, and options checks.
-Malformed JSON or YAML still fails before writing.
+warnings naming their full configuration paths and discarded values. Known rules
+in the wrong group or section are moved to their declared location, preserving
+levels and supported options; collisions use the same severity policy described
+above, and warnings name both paths.
+
+Migration converts a single string `includes` into a one-element array when it
+is a valid glob. Invalid include entries are dropped only while usable patterns
+remain. If none remain, the whole override is dropped with a warning rather than
+applying it to every file; for `files.includes`, migration fails instead of
+widening the analyzed file set. Intentionally empty or omitted includes remain
+unchanged.
+
+Other supported settings remain unchanged, and the resulting configuration passes
+falcon's loader. Migration applies the loader's structural, rule-name, and options
+checks. Malformed JSON or YAML still fails before writing.
 
 Glob matching now uses the configuration file's directory in both the CLI and
 the editor, rather than paths as walked. User-level `~/.falcon.json` globs instead

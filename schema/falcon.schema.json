@@ -3499,9 +3499,16 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {}
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -3524,29 +3531,36 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Alphabetical ordering direction for named arguments; unset uses parameter declaration order.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Alphabetical ordering direction for named arguments; unset uses parameter declaration order.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    },
+                    "alphabetize": {
+                      "description": "Alphabetizes named arguments in ascending order when true.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
                 },
-                "alphabetize": {
-                  "description": "Alphabetizes named arguments in ascending order when true.",
-                  "type": "boolean",
-                  "default": false
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3569,39 +3583,46 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "rules": {
-                  "description": "Banned annotation-name globs and the diagnostic message to report on a match.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "deny": {
-                        "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "Banned annotation-name globs and the diagnostic message to report on a match.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deny": {
+                            "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "message": {
+                            "description": "Diagnostic text emitted when any pattern in this entry matches.",
+                            "type": "string"
+                          }
                         },
-                        "minItems": 1
+                        "additionalProperties": false,
+                        "required": [
+                          "deny",
+                          "message"
+                        ]
                       },
-                      "message": {
-                        "description": "Diagnostic text emitted when any pattern in this entry matches.",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "deny",
-                      "message"
-                    ]
-                  },
-                  "default": []
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3624,39 +3645,46 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "rules": {
-                  "description": "Banned export-URI globs and the diagnostic message to report on a match.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "deny": {
-                        "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "Banned export-URI globs and the diagnostic message to report on a match.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deny": {
+                            "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "message": {
+                            "description": "Diagnostic text emitted when any pattern in this entry matches.",
+                            "type": "string"
+                          }
                         },
-                        "minItems": 1
+                        "additionalProperties": false,
+                        "required": [
+                          "deny",
+                          "message"
+                        ]
                       },
-                      "message": {
-                        "description": "Diagnostic text emitted when any pattern in this entry matches.",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "deny",
-                      "message"
-                    ]
-                  },
-                  "default": []
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3679,39 +3707,46 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "rules": {
-                  "description": "Banned declaration-name globs and the diagnostic message to report on a match.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "deny": {
-                        "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "Banned declaration-name globs and the diagnostic message to report on a match.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deny": {
+                            "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "message": {
+                            "description": "Diagnostic text emitted when any pattern in this entry matches.",
+                            "type": "string"
+                          }
                         },
-                        "minItems": 1
+                        "additionalProperties": false,
+                        "required": [
+                          "deny",
+                          "message"
+                        ]
                       },
-                      "message": {
-                        "description": "Diagnostic text emitted when any pattern in this entry matches.",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "deny",
-                      "message"
-                    ]
-                  },
-                  "default": []
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3734,39 +3769,46 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "rules": {
-                  "description": "Banned type-name globs and the diagnostic message to report on a match.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "deny": {
-                        "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "Banned type-name globs and the diagnostic message to report on a match.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deny": {
+                            "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "message": {
+                            "description": "Diagnostic text emitted when any pattern in this entry matches.",
+                            "type": "string"
+                          }
                         },
-                        "minItems": 1
+                        "additionalProperties": false,
+                        "required": [
+                          "deny",
+                          "message"
+                        ]
                       },
-                      "message": {
-                        "description": "Diagnostic text emitted when any pattern in this entry matches.",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "deny",
-                      "message"
-                    ]
-                  },
-                  "default": []
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3789,18 +3831,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-terms": {
-                  "description": "Maximum number of arithmetic operands in one connected expression.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 6
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-terms": {
+                      "description": "Maximum number of arithmetic operands in one connected expression.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 6
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3823,18 +3872,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "threshold": {
-                  "description": "Maximum number of logical operands in a condition.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 10
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "threshold": {
+                      "description": "Maximum number of logical operands in a condition.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 10
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3857,18 +3913,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "threshold": {
-                  "description": "Maximum number of logical operands in a loop condition.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 1
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "threshold": {
+                      "description": "Maximum number of logical operands in a loop condition.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 1
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3891,19 +3954,26 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "include-methods": {
-                  "description": "Additional method names recognized as test registrations inside a group.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "include-methods": {
+                      "description": "Additional method names recognized as test registrations inside a group.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3926,18 +3996,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-branches": {
-                  "description": "Maximum number of branches in an `if`/`else if` chain.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 3
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-branches": {
+                      "description": "Maximum number of branches in an `if`/`else if` chain.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 3
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3960,18 +4037,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-fields": {
-                  "description": "Maximum number of fields in a record.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 6
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-fields": {
+                      "description": "Maximum number of fields in a record.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 6
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -3994,16 +4078,23 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "ignore-null-checks": {
-                  "description": "Exempt null comparisons from the negated-condition diagnostic.",
-                  "type": "boolean",
-                  "default": false
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-null-checks": {
+                      "description": "Exempt null comparisons from the negated-condition diagnostic.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4026,16 +4117,23 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "ignore-null-aware-assignments": {
-                  "description": "Exempt null-aware assignments (`??=`) from the nested-assignment diagnostic.",
-                  "type": "boolean",
-                  "default": false
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-null-aware-assignments": {
+                      "description": "Exempt null-aware assignments (`??=`) from the nested-assignment diagnostic.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4058,18 +4156,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-nesting": {
-                  "description": "Maximum number of nested switch expressions.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 1
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-nesting": {
+                      "description": "Maximum number of nested switch expressions.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 1
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4092,18 +4197,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-nesting": {
-                  "description": "Maximum number of nested switch statements.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 1
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-nesting": {
+                      "description": "Maximum number of nested switch statements.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 1
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4126,18 +4238,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-nesting": {
-                  "description": "Maximum number of nested `try` statements.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 2
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-nesting": {
+                      "description": "Maximum number of nested `try` statements.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 2
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4160,23 +4279,30 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "ignored-annotations": {
-                  "description": "Annotation names that exempt a class from subclass-reference checks.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": [
-                    "freezed",
-                    "Freezed",
-                    "unfreezed"
-                  ]
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignored-annotations": {
+                      "description": "Annotation names that exempt a class from subclass-reference checks.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": [
+                        "freezed",
+                        "Freezed",
+                        "unfreezed"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4199,16 +4325,23 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "ignore-upcast": {
-                  "description": "Ignore getters whose value is explicitly upcast to a broader type.",
-                  "type": "boolean",
-                  "default": true
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-upcast": {
+                      "description": "Ignore getters whose value is explicitly upcast to a broader type.",
+                      "type": "boolean",
+                      "default": true
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4231,49 +4364,56 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "rules": {
-                  "description": "Package-relative import boundaries applied to matching source files.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "files": {
-                        "description": "Source-file globs selecting where this boundary applies.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "Package-relative import boundaries applied to matching source files.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "files": {
+                            "description": "Source-file globs selecting where this boundary applies.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "deny": {
+                            "description": "Import URI or package-relative target globs prohibited within `files`.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "message": {
+                            "description": "Warning text emitted when a prohibited import matches.",
+                            "type": "string"
+                          }
                         },
-                        "minItems": 1
+                        "additionalProperties": false,
+                        "required": [
+                          "files",
+                          "deny",
+                          "message"
+                        ]
                       },
-                      "deny": {
-                        "description": "Import URI or package-relative target globs prohibited within `files`.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
-                        },
-                        "minItems": 1
-                      },
-                      "message": {
-                        "description": "Warning text emitted when a prohibited import matches.",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "files",
-                      "deny",
-                      "message"
-                    ]
-                  },
-                  "default": []
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4296,39 +4436,46 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "rules": {
-                  "description": "Banned API-name globs and the diagnostic message to report on a match.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "deny": {
-                        "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
-                        "type": "array",
-                        "items": {
-                          "description": "A validated glob pattern used to match a banned name, API, or import.",
-                          "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "Banned API-name globs and the diagnostic message to report on a match.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deny": {
+                            "description": "Non-empty glob patterns (JSON key `deny`) that trigger this entry.",
+                            "type": "array",
+                            "items": {
+                              "description": "A validated glob pattern used to match a banned name, API, or import.",
+                              "type": "string"
+                            },
+                            "minItems": 1
+                          },
+                          "message": {
+                            "description": "Diagnostic text emitted when any pattern in this entry matches.",
+                            "type": "string"
+                          }
                         },
-                        "minItems": 1
+                        "additionalProperties": false,
+                        "required": [
+                          "deny",
+                          "message"
+                        ]
                       },
-                      "message": {
-                        "description": "Diagnostic text emitted when any pattern in this entry matches.",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "deny",
-                      "message"
-                    ]
-                  },
-                  "default": []
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4351,19 +4498,26 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "valid-prefixes": {
-                  "description": "Additional accepted prefixes for boolean names; these extend built-ins.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "valid-prefixes": {
+                      "description": "Additional accepted prefixes for boolean names; these extend built-ins.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4386,36 +4540,43 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Optional member category sequence; unset uses the built-in ordering.",
-                  "type": [
-                    "array",
-                    "null"
-                  ],
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "public-fields",
-                      "private-fields",
-                      "fields",
-                      "static-fields",
-                      "constructors",
-                      "named-constructors",
-                      "static-methods",
-                      "private-methods",
-                      "public-methods",
-                      "methods",
-                      "getters",
-                      "setters"
-                    ]
-                  },
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Optional member category sequence; unset uses the built-in ordering.",
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "public-fields",
+                          "private-fields",
+                          "fields",
+                          "static-fields",
+                          "constructors",
+                          "named-constructors",
+                          "static-methods",
+                          "private-methods",
+                          "public-methods",
+                          "methods",
+                          "getters",
+                          "setters"
+                        ]
+                      },
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4438,18 +4599,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-complexity": {
-                  "description": "Maximum cognitive complexity allowed for a function.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 15
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-complexity": {
+                      "description": "Maximum cognitive complexity allowed for a function.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 15
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4472,18 +4640,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-complexity": {
-                  "description": "Maximum cyclomatic complexity allowed for a function.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 20
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-complexity": {
+                      "description": "Maximum cyclomatic complexity allowed for a function.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 20
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4506,24 +4681,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Alphabetical order for enum constants; unset leaves this rule inactive.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Alphabetical order for enum constants; unset leaves this rule inactive.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4546,27 +4728,34 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "class-name-pattern": {
-                  "description": "Regex selecting class names that must use Equatable semantics.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "class-name-pattern": {
+                      "description": "Regex selecting class names that must use Equatable semantics.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    },
+                    "file-name-pattern": {
+                      "description": "Regex selecting file names whose classes must use Equatable semantics.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    }
+                  }
                 },
-                "file-name-pattern": {
-                  "description": "Regex selecting file names whose classes must use Equatable semantics.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "default": null
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4589,25 +4778,32 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "only-doc-comments": {
-                  "description": "When true, checks only documentation comments (`///`).",
-                  "type": "boolean",
-                  "default": false
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "only-doc-comments": {
+                      "description": "When true, checks only documentation comments (`///`).",
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ignored-patterns": {
+                      "description": "Regex patterns that exclude matching comments from formatting checks.",
+                      "type": "array",
+                      "items": {
+                        "description": "A regex compiled when its containing rule options are loaded.",
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
                 },
-                "ignored-patterns": {
-                  "description": "Regex patterns that exclude matching comments from formatting checks.",
-                  "type": "array",
-                  "items": {
-                    "description": "A regex compiled when its containing rule options are loaded.",
-                    "type": "string"
-                  },
-                  "default": []
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4630,24 +4826,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Alphabetical initializer order; unset follows field declaration order.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Alphabetical initializer order; unset follows field declaration order.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4670,24 +4873,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Alphabetical key order; unset leaves this rule inactive.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Alphabetical key order; unset leaves this rule inactive.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4710,18 +4920,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-lines": {
-                  "description": "Maximum number of source lines allowed in a file.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 200
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-lines": {
+                      "description": "Maximum number of source lines allowed in a file.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 200
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4744,18 +4961,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-lines": {
-                  "description": "Maximum number of source lines allowed in a function.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 100
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-lines": {
+                      "description": "Maximum number of source lines allowed in a function.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 100
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4778,18 +5002,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-parameters": {
-                  "description": "Maximum number of parameters allowed in a function.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 5
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-parameters": {
+                      "description": "Maximum number of parameters allowed in a function.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 5
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4812,18 +5043,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-statements": {
-                  "description": "Maximum number of statements allowed in a function.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 20
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-statements": {
+                      "description": "Maximum number of statements allowed in a function.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 20
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4846,18 +5084,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-cases": {
-                  "description": "Maximum number of non-default cases in a switch.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 10
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-cases": {
+                      "description": "Maximum number of non-default cases in a switch.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 10
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4880,18 +5125,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-nesting": {
-                  "description": "Maximum nesting depth allowed in a function.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 5
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-nesting": {
+                      "description": "Maximum nesting depth allowed in a function.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 5
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4914,56 +5166,63 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Optional member category sequence; unset uses the built-in ordering.",
-                  "type": [
-                    "array",
-                    "null"
-                  ],
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "public-fields",
-                      "private-fields",
-                      "fields",
-                      "static-fields",
-                      "constructors",
-                      "named-constructors",
-                      "static-methods",
-                      "private-methods",
-                      "public-methods",
-                      "methods",
-                      "getters",
-                      "setters"
-                    ]
-                  },
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Optional member category sequence; unset uses the built-in ordering.",
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "public-fields",
+                          "private-fields",
+                          "fields",
+                          "static-fields",
+                          "constructors",
+                          "named-constructors",
+                          "static-methods",
+                          "private-methods",
+                          "public-methods",
+                          "methods",
+                          "getters",
+                          "setters"
+                        ]
+                      },
+                      "default": null
+                    },
+                    "widgets-order": {
+                      "description": "Optional lifecycle sequence for classes extending `State`.",
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "constructor",
+                          "init-state",
+                          "did-change-dependencies",
+                          "did-update-widget",
+                          "dispose",
+                          "build",
+                          "overridden-methods"
+                        ]
+                      },
+                      "default": null
+                    }
+                  }
                 },
-                "widgets-order": {
-                  "description": "Optional lifecycle sequence for classes extending `State`.",
-                  "type": [
-                    "array",
-                    "null"
-                  ],
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "constructor",
-                      "init-state",
-                      "did-change-dependencies",
-                      "did-update-widget",
-                      "dispose",
-                      "build",
-                      "overridden-methods"
-                    ]
-                  },
-                  "default": null
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -4986,19 +5245,26 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "include-assertions": {
-                  "description": "Additional assertion function names recognized within test callbacks.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "include-assertions": {
+                      "description": "Additional assertion function names recognized within test callbacks.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5021,21 +5287,28 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "ignore-const": {
-                  "description": "Skip const variables even when their literal initializer has no side effects.",
-                  "type": "boolean",
-                  "default": false
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-const": {
+                      "description": "Skip const variables even when their literal initializer has no side effects.",
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ignore-after-if": {
+                      "description": "Skip moving declarations that follow an `if` statement.",
+                      "type": "boolean",
+                      "default": true
+                    }
+                  }
                 },
-                "ignore-after-if": {
-                  "description": "Skip moving declarations that follow an `if` statement.",
-                  "type": "boolean",
-                  "default": true
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5058,24 +5331,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "allowed": {
-                  "description": "Numeric values that are exempt from magic-number diagnostics.",
-                  "type": "array",
-                  "items": {
-                    "type": "number",
-                    "format": "double"
-                  },
-                  "default": [
-                    -1.0,
-                    0.0,
-                    1.0
-                  ]
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "allowed": {
+                      "description": "Numeric values that are exempt from magic-number diagnostics.",
+                      "type": "array",
+                      "items": {
+                        "type": "number",
+                        "format": "double"
+                      },
+                      "default": [
+                        -1.0,
+                        0.0,
+                        1.0
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5098,27 +5378,34 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "allow-only-once": {
-                  "description": "Allow string literal values that occur only once.",
-                  "type": "boolean",
-                  "default": false
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "allow-only-once": {
+                      "description": "Allow string literal values that occur only once.",
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ignored-invocations": {
+                      "description": "Invocation names whose direct string arguments are exempt from this rule.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": [
+                        "print",
+                        "debugPrint"
+                      ]
+                    }
+                  }
                 },
-                "ignored-invocations": {
-                  "description": "Invocation names whose direct string arguments are exempt from this rule.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": [
-                    "print",
-                    "debugPrint"
-                  ]
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5141,24 +5428,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Alphabetical order for named parameters; unset leaves this rule inactive.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Alphabetical order for named parameters; unset leaves this rule inactive.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5181,24 +5475,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Alphabetical order for named pattern fields; unset leaves this rule inactive.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Alphabetical order for named pattern fields; unset leaves this rule inactive.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5221,16 +5522,23 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "ignore-global": {
-                  "description": "Do not require explanations for file-wide analyzer ignore directives.",
-                  "type": "boolean",
-                  "default": true
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-global": {
+                      "description": "Do not require explanations for file-wide analyzer ignore directives.",
+                      "type": "boolean",
+                      "default": true
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5253,18 +5561,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "min-sequence": {
-                  "description": "Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 3
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "min-sequence": {
+                      "description": "Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 3
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5287,19 +5602,26 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "name-pattern": {
-                  "description": "Regular expression matching callback field names; absent or empty patterns disable this rule.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "name-pattern": {
+                      "description": "Regular expression matching callback field names; absent or empty patterns disable this rule.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5322,27 +5644,34 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "allowed-names": {
-                  "description": "Accepted names for exception variables and error parameters; an empty list disables this rule.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "allowed-names": {
+                      "description": "Accepted names for exception variables and error parameters; an empty list disables this rule.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "ignored-names": {
+                      "description": "Names exempt from the accepted-name check.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
                 },
-                "ignored-names": {
-                  "description": "Names exempt from the accepted-name check.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5365,24 +5694,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "name-pattern": {
-                  "description": "Regular expression matching handler method names; absent or empty patterns disable this rule.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "name-pattern": {
+                      "description": "Regular expression matching handler method names; absent or empty patterns disable this rule.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    },
+                    "ignore-public": {
+                      "description": "Whether to skip public handler methods.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
                 },
-                "ignore-public": {
-                  "description": "Whether to skip public handler methods.",
-                  "type": "boolean",
-                  "default": false
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5405,33 +5741,40 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "min-length": {
-                  "description": "Shortest permitted identifier length, excluding one leading privacy underscore.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 3
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "min-length": {
+                      "description": "Shortest permitted identifier length, excluding one leading privacy underscore.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 3
+                    },
+                    "max-length": {
+                      "description": "Longest permitted identifier length, excluding one leading privacy underscore.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 300
+                    },
+                    "exceptions": {
+                      "description": "Identifier names exempt from length checks, compared after removing one leading privacy underscore.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
                 },
-                "max-length": {
-                  "description": "Longest permitted identifier length, excluding one leading privacy underscore.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 300
-                },
-                "exceptions": {
-                  "description": "Identifier names exempt from length checks, compared after removing one leading privacy underscore.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5454,29 +5797,36 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "allowed-line-count": {
-                  "description": "Callback body line threshold; unset disables the length filter.",
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "allowed-line-count": {
+                      "description": "Callback body line threshold; unset disables the length filter.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": null
+                    },
+                    "ignored-named-arguments": {
+                      "description": "Named widget-constructor arguments whose callbacks are ignored.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
                 },
-                "ignored-named-arguments": {
-                  "description": "Named widget-constructor arguments whose callbacks are ignored.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5499,18 +5849,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "allowed-duplicated-chains": {
-                  "description": "Minimum repeated expression-chain count for extraction (clamped to at least two).",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 2
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "allowed-duplicated-chains": {
+                      "description": "Minimum repeated expression-chain count for extraction (clamped to at least two).",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 2
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5533,18 +5890,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-number": {
-                  "description": "Maximum number of positional parameters allowed before named parameters are preferred.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 1
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-number": {
+                      "description": "Maximum number of positional parameters allowed before named parameters are preferred.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 1
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5567,19 +5931,26 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "include-methods": {
-                  "description": "Additional method names recognized as test registrations inside a group.",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "default": []
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "include-methods": {
+                      "description": "Additional method names recognized as test registrations inside a group.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5602,24 +5973,31 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "order": {
-                  "description": "Lexicographic direction in which named fields in each record type must be ordered.",
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "enum": [
-                    "ascending",
-                    "descending",
-                    null
-                  ],
-                  "default": null
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "description": "Lexicographic direction in which named fields in each record type must be ordered.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ascending",
+                        "descending",
+                        null
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5642,36 +6020,43 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "items": {
-                  "description": "Class names whose construction should be replaced with a design-system equivalent.",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "class-name": {
-                        "description": "Class name of the construction to flag.",
-                        "type": "string"
-                      },
-                      "use-instead": {
-                        "description": "Suggested design-system replacement name, shown in the diagnostic when provided.",
-                        "type": [
-                          "string",
-                          "null"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "description": "Class names whose construction should be replaced with a design-system equivalent.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "class-name": {
+                            "description": "Class name of the construction to flag.",
+                            "type": "string"
+                          },
+                          "use-instead": {
+                            "description": "Suggested design-system replacement name, shown in the diagnostic when provided.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "class-name"
                         ]
-                      }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                      "class-name"
-                    ]
-                  },
-                  "default": []
+                      },
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }
@@ -5694,18 +6079,25 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
-              "additionalProperties": false,
-              "title": "Options",
-              "type": "object",
-              "properties": {
-                "max-nesting": {
-                  "description": "Maximum depth of nested widget construction allowed in a widget tree.",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "default": 8
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "max-nesting": {
+                      "description": "Maximum depth of nested widget construction allowed in a widget tree.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0,
+                      "default": 8
+                    }
+                  }
+                },
+                {
+                  "type": "null"
                 }
-              }
+              ]
             }
           }
         }

@@ -22,11 +22,6 @@ pub fn rule_options_schemas() -> Vec<(&'static str, Value)> {
     crate::lint::options::schemas()
 }
 
-/// Options schema for a canonical rule, or no schema when the rule has no options.
-pub fn rule_options_schema(name: &str) -> Option<Value> {
-    crate::lint::options::schema_for(name).cloned()
-}
-
 fn rule_config(options: Value) -> Value {
     json!({
         "description": "A severity level, or an object with a severity level and rule-specific options.",
@@ -38,7 +33,7 @@ fn rule_config(options: Value) -> Value {
                 "required": ["level"],
                 "properties": {
                     "level": {"$ref": "#/definitions/ruleLevel"},
-                    "options": options
+                    "options": {"anyOf": [options, {"type": "null"}]}
                 }
             }
         ]

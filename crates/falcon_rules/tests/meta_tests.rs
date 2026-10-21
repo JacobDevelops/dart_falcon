@@ -335,7 +335,7 @@ fn cross_file_lazy_option_errors_report_base_and_override_origins() {
 fn rule_sections_reference_shared_options_definitions() {
     let schema = falcon_rules::schema::config_schema();
     let exceptions = &schema["definitions"]["prefer-correct-identifier-length"]["oneOf"][1]["properties"]
-        ["options"]["properties"]["exceptions"];
+        ["options"]["anyOf"][0]["properties"]["exceptions"];
     assert_eq!(exceptions["type"], "array");
     assert!(exceptions.get("uniqueItems").is_none());
     let names: HashSet<_> = falcon_rules::schema::rule_options_schemas()
@@ -370,6 +370,8 @@ fn rule_sections_reference_shared_options_definitions() {
             expected
         );
         assert!(schema["definitions"].get(definition).is_some());
+        let options = &schema["definitions"][definition]["oneOf"][1]["properties"]["options"];
+        assert_eq!(options["anyOf"][1], serde_json::json!({"type": "null"}));
     }
 }
 

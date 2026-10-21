@@ -338,6 +338,7 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
         }
     }
 
+    relocate_rules(&mut root, "", &mut report);
     for section in ["linter", "cross-file"] {
         if let Some(s) = root.get_mut(section) {
             canonicalize_section_rules(s, section, &mut report);
@@ -345,6 +346,7 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
         for (index, ov) in overrides.iter_mut().enumerate() {
+            relocate_rules(ov, &format!("overrides[{index}]"), &mut report);
             for section in ["linter", "cross-file"] {
                 if let Some(s) = ov.get_mut(section) {
                     canonicalize_section_rules(
@@ -369,6 +371,7 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
 
 /// Repair invalid entries using the canonical loader before serializing.
 fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<String, String> {
+    repair_includes(&mut value, warnings)?;
     let mut removals = Vec::new();
     loop {
         let loaded = deserialize_config_value(&value, Path::new("falcon.json"))
@@ -424,6 +427,147 @@ fn serialize_config(mut value: Value, warnings: &mut Vec<String>) -> Result<Stri
         .map_err(|e| format!("failed to serialize falcon.json: {e}"))?;
     json.push('\n');
     Ok(json)
+}
+
+fn repair_includes(value: &mut Value, warnings: &mut Vec<String>) -> Result<(), String> {
+    fn repair(includes: &mut Value, path: &str, warnings: &mut Vec<String>) -> bool {
+        if includes.is_string() {
+            *includes = Value::Array(vec![std::mem::take(includes)]);
+            warnings.push(format!("converted `{path}` string to a one-element array"));
+        }
+        let Some(patterns) = includes.as_array_mut() else {
+            return false;
+        };
+        let was_empty = patterns.is_empty();
+        let mut index = 0;
+        patterns.retain(|pattern| {
+            let valid = pattern.as_str().is_some_and(|pattern| {
+                falcon_config::PathFilter::from(vec![pattern.to_owned()])
+                    .warnings()
+                    .is_empty()
+            });
+            if !valid {
+                warnings.push(format!(
+                    "invalid include at `{path}[{index}]`; discarded value {pattern}"
+                ));
+            }
+            index += 1;
+            valid
+        });
+        was_empty || !patterns.is_empty()
+    }
+
+    if let Some(includes) = value
+        .get_mut("files")
+        .and_then(|files| files.get_mut("includes"))
+        && !repair(includes, "files.includes", warnings)
+    {
+        return Err("cannot repair `files.includes`: no valid include remains; refusing to widen the analyzed file set".into());
+    }
+    if let Some(overrides) = value.get_mut("overrides").and_then(Value::as_array_mut) {
+        let mut index = 0;
+        overrides.retain_mut(|entry| {
+            let path = format!("overrides[{index}]");
+            index += 1;
+            let Some(includes) = entry.get_mut("includes") else {
+                return true;
+            };
+            if repair(includes, &format!("{path}.includes"), warnings) {
+                return true;
+            }
+            warnings.push(format!(
+                "discarded override `{path}`: includes has no usable patterns; refusing to widen its scope"
+            ));
+            false
+        });
+    }
+    Ok(())
+}
+
+fn relocate_rules(value: &mut Value, prefix: &str, report: &mut Migration) {
+    let mut moves = BTreeMap::<_, Vec<_>>::new();
+    for section in ["linter", "cross-file"] {
+        let Some(groups) = value
+            .get_mut(section)
+            .and_then(|value| value.get_mut("rules"))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        for (group, entries) in groups {
+            let Some(entries) = entries.as_object_mut() else {
+                continue;
+            };
+            entries.retain(|name, config| {
+                let Some(meta) = meta_for(name) else {
+                    return true;
+                };
+                if canonical_rule_name(name) != name {
+                    report.migrated_count += 1;
+                }
+                let target = if meta.is_cross_file() {
+                    "cross-file"
+                } else {
+                    "linter"
+                };
+                if section == target && group == meta.group.as_str() {
+                    return true;
+                }
+                let old = format!("{section}.rules.{group}.{name}");
+                let new = format!("{target}.rules.{}.{}", meta.group.as_str(), meta.name);
+                let prefix = if prefix.is_empty() {
+                    String::new()
+                } else {
+                    format!("{prefix}.")
+                };
+                report
+                    .warnings
+                    .push(format!("moved rule `{prefix}{old}` to `{prefix}{new}`"));
+                moves
+                    .entry((target, meta.group.as_str()))
+                    .or_default()
+                    .push((name.clone(), std::mem::take(config)));
+                false
+            });
+        }
+    }
+    for ((section, group), moved) in moves {
+        let path = if prefix.is_empty() {
+            format!("{section}.rules.{group}")
+        } else {
+            format!("{prefix}.{section}.rules.{group}")
+        };
+        let mut target = &mut *value;
+        let mut target_path = prefix.to_owned();
+        for key in [section, "rules", group] {
+            if !target.is_object() {
+                report.warnings.push(format!(
+                    "invalid configuration at `{target_path}`; discarded value {target}"
+                ));
+                *target = json!({});
+            }
+            target = target
+                .as_object_mut()
+                .expect("object target")
+                .entry(key)
+                .or_insert_with(|| json!({}));
+            if !target_path.is_empty() {
+                target_path.push('.');
+            }
+            target_path.push_str(key);
+        }
+        if !target.is_object() {
+            report.warnings.push(format!(
+                "invalid configuration at `{path}`; discarded value {target}"
+            ));
+            *target = json!({});
+        }
+        let entries = target.as_object_mut().expect("object rule group");
+        let (merged, warnings) =
+            canonicalize_rule_entries(std::mem::take(entries).into_iter().chain(moved), &path);
+        *entries = merged;
+        report.warnings.extend(warnings);
+    }
 }
 
 fn rename_cross_file_section(value: &mut Value, path: &str, warnings: &mut Vec<String>) {
@@ -488,12 +632,9 @@ fn canonicalize_section_rules(section: &mut Value, path: &str, report: &mut Migr
 fn canonicalize_group(group: &mut Map<String, Value>, path: &str, report: &mut Migration) {
     let mut unknown = Vec::with_capacity(group.len());
     for key in group.keys() {
-        let canonical = canonical_rule_name(key);
         if meta_for(key).is_none() {
             report.unrecognized.push(key.clone());
             unknown.push(key.clone());
-        } else if canonical != key {
-            report.migrated_count += 1;
         }
     }
     for key in unknown {
