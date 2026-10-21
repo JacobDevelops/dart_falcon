@@ -82,7 +82,8 @@ A single mixed list of globs:
 
 - Plain entries are **positive includes**: only files matching at least one are
   linted. A list containing a bare catch-all (`**` or `**/*`), or an empty list,
-  means "no positive filtering": every file is a candidate.
+  means "no positive filtering": every file is a candidate, even outside the
+  configuration directory. Exclusions still resolve relative to that directory.
 - Entries prefixed with `!` are **exclusions**, applied on top of the includes.
 
 Exclusions and any CLI `--exclude` patterns are unioned.

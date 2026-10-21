@@ -181,11 +181,10 @@ impl PathFilter {
                     .push(format!("invalid path pattern `{raw}`: {error}")),
             }
         }
-        if self.base_dir.is_none()
-            && self
-                .patterns
-                .iter()
-                .any(|pattern| pattern == "**" || pattern == "**/*")
+        if self
+            .patterns
+            .iter()
+            .any(|pattern| pattern == "**" || pattern == "**/*")
         {
             self.include.clear();
         }

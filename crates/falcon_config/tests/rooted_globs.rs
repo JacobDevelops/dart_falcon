@@ -112,11 +112,29 @@ fn relative_candidates_use_cwd_not_the_configuration_directory() {
 }
 
 #[test]
-fn rooted_catchall_stays_under_configuration_directory() {
-    let mut filter = PathFilter::from_includes(&["**".into()]);
-    filter.set_base_dir(Path::new("/project/app"));
-    assert!(filter.admits("/project/app/lib/main.dart"));
-    assert!(!filter.admits("/project/other/lib/main.dart"));
+fn rooted_bare_catchalls_match_omitted_includes_and_keep_exclusions_rooted() {
+    let base = Path::new("/project/elsewhere");
+    let mut omitted: FalconConfig =
+        serde_json::from_str(r#"{"files":{"includes":["!build/**"]}}"#).unwrap();
+    omitted.resolve_paths(base);
+    for catchall in ["**", "**/*"] {
+        let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
+            "files": { "includes": [catchall, "!build/**"] }
+        }))
+        .unwrap();
+        config.resolve_paths(base);
+        for path in [
+            "/project/a.dart",
+            "/project/build/generated.dart",
+            "/project/elsewhere/lib/main.dart",
+        ] {
+            assert!(omitted.files.includes.admits(path));
+            assert!(config.files.includes.admits(path), "{catchall}: {path}");
+        }
+        let excluded = "/project/elsewhere/build/generated.dart";
+        assert!(!omitted.files.includes.admits(excluded));
+        assert!(!config.files.includes.admits(excluded));
+    }
 }
 
 #[test]
