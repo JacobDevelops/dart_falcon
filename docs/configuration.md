@@ -100,7 +100,9 @@ when the home directory is reached through a symlink or another directory alias;
 a config symlink in another directory still uses that directory as its root.
 With no config, the current directory is the base. CLI relative paths, absolute paths, and LSP
 document paths therefore select the same files, including symlinked configuration
-or document roots and not-yet-created document paths beneath those roots.
+or document roots and not-yet-created document paths beneath those roots. A link
+to a subdirectory also preserves its root-relative path: a document reached
+through `lib-link -> <root>/lib` matches `lib/**` in file filters and overrides.
 `*` never crosses `/`; `**` crosses directories.
 For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also
 matches nested files. An exclusion matching a directory excludes its whole
@@ -676,4 +678,5 @@ ignoring it. Migrate as follows:
 | `"max_errors": 100`                                | `"max-errors": 100`                                            |
 
 The group for a rule is its category (`a11y`, `complexity`, `correctness`,
-`performance`, `security`, `style`, `suspicious`); see `crates/falcon_rules/src/meta.rs`.
+`performance`, `security`, `style`, `suspicious`); see the declarations in
+`crates/falcon_rules/src/lint/<group>.rs` and `crates/falcon_rules/src/cross_file.rs`.

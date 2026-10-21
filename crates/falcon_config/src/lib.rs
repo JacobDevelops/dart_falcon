@@ -11,10 +11,10 @@ use glob::Pattern;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::any::Any;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Top-level falcon.json configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,10 +100,86 @@ pub struct PathFilter {
     patterns: Vec<String>,
     include: Vec<Pattern>,
     exclude: Vec<Pattern>,
-    base_dir: Option<PathBuf>,
-    lexical_base: Option<PathBuf>,
-    working_dir: Option<PathBuf>,
+    root: Option<Arc<PathRoot>>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug)]
+struct PathRoot {
+    canonical: PathBuf,
+    lexical: PathBuf,
+    working_dir: PathBuf,
+    // Shared by files.includes and every override, including cloned configs.
+    parents: Mutex<HashMap<PathBuf, Option<PathBuf>>>,
+    #[cfg(test)]
+    canonicalizations: std::sync::atomic::AtomicUsize,
+}
+
+impl PathRoot {
+    fn relative_parent(&self, parent: &Path) -> Option<PathBuf> {
+        let mut resolved = None;
+        let mut existing = parent;
+        for ancestor in parent.ancestors() {
+            existing = ancestor;
+            if let Some(cached) = self.parents.lock().unwrap().get(ancestor) {
+                if ancestor == parent {
+                    return strip_root(cached.as_ref()?, &self.canonical).map(Path::to_path_buf);
+                }
+                resolved = cached.clone();
+                break;
+            }
+            #[cfg(test)]
+            self.canonicalizations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(canonical) = std::fs::canonicalize(ancestor) {
+                resolved = Some(canonical);
+                break;
+            }
+        }
+        // Preserve missing descendants without probing them again for another
+        // document, override, option lookup, or diagnostic in this directory.
+        let mut parents = self.parents.lock().unwrap();
+        for ancestor in parent.ancestors() {
+            let canonical = resolved
+                .as_ref()
+                .map(|base| base.join(ancestor.strip_prefix(existing).unwrap()));
+            parents.insert(ancestor.to_path_buf(), canonical);
+            if ancestor == existing {
+                break;
+            }
+        }
+        strip_root(parents.get(parent)?.as_ref()?, &self.canonical).map(Path::to_path_buf)
+    }
+}
+
+fn strip_root<'a>(path: &'a Path, base: &Path) -> Option<&'a Path> {
+    if let Ok(suffix) = path.strip_prefix(base) {
+        return Some(suffix);
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut path_components = path.components();
+        let mut base_components = base.components();
+        if let (Some(Component::Prefix(path_prefix)), Some(Component::Prefix(base_prefix))) =
+            (path_components.next(), base_components.next())
+        {
+            let equivalent = match (path_prefix.kind(), base_prefix.kind()) {
+                (Prefix::Disk(a), Prefix::VerbatimDisk(b))
+                | (Prefix::VerbatimDisk(a), Prefix::Disk(b)) => a.eq_ignore_ascii_case(&b),
+                (Prefix::UNC(a, b), Prefix::VerbatimUNC(c, d))
+                | (Prefix::VerbatimUNC(a, b), Prefix::UNC(c, d)) => a == c && b == d,
+                _ => false,
+            };
+            if equivalent {
+                return path_components
+                    .as_path()
+                    .strip_prefix(base_components.as_path())
+                    .ok();
+            }
+        }
+    }
+    None
 }
 
 impl From<Vec<String>> for PathFilter {
@@ -137,9 +213,18 @@ impl PathFilter {
     pub fn set_base_dir(&mut self, base: &Path) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let lexical = normalize_path(&cwd.join(base));
-        self.base_dir = Some(std::fs::canonicalize(&lexical).unwrap_or_else(|_| lexical.clone()));
-        self.lexical_base = Some(lexical);
-        self.working_dir = Some(cwd);
+        self.set_root(Arc::new(PathRoot {
+            canonical: std::fs::canonicalize(&lexical).unwrap_or_else(|_| lexical.clone()),
+            lexical,
+            working_dir: cwd,
+            parents: Mutex::default(),
+            #[cfg(test)]
+            canonicalizations: std::sync::atomic::AtomicUsize::new(0),
+        }));
+    }
+
+    fn set_root(&mut self, root: Arc<PathRoot>) {
+        self.root = Some(root);
         self.compile();
     }
 
@@ -158,16 +243,17 @@ impl PathFilter {
             };
             let resolved = if Path::new(raw).is_absolute() {
                 let path = normalize_path(Path::new(raw));
-                let path = if let Some(lexical) = &self.lexical_base
+                let path = if let Some(root) = &self.root
                     && let Some(suffix) = self.relative_to_base(&path)
                 {
-                    Path::new(&Pattern::escape(&lexical.to_string_lossy())).join(suffix)
+                    Path::new(&Pattern::escape(&root.lexical.to_string_lossy())).join(suffix)
                 } else {
                     path
                 };
                 Some(path.to_string_lossy().into_owned())
             } else {
-                self.lexical_base.as_ref().map(|base| {
+                self.root.as_ref().map(|root| {
+                    let base = &root.lexical;
                     let escaped = Pattern::escape(&base.to_string_lossy());
                     let path = normalize_path(&Path::new(&escaped).join(raw));
                     path.to_string_lossy().into_owned()
@@ -195,39 +281,28 @@ impl PathFilter {
         }
     }
 
-    fn relative_to_base<'a>(&self, path: &'a Path) -> Option<&'a Path> {
-        let lexical = self.lexical_base.as_ref()?;
-        let canonical = self.base_dir.as_ref()?;
-        if let Ok(suffix) = path
-            .strip_prefix(lexical)
-            .or_else(|_| path.strip_prefix(canonical))
+    fn relative_to_base(&self, path: &Path) -> Option<PathBuf> {
+        let root = self.root.as_ref()?;
+        if let Some(suffix) =
+            strip_root(path, &root.lexical).or_else(|| strip_root(path, &root.canonical))
         {
-            return Some(suffix);
+            return Some(suffix.to_path_buf());
         }
-        // Resolve root aliases (including macOS /var) without requiring the
-        // document or the literal prefix of an absolute glob to exist.
-        for ancestor in path.ancestors() {
-            if let Ok(resolved) = std::fs::canonicalize(ancestor) {
-                if resolved == *canonical {
-                    return path.strip_prefix(ancestor).ok();
-                }
-                // With no aliases left in this prefix, none of its parents
-                // can resolve back to the configuration root.
-                if resolved == ancestor {
-                    return None;
-                }
-            }
-        }
-        None
+        // Canonicalize only up to the nearest existing parent. Both sides of
+        // strip_prefix then have the same canonical Windows verbatim prefix.
+        let parent = path.parent()?;
+        let mut suffix = root.relative_parent(parent)?;
+        suffix.push(path.file_name()?);
+        Some(suffix)
     }
 
     fn matching_path<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
-        let Some(cwd) = &self.working_dir else {
+        let Some(root) = &self.root else {
             return path.into();
         };
         let input = Path::new(path);
         let normalized = if !input.is_absolute() {
-            std::borrow::Cow::Owned(normalize_path(&cwd.join(input)))
+            std::borrow::Cow::Owned(normalize_path(&root.working_dir.join(input)))
         } else if path.contains("//")
             || path.contains("/./")
             || path.contains("/../")
@@ -239,11 +314,15 @@ impl PathFilter {
         } else {
             std::borrow::Cow::Borrowed(input)
         };
-        if let Some(lexical) = &self.lexical_base
-            && !normalized.starts_with(lexical)
+        if !normalized.starts_with(&root.lexical)
             && let Some(suffix) = self.relative_to_base(&normalized)
         {
-            return lexical.join(suffix).to_string_lossy().into_owned().into();
+            return root
+                .lexical
+                .join(suffix)
+                .to_string_lossy()
+                .into_owned()
+                .into();
         }
         match normalized {
             std::borrow::Cow::Borrowed(_) => path.into(),
@@ -266,8 +345,33 @@ impl PathFilter {
     }
 
     pub fn excludes_directory(&self, path: &Path) -> bool {
-        let raw = path.to_string_lossy();
-        let mut path = self.matching_path(&raw).into_owned();
+        let mut path = if let Some(root) = &self.root {
+            let normalized = normalize_path(&root.working_dir.join(path));
+            let resolved = if normalized.starts_with(&root.lexical) {
+                normalized
+            } else if let Some(suffix) = strip_root(&normalized, &root.lexical)
+                .or_else(|| strip_root(&normalized, &root.canonical))
+            {
+                if suffix.as_os_str().is_empty() {
+                    root.lexical.clone()
+                } else {
+                    root.lexical.join(suffix)
+                }
+            } else if let Some(suffix) = root.relative_parent(&normalized) {
+                // A directory can itself be a root alias. Resolve it rather
+                // than treating its final component as a document filename.
+                if suffix.as_os_str().is_empty() {
+                    root.lexical.clone()
+                } else {
+                    root.lexical.join(suffix)
+                }
+            } else {
+                normalized
+            };
+            resolved.to_string_lossy().into_owned()
+        } else {
+            path.to_string_lossy().into_owned()
+        };
         if self.excludes_resolved(&path) {
             return true;
         }
@@ -320,7 +424,11 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 impl FalconConfig {
     pub fn root_dir(&self) -> Option<&Path> {
-        self.files.includes.base_dir.as_deref()
+        self.files
+            .includes
+            .root
+            .as_ref()
+            .map(|root| root.canonical.as_path())
     }
 
     pub fn path_warnings(&self) -> Vec<String> {
@@ -333,8 +441,9 @@ impl FalconConfig {
 
     pub fn resolve_paths(&mut self, base: &Path) {
         self.files.includes.set_base_dir(base);
+        let root = self.files.includes.root.as_ref().unwrap();
         for entry in &mut self.overrides {
-            entry.includes.set_base_dir(base);
+            entry.includes.set_root(Arc::clone(root));
         }
     }
 }
@@ -1208,6 +1317,106 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod path_resolution_tests {
+    use super::FalconConfig;
+    use std::sync::atomic::Ordering;
+
+    fn config() -> FalconConfig {
+        serde_json::from_value(serde_json::json!({
+            "files": { "includes": ["lib/**"] },
+            "overrides": [
+                { "includes": ["lib/**"] },
+                { "includes": ["lib/**/*.dart"] }
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn lexical_root_matching_does_not_touch_the_filesystem() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = config();
+        config.resolve_paths(directory.path());
+        let root = config.files.includes.root.as_ref().unwrap();
+        for name in ["lib/first.dart", "lib/missing/second.dart"] {
+            let path = root.lexical.join(name);
+            let path = path.to_string_lossy();
+            assert!(config.files.includes.admits(&path));
+            for entry in &config.overrides {
+                assert!(entry.matches(&path));
+            }
+        }
+        assert_eq!(root.canonicalizations.load(Ordering::Relaxed), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_prefix_spellings_preserve_internal_links_without_filesystem_probes() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("project");
+        let target = directory.path().join("outside");
+        std::fs::create_dir_all(project.join("lib")).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        // Directory junctions do not require symlink privileges or Developer Mode.
+        let junction = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(project.join("lib/plugin"))
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(junction.status.success(), "{junction:?}");
+        let canonical = std::fs::canonicalize(&project).unwrap();
+        let ordinary =
+            std::path::Path::new(canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+        let mut config = config();
+        config.resolve_paths(&canonical);
+        let root = config.files.includes.root.as_ref().unwrap();
+        for base in [ordinary, canonical.as_path()] {
+            let path = base.join("lib/plugin/unsaved.dart");
+            let path = path.to_string_lossy();
+            assert!(config.files.includes.admits(&path));
+            for entry in &config.overrides {
+                assert!(entry.matches(&path));
+            }
+        }
+        assert_eq!(root.canonicalizations.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn outside_parent_resolution_is_shared_and_stops_at_first_existing_parent() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("project");
+        let outside = directory.path().join("outside");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let mut config = config();
+        config.resolve_paths(&project);
+        let root = config.files.includes.root.as_ref().unwrap();
+        for name in ["first.dart", "second.dart"] {
+            let path = outside.join(name);
+            let path = path.to_string_lossy();
+            assert!(!config.files.includes.admits(&path));
+            for entry in &config.overrides {
+                assert!(!entry.matches(&path));
+            }
+        }
+        assert_eq!(root.canonicalizations.load(Ordering::Relaxed), 1);
+
+        // Missing parent components are cached too; each new component is
+        // probed once, not once per file or override.
+        for name in ["first.dart", "second.dart"] {
+            let path = outside.join("missing/deeper").join(name);
+            let path = path.to_string_lossy();
+            assert!(!config.files.includes.admits(&path));
+            for entry in &config.overrides {
+                assert!(!entry.matches(&path));
+            }
+        }
+        assert_eq!(root.canonicalizations.load(Ordering::Relaxed), 3);
+    }
 }
 
 #[cfg(test)]

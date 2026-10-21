@@ -71,7 +71,13 @@ pub fn walk_project(
                 output.filtered_paths.push(path.clone());
             }
         }
-        if collect_manifests && !filter.excludes_directory(path) {
+        if collect_manifests
+            && if metadata.is_file() {
+                !filter.excludes(&path.to_string_lossy())
+            } else {
+                !filter.excludes_directory(path)
+            }
+        {
             let start = if metadata.is_file() {
                 path.parent().unwrap_or(path)
             } else {

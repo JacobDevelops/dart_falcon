@@ -104,6 +104,72 @@ fn document_root_aliases_resolve_missing_descendants() {
     assert!(filter.admits(&alias.join("lib/unsaved.dart").to_string_lossy()));
     assert!(!filter.admits(&alias.join("lib/generated/unsaved.dart").to_string_lossy()));
     assert!(filter.excludes_directory(&alias.join("lib/generated")));
+    let mut excluded_root = PathFilter::from_includes(&["!.".into()]);
+    excluded_root.set_base_dir(&real);
+    assert!(excluded_root.excludes_directory(&real));
+    assert!(excluded_root.excludes_directory(&alias));
+    assert!(excluded_root.excludes_directory(&std::fs::canonicalize(&real).unwrap()));
+}
+
+#[cfg(unix)]
+#[test]
+fn document_alias_to_root_subdirectory_matches_includes_and_overrides() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("project");
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::write(root.join("lib/main.dart"), "void main() {}").unwrap();
+    let alias = directory.path().join("lib-link");
+    std::os::unix::fs::symlink(root.join("lib"), &alias).unwrap();
+    let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
+        "files": { "includes": ["lib/**", "!lib/generated/**"] },
+        "overrides": [{
+            "includes": ["lib/**"],
+            "linter": { "enabled": false }
+        }]
+    }))
+    .unwrap();
+    config.resolve_paths(&root);
+    for name in ["main.dart", "unsaved.dart", "missing/unsaved.dart"] {
+        let path = alias.join(name);
+        let path = path.to_string_lossy();
+        assert!(config.files.includes.admits(&path), "{path}");
+        assert!(config.overrides[0].matches(&path), "{path}");
+        assert_eq!(
+            config.resolve_rule_for(&path, "style", "test-rule", true, &[]),
+            None
+        );
+    }
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&alias.join("generated/unsaved.dart").to_string_lossy())
+    );
+    assert!(
+        config
+            .files
+            .includes
+            .excludes_directory(&alias.join("generated"))
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn canonical_windows_root_matches_non_verbatim_document_parents() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("lib")).unwrap();
+    let canonical = std::fs::canonicalize(directory.path()).unwrap();
+    let ordinary = canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap();
+    let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
+        "files": { "includes": ["lib/**"] },
+        "overrides": [{ "includes": ["lib/**"] }]
+    }))
+    .unwrap();
+    config.resolve_paths(&canonical);
+    let path = Path::new(ordinary).join("lib/missing/unsaved.dart");
+    let path = path.to_string_lossy();
+    assert!(config.files.includes.admits(&path));
+    assert!(config.overrides[0].matches(&path));
 }
 
 #[test]
