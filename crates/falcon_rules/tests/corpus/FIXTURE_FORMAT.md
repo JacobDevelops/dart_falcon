@@ -163,16 +163,17 @@ dynamic value = 42; /* expect: avoid-dynamic, msg: "Expected message here" */
 
 The `cargo xtask validate-rules` harness processes corpus fixtures to verify that rule implementations produce correct diagnostics.
 
-When no installed Dart SDK is discoverable, `validate-rules` for the bundled corpus
-and `docgen` pass the shared `tests/support/sdk` fixture SDK through subprocess
-`DART_SDK` only for sources listed in `tests/support/sdk/fixtures.txt`. The
+For the bundled corpus, `validate-rules` and `docgen` pass the shared
+`tests/support/sdk` fixture SDK through subprocess `DART_SDK` for sources listed
+in `tests/support/sdk/fixtures.txt`, and run unlisted sources with `DART_SDK`,
+`FLUTTER_ROOT` and `PATH` removed so no installed SDK is discovered. The
 in-process corpus tests consume that same fixture inventory and parse those same
-declaration-only Dart excerpts, not a separate semantic signature table. Unlisted
-fixtures and custom `--corpus` directories retain normal SDK discovery and builtin
-fallback behavior. An available real SDK (including a package's Flutter SDK)
-retains precedence. Keep SDK-dependent expressions and expectations intact, and
-extend the shared declarations and fixture inventory when testing additional SDK
-member signatures.
+declaration-only Dart excerpts, not a separate semantic signature table, and also
+analyze unlisted fixtures without an SDK, so generated docs do not depend on the
+developer machine. Custom `--corpus` directories retain normal SDK discovery and
+builtin fallback behavior. Keep SDK-dependent expressions and expectations intact,
+and extend the shared declarations and fixture inventory when testing additional
+SDK member signatures.
 
 ### How It Works
 

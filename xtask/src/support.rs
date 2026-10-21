@@ -2,6 +2,7 @@ use crate::workspace_root;
 use falcon_rules::meta::RuleMeta;
 use serde_json::{Map, Value, json};
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -32,8 +33,9 @@ impl DiagnosticJson {
 #[path = "../../crates/falcon_rules/tests/support/sdk_fixture.rs"]
 mod sdk_fixture;
 
-/// Bundled listed corpus fixtures always use parsed dependency sources,
-/// independently of the developer machine's installed SDK.
+/// Bundled listed corpus fixtures always use parsed dependency sources and
+/// unlisted ones run without an SDK, independently of the developer machine's
+/// installed SDK.
 pub(crate) struct FalconRunner {
     pub(crate) binary: String,
     pub(crate) fallback_sdk: Option<PathBuf>,
@@ -42,6 +44,16 @@ pub(crate) struct FalconRunner {
 impl FalconRunner {
     pub(crate) fn new(binary: PathBuf, workspace: &Path, corpus: &Path) -> Self {
         let fallback_sdk = corpus_fixture_sdk(workspace, corpus);
+        // Isolated bundled runs remove the child's PATH, so bare names resolve against ours.
+        let binary = if fallback_sdk.is_some() {
+            resolve_binary(
+                binary,
+                std::env::var_os("PATH"),
+                &std::env::current_dir().unwrap_or_default(),
+            )
+        } else {
+            binary
+        };
         Self {
             binary: binary.to_string_lossy().into_owned(),
             fallback_sdk,
@@ -102,6 +114,11 @@ impl FalconRunner {
                 "DART_SDK",
                 project.path().join("flutter/bin/cache/dart-sdk"),
             );
+        } else if self.fallback_sdk.is_some() {
+            // Match the SDK-free in-process harness so output is machine-independent.
+            for variable in ["DART_SDK", "FLUTTER_ROOT", "PATH"] {
+                cmd.env_remove(variable);
+            }
         }
         let output = cmd
             .env("RUST_LOG", "error")
@@ -205,6 +222,48 @@ fn corpus_fixture_sdk(workspace: &Path, corpus: &Path) -> Option<PathBuf> {
     let bundled = workspace.join("crates/falcon_rules/tests/corpus");
     (falcon_analyze::canonical_or_lexical(corpus) == falcon_analyze::canonical_or_lexical(&bundled))
         .then(|| workspace.join("crates/falcon_rules/tests/support/sdk"))
+}
+
+/// Resolve a bare executable name against `search_path` like process lookup,
+/// skipping non-executable matches; paths are kept as given.
+fn resolve_binary(
+    binary: PathBuf,
+    search_path: Option<OsString>,
+    current_directory: &Path,
+) -> PathBuf {
+    if binary.components().count() != 1 {
+        return binary;
+    }
+    search_path
+        .and_then(|search_path| {
+            std::env::split_paths(&search_path)
+                .map(|directory| {
+                    // Empty and relative entries mean our working directory; anchor them.
+                    let candidate = current_directory.join(directory).join(&binary);
+                    // Windows lookup appends `.exe` to extensionless names; Unix has no suffix.
+                    if binary.extension().is_none() {
+                        candidate.with_extension(std::env::consts::EXE_EXTENSION)
+                    } else {
+                        candidate
+                    }
+                })
+                .find(|candidate| is_executable(candidate))
+        })
+        .unwrap_or(binary)
+}
+
+fn is_executable(candidate: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        candidate
+            .metadata()
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        candidate.is_file()
+    }
 }
 
 pub(crate) fn recursive_files(root: &Path) -> Vec<PathBuf> {
@@ -537,6 +596,101 @@ mod tests {
                 assert!(result.unwrap().is_empty());
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unlisted_bundled_fixtures_run_without_ambient_sdk_discovery() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let environment = directory.path().join("environment");
+        let binary = directory.path().join("falcon");
+        fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\n/usr/bin/env > '{}'\nprintf '[]'\n",
+                environment.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        let child_environment = |fallback_sdk: Option<PathBuf>| {
+            let runner = super::FalconRunner {
+                binary: binary.to_string_lossy().into_owned(),
+                fallback_sdk,
+            };
+            assert!(
+                runner
+                    .run(&directory.path().join("clean.dart"), None)
+                    .unwrap()
+                    .is_empty()
+            );
+            fs::read_to_string(&environment).unwrap()
+        };
+        let sdk_variables = ["DART_SDK=", "FLUTTER_ROOT=", "PATH="];
+        // Custom corpora keep the caller's environment, so PATH proves inheritance works.
+        assert!(
+            child_environment(None)
+                .lines()
+                .any(|line| line.starts_with("PATH="))
+        );
+        let isolated = child_environment(Some(directory.path().join("sdk")));
+        assert!(
+            isolated.lines().all(|line| !sdk_variables
+                .iter()
+                .any(|variable| line.starts_with(variable))),
+            "{isolated}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bare_binary_names_resolve_to_the_first_executable_match() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let [blocked, executable] = [("blocked", 0o600), ("bin", 0o700)].map(|(name, mode)| {
+            let binary = directory.path().join(name).join("falcon");
+            fs::create_dir(binary.parent().unwrap()).unwrap();
+            fs::write(&binary, "").unwrap();
+            fs::set_permissions(&binary, fs::Permissions::from_mode(mode)).unwrap();
+            binary
+        });
+        let search_path = std::env::join_paths([
+            directory.path().join("missing"),
+            blocked.parent().unwrap().to_path_buf(),
+            executable.parent().unwrap().to_path_buf(),
+        ])
+        .unwrap();
+        let resolve = |binary: &str, search_path: Option<OsString>, current_directory: &Path| {
+            super::resolve_binary(PathBuf::from(binary), search_path, current_directory)
+        };
+        let elsewhere = Path::new("/nonexistent-working-directory");
+        assert_eq!(
+            resolve("falcon", Some(search_path.clone()), elsewhere),
+            executable
+        );
+        for unresolved in ["./falcon", "absent"] {
+            assert_eq!(
+                resolve(unresolved, Some(search_path.clone()), elsewhere),
+                PathBuf::from(unresolved),
+            );
+        }
+        assert_eq!(resolve("falcon", None, elsewhere), PathBuf::from("falcon"));
+        // Empty and relative entries are anchored to the given directory, not left bare.
+        let relative = std::env::join_paths([PathBuf::new(), PathBuf::from("bin")]).unwrap();
+        assert_eq!(
+            resolve("falcon", Some(relative.clone()), directory.path()),
+            executable,
+        );
+        let empty = std::env::join_paths([PathBuf::new()]).unwrap();
+        assert_eq!(
+            resolve("falcon", Some(empty), executable.parent().unwrap()),
+            executable,
+        );
+        assert_eq!(
+            resolve("falcon", Some(relative), elsewhere),
+            PathBuf::from("falcon"),
+        );
     }
 
     #[test]
