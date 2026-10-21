@@ -1,1 +1,1 @@
-{"linter":{"rules":{"style":{"prefer-correct-handler-name":{"level":"warn","options":{"name_pattern":"^handle[A-Z]","ignore_public":false}}}}}}
+{"linter":{"rules":{"style":{"prefer-correct-handler-name":{"level":"warn","options":{"name-pattern":"^handle[A-Z]","ignore-public":false}}}}}}

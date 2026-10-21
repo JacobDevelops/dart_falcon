@@ -17,6 +17,33 @@ pub const SCHEMA_URL: &str = concat!(
     "/schema/falcon.schema.json"
 );
 
+/// Rule option schemas generated from the same types used during config loading.
+pub fn rule_options_schemas() -> Vec<(&'static str, Value)> {
+    crate::lint::options::schemas()
+}
+
+fn rule_config(name: &str) -> Value {
+    let options = crate::lint::options::schema_for(name).unwrap_or_else(|| {
+        json!({
+            "type": "object", "additionalProperties": false, "properties": {}
+        })
+    });
+    json!({
+        "description": "A severity level, or an object with a severity level and rule-specific options.",
+        "oneOf": [
+            {"$ref": "#/definitions/ruleLevel"},
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["level"],
+                "properties": {
+                    "level": {"$ref": "#/definitions/ruleLevel"},
+                    "options": options
+                }
+            }
+        ]
+    })
+}
 /// The `rules` sub-schema for one section, with optional preset configuration.
 /// Groups list exactly that section's rules (file rules unless `cross_file`).
 fn section_rules(cross_file: bool, preset_allowed: bool) -> Value {
@@ -47,10 +74,7 @@ fn section_rules(cross_file: bool, preset_allowed: bool) -> Value {
         entry["properties"]
             .as_object_mut()
             .expect("properties object")
-            .insert(
-                meta.name.to_string(),
-                json!({ "$ref": "#/definitions/ruleConfig" }),
-            );
+            .insert(meta.name.to_string(), rule_config(meta.name));
     }
     let mut props = Map::new();
     if preset_allowed {
@@ -201,26 +225,6 @@ pub fn config_schema() -> Value {
                 "description": "Severity level for a rule: `off` disables it; `on` \
                     reports at its default severity; `info`, `warn`, and `error` set an \
                     explicit severity."
-            },
-            "ruleConfig": {
-                "description": "A rule's configuration: either a bare severity level, or \
-                    an object with a `level` and rule-specific `options`.",
-                "oneOf": [
-                    { "$ref": "#/definitions/ruleLevel" },
-                    {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["level"],
-                        "properties": {
-                            "level": { "$ref": "#/definitions/ruleLevel" },
-                            "options": {
-                                "type": "object",
-                                "description": "Rule-specific options (see the rule's \
-                                    documentation for supported keys)."
-                            }
-                        }
-                    }
-                ]
             },
             "overrideLinter": {
                 "type": "object",

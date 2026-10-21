@@ -8,7 +8,7 @@
 //!
 //! ## Options
 //!
-//! `max_parameters` (integer, default: 5) — flag when the parameter count
+//! `max-parameters` (integer, default: 5) — flag when the parameter count
 //! exceeds this.
 
 use falcon_analyze::{
@@ -16,6 +16,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of parameters allowed in a function.
+    max_parameters: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_parameters: 5 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MaxParametersForFunction;
@@ -35,11 +50,7 @@ impl Rule for MaxParametersForFunction {
 }
 
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, MaxParametersForFunction::NAME),
-        "max_parameters",
-    )
-    .unwrap_or(5)
+    crate::lint::options::get::<Options>(ctx, MaxParametersForFunction::NAME).max_parameters
 }
 
 struct Collector<'a> {

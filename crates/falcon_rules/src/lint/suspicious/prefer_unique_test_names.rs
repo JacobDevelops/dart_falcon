@@ -1,12 +1,21 @@
 //! Reports duplicate test descriptions within a group and constant names in loops.
 //!
-//! `include_methods` (array of strings, default: []) adds custom test registration helpers.
+//! `include-methods` (array of strings, default: []) adds custom test registration helpers.
 
 use crate::lint::correctness::test_assertions;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Additional method names recognized as test registrations inside a group.
+    include_methods: Vec<String>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct PreferUniqueTestNames;
@@ -25,13 +34,7 @@ impl Rule for PreferUniqueTestNames {
             groups: Vec::new(),
             tests: Vec::new(),
             loops: Vec::new(),
-            include_methods: crate::lint::options::strings(
-                crate::lint::options::for_rule(ctx, PreferUniqueTestNames::NAME),
-                "include_methods",
-            )
-            .into_iter()
-            .flatten()
-            .collect(),
+            include_methods: &crate::lint::options::get::<Options>(ctx, Self::NAME).include_methods,
         }))
     }
 }
@@ -41,7 +44,7 @@ struct Collector<'a> {
     groups: Vec<Span>,
     tests: Vec<(String, Span, Option<Span>)>,
     loops: Vec<Span>,
-    include_methods: Vec<&'a str>,
+    include_methods: &'a [String],
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -62,7 +65,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             self.groups.push(callback.span());
         }
-        let configured = matches!(call.callee().unparenthesized(), Expr::Ident(name) if self.include_methods.contains(&name.name()));
+        let configured = matches!(call.callee().unparenthesized(), Expr::Ident(name) if self.include_methods.iter().any(|method| method == name.name()));
         if (configured || canonical.is_some_and(|(name, _)| matches!(name, "test" | "testWidgets")))
             && let Some(description) = call.args().positional().next()
             && let Some(falcon_analyze::ConstantValue::String(value)) =

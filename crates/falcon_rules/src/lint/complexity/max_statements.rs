@@ -1,6 +1,6 @@
 //! Reports function bodies with too many statements.
 //!
-//! `max_statements` (integer, default: 20) limits executable and declaration
+//! `max-statements` (integer, default: 20) limits executable and declaration
 //! statements, excluding blocks, labels, empty statements, and local function
 //! declarations. Nested callable bodies are measured independently.
 
@@ -9,6 +9,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of statements allowed in a function.
+    max_statements: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_statements: 20 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MaxStatements;
@@ -21,11 +36,7 @@ impl Rule for MaxStatements {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-            threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, MaxStatements::NAME),
-                "max_statements",
-            )
-            .unwrap_or(20),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_statements,
             counts: Vec::new(),
         }))
     }

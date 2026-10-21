@@ -594,7 +594,7 @@ Widget build(BuildContext context) {
                         "level": "warn",
                         "options": {
                             "items": [
-                                { "class_name": "Container", "use_instead": "AppContainer" }
+                                { "class-name": "Container", "use-instead": "AppContainer" }
                             ]
                         }
                     }

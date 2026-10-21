@@ -1,6 +1,6 @@
 //! Reports function bodies with excessive nesting-weighted control flow.
 //!
-//! `max_complexity` (integer, default: 15) limits the score. Ifs, loops,
+//! `max-complexity` (integer, default: 15) limits the score. Ifs, loops,
 //! switches, ternaries, and catches cost one plus their nesting depth. Else-if
 //! and else cost one without extra nesting. Each connected logical operator
 //! sequence costs one, with another point when && changes to || or vice versa.
@@ -13,6 +13,21 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum cognitive complexity allowed for a function.
+    max_complexity: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_complexity: 15 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 #[derive(Default)]
 pub struct CognitiveComplexity;
 impl Rule for CognitiveComplexity {
@@ -24,11 +39,7 @@ impl Rule for CognitiveComplexity {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-            threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, CognitiveComplexity::NAME),
-                "max_complexity",
-            )
-            .unwrap_or(15),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_complexity,
             count: 0,
             depth: 0,
             else_if: None,

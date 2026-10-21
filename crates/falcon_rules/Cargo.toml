@@ -16,6 +16,8 @@ regress            = { workspace = true }
 serde_json         = { workspace = true }
 serde_yaml         = { workspace = true }
 marked-yaml        = { workspace = true }
+serde              = { workspace = true }
+schemars           = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

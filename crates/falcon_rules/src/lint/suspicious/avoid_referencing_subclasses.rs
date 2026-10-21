@@ -1,5 +1,5 @@
 //! Keeps base classes independent from their transitive subclasses.
-//! `ignored_annotations` replaces the default ["freezed", "Freezed", "unfreezed"].
+//! `ignored-annotations` replaces the default ["freezed", "Freezed", "unfreezed"].
 //! Annotation names match the final name segment exactly, including case.
 
 use falcon_analyze::resolve::lexical_usage::local_declarations;
@@ -11,6 +11,24 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 use std::collections::HashMap;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Annotation names that exempt a class from subclass-reference checks.
+    ignored_annotations: Vec<String>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            ignored_annotations: ["freezed", "Freezed", "unfreezed"]
+                .into_iter().map(str::to_owned).collect(),
+        }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidReferencingSubclasses;
@@ -24,17 +42,7 @@ impl Rule for AvoidReferencingSubclasses {
         let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let ignored = crate::lint::options::strings(
-            crate::lint::options::for_rule(ctx, AvoidReferencingSubclasses::NAME),
-            "ignored_annotations",
-        )
-        .map(|names| names.map(str::to_owned).collect())
-        .unwrap_or_else(|| {
-            ["freezed", "Freezed", "unfreezed"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect()
-        });
+        let ignored = &crate::lint::options::get::<Options>(ctx, Self::NAME).ignored_annotations;
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
@@ -52,7 +60,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    ignored: Vec<String>,
+    ignored: &'a [String],
     owner: Option<DeclarationIdentity>,
     references: HashMap<usize, NodeId>,
     parameters: TypeParameterScope,

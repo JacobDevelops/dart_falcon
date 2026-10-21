@@ -9,7 +9,7 @@
 //!
 //! ## Options
 //!
-//! `allowed_duplicated_chains` (integer, default: 2) — the occurrence index at
+//! `allowed-duplicated-chains` (integer, default: 2) — the occurrence index at
 //! which a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the
 //! 3rd and later. Values below `2` are clamped to `2`.
 
@@ -21,6 +21,23 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::Visitor;
 use falcon_syntax::cst::visit::{body_list, member_list, stmt_lists};
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Minimum repeated expression-chain count for extraction (clamped to at least two).
+    allowed_duplicated_chains: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            allowed_duplicated_chains: 2,
+        }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct PreferMovingToVariable;
@@ -56,12 +73,9 @@ impl Rule for PreferMovingToVariable {
 }
 
 fn allowed_duplicated_chains(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, PreferMovingToVariable::NAME),
-        "allowed_duplicated_chains",
-    )
-    .unwrap_or(2)
-    .max(2)
+    crate::lint::options::get::<Options>(ctx, PreferMovingToVariable::NAME)
+        .allowed_duplicated_chains
+        .max(2)
 }
 
 enum Entry {

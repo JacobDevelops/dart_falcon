@@ -5,7 +5,7 @@
         "max-statements": {
           "level": "warn",
           "options": {
-            "max_statements": 2
+            "max-statements": 2
           }
         }
       }

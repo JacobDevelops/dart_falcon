@@ -15,7 +15,7 @@
             "avoid-referencing-subclasses": {
               "level": "warn",
               "options": {
-                "ignored_annotations": ["generated"]
+                "ignored-annotations": ["generated"]
               }
             }
           }

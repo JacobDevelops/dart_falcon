@@ -2,7 +2,7 @@
   "linter": {
     "rules": {
       "style": {
-        "avoid-unnecessary-getter": { "level": "warn", "options": { "ignore_upcast": true } }
+        "avoid-unnecessary-getter": { "level": "warn", "options": { "ignore-upcast": true } }
       }
     }
   },
@@ -12,7 +12,7 @@
       "linter": {
         "rules": {
           "style": {
-            "avoid-unnecessary-getter": { "level": "warn", "options": { "ignore_upcast": false } }
+            "avoid-unnecessary-getter": { "level": "warn", "options": { "ignore-upcast": false } }
           }
         }
       }

@@ -7,53 +7,83 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 use glob::{MatchOptions, Pattern};
-use serde_json::Value;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Default)]
 pub struct AvoidBannedNames;
 
-pub(super) struct Entry<'a> {
-    patterns: Vec<Pattern>,
-    message: &'a str,
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Banned declaration-name globs and the diagnostic message to report on a match.
+    rules: Vec<Entry>,
 }
 
-pub(super) fn entries<'a>(ctx: &'a AnalyzeContext<'a>, name: &str) -> Vec<Entry<'a>> {
-    let Some(values) = crate::lint::options::for_rule(ctx, name)
-        .and_then(|options| options.get("rules"))
-        .and_then(Value::as_array)
-    else {
-        return Vec::new();
-    };
-    values
-        .iter()
-        .filter_map(|entry| {
-            let message = entry.get("message")?.as_str()?;
-            if message.trim().is_empty() {
-                return None;
-            }
-            let values = entry.get("deny")?.as_array()?;
-            if values.is_empty() {
-                return None;
-            }
-            let patterns = values
-                .iter()
-                .map(|value| {
-                    let value = value.as_str()?;
-                    if value.is_empty() {
-                        None
-                    } else {
-                        Pattern::new(value).ok()
-                    }
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(Entry { patterns, message })
-        })
-        .collect()
+crate::lint::options::impl_options!(Options);
+
+#[derive(Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(try_from = "String", into = "String")]
+#[schemars(with = "String")]
+pub(crate) struct Glob(Pattern);
+
+/// A validated glob pattern used to match a banned name or API.
+impl TryFrom<String> for Glob {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            return Err("glob must not be empty".into());
+        }
+        Pattern::new(&value).map(Self).map_err(|error| error.to_string())
+    }
 }
 
+impl From<Glob> for String {
+    fn from(value: Glob) -> Self {
+        value.0.as_str().to_owned()
+    }
+}
+
+impl Glob {
+    pub(crate) fn matches_with(&self, value: &str, options: MatchOptions) -> bool {
+        self.0.matches_with(value, options)
+    }
+}
+
+pub(crate) fn nonempty_patterns<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Glob>, D::Error> {
+    let patterns = Vec::<Glob>::deserialize(deserializer)?;
+    if patterns.is_empty() {
+        return Err(serde::de::Error::custom("glob list must not be empty"));
+    }
+    Ok(patterns)
+}
+
+pub(crate) fn nonblank_message<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let message = String::deserialize(deserializer)?;
+    if message.trim().is_empty() {
+        return Err(serde::de::Error::custom("message must not be blank"));
+    }
+    Ok(message)
+}
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Entry {
+    /// Non-empty glob patterns (JSON key `deny`) that trigger this entry.
+    #[serde(rename = "deny", deserialize_with = "nonempty_patterns")]
+    #[schemars(length(min = 1))]
+    patterns: Vec<Glob>,
+    /// Diagnostic text emitted when any pattern in this entry matches.
+    #[serde(deserialize_with = "nonblank_message")]
+    message: String,
+}
 pub(super) fn report(
     ctx: &AnalyzeContext<'_>,
-    entries: &[Entry<'_>],
+    entries: &[Entry],
     value: &str,
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
@@ -69,7 +99,7 @@ pub(super) fn report(
             .iter()
             .any(|pattern| pattern.matches_with(value, MATCH))
         {
-            diagnostics.push(ctx.diagnostic(entry.message, span));
+            diagnostics.push(ctx.diagnostic(&entry.message, span));
         }
     }
 }
@@ -80,7 +110,7 @@ impl Rule for AvoidBannedNames {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let entries = entries(ctx, "avoid-banned-names");
+        let entries = &crate::lint::options::get::<Options>(ctx, Self::NAME).rules;
         if entries.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
@@ -94,7 +124,7 @@ impl Rule for AvoidBannedNames {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    entries: Vec<Entry<'a>>,
+    entries: &'a [Entry],
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -106,7 +136,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 annotation.name().any(|name| name.name() == "override")
             })
         {
-            report(self.ctx, &self.entries, name.name(), name.span(), &mut self.diagnostics);
+            report(self.ctx, self.entries, name.name(), name.span(), &mut self.diagnostics);
         }
         StructuralTraversal::Continue
     }
@@ -150,7 +180,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             return StructuralTraversal::Continue;
         }
-        report(self.ctx, &self.entries, node.name(), node.span(), &mut self.diagnostics);
+        report(self.ctx, self.entries, node.name(), node.span(), &mut self.diagnostics);
         StructuralTraversal::Continue
     }
 
@@ -158,4 +188,35 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.diagnostics
     }
 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Options;
+    use serde_json::json;
+
+    #[test]
+    fn invalid_entries_are_rejected() {
+        for entry in [
+            json!({"deny": ["*"]}),
+            json!({"deny": [], "message": "blocked"}),
+            json!({"deny": [""], "message": "blocked"}),
+            json!({"deny": ["["], "message": "blocked"}),
+            json!({"deny": ["*", false], "message": "blocked"}),
+            json!({"deny": ["*"], "message": " "}),
+            json!({"deny": ["*"], "message": "blocked", "unknown": true}),
+        ] {
+            assert!(serde_json::from_value::<Options>(json!({"rules": [entry]})).is_err());
+        }
+    }
+
+    #[test]
+    fn entries_preserve_patterns_and_messages() {
+        let options: Options = serde_json::from_value(json!({
+            "rules": [{"deny": ["Legacy*"], "message": "Use the supported API."}]
+        })).unwrap();
+        assert_eq!(options.rules[0].patterns[0].0.as_str(), "Legacy*");
+        assert_eq!(options.rules[0].message, "Use the supported API.");
+        assert!(Options::default().rules.is_empty());
+    }
 }

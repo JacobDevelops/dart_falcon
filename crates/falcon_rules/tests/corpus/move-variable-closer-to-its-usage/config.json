@@ -9,11 +9,11 @@
   "overrides": [
     {
       "includes": ["**/bad_after_if.dart", "**/good_after_if.dart"],
-      "linter": {"rules": {"performance": {"move-variable-closer-to-its-usage": {"level": "warn", "options": {"ignore_after_if": false}}}}}
+      "linter": {"rules": {"performance": {"move-variable-closer-to-its-usage": {"level": "warn", "options": {"ignore-after-if": false}}}}}
     },
     {
       "includes": ["**/good_ignore_const.dart"],
-      "linter": {"rules": {"performance": {"move-variable-closer-to-its-usage": {"level": "warn", "options": {"ignore_const": true}}}}}
+      "linter": {"rules": {"performance": {"move-variable-closer-to-its-usage": {"level": "warn", "options": {"ignore-const": true}}}}}
     }
   ]
 }

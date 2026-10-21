@@ -14,13 +14,22 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct ParametersOrdering;
 
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Alphabetical order for named parameters; unset leaves this rule inactive.
+    order: Option<Order>,
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for ParametersOrdering {
     fn prepare<'a>(
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, Self::NAME) else {
+        let Some(order) = crate::lint::options::get::<Options>(ctx, Self::NAME).order else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {

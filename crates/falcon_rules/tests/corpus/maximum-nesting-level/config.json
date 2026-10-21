@@ -5,7 +5,7 @@
         "maximum-nesting-level": {
           "level": "warn",
           "options": {
-            "max_nesting": 2
+            "max-nesting": 2
           }
         }
       }

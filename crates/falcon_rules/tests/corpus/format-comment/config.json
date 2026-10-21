@@ -4,7 +4,7 @@
       "style": {
         "format-comment": {
           "level": "warn",
-          "options": { "only_doc_comments": true }
+          "options": { "only-doc-comments": true }
         }
       }
     }

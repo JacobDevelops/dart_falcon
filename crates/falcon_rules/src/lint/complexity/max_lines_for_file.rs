@@ -8,23 +8,33 @@
 //!
 //! ## Options
 //!
-//! `max_lines` (integer, default: 200) — flag files with more than this many
+//! `max-lines` (integer, default: 200) — flag files with more than this many
 //! lines.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::cst::*;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of source lines allowed in a file.
+    max_lines: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_lines: 200 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 #[derive(Default)]
 pub struct MaxLinesForFile;
 
-/// Read the `max_lines` option (default 200). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, MaxLinesForFile::NAME),
-        "max_lines",
-    )
-    .unwrap_or(200)
+    crate::lint::options::get::<Options>(ctx, MaxLinesForFile::NAME).max_lines
 }
 
 impl Rule for MaxLinesForFile {

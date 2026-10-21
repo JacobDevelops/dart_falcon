@@ -5,7 +5,7 @@
         "avoid-long-records": {
           "level": "warn",
           "options": {
-            "max_fields": 2
+            "max-fields": 2
           }
         }
       }

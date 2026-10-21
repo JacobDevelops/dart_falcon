@@ -2,7 +2,7 @@
 //!
 //! Replace the backing field and getter with a public final field. Getter/setter
 //! pairs are covered separately by `unnecessary-getters-setters`. By default,
-//! getters that upcast the field are retained; set `ignore_upcast` to false to
+//! getters that upcast the field are retained; set `ignore-upcast` to false to
 //! diagnose those too.
 
 use falcon_analyze::{
@@ -15,6 +15,21 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct AvoidUnnecessaryGetter;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Ignore getters whose value is explicitly upcast to a broader type.
+    ignore_upcast: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { ignore_upcast: true }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for AvoidUnnecessaryGetter {
     fn prepare<'a>(
         &self,
@@ -24,10 +39,8 @@ impl Rule for AvoidUnnecessaryGetter {
         let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let ignore_upcast = crate::lint::options::for_rule(ctx, AvoidUnnecessaryGetter::NAME)
-            .and_then(|options| options.get("ignore_upcast"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(true);
+        let ignore_upcast =
+            crate::lint::options::get::<Options>(ctx, Self::NAME).ignore_upcast;
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),

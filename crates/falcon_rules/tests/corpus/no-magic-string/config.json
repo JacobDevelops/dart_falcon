@@ -18,8 +18,8 @@
             "no-magic-string": {
               "level": "warn",
               "options": {
-                "allow_only_once": true,
-                "ignored_invocations": [
+                "allow-only-once": true,
+                "ignored-invocations": [
                   "trace"
                 ]
               }

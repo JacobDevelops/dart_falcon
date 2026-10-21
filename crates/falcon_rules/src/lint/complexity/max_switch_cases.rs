@@ -8,7 +8,7 @@
 //!
 //! ## Options
 //!
-//! `max_cases` (integer, default: 10) — flag when the number of non-default
+//! `max-cases` (integer, default: 10) — flag when the number of non-default
 //! cases exceeds this.
 
 use falcon_analyze::{
@@ -16,6 +16,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of non-default cases in a switch.
+    max_cases: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_cases: 10 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MaxSwitchCases;
@@ -42,13 +57,8 @@ fn count_non_default_cases(switch_stmt: SwitchStmt<'_>) -> usize {
         .count()
 }
 
-/// Read the `max_cases` option (default 10). Malformed/missing → default.
 fn max_cases_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, MaxSwitchCases::NAME),
-        "max_cases",
-    )
-    .unwrap_or(10)
+    crate::lint::options::get::<Options>(ctx, MaxSwitchCases::NAME).max_cases
 }
 
 struct Collector<'a, 'ctx> {

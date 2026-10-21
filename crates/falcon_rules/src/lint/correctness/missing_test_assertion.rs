@@ -8,7 +8,7 @@
 //!
 //! ## Options
 //!
-//! `include_assertions` is a list of additional assertion function names. These
+//! `include-assertions` is a list of additional assertion function names. These
 //! names explicitly trust project helpers, including local functions; prefixed
 //! names can be supplied as written at their call sites.
 
@@ -19,6 +19,15 @@ use falcon_syntax::cst::*;
 
 use super::test_assertions;
 use crate::lint::options;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Additional assertion function names recognized within test callbacks.
+    include_assertions: Vec<String>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MissingTestAssertion;
@@ -32,13 +41,7 @@ impl Rule for MissingTestAssertion {
         if !test_assertions::enabled(program, ctx) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let additional = options::strings(
-            options::for_rule(ctx, MissingTestAssertion::NAME),
-            "include_assertions",
-        )
-        .into_iter()
-        .flatten()
-        .collect();
+        let additional = &options::get::<Options>(ctx, Self::NAME).include_assertions;
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             additional,
@@ -52,7 +55,7 @@ impl Rule for MissingTestAssertion {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    additional: Vec<&'a str>,
+    additional: &'a [String],
     tests: Vec<(Span, Span)>,
     closures: Vec<(Span, Span)>,
     references: Vec<(Span, Span)>,
@@ -118,7 +121,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let callee = call.callee().span();
         let spelling = &self.ctx.source()[callee.start..callee.end];
-        if self.additional.contains(&spelling) {
+        if self.additional.iter().any(|name| name == spelling) {
             self.assertions.push(call.span());
         }
         let Some((name, package)) = test_assertions::package_call(call, state) else {

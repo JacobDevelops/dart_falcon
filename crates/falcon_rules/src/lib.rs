@@ -64,7 +64,12 @@ pub fn load_or_default(start_dir: &Path) -> Result<LoadedConfig, ConfigError> {
     }
 }
 
-fn canonicalize_loaded_config(mut loaded: LoadedConfig) -> Result<LoadedConfig, ConfigError> {
+/// Canonicalize aliases and validate registered rule names and typed options.
+///
+/// # Errors
+///
+/// Returns an error for unknown rules, unsupported sections, or invalid options.
+pub fn canonicalize_loaded_config(mut loaded: LoadedConfig) -> Result<LoadedConfig, ConfigError> {
     validate_rule_names(&loaded.config.linter.rules, "linter.rules", Section::Linter)?;
     validate_rule_names(
         &loaded.config.cross_file.rules,
@@ -91,6 +96,7 @@ fn canonicalize_loaded_config(mut loaded: LoadedConfig) -> Result<LoadedConfig, 
         .warnings
         .extend(meta::canonicalize_config(&mut loaded.config));
     loaded.warnings.extend(config_warnings(&loaded.config));
+    validate_config_options(&loaded.config)?;
     Ok(loaded)
 }
 
@@ -117,6 +123,70 @@ fn validate_rule_names(rules: &Rules, path: &str, section: Section) -> Result<()
                     metadata.name
                 )));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Rewrite legacy snake_case option keys recursively, preserving canonical keys.
+pub fn canonicalize_option_keys(options: &mut serde_json::Value, path: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    match options {
+        serde_json::Value::Object(entries) => {
+            let aliases: Vec<_> = entries
+                .keys()
+                .filter(|key| key.contains('_'))
+                .cloned()
+                .collect();
+            for alias in aliases {
+                let canonical = alias.replace('_', "-");
+                let value = entries.shift_remove(&alias).expect("existing option key");
+                warnings.push(format!(
+                    "deprecated option key `{path}.{alias}`; use `{canonical}` — \
+                     run `falcon migrate` to update"
+                ));
+                entries.entry(canonical).or_insert(value);
+            }
+            for (key, value) in entries {
+                warnings.extend(canonicalize_option_keys(value, &format!("{path}.{key}")));
+            }
+        }
+        serde_json::Value::Array(entries) => {
+            for (index, value) in entries.iter_mut().enumerate() {
+                warnings.extend(canonicalize_option_keys(value, &format!("{path}[{index}]")));
+            }
+        }
+        _ => {}
+    }
+    warnings
+}
+
+fn validate_config_options(config: &FalconConfig) -> Result<(), ConfigError> {
+    let validate = |rules: &Rules, path: &str| {
+        for (group, entries) in &rules.groups {
+            for (name, configuration) in entries {
+                if let Some(options) = configuration.options_data() {
+                    lint::options::validate_rule(
+                        name,
+                        options,
+                        &format!("{path}.{group}.{name}.options"),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    };
+    validate(&config.linter.rules, "linter.rules")?;
+    validate(&config.cross_file.rules, "cross-file.rules")?;
+    for (index, entry) in config.overrides.iter().enumerate() {
+        if let Some(section) = &entry.linter {
+            validate(&section.rules, &format!("overrides[{index}].linter.rules"))?;
+        }
+        if let Some(section) = &entry.cross_file {
+            validate(
+                &section.rules,
+                &format!("overrides[{index}].cross-file.rules"),
+            )?;
         }
     }
     Ok(())

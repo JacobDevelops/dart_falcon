@@ -1,4 +1,4 @@
-//! Prefer named parameters when a declaration exceeds `max_number` (default 1).
+//! Prefer named parameters when a declaration exceeds `max-number` (default 1).
 //!
 //! Checks top-level functions, constructors, and methods on classes without
 //! inheritance. Overrides, operators, setters, closures, function types, `main`,
@@ -11,20 +11,29 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const RULE: &str = "prefer-named-parameters";
-
 #[derive(Default)]
 pub struct PreferNamedParameters;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of positional parameters allowed before named parameters are preferred.
+    max_number: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_number: 1 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 impl Rule for PreferNamedParameters {
     fn prepare<'a>(&self, _: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            maximum: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, RULE),
-                "max_number",
-            )
-            .unwrap_or(1),
+            maximum: crate::lint::options::get::<Options>(ctx, Self::NAME).max_number,
             methods_allowed: false,
             diags: Vec::new(),
         }))

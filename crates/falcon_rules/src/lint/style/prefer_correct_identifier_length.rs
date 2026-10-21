@@ -12,8 +12,8 @@
 //!
 //! ## Options
 //!
-//! `min_length` (int, default: 3) — flag identifiers shorter than this.
-//! `max_length` (int, default: 300) — flag identifiers longer than this.
+//! `min-length` (int, default: 3) — flag identifiers shorter than this.
+//! `max-length` (int, default: 300) — flag identifiers longer than this.
 //! `exceptions` (list of strings, default: []) — names always allowed regardless of length.
 
 use std::collections::HashSet;
@@ -30,28 +30,28 @@ use falcon_syntax::cst::*;
 pub struct PreferCorrectIdentifierLength;
 
 // No built-in exceptions: dcl has none, and short-lived bindings are exempt by scope.
-struct IdentCfg {
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Shortest permitted identifier length, excluding one leading privacy underscore.
     min_length: usize,
+    /// Longest permitted identifier length, excluding one leading privacy underscore.
     max_length: usize,
+    /// Identifier names exempt from length checks, compared after removing one leading privacy underscore.
     exceptions: HashSet<String>,
 }
 
-fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
-    let opts = crate::lint::options::for_rule(ctx, PreferCorrectIdentifierLength::NAME);
-    let min_length = crate::lint::options::usize(opts, "min_length").unwrap_or(3);
-    let max_length = crate::lint::options::usize(opts, "max_length").unwrap_or(300);
-    let exceptions = crate::lint::options::strings(opts, "exceptions")
-        .into_iter()
-        .flatten()
-        .map(str::to_string)
-        .collect();
-
-    IdentCfg {
-        min_length,
-        max_length,
-        exceptions,
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            min_length: 3,
+            max_length: 300,
+            exceptions: HashSet::new(),
+        }
     }
 }
+
+crate::lint::options::impl_options!(Options);
 
 impl Rule for PreferCorrectIdentifierLength {
     fn prepare<'a>(
@@ -62,13 +62,13 @@ impl Rule for PreferCorrectIdentifierLength {
         RulePreparation::Structural(Box::new(Names {
             diags: Vec::new(),
             ctx,
-            cfg: ident_cfg(ctx),
+            cfg: crate::lint::options::get::<Options>(ctx, Self::NAME),
         }))
     }
 }
 
 // Strip exactly one leading underscore, including when matching exceptions.
-fn is_invalid(name: &str, cfg: &IdentCfg) -> bool {
+fn is_invalid(name: &str, cfg: &Options) -> bool {
     let stripped = name.strip_prefix('_').unwrap_or(name);
     if cfg.exceptions.contains(stripped) {
         return false;
@@ -81,7 +81,7 @@ fn check_ident(
     ident: Identifier<'_>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
-    cfg: &IdentCfg,
+    cfg: &Options,
 ) {
     if is_invalid(ident.name(), cfg) {
         diags.push(make_diag(ctx, &ident.span(), ident.name(), cfg));
@@ -91,12 +91,12 @@ fn check_ident(
 struct Names<'a, 'ctx> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
-    cfg: IdentCfg,
+    cfg: &'a Options,
 }
 
 impl Names<'_, '_> {
     fn check(&mut self, ident: Identifier<'_>) {
-        check_ident(ident, &mut self.diags, self.ctx, &self.cfg);
+        check_ident(ident, &mut self.diags, self.ctx, self.cfg);
     }
 }
 
@@ -155,7 +155,7 @@ impl<'a> StructuralRuleVisitor<'a> for Names<'a, 'a> {
 }
 }
 
-fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &IdentCfg) -> Diagnostic {
+fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &Options) -> Diagnostic {
     let len = name.strip_prefix('_').unwrap_or(name).chars().count();
     let message = if len > cfg.max_length {
         format!(

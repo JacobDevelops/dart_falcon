@@ -9,7 +9,16 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{Entry, entries, report};
+use super::avoid_banned_names::{Entry, report};
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Banned type-name globs and the diagnostic message to report on a match.
+    rules: Vec<Entry>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidBannedTypes;
@@ -20,7 +29,7 @@ impl Rule for AvoidBannedTypes {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let entries = entries(ctx, "avoid-banned-types");
+        let entries = &crate::lint::options::get::<Options>(ctx, Self::NAME).rules;
         let Some(identities) = ctx.identities() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
@@ -39,7 +48,7 @@ impl Rule for AvoidBannedTypes {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    entries: Vec<Entry<'a>>,
+    entries: &'a [Entry],
     model: SemanticModel<'a>,
     diagnostics: Vec<Diagnostic>,
     ancestors: Vec<SyntaxNode<'a>>,
@@ -73,7 +82,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             ResolvedType::Void => "void",
             _ => return StructuralTraversal::Continue,
         };
-        report(self.ctx, &self.entries, name, node.span(), &mut self.diagnostics);
+        report(self.ctx, self.entries, name, node.span(), &mut self.diagnostics);
         StructuralTraversal::Continue
     }
 

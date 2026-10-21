@@ -4,7 +4,7 @@
       "style": {
         "prefer-commenting-analyzer-ignores": {
           "level": "warn",
-          "options": { "ignore_global": false }
+          "options": { "ignore-global": false }
         }
       }
     }

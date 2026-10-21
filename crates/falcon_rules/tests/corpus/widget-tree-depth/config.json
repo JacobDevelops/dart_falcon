@@ -4,7 +4,7 @@
       "complexity": {
         "widget-tree-depth": {
           "level": "warn",
-          "options": { "max_nesting": 3 }
+          "options": { "max-nesting": 3 }
         }
       }
     }

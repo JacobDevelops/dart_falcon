@@ -423,9 +423,9 @@ mod tests {
                 panic!("expected a file rule: {name}");
             };
             let options = match name {
-                "max-lines-for-function" => serde_json::json!({"max_lines": 2}),
+                "max-lines-for-function" => serde_json::json!({"max-lines": 2}),
                 "use-design-system-item" => serde_json::json!({
-                    "items": [{"class_name": "Container", "use_instead": "AppContainer"}]
+                    "items": [{"class-name": "Container", "use-instead": "AppContainer"}]
                 }),
                 _ => serde_json::json!({}),
             };

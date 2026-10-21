@@ -16,6 +16,15 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct RecordFieldsOrdering;
 
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Lexicographic direction in which named fields in each record type must be ordered.
+    order: Option<Order>,
+}
+
+crate::lint::options::impl_options!(Options);
+
 
 impl Rule for RecordFieldsOrdering {
     fn prepare<'a>(
@@ -23,7 +32,7 @@ impl Rule for RecordFieldsOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(order) = Order::configured(ctx, Self::NAME) else {
+        let Some(order) = crate::lint::options::get::<Options>(ctx, Self::NAME).order else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         RulePreparation::Structural(Box::new(Collector {

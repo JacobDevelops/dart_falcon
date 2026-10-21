@@ -4,7 +4,7 @@
       "style": {
         "prefer-named-parameters": {
           "level": "warn",
-          "options": { "max_number": 2 }
+          "options": { "max-number": 2 }
         }
       }
     }

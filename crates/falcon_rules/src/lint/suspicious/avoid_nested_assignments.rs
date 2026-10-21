@@ -1,5 +1,5 @@
 //! Require assignments to be standalone statements, arrow bodies or loop operations.
-//! `ignore_null_aware_assignments` (default false) exempts `??=`.
+//! `ignore-null-aware-assignments` (default false) exempts `??=`.
 //! Conditions and chained assignments are handled by their dedicated rules.
 
 use super::avoid_assignments_as_conditions::is_in_condition;
@@ -8,6 +8,15 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Exempt null-aware assignments (`??=`) from the nested-assignment diagnostic.
+    ignore_null_aware_assignments: bool,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidNestedAssignments;
@@ -18,10 +27,8 @@ impl Rule for AvoidNestedAssignments {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let ignore_null_aware = crate::lint::options::for_rule(ctx, AvoidNestedAssignments::NAME)
-            .and_then(|options| options.get("ignore_null_aware_assignments"))
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
+        let ignore_null_aware =
+            crate::lint::options::get::<Options>(ctx, Self::NAME).ignore_null_aware_assignments;
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),

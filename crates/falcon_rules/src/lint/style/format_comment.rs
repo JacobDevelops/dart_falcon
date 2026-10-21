@@ -10,44 +10,30 @@
 //!
 //! ## Options
 //!
-//! `only_doc_comments` (bool, default: `false`) — when `true`, only `///` doc
+//! `only-doc-comments` (bool, default: `false`) — when `true`, only `///` doc
 //! comments are checked.
 //!
-//! `ignored_patterns` (list of regexes, default: `[]`) — a comment matching any
-//! of these patterns is skipped entirely; invalid patterns are ignored.
+//! `ignored-patterns` (list of regexes, default: `[]`) — a comment matching any
+//! of these patterns is skipped entirely. Invalid patterns are rejected.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
-use regex::Regex;
+use crate::lint::options;
 
 #[derive(Default)]
 pub struct FormatComment;
 
-struct CommentCfg {
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// When true, checks only documentation comments (`///`).
     only_doc_comments: bool,
-    ignored_patterns: Vec<Regex>,
+    /// Regex patterns that exclude matching comments from formatting checks.
+    ignored_patterns: Vec<options::Regex>,
 }
 
-fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
-    let opts = crate::lint::options::for_rule(ctx, FormatComment::NAME);
-
-    let only_doc_comments = opts
-        .and_then(|o| o.get("only_doc_comments"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let ignored_patterns = crate::lint::options::strings(opts, "ignored_patterns")
-        .into_iter()
-        .flatten()
-        .filter_map(|pattern| Regex::new(pattern).ok())
-        .collect();
-
-    CommentCfg {
-        only_doc_comments,
-        ignored_patterns,
-    }
-}
+crate::lint::options::impl_options!(Options);
 
 impl Rule for FormatComment {
     fn prepare<'a>(
@@ -56,10 +42,10 @@ impl Rule for FormatComment {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        let cfg = comment_cfg(ctx);
+        let cfg = options::get::<Options>(ctx, Self::NAME);
         let tokens = collect_comment_tokens(ctx.source());
         for group in group_comments(&tokens) {
-            check_group(group, &mut diags, ctx, &cfg);
+            check_group(group, &mut diags, ctx, cfg);
         }
         RulePreparation::Diagnostics(diags)
     }
@@ -168,7 +154,7 @@ fn check_group(
     group: &[CommentToken<'_>],
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
-    cfg: &CommentCfg,
+    cfg: &Options,
 ) {
     let is_doc = group.first().map(|t| t.marker == "///").unwrap_or(false);
     if !is_doc && cfg.only_doc_comments {
@@ -205,7 +191,7 @@ fn check_group(
     }
 }
 
-fn has_valid_single_line(lexeme: &str, marker: &str, cfg: &CommentCfg) -> bool {
+fn has_valid_single_line(lexeme: &str, marker: &str, cfg: &Options) -> bool {
     let comment_text = &lexeme[marker.len()..];
     let text = comment_text.trim();
     if text.is_empty()
@@ -218,12 +204,12 @@ fn has_valid_single_line(lexeme: &str, marker: &str, cfg: &CommentCfg) -> bool {
     is_valid_sentence(comment_text)
 }
 
-fn has_valid_multiline(group: &[CommentToken<'_>], cfg: &CommentCfg) -> bool {
+fn has_valid_multiline(group: &[CommentToken<'_>], cfg: &Options) -> bool {
     let text = extract_text(group, cfg);
     split_sentences(&text).iter().all(|s| is_valid_sentence(s))
 }
 
-fn extract_text(group: &[CommentToken<'_>], cfg: &CommentCfg) -> String {
+fn extract_text(group: &[CommentToken<'_>], cfg: &Options) -> String {
     let mut result = String::new();
     let mut skip_fenced = false;
     for tok in group {
@@ -237,7 +223,7 @@ fn extract_text(group: &[CommentToken<'_>], cfg: &CommentCfg) -> String {
     result
 }
 
-fn should_skip(text: &str, cfg: &CommentCfg) -> bool {
+fn should_skip(text: &str, cfg: &Options) -> bool {
     let trimmed = text.trim();
     is_macros(text) || is_ignore_comment(trimmed) || is_ignored_pattern(trimmed, cfg)
 }
@@ -295,7 +281,7 @@ fn is_macros(text: &str) -> bool {
     }
 }
 
-fn is_ignored_pattern(text: &str, cfg: &CommentCfg) -> bool {
+fn is_ignored_pattern(text: &str, cfg: &Options) -> bool {
     cfg.ignored_patterns.iter().any(|re| re.is_match(text))
 }
 

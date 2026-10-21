@@ -12,25 +12,6 @@
                   "Marker.old"
                 ],
                 "message": "Use the supported alternative."
-              },
-              {
-                "deny": [
-                  "*",
-                  null
-                ],
-                "message": "Invalid mixed lists are ignored."
-              },
-              {
-                "deny": [
-                  "["
-                ],
-                "message": "Invalid globs are ignored."
-              },
-              {
-                "deny": [
-                  "**"
-                ],
-                "message": " "
               }
             ]
           }

@@ -544,7 +544,7 @@ mod tests {
                         "performance",
                         "move-variable-closer-to-its-usage",
                     ),
-                    Some(&json!({ "ignore_after_if": false })),
+                    Some(&json!({ "ignore-after-if": false })),
                 );
                 let good =
                     sdk_fixture::staged_file(staged.path(), &original, &original.join("good.dart"));
@@ -556,7 +556,7 @@ mod tests {
                     ),
                     target
                         .is_dir()
-                        .then_some(&json!({ "ignore_after_if": true })),
+                        .then_some(&json!({ "ignore-after-if": true })),
                 );
             }
             assert_eq!(fs::read_to_string(&config_path).unwrap(), contents);

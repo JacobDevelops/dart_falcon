@@ -7,7 +7,7 @@
 //! not evidence of the widget returned by the call. References to extracted
 //! widgets likewise do not expand a tree. Each tree is reported once at its root.
 //!
-//! `max_nesting` (integer, default: 8) is the maximum permitted widget depth;
+//! `max-nesting` (integer, default: 8) is the maximum permitted widget depth;
 //! the root is level one. This follows the widgets-nesting-level metric's default.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -16,6 +16,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{Expr, Program, Span};
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum depth of nested widget construction allowed in a widget tree.
+    max_nesting: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_nesting: 8 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct WidgetTreeDepth;
@@ -26,11 +41,7 @@ impl Rule for WidgetTreeDepth {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let threshold = crate::lint::options::usize(
-            crate::lint::options::for_rule(ctx, WidgetTreeDepth::NAME),
-            "max_nesting",
-        )
-        .unwrap_or(8);
+        let threshold = crate::lint::options::get::<Options>(ctx, Self::NAME).max_nesting;
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             threshold,

@@ -1,7 +1,7 @@
 //! Require configured error parameter names in catches and SDK error callbacks.
 //!
-//! Set `allowed_names` to a nonempty string array to enable the rule. Optional
-//! `ignored_names` exempts names. Stack-trace parameters are not checked. Callback
+//! Set `allowed-names` to a nonempty string array to enable the rule. Optional
+//! `ignored-names` exempts names. Stack-trace parameters are not checked. Callback
 //! checks require a resolved dart:async Future or Stream receiver; unrelated APIs,
 //! tear-offs and dynamic receivers are excluded.
 
@@ -10,26 +10,33 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const RULE: &str = "prefer-correct-error-name";
-
 #[derive(Default)]
 pub struct PreferCorrectErrorName;
 
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Accepted names for exception variables and error parameters; an empty list disables this rule.
+    allowed_names: Vec<String>,
+    /// Names exempt from the accepted-name check.
+    ignored_names: Vec<String>,
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for PreferCorrectErrorName {
     fn prepare<'a>(&self, _: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, RULE);
-        let allowed: Vec<_> = crate::lint::options::strings(options, "allowed_names")
-            .into_iter()
-            .flatten()
+        let options = crate::lint::options::get::<Options>(ctx, Self::NAME);
+        let allowed: Vec<_> = options
+            .allowed_names
+            .iter()
+            .map(String::as_str)
             .filter(|name| !name.is_empty())
             .collect();
         if allowed.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let ignored = crate::lint::options::strings(options, "ignored_names")
-            .into_iter()
-            .flatten()
-            .collect();
+        let ignored = options.ignored_names.iter().map(String::as_str).collect();
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             allowed,

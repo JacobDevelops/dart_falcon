@@ -5,7 +5,7 @@
         "cognitive-complexity": {
           "level": "warn",
           "options": {
-            "max_complexity": 2
+            "max-complexity": 2
           }
         }
       }

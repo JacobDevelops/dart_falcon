@@ -1,8 +1,8 @@
 //! Move final/const scalar literals into their only branch, or after an if.
 //!
 //! Literal initialization has no observable side effects. Declaration-resolved
-//! references exclude shadowed names and captures. `ignore_const` defaults to
-//! false; `ignore_after_if` defaults to true. Effectful/late/mutable variables
+//! references exclude shadowed names and captures. `ignore-const` defaults to
+//! false; `ignore-after-if` defaults to true. Effectful/late/mutable variables
 //! are deliberately excluded.
 
 use std::collections::{HashMap, HashSet};
@@ -13,6 +13,23 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Skip const variables even when their literal initializer has no side effects.
+    ignore_const: bool,
+    /// Skip moving declarations that follow an `if` statement.
+    ignore_after_if: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { ignore_const: false, ignore_after_if: true }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 #[derive(Default)]
 pub struct MoveVariableCloserToItsUsage;
 
@@ -22,20 +39,14 @@ impl Rule for MoveVariableCloserToItsUsage {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, MoveVariableCloserToItsUsage::NAME);
+        let options = crate::lint::options::get::<Options>(ctx, Self::NAME);
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             references: local_declarations(program),
             candidates: Vec::new(),
             uses: HashMap::new(),
-            ignore_const: options
-                .and_then(|value| value.get("ignore_const"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-            ignore_after_if: options
-                .and_then(|value| value.get("ignore_after_if"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true),
+            ignore_const: options.ignore_const,
+            ignore_after_if: options.ignore_after_if,
         }))
     }
 }

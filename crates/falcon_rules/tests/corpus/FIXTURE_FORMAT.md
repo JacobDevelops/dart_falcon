@@ -42,7 +42,7 @@ the in-process harness loads it with `falcon_rules::load_config`):
         "use-design-system-item": {
           "level": "warn",
           "options": {
-            "items": [{ "class_name": "Container", "use_instead": "AppContainer" }]
+            "items": [{ "class-name": "Container", "use-instead": "AppContainer" }]
           }
         }
       }

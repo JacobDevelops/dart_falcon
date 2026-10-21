@@ -1,5 +1,5 @@
 //! Tests for the pure `migrate_yaml_to_config` core: upstream-id mapping,
-//! options passthrough, disabled entries, unrecognized rules, and round-trip
+//! option-key canonicalization, disabled entries, unrecognized rules, and round-trip
 //! back through `FalconConfig`.
 
 use falcon_cli::{migrate_existing_config, migrate_yaml_to_config, run_migrate};
@@ -66,7 +66,7 @@ custom_lint:
     // The upstream pyramid id keeps working; it maps to the canonical falcon id.
     let cfg = &value["linter"]["rules"]["complexity"]["max-lines-for-file"];
     assert_eq!(cfg["level"], Value::String("warn".into()));
-    assert_eq!(cfg["options"]["max_lines"], Value::from(200));
+    assert_eq!(cfg["options"]["max-lines"], Value::from(200));
 }
 
 #[test]
@@ -154,9 +154,12 @@ custom_lint:
         max_lines: 200
 ";
     let result = migrate_yaml_to_config(yaml).expect("migration succeeds");
-    // Round-trip sanity: the emitted config deserializes without error.
-    let config: falcon_config::FalconConfig =
-        serde_json::from_str(&result.json).expect("emitted JSON is a valid FalconConfig");
+    let config = falcon_rules::canonicalize_loaded_config(falcon_config::LoadedConfig {
+        config: serde_json::from_str(&result.json).expect("emitted JSON is a valid FalconConfig"),
+        warnings: Vec::new(),
+    })
+    .expect("emitted config passes rules loader validation")
+    .config;
     assert_eq!(config.linter.rules.recommended, Some(false));
     assert_eq!(config.cross_file.rules.recommended, Some(false));
 }
@@ -182,7 +185,7 @@ fn upgrade_rewrites_legacy_ids_in_existing_falcon_json() {
     assert!(complexity.get("max_lines_for_file").is_none());
     assert_eq!(complexity["max-lines-for-file"]["level"], "error");
     assert_eq!(
-        complexity["max-lines-for-file"]["options"]["max_lines"],
+        complexity["max-lines-for-file"]["options"]["max-lines"],
         300
     );
     assert_eq!(
@@ -367,7 +370,7 @@ fn upgrade_collision_levels_preserve_unknown_off_and_tied_options() {
             serde_json::json!("error"),
         ),
         (
-            serde_json::json!({"level":"on","options":{"a":1}}),
+            serde_json::json!({"level":"on","options":{}}),
             serde_json::json!("warn"),
             serde_json::json!("warn"),
         ),
@@ -445,6 +448,8 @@ fn run_migrate_converts_yaml_to_explicit_output_without_changing_input() {
         0
     );
     assert_eq!(std::fs::read_to_string(input).unwrap(), yaml);
+    let loaded = falcon_rules::load_config(&output).expect("written migration output loads");
+    assert!(loaded.warnings.is_empty());
     let value: Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
     assert_eq!(
         value["linter"]["rules"]["suspicious"]["avoid-print"],
@@ -494,15 +499,15 @@ fn run_migrate_reports_read_parse_and_write_failures() {
 #[test]
 fn upgrade_equal_rank_prefers_canonical_options_in_either_input_order() {
     for entries in [
-        r#""no_empty_block":{"level":"on","options":{"legacy":true}},"no-empty-block":{"level":"warn","options":{"canonical":true}}"#,
-        r#""no-empty-block":{"level":"warn","options":{"canonical":true}},"no_empty_block":{"level":"on","options":{"legacy":true}}"#,
+        r#""max_lines_for_file":{"level":"on","options":{"max-lines":20}},"max-lines-for-file":{"level":"warn","options":{"max-lines":30}}"#,
+        r#""max-lines-for-file":{"level":"warn","options":{"max-lines":30}},"max_lines_for_file":{"level":"on","options":{"max-lines":20}}"#,
     ] {
-        let input = format!(r#"{{"linter":{{"rules":{{"suspicious":{{{entries}}}}}}}}}"#);
+        let input = format!(r#"{{"linter":{{"rules":{{"complexity":{{{entries}}}}}}}}}"#);
         let result = migrate_existing_config(&input).unwrap();
         let value: Value = serde_json::from_str(&result.json).unwrap();
         assert_eq!(
-            value["linter"]["rules"]["suspicious"]["no-empty-block"],
-            serde_json::json!({"level": "warn", "options": {"canonical": true}})
+            value["linter"]["rules"]["complexity"]["max-lines-for-file"],
+            serde_json::json!({"level": "warn", "options": {"max-lines": 30}})
         );
     }
 }
@@ -527,14 +532,14 @@ fn yaml_collisions_keep_highest_severity_across_upstream_linters() {
 #[test]
 fn yaml_collision_keeps_canonical_options_on_equal_severity() {
     let (value, unrecognized, count) = parse(
-        "dart_code_linter:\n  rules:\n    - no-empty-block:\n        canonical: true\n\
-         custom_lint:\n  rules:\n    - avoid_empty_blocks:\n        legacy: true\n",
+        "dart_code_linter:\n  rules:\n    - no-magic-number:\n        allowed: [1]\n\
+         custom_lint:\n  rules:\n    - no_magic_number:\n        allowed: [2]\n",
     );
     assert!(unrecognized.is_empty());
     assert_eq!(count, 2);
     assert_eq!(
-        value["linter"]["rules"]["suspicious"]["no-empty-block"],
-        serde_json::json!({"level": "warn", "options": {"canonical": true}})
+        value["linter"]["rules"]["style"]["no-magic-number"],
+        serde_json::json!({"level": "warn", "options": {"allowed": [1]}})
     );
 }
 
@@ -548,4 +553,126 @@ fn yaml_duplicate_rule_entries_do_not_let_off_replace_warn() {
         value["linter"]["rules"]["suspicious"]["no-empty-block"],
         "warn"
     );
+}
+
+#[test]
+fn upgrade_normalizes_option_keys_in_base_and_override_sections() {
+    for options in [
+        serde_json::json!({"max_lines": 20, "max-lines": 30}),
+        serde_json::json!({"max-lines": 30, "max_lines": 20}),
+    ] {
+        let rule = serde_json::json!({"level": "error", "options": options});
+        let section = serde_json::json!({"rules": {"complexity": {"max-lines-for-file": rule}}});
+        let cross_file = serde_json::json!({
+            "rules": {"correctness": {"unused-files": {"level": "warn", "options": {}}}}
+        });
+        let input = serde_json::json!({
+            "linter": section,
+            "cross_file": cross_file,
+            "overrides": [{"includes": ["test/**"], "linter": section, "project": cross_file}]
+        });
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        for scope in [&value, &value["overrides"][0]] {
+            assert_eq!(
+                scope["linter"]["rules"]["complexity"]["max-lines-for-file"],
+                serde_json::json!({"level": "error", "options": {"max-lines": 30}})
+            );
+            assert_eq!(
+                scope["cross-file"]["rules"]["correctness"]["unused-files"]["options"],
+                serde_json::json!({})
+            );
+        }
+        let again = migrate_existing_config(&result.json).unwrap();
+        assert_eq!(again.json, result.json);
+    }
+}
+
+#[test]
+fn yaml_normalizes_option_keys_and_preserves_canonical_collision_values() {
+    let result = migrate_yaml_to_config(
+        "custom_lint:\n  rules:\n    - max_lines_for_file:\n        max_lines: 20\n        max-lines: 30\n",
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&result.json).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["complexity"]["max-lines-for-file"]["options"],
+        serde_json::json!({"max-lines": 30})
+    );
+}
+
+#[test]
+fn yaml_rejects_unsupported_upstream_options_with_full_path() {
+    let error = migrate_yaml_to_config(
+        "dart_code_linter:\n  rules:\n    - check-unused-files:\n        ignored_paths: [generated/**]\n",
+    )
+    .err()
+    .expect("unsupported upstream options fail migration");
+    assert!(
+        error.contains("cross-file.rules.correctness.unused-files.options.ignored-paths"),
+        "{error}"
+    );
+}
+
+#[test]
+fn run_migrate_does_not_write_invalid_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("analysis_options.yaml");
+    let output = dir.path().join("falcon.json");
+    let yaml = "dart_code_linter:\n  rules:\n    - check-unused-files:\n        ignored_paths: [generated/**]\n";
+    std::fs::write(&input, yaml).unwrap();
+    std::fs::write(&output, "existing output").unwrap();
+    assert_eq!(
+        run_migrate(Some(input.clone()), true, Some(output.clone())),
+        1
+    );
+    assert_eq!(std::fs::read_to_string(input).unwrap(), yaml);
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "existing output");
+}
+
+#[test]
+fn upgrade_rejects_unsupported_options_with_override_path() {
+    let input = r#"{"overrides":[{"linter":{"rules":{"complexity":{
+        "max_lines_for_file":{"level":"warn","options":{"nested_items":[]}}
+    }}}}]}"#;
+    let error = migrate_existing_config(input)
+        .err()
+        .expect("unsupported options fail upgrade");
+    assert!(
+        error.contains(
+            "overrides[0].linter.rules.complexity.max-lines-for-file.options.nested-items"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn upgrade_rejects_unknown_rule_ids_in_base_and_overrides() {
+    for input in [
+        r#"{"linter":{"rules":{"suspicious":{"unknown-rule":"warn"}}}}"#,
+        r#"{"overrides":[{"linter":{"rules":{"suspicious":{"unknown-rule":"warn"}}}}]}"#,
+    ] {
+        let error = migrate_existing_config(input)
+            .err()
+            .expect("unknown falcon rules fail upgrade");
+        let path = if input.contains("overrides") {
+            "overrides[0].linter.rules.suspicious.unknown-rule"
+        } else {
+            "linter.rules.suspicious.unknown-rule"
+        };
+        assert!(error.contains("unknown rule key"), "{error}");
+        assert!(error.contains(path), "{error}");
+    }
+}
+
+#[test]
+fn run_migrate_does_not_rewrite_config_with_unknown_rule_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("falcon.json");
+    let json = r#"{"linter":{"rules":{"suspicious":{
+        "no_empty_block":"warn","unknown-rule":"error"
+    }}}}"#;
+    std::fs::write(&input, json).unwrap();
+    assert_eq!(run_migrate(Some(input.clone()), true, None), 1);
+    assert_eq!(std::fs::read_to_string(input).unwrap(), json);
 }

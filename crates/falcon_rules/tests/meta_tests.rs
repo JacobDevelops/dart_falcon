@@ -47,6 +47,44 @@ fn total_rules_match_documented_count() {
 }
 
 #[test]
+fn every_rule_option_schema_property_has_a_description() {
+    fn check(schema: &serde_json::Value, path: &str) {
+        match schema {
+            serde_json::Value::Object(object) => {
+                if let Some(properties) = object
+                    .get("properties")
+                    .and_then(serde_json::Value::as_object)
+                {
+                    for (name, property) in properties {
+                        let path = format!("{path}.{name}");
+                        assert!(
+                            property
+                                .get("description")
+                                .and_then(serde_json::Value::as_str)
+                                .is_some_and(|description| !description.trim().is_empty()),
+                            "missing option description: {path}"
+                        );
+                    }
+                }
+                for (key, value) in object {
+                    check(value, &format!("{path}.{key}"));
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for (index, value) in values.iter().enumerate() {
+                    check(value, &format!("{path}[{index}]"));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (name, schema) in falcon_rules::schema::rule_options_schemas() {
+        check(&schema, name);
+    }
+}
+
+#[test]
 fn rule_named_changesets_mention_rule_ids() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.changeset");
     let entries = match std::fs::read_dir(&directory) {
@@ -541,23 +579,23 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
                     "record-fields-ordering": { "level": "warn", "options": { "order": "ascending" } },
                     "extend-equatable": {
                         "level": "warn",
-                        "options": { "class_name_pattern": "Probe$" }
+                        "options": { "class-name-pattern": "Probe$" }
                     },
                     "use-design-system-item": {
                         "level": "warn",
-                        "options": { "items": [{ "class_name": "Container" }] }
+                        "options": { "items": [{ "class-name": "Container" }] }
                     },
                     "prefer-correct-error-name": {
                         "level": "warn",
-                        "options": { "allowed_names": ["error"] }
+                        "options": { "allowed-names": ["error"] }
                     },
                     "prefer-correct-handler-name": {
                         "level": "warn",
-                        "options": { "name_pattern": "^handle[A-Z]" }
+                        "options": { "name-pattern": "^handle[A-Z]" }
                     },
                     "prefer-correct-callback-field-name": {
                         "level": "warn",
-                        "options": { "name_pattern": "^on[A-Z]" }
+                        "options": { "name-pattern": "^on[A-Z]" }
                     }
                 },
                 "suspicious": {

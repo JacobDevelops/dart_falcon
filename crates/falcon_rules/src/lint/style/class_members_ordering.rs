@@ -22,7 +22,17 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::member_order::{category_rank, check_sequence, read_string_list};
+use crate::lint::options;
+use crate::member_order::{MemberCategory, category_rank, check_sequence};
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Optional member category sequence; unset uses the built-in ordering.
+    order: Option<Vec<MemberCategory>>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct ClassMembersOrdering;
@@ -36,7 +46,7 @@ impl Rule for ClassMembersOrdering {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            order: read_string_list(ctx, Self::NAME, "order"),
+            order: options::get::<Options>(ctx, Self::NAME).order.as_deref(),
             diags: Vec::new(),
         }))
     }
@@ -44,7 +54,7 @@ impl Rule for ClassMembersOrdering {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    order: Option<Vec<String>>,
+    order: Option<&'a [MemberCategory]>,
     diags: Vec<Diagnostic>,
 }
 
@@ -54,7 +64,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let Some(members) = crate::lint::declarations::members_of(decl) else {
                 return StructuralTraversal::SkipChildren;
             };
-            match &self.order {
+            match self.order {
                 Some(seq) => check_sequence(
                     members,
                     &mut self.diags,

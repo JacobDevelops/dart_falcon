@@ -1,12 +1,27 @@
 //! Reports arithmetic expressions containing too many terms.
 //!
-//! `max_terms` (integer, default: 6) limits connected +, -, *, /, ~/, and %
+//! `max-terms` (integer, default: 6) limits connected +, -, *, /, ~/, and %
 //! operands. Parentheses do not reset the count; calls are opaque operands.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of arithmetic operands in one connected expression.
+    max_terms: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_terms: 6 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidComplexArithmeticExpressions;
@@ -19,11 +34,7 @@ impl Rule for AvoidComplexArithmeticExpressions {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-            threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, AvoidComplexArithmeticExpressions::NAME),
-                "max_terms",
-            )
-            .unwrap_or(6),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_terms,
             parents: Vec::new(),
         }))
     }

@@ -1,6 +1,6 @@
 //! Match callback handler methods to a configured regular expression.
 //!
-//! Nonempty valid regex `name_pattern` enables the rule. `ignore_public`
+//! Nonempty valid regex `name-pattern` enables the rule. `ignore-public`
 //! (default false) exempts public methods. Direct method tear-offs passed as
 //! positional or named arguments are checked, including unqualified references
 //! unless shadowed by a lexical binding. Only ordinary unannotated methods
@@ -12,10 +12,20 @@ use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
-use regex::Regex;
+use crate::lint::options;
 use std::collections::HashMap;
 
-const RULE: &str = "prefer-correct-handler-name";
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Regular expression matching handler method names; absent or empty patterns disable this rule.
+    name_pattern: Option<options::Regex>,
+    /// Whether to skip public handler methods.
+    ignore_public: bool,
+}
+
+crate::lint::options::impl_options!(Options);
+
 #[derive(Default)]
 pub struct PreferCorrectHandlerName;
 impl Rule for PreferCorrectHandlerName {
@@ -24,12 +34,11 @@ impl Rule for PreferCorrectHandlerName {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, RULE);
+        let options = options::get::<Options>(ctx, Self::NAME);
         let Some(pattern) = options
-            .and_then(|o| o.get("name_pattern"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|s| !s.is_empty())
-            .and_then(|s| Regex::new(s).ok())
+            .name_pattern
+            .as_ref()
+            .filter(|pattern| !pattern.as_str().is_empty())
         else {
             return RulePreparation::Diagnostics(Vec::new());
         };
@@ -37,10 +46,7 @@ impl Rule for PreferCorrectHandlerName {
             ctx,
             program,
             pattern,
-            ignore_public: options
-                .and_then(|o| o.get("ignore_public"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
+            ignore_public: options.ignore_public,
             reported: Vec::new(),
             diags: Vec::new(),
         }))
@@ -49,7 +55,7 @@ impl Rule for PreferCorrectHandlerName {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     program: Program<'a>,
-    pattern: Regex,
+    pattern: &'a options::Regex,
     ignore_public: bool,
     reported: Vec<Span>,
     diags: Vec<Diagnostic>,
@@ -84,7 +90,7 @@ impl<'a> Collector<'a> {
                 return;
             }
             self.reported.push(span);
-            self.diags.push(self.ctx.diagnostic(format!("This callback handler does not match '{}'; rename it to match the configured pattern.", self.pattern), span));
+            self.diags.push(self.ctx.diagnostic(format!("This callback handler does not match '{}'; rename it to match the configured pattern.", self.pattern.as_str()), span));
         }
     }
 }

@@ -5,7 +5,7 @@
 //! comments, and other ignore directives do not supply an explanation.
 //! Read CST comment tokens so directive-like text in strings is never linted.
 //!
-//! `ignore_global` (bool, default `true`) skips `ignore_for_file:` directives.
+//! `ignore-global` (bool, default `true`) skips `ignore_for_file:` directives.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
@@ -13,6 +13,21 @@ use falcon_syntax::token::TokenKind;
 
 #[derive(Default)]
 pub struct PreferCommentingAnalyzerIgnores;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Do not require explanations for file-wide analyzer ignore directives.
+    ignore_global: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { ignore_global: true }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 fn directive(text: &str) -> Option<&str> {
     let text = text.strip_prefix("//")?.trim_start();
@@ -64,10 +79,7 @@ impl Rule for PreferCommentingAnalyzerIgnores {
     ) -> RulePreparation<'a> {
         let mut diagnostics = Vec::new();
         let ignore_global =
-            crate::lint::options::for_rule(ctx, PreferCommentingAnalyzerIgnores::NAME)
-                .and_then(|options| options.get("ignore_global"))
-                .and_then(|value| value.as_bool())
-                .unwrap_or(true);
+            crate::lint::options::get::<Options>(ctx, Self::NAME).ignore_global;
         let mut previous_comment = None::<SyntaxToken<'a>>;
         let mut previous_line_comment = None::<SyntaxToken<'a>>;
         for token in ctx.tree().tokens(ctx.source()) {

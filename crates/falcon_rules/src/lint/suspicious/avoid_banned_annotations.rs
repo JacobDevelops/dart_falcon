@@ -6,7 +6,16 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{Entry, entries, report};
+use super::avoid_banned_names::{Entry, report};
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Banned annotation-name globs and the diagnostic message to report on a match.
+    rules: Vec<Entry>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidBannedAnnotations;
@@ -17,7 +26,7 @@ impl Rule for AvoidBannedAnnotations {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let entries = entries(ctx, "avoid-banned-annotations");
+        let entries = &crate::lint::options::get::<Options>(ctx, Self::NAME).rules;
         if entries.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
@@ -31,7 +40,7 @@ impl Rule for AvoidBannedAnnotations {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    entries: Vec<Entry<'a>>,
+    entries: &'a [Entry],
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -49,7 +58,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             name.push('.');
             name.push_str(constructor.name());
         }
-        report(self.ctx, &self.entries, &name, node.span(), &mut self.diagnostics);
+        report(self.ctx, self.entries, &name, node.span(), &mut self.diagnostics);
         StructuralTraversal::Continue
     }
 

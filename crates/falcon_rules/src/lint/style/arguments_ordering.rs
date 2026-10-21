@@ -17,18 +17,25 @@ use super::ordering::Order;
 #[derive(Default)]
 pub struct ArgumentsOrdering;
 
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Alphabetical ordering direction for named arguments; unset uses parameter declaration order.
+    order: Option<Order>,
+    /// Alphabetizes named arguments in ascending order when true.
+    alphabetize: bool,
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for ArgumentsOrdering {
     fn prepare<'a>(
         &self,
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let order = Order::configured(ctx, Self::NAME).or_else(|| {
-            crate::lint::options::for_rule(ctx, Self::NAME)?
-                .get("alphabetize")?
-                .as_bool()?
-                .then_some(Order::Ascending)
-        });
+        let options = crate::lint::options::get::<Options>(ctx, Self::NAME);
+        let order = options.order.or_else(|| options.alphabetize.then_some(Order::Ascending));
         let Some(order) = order else {
             return RulePreparation::Semantic(Box::new(DeclarationCollector {
                 ctx,

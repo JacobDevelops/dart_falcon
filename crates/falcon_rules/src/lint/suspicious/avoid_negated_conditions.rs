@@ -1,12 +1,21 @@
 //! Prefer positive conditions when both branches can be swapped.
 //! Checks if statements, conditional expressions, and collection/map if/else elements.
-//! `ignore_null_checks` (default false) exempts comparisons with null.
+//! `ignore-null-checks` (default false) exempts comparisons with null.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Exempt null comparisons from the negated-condition diagnostic.
+    ignore_null_checks: bool,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidNegatedConditions;
@@ -17,10 +26,8 @@ impl Rule for AvoidNegatedConditions {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let ignore_null_checks = crate::lint::options::for_rule(ctx, AvoidNegatedConditions::NAME)
-            .and_then(|options| options.get("ignore_null_checks"))
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
+        let ignore_null_checks =
+            crate::lint::options::get::<Options>(ctx, Self::NAME).ignore_null_checks;
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),

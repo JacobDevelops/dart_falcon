@@ -11,7 +11,7 @@
 //!
 //! ## Options
 //!
-//! `max_nesting` (integer, default: 5) — flag when the nesting depth exceeds
+//! `max-nesting` (integer, default: 5) — flag when the nesting depth exceeds
 //! this.
 
 use falcon_analyze::{
@@ -20,6 +20,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum nesting depth allowed in a function.
+    max_nesting: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_nesting: 5 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MaximumNestingLevel;
@@ -44,13 +59,8 @@ impl Rule for MaximumNestingLevel {
     }
 }
 
-/// Read the `max_nesting` option (default 5). Malformed/missing → default.
 fn max_nesting_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, MaximumNestingLevel::NAME),
-        "max_nesting",
-    )
-    .unwrap_or(5)
+    crate::lint::options::get::<Options>(ctx, MaximumNestingLevel::NAME).max_nesting
 }
 
 struct Nesting<'a> {

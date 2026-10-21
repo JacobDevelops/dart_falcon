@@ -3,8 +3,8 @@
 //! Configure `rules: [{files: ["lib/domain/**"], deny: ["package:flutter/**"],
 //! message: "Keep domain code independent of Flutter."}]` in this rule's options.
 //! Both lists are required, nonempty lists of nonempty glob strings; `message`
-//! is required and nonblank. An invalid entry (including any invalid glob or
-//! non-string list member) is ignored, and no configuration means no reports.
+//! is required and nonblank. Invalid entries are rejected during configuration
+//! validation; no configuration means no reports.
 //! Globs are case-sensitive, match the entire string, and use `/` separators:
 //! `*` does not cross directories, while `**` does. Source `files` paths are
 //! relative to their nearest enclosing pubspec directory (including `lib/`).
@@ -26,10 +26,12 @@ use std::path::{Path, PathBuf};
 use falcon_analyze::{CrossFileRule, PackageIdentity, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
-use glob::{MatchOptions, Pattern};
-use serde_json::Value;
+use glob::MatchOptions;
 
 use crate::lint::options;
+use crate::lint::suspicious::avoid_banned_names::{
+    Glob, nonblank_message, nonempty_patterns,
+};
 
 use super::{ResolvedRef, canonical_or_lexical, enclosing_pubspec, resolve_directive_uri};
 
@@ -42,10 +44,29 @@ const MATCH_OPTIONS: MatchOptions = MatchOptions {
     require_literal_leading_dot: false,
 };
 
-struct Boundary<'a> {
-    files: Vec<Pattern>,
-    deny: Vec<Pattern>,
-    message: &'a str,
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Package-relative import boundaries applied to matching source files.
+    rules: Vec<Boundary>,
+}
+
+crate::lint::options::impl_options!(Options);
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Boundary {
+    /// Source-file globs selecting where this boundary applies.
+    #[serde(deserialize_with = "nonempty_patterns")]
+    #[schemars(length(min = 1))]
+    files: Vec<Glob>,
+    /// Import URI or package-relative target globs prohibited within `files`.
+    #[serde(deserialize_with = "nonempty_patterns")]
+    #[schemars(length(min = 1))]
+    deny: Vec<Glob>,
+    /// Warning text emitted when a prohibited import matches.
+    #[serde(deserialize_with = "nonblank_message")]
+    message: String,
 }
 
 impl CrossFileRule for BannedImports {
@@ -55,17 +76,11 @@ impl CrossFileRule for BannedImports {
         config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let mut compiled: HashMap<*const Value, Vec<Boundary<'_>>> = HashMap::new();
         let mut packages: HashMap<PathBuf, PackageIdentity> = HashMap::new();
         let mut diagnostics = Vec::new();
         for file in files {
             let file_path = file.path.to_string_lossy();
-            let Some(settings) = options::cross_file_for_rule(config, &file_path, BannedImports::NAME) else {
-                continue;
-            };
-            let boundaries = compiled
-                .entry(std::ptr::from_ref(settings))
-                .or_insert_with(|| parse_boundaries(settings));
+            let boundaries = &options::cross_file::<Options>(config, &file_path, Self::NAME).rules;
             if boundaries.is_empty() {
                 continue;
             }
@@ -111,7 +126,7 @@ impl CrossFileRule for BannedImports {
                             diagnostics.push(Diagnostic::new(
                                 "",
                                 Severity::Warning,
-                                entry.message,
+                                &entry.message,
                                 file_path.as_ref(),
                                 uri.span(),
                             ));
@@ -124,43 +139,7 @@ impl CrossFileRule for BannedImports {
     }
 }
 
-fn parse_boundaries(settings: &Value) -> Vec<Boundary<'_>> {
-    let Some(entries) = settings.get("rules").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    entries
-        .iter()
-        .filter_map(|entry| {
-            let message = entry.get("message")?.as_str()?;
-            if message.trim().is_empty() {
-                return None;
-            }
-            Some(Boundary {
-                files: patterns(entry, "files")?,
-                deny: patterns(entry, "deny")?,
-                message,
-            })
-        })
-        .collect()
-}
-
-fn patterns(entry: &Value, key: &str) -> Option<Vec<Pattern>> {
-    let values = entry.get(key)?.as_array()?;
-    if values.is_empty() || values.iter().any(|value| !value.is_string()) {
-        return None;
-    }
-    options::strings(Some(entry), key)?
-        .map(|value| {
-            if value.is_empty() {
-                None
-            } else {
-                Pattern::new(value).ok()
-            }
-        })
-        .collect()
-}
-
-fn matches(patterns: &[Pattern], value: &str) -> bool {
+fn matches(patterns: &[Glob], value: &str) -> bool {
     patterns
         .iter()
         .any(|pattern| pattern.matches_with(value, MATCH_OPTIONS))
@@ -185,7 +164,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn malformed_entries_do_not_broaden_a_boundary() {
+    fn malformed_entries_are_rejected() {
         for entry in [
             json!({"deny": ["*"], "message": "blocked"}),
             json!({"files": [], "deny": ["*"], "message": "blocked"}),
@@ -196,7 +175,7 @@ mod tests {
             json!({"files": ["**"], "deny": [""], "message": "blocked"}),
             json!({"files": ["**"], "deny": ["*"], "message": " "}),
         ] {
-            assert!(parse_boundaries(&json!({"rules": [entry]})).is_empty());
+            assert!(serde_json::from_value::<Options>(json!({"rules": [entry]})).is_err());
         }
     }
 
@@ -207,7 +186,8 @@ mod tests {
             "deny": ["package:legacy/*.dart"],
             "message": "Use the supported API."
         }]});
-        let entries = parse_boundaries(&settings);
+        let options: Options = serde_json::from_value(settings).unwrap();
+        let entries = options.rules;
         assert_eq!(entries.len(), 1);
         assert!(matches(&entries[0].files, "lib/domain/nested/model.dart"));
         assert!(!matches(&entries[0].files, "lib/Domain/model.dart"));

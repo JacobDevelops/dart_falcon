@@ -422,9 +422,18 @@ fn schema_resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
 /// A human-readable type label for a schema node (following `$ref`s).
 fn schema_type_label(root: &Value, node: &Value) -> String {
     let resolved = schema_resolve(root, node);
-    if resolved.get("oneOf").is_some() {
-        // The only `oneOf` in the schema is `ruleConfig`.
-        return "rule level (or object with level + options)".to_string();
+    if let Some(branches) = resolved
+        .get("oneOf")
+        .or_else(|| resolved.get("anyOf"))
+        .and_then(Value::as_array)
+    {
+        let mut types: Vec<_> = branches
+            .iter()
+            .map(|branch| schema_type_label(root, branch))
+            .collect();
+        types.sort_unstable();
+        types.dedup();
+        return types.join(" | ");
     }
     match resolved.get("type") {
         Some(Value::String(s)) if s == "array" => {
@@ -445,8 +454,7 @@ fn schema_type_label(root: &Value, node: &Value) -> String {
     }
 }
 
-/// The accepted values for a node, if it is an enum (or a `ruleConfig` whose
-/// severity branch is `ruleLevel`).
+/// The accepted enum values, including a rule entry's severity branch.
 fn schema_allowed_values(root: &Value, node: &Value) -> Vec<Value> {
     let resolved = schema_resolve(root, node);
     if let Some(Value::Array(e)) = resolved.get("enum") {
@@ -487,21 +495,73 @@ fn config_leaf(root: &Value, node: &Value, path: &str) -> Value {
     Value::Object(obj)
 }
 
+const OPTIONS_START: &str = "<!-- rule-options:start -->";
+const OPTIONS_END: &str = "<!-- rule-options:end -->";
+
+fn markdown_cell(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('|', "&#124;")
+        .replace('`', "&#96;")
+        .replace(['\r', '\n'], " ")
+}
+
+fn rule_options_markdown(document: &str, schemas: &[(&str, Value)]) -> Result<String, String> {
+    let (before, rest) = document
+        .split_once(OPTIONS_START)
+        .ok_or_else(|| format!("configuration.md is missing {OPTIONS_START}"))?;
+    let (_, after) = rest
+        .split_once(OPTIONS_END)
+        .ok_or_else(|| format!("configuration.md is missing {OPTIONS_END}"))?;
+    let mut output = format!(
+        "{before}{OPTIONS_START}\n\n| Rule | Option | Type | Default | Description |\n|------|--------|------|---------|-------------|\n"
+    );
+    for (rule, schema) in schemas {
+        let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+            return Err(format!("{rule}: options schema has no object properties"));
+        };
+        let mut properties: Vec<_> = properties.iter().collect();
+        properties.sort_unstable_by_key(|(name, _)| *name);
+        for (name, property) in properties {
+            let leaf = config_leaf(schema, property, name);
+            let default = leaf
+                .get("default")
+                .map(|value| format!("`{}`", markdown_cell(&value.to_string())))
+                .unwrap_or_else(|| "unset".to_string());
+            output.push_str(&format!(
+                "| `{rule}` | `{name}` | {} | {default} | {} |\n",
+                markdown_cell(leaf["type"].as_str().unwrap_or("")),
+                markdown_cell(leaf["description"].as_str().unwrap_or("")),
+            ));
+        }
+    }
+    output.push_str(&format!("\n{OPTIONS_END}{after}"));
+    Ok(output)
+}
+
 /// Emit the optional `recommended` toggle and a templated rule entry (per-rule
 /// detail lives in rules.json, so the reference stays structural).
 fn emit_rules_section(root: &Value, node: &Value, path: &str, out: &mut Vec<Value>) {
     if let Some(rec) = node.pointer("/properties/recommended") {
         out.push(config_leaf(root, rec, &format!("{path}.recommended")));
     }
-    let rule_config = root
-        .pointer("/definitions/ruleConfig")
-        .cloned()
-        .unwrap_or(Value::Null);
-    out.push(config_leaf(
-        root,
-        &rule_config,
-        &format!("{path}.<group>.<rule>"),
-    ));
+    let rule_config = node
+        .get("properties")
+        .and_then(Value::as_object)
+        .and_then(|groups| {
+            groups.values().find_map(|group| {
+                schema_resolve(root, group)
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .and_then(|rules| rules.values().next())
+            })
+        })
+        .expect("rules section contains a rule schema");
+    let mut entry = config_leaf(root, rule_config, &format!("{path}.<group>.<rule>"));
+    entry["type"] = json!("rule level (or object with level + options)");
+    out.push(entry);
 }
 
 /// Recursively walk the config schema, emitting a flat list of config-key
@@ -774,12 +834,23 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
     let config_ref_count = config_ref.as_array().map(|a| a.len()).unwrap_or(0);
     let config_ref_json =
         serde_json::to_string_pretty(&config_ref).expect("serialize config-reference.json");
+    let configuration_path = root.join("docs/configuration.md");
+    let configuration = fs::read_to_string(&configuration_path)
+        .map_err(|error| format!("cannot read {}: {error}", configuration_path.display()))?;
+    let configuration = rule_options_markdown(
+        &configuration,
+        &falcon_rules::schema::rule_options_schemas(),
+    )?;
 
     for (path, contents) in [
-        (&rules_path, &rules_json),
-        (&domains_path, &domains_json),
-        (&cli_path, &cli_json),
-        (&config_ref_path, &config_ref_json),
+        (&rules_path, rules_json.as_str()),
+        (&domains_path, domains_json.as_str()),
+        (&cli_path, cli_json.as_str()),
+        (&config_ref_path, config_ref_json.as_str()),
+        (
+            &configuration_path,
+            configuration.strip_suffix('\n').unwrap_or(&configuration),
+        ),
     ] {
         write_or_check(path, contents, check)?;
     }
@@ -800,6 +871,7 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
     println!("  {action}: {}", domains_path.display());
     println!("  {action}: {}", cli_path.display());
     println!("  {action}: {}", config_ref_path.display());
+    println!("  {action}: {}", configuration_path.display());
     println!("────────────────────────────────────────────────────────");
     Ok(())
 }
@@ -850,6 +922,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rule_options_table_uses_schemas_and_preserves_surrounding_prose() {
+        let document = format!("Before\n{OPTIONS_START}\nold table\n{OPTIONS_END}\nAfter\n");
+        let schemas = [(
+            "example-rule",
+            json!({
+                "properties": {
+                    "threshold": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Maximum | count.\nMore detail."
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": []
+                    }
+                }
+            }),
+        )];
+        let generated = rule_options_markdown(&document, &schemas).unwrap();
+        assert!(generated.starts_with(&format!("Before\n{OPTIONS_START}\n")));
+        assert!(generated.ends_with(&format!("{OPTIONS_END}\nAfter\n")));
+        assert!(!generated.contains("old table"));
+        assert!(generated.contains("| `example-rule` | `items` | string[] | `[]` |  |"));
+        assert!(generated.contains(
+            "| `example-rule` | `threshold` | integer | `5` | Maximum &#124; count. More detail. |"
+        ));
+        assert_eq!(
+            rule_options_markdown(&generated, &schemas).unwrap(),
+            generated
+        );
+    }
+
+    #[test]
+    fn rule_options_table_requires_markers_and_object_properties() {
+        assert!(rule_options_markdown("No markers", &[]).is_err());
+        assert!(rule_options_markdown(OPTIONS_START, &[]).is_err());
+        let document = format!("{OPTIONS_START}{OPTIONS_END}");
+        assert!(
+            rule_options_markdown(&document, &[("example", json!({"type": "string"}))])
+                .unwrap_err()
+                .contains("options schema has no object properties")
+        );
+    }
+
+    #[test]
     fn override_rule_reference_stays_structural_without_a_preset_toggle() {
         let schema = falcon_rules::schema::config_schema();
         let mut entries = Vec::new();
@@ -863,6 +981,38 @@ mod tests {
                 .collect();
             assert_eq!(paths, [format!("{prefix}.<group>.<rule>")]);
         }
+    }
+
+    #[test]
+    fn inline_rule_schemas_supply_structural_reference_severities() {
+        let schema = falcon_rules::schema::config_schema();
+        let mut entries = Vec::new();
+        walk_config_schema(&schema, &schema, "", &mut entries);
+        for path in [
+            "linter.rules.<group>.<rule>",
+            "cross-file.rules.<group>.<rule>",
+            "overrides[].linter.rules.<group>.<rule>",
+            "overrides[].cross-file.rules.<group>.<rule>",
+        ] {
+            let entry = entries.iter().find(|entry| entry["path"] == path).unwrap();
+            assert_eq!(entry["type"], "rule level (or object with level + options)");
+            assert_eq!(
+                entry["allowedValues"],
+                schema["definitions"]["ruleLevel"]["enum"]
+            );
+            assert!(entry["allowedValues"].is_array());
+        }
+    }
+
+    #[test]
+    fn option_union_types_are_not_rendered_as_rule_entries() {
+        let schema = json!({
+            "oneOf": [
+                {"type": "string", "enum": ["ascending", "descending"]},
+                {"type": "null"}
+            ]
+        });
+        assert_eq!(schema_type_label(&schema, &schema), "null | string");
     }
 
     #[test]

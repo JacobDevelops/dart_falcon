@@ -5,7 +5,7 @@
         "cyclomatic-complexity": {
           "level": "warn",
           "options": {
-            "max_complexity": 3
+            "max-complexity": 3
           }
         }
       }

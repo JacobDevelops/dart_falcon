@@ -195,7 +195,26 @@ empty rule descriptions and bad examples that produce no diagnostics.
 
 ### Rule options
 
-Read options with `crate::lint::options::for_rule(ctx, Type::NAME)` and the typed `options::usize` / `options::strings` helpers. They look up the group from metadata and honor per-path overrides through `ctx.rule_options`. See `max_parameters_for_function` or `use_design_system_item` for examples. Document new options in [`docs/configuration.md`](./docs/configuration.md).
+Define an `Options` type beside the rule, deriving `Default`, `serde::Serialize`,
+`serde::Deserialize`, and `schemars::JsonSchema`. Use
+`#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]` so omitted
+fields use defaults and unknown keys are rejected. Document each field with a
+Rustdoc description and preserve the rule's existing defaults; custom defaults
+can use a manual `Default` implementation.
+
+Implement the options contract with `options::impl_options!(Options)` and read
+the typed value with `options::get::<Options>(ctx, Self::NAME)`, using
+`crate::lint::options`. Register the rule and its options type in
+`crates/falcon_rules/src/lint/options.rs`'s registry. The loader validates options
+and reports invalid values at their configuration path; the typed lookup honors
+per-path overrides. Nested option models also derive `Serialize`, `Deserialize`,
+and `JsonSchema`, with kebab-case field names and unknown-field rejection where
+applicable.
+
+Run `cargo xtask schema` and `cargo xtask docgen` after changing options. Their
+schemas and the generated options table in [`docs/configuration.md`](./docs/configuration.md)
+share the registered types, including field descriptions and defaults. Keep
+handwritten behavioral examples outside the generated table markers.
 
 ### Suppressions
 

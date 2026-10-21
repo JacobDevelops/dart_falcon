@@ -1,6 +1,6 @@
 //! Reports deeply nested try statements.
 //!
-//! `max_nesting` (integer, default: 2) limits nesting of this construct.
+//! `max-nesting` (integer, default: 2) limits nesting of this construct.
 //! Local functions and closures restart the nesting count.
 
 use falcon_analyze::{
@@ -8,6 +8,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of nested `try` statements.
+    max_nesting: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_nesting: 2 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidNestedTryStatements;
@@ -20,11 +35,7 @@ impl Rule for AvoidNestedTryStatements {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-            threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, AvoidNestedTryStatements::NAME),
-                "max_nesting",
-            )
-            .unwrap_or(2),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_nesting,
             depth: 0,
             parents: Vec::new(),
             bodies: Vec::new(),

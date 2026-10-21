@@ -291,12 +291,13 @@ impl<'a> AnalyzeContext<'a> {
         self
     }
 
-    /// Resolve a rule's options for the file under analysis: the base options
-    /// patched by any `overrides` entry whose `includes` match this file (see
-    /// [`FalconConfig::rule_options_for`]). Rules should prefer this over
-    /// [`FalconConfig::rule_options`] so per-path override options take effect.
-    pub fn rule_options(&self, group: &str, rule_name: &str) -> Option<&serde_json::Value> {
+    /// Resolve cached rule options with this file's per-path overrides.
+    pub fn rule_options_data(
+        &self,
+        group: &str,
+        rule_name: &str,
+    ) -> Option<&falcon_config::RuleOptions> {
         self.config
-            .rule_options_for(&self.file_path.to_string_lossy(), group, rule_name)
+            .rule_options_data_for(&self.file_path.to_string_lossy(), group, rule_name)
     }
 }

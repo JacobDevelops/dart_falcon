@@ -8,7 +8,7 @@
 //!
 //! ## Options
 //!
-//! `max_lines` (integer, default: 100) — flag functions/methods spanning more
+//! `max-lines` (integer, default: 100) — flag functions/methods spanning more
 //! than this many lines.
 
 use falcon_analyze::{
@@ -16,6 +16,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of source lines allowed in a function.
+    max_lines: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_lines: 100 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MaxLinesForFunction;
@@ -62,13 +77,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
 use crate::lint::expressions::line_of;
 
-/// Read the `max_lines` option (default 100). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, MaxLinesForFunction::NAME),
-        "max_lines",
-    )
-    .unwrap_or(100)
+    crate::lint::options::get::<Options>(ctx, MaxLinesForFunction::NAME).max_lines
 }
 
 fn check_function_lines(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

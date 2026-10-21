@@ -5,7 +5,7 @@
         "avoid-complex-arithmetic-expressions": {
           "level": "warn",
           "options": {
-            "max_terms": 3
+            "max-terms": 3
           }
         }
       }

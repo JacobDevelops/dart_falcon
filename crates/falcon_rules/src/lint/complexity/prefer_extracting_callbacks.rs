@@ -3,6 +3,10 @@
 //! The rule uses resolved Flutter identities for both the containing Widget class
 //! and each constructed Widget. Calls that cannot be resolved uniquely are left
 //! alone; spelling, capitalization, and import-prefix shape are not evidence.
+//!
+//! `allowed-line-count` (optional integer, default: unset) permits callbacks up
+//! to that many lines. `ignored-named-arguments` (string array, default: empty)
+//! excludes matching named arguments from callback checks.
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
@@ -14,22 +18,16 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct PreferExtractingCallbacks;
 
-struct Cfg {
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Callback body line threshold; `None` disables the length filter.
     allowed_line_count: Option<usize>,
-    ignored: Vec<String>,
+    /// Named widget-constructor arguments whose callbacks are ignored.
+    ignored_named_arguments: Vec<String>,
 }
 
-fn cfg(ctx: &AnalyzeContext) -> Cfg {
-    let opts = crate::lint::options::for_rule(ctx, PreferExtractingCallbacks::NAME);
-    Cfg {
-        allowed_line_count: crate::lint::options::usize(opts, "allowed_line_count"),
-        ignored: crate::lint::options::strings(opts, "ignored_named_arguments")
-            .into_iter()
-            .flatten()
-            .map(str::to_string)
-            .collect(),
-    }
-}
+crate::lint::options::impl_options!(Options);
 
 impl Rule for PreferExtractingCallbacks {
     fn prepare<'a>(
@@ -44,7 +42,7 @@ impl Rule for PreferExtractingCallbacks {
             model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             signatures,
             widget: DeclarationIdentity::flutter("Widget"),
-            cfg: cfg(ctx),
+            cfg: crate::lint::options::get::<Options>(ctx, Self::NAME),
             source: ctx.source(),
             ctx,
             candidates: Vec::new(),
@@ -64,7 +62,7 @@ struct CallbackCollector<'a> {
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     widget: DeclarationIdentity,
-    cfg: Cfg,
+    cfg: &'a Options,
     source: &'a str,
     ctx: &'a AnalyzeContext<'a>,
     candidates: Vec<Callback>,
@@ -125,7 +123,7 @@ impl<'a> StructuralRuleVisitor<'a> for CallbackCollector<'a> {
             for argument in args.named() {
                 if !self
                     .cfg
-                    .ignored
+                    .ignored_named_arguments
                     .iter()
                     .any(|name| name == argument.name().name())
                 {
@@ -164,7 +162,7 @@ impl CallbackCollector<'_> {
         };
         let span = function.span();
         if !matches!(function.body(), FunctionBody::Block(block) if !block.stmts().is_empty())
-            || !is_long_enough(&span, self.source, &self.cfg)
+            || !is_long_enough(&span, self.source, self.cfg)
         {
             return;
         }
@@ -195,7 +193,7 @@ fn expression_is_widget(
         .is_some_and(|(ty, _)| signatures.is_subtype_of(&ty, widget, model) == Truth::Yes)
 }
 
-fn is_long_enough(span: &Span, source: &str, cfg: &Cfg) -> bool {
+fn is_long_enough(span: &Span, source: &str, cfg: &Options) -> bool {
     match cfg.allowed_line_count {
         None => true,
         Some(limit) => {

@@ -10,7 +10,7 @@
 //!
 //! ## Options
 //!
-//! `valid_prefixes` (list of strings, default: `["is", "are", "was", "were",
+//! `valid-prefixes` (list of strings, default: `["is", "are", "was", "were",
 //! "has", "have", "had", "can", "should", "will", "do", "does", "did"]`) —
 //! accepted boolean-name prefixes. User-provided entries extend the defaults
 //! rather than replacing them.
@@ -24,6 +24,15 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct BooleanPrefixes;
 
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Additional accepted prefixes for boolean names; these extend built-ins.
+    valid_prefixes: Vec<String>,
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for BooleanPrefixes {
     fn prepare<'a>(
         &self,
@@ -33,30 +42,19 @@ impl Rule for BooleanPrefixes {
         let visitor = Collector {
             diags: Vec::new(),
             ctx,
-            prefixes: resolve_prefixes(ctx),
+            prefixes: &crate::lint::options::get::<Options>(ctx, Self::NAME).valid_prefixes,
         };
         RulePreparation::Structural(Box::new(visitor))
     }
 }
 
-/// pyramid_lint's default valid prefixes. A user-provided `valid_prefixes`
+/// pyramid_lint's default valid prefixes. A user-provided `valid-prefixes`
 /// option EXTENDS this list rather than replacing it.
 const DEFAULT_PREFIXES: &[&str] = &[
     "is", "are", "was", "were", "has", "have", "had", "can", "should", "will", "do", "does", "did",
 ];
 
 const MESSAGE: &str = "Boolean should be named with a valid prefix.";
-
-fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
-    let mut prefixes: Vec<String> = DEFAULT_PREFIXES.iter().map(|s| s.to_string()).collect();
-    if let Some(list) = crate::lint::options::strings(
-        crate::lint::options::for_rule(ctx, BooleanPrefixes::NAME),
-        "valid_prefixes",
-    ) {
-        prefixes.extend(list.map(str::to_string));
-    }
-    prefixes
-}
 
 fn is_bool_type(ty: Option<DartType<'_>>) -> bool {
     matches!(ty, Some(DartType::Named(nt)) if nt.segments().count() == 1 && nt.segments().next().unwrap().name() == "bool")
@@ -69,9 +67,11 @@ use crate::member_order::is_override;
 /// mirroring `validPrefixes.any(name.startsWith)`).
 fn has_valid_boolean_prefix(name: &str, prefixes: &[String]) -> bool {
     let name = name.strip_prefix('_').unwrap_or(name);
-    prefixes
+    DEFAULT_PREFIXES
         .iter()
-        .any(|prefix| name.starts_with(prefix.as_str()))
+        .copied()
+        .chain(prefixes.iter().map(String::as_str))
+        .any(|prefix| name.starts_with(prefix))
 }
 
 fn check_name(
@@ -109,7 +109,7 @@ fn check_declarators(
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    prefixes: Vec<String>,
+    prefixes: &'a [String],
 }
 
 falcon_analyze::structural_visitor! {
@@ -118,14 +118,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         if let TopLevelDecl::Variable(v) = decl {
-            check_declarators(v.declarators(), &mut self.diags, self.ctx, &self.prefixes);
+            check_declarators(v.declarators(), &mut self.diags, self.ctx, self.prefixes);
         }
         StructuralTraversal::Continue
     }
 
     fn visit_function_decl(&mut self, f: FunctionDecl<'a>) -> StructuralTraversal {
         if !matches!(f.kind(), FunctionKind::Setter(_)) && is_bool_type(f.return_type()) {
-            check_name(f.name(), &mut self.diags, self.ctx, &self.prefixes);
+            check_name(f.name(), &mut self.diags, self.ctx, self.prefixes);
         }
         StructuralTraversal::Continue
     }
@@ -133,7 +133,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let named_return = match member {
             ClassMember::Field(f) => {
-                check_declarators(f.declarators(), &mut self.diags, self.ctx, &self.prefixes);
+                check_declarators(f.declarators(), &mut self.diags, self.ctx, self.prefixes);
                 None
             }
             ClassMember::Method(m) if !is_override(m.annotations()) => {
@@ -147,7 +147,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let Some((name, ty)) = named_return
             && is_bool_type(ty)
         {
-            check_name(name, &mut self.diags, self.ctx, &self.prefixes);
+            check_name(name, &mut self.diags, self.ctx, self.prefixes);
         }
         StructuralTraversal::Continue
     }
@@ -157,7 +157,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             local.declarators(),
             &mut self.diags,
             self.ctx,
-            &self.prefixes,
+            self.prefixes,
         );
         StructuralTraversal::Continue
     }

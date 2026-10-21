@@ -18,7 +18,7 @@
             "avoid-nested-assignments": {
               "level": "warn",
               "options": {
-                "ignore_null_aware_assignments": true
+                "ignore-null-aware-assignments": true
               }
             }
           }

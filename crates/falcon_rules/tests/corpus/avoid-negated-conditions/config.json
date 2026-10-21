@@ -18,7 +18,7 @@
             "avoid-negated-conditions": {
               "level": "warn",
               "options": {
-                "ignore_null_checks": true
+                "ignore-null-checks": true
               }
             }
           }

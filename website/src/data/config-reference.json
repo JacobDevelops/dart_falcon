@@ -101,7 +101,7 @@
       "warn",
       "error"
     ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+    "description": "A severity level, or an object with a severity level and rule-specific options."
   },
   {
     "path": "cross-file.enabled",
@@ -125,7 +125,7 @@
       "warn",
       "error"
     ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+    "description": "A severity level, or an object with a severity level and rule-specific options."
   },
   {
     "path": "overrides[].includes",
@@ -147,7 +147,7 @@
       "warn",
       "error"
     ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+    "description": "A severity level, or an object with a severity level and rule-specific options."
   },
   {
     "path": "overrides[].cross-file.enabled",
@@ -164,7 +164,7 @@
       "warn",
       "error"
     ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+    "description": "A severity level, or an object with a severity level and rule-specific options."
   },
   {
     "path": "max-errors",

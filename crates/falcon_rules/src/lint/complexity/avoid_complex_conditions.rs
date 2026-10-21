@@ -16,6 +16,21 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of logical operands in a condition.
+    threshold: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { threshold: 10 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 #[derive(Default)]
 pub struct AvoidComplexConditions;
 
@@ -27,11 +42,7 @@ impl Rule for AvoidComplexConditions {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Conditions {
             ctx,
-            threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, AvoidComplexConditions::NAME),
-                "threshold",
-            )
-            .unwrap_or(10),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).threshold,
             in_logical_tree: false,
             parents: Vec::new(),
             diags: Vec::new(),

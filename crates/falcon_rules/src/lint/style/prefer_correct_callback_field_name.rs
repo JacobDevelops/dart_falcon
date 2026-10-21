@@ -1,6 +1,6 @@
 //! Match callback field names to a configured regular expression.
 //!
-//! `name_pattern` must be a nonempty valid regex; otherwise the rule is inactive.
+//! `name-pattern` must be a valid regex. Missing or empty patterns leave the rule inactive.
 //! Leading privacy underscores are ignored. Resolved function fields, including
 //! aliases and Function, must match; proven non-function fields must not match.
 //! Unknown, dynamic and enclosing type-parameter types are excluded, as are
@@ -13,11 +13,18 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
-use regex::Regex;
 
-const RULE: &str = "prefer-correct-callback-field-name";
 #[derive(Default)]
 pub struct PreferCorrectCallbackFieldName;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Regular expression matching callback field names; absent or empty patterns disable this rule.
+    name_pattern: Option<crate::lint::options::Regex>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 impl Rule for PreferCorrectCallbackFieldName {
     fn prepare<'a>(
@@ -25,11 +32,10 @@ impl Rule for PreferCorrectCallbackFieldName {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(pattern) = crate::lint::options::for_rule(ctx, RULE)
-            .and_then(|o| o.get("name_pattern"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|s| !s.is_empty())
-            .and_then(|s| Regex::new(s).ok())
+        let Some(pattern) = crate::lint::options::get::<Options>(ctx, Self::NAME)
+            .name_pattern
+            .as_ref()
+            .filter(|pattern| !pattern.as_str().is_empty())
         else {
             return RulePreparation::Diagnostics(Vec::new());
         };
@@ -47,7 +53,7 @@ impl Rule for PreferCorrectCallbackFieldName {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     state: SemanticState<'a>,
-    pattern: Regex,
+    pattern: &'a crate::lint::options::Regex,
     diags: Vec<Diagnostic>,
 }
 falcon_analyze::structural_visitor! {
@@ -84,9 +90,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for declaration in node.declarators() {
             if self.pattern.is_match(declaration.name().name().trim_start_matches('_')) != function {
                 self.diags.push(self.ctx.diagnostic(if function {
-                        format!("This callback field does not match '{}'; rename it to match the configured pattern.", self.pattern)
+                        format!("This callback field does not match '{}'; rename it to match the configured pattern.", self.pattern.as_str())
                     } else {
-                        format!("This non-function field matches callback pattern '{}'; rename it so it does not match.", self.pattern)
+                        format!("This non-function field matches callback pattern '{}'; rename it so it does not match.", self.pattern.as_str())
                     }, declaration.name().span()));
             }
         }

@@ -5,7 +5,7 @@
         "max-lines-for-file": {
           "level": "warn",
           "options": {
-            "max_lines": 60
+            "max-lines": 60
           }
         }
       }

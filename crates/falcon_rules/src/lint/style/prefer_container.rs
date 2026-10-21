@@ -13,7 +13,7 @@
 //!
 //! ## Options
 //!
-//! `min_sequence` (integer, default: 3) sets the minimum chain length, with a
+//! `min-sequence` (integer, default: 3) sets the minimum chain length, with a
 //! minimum effective value of 3 to avoid competing with single-widget rules.
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -24,6 +24,21 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct PreferContainer;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three.
+    min_sequence: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { min_sequence: 3 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for PreferContainer {
     fn prepare<'a>(
         &self,
@@ -33,12 +48,9 @@ impl Rule for PreferContainer {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             contexts: crate::lint::const_eval::ConstContexts::of(program),
-            minimum: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, PreferContainer::NAME),
-                "min_sequence",
-            )
-            .unwrap_or(3)
-            .max(3),
+            minimum: crate::lint::options::get::<Options>(ctx, Self::NAME)
+                .min_sequence
+                .max(3),
             covered: [usize::MAX; 6],
             diags: Vec::new(),
         }))
@@ -214,7 +226,7 @@ Widget build(Widget child, dynamic matrix) =>
                 "linter": { "rules": { "style": {
                     "prefer-container": {
                         "level": "warn",
-                        "options": { "min_sequence": minimum }
+                        "options": { "min-sequence": minimum }
                     }
                 }}}
             }))

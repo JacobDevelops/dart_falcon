@@ -4,7 +4,16 @@ use crate::lint::style::conditional_uri_does_not_exist::uri_value;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{entries, report};
+use super::avoid_banned_names::{Entry, report};
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Banned export-URI globs and the diagnostic message to report on a match.
+    rules: Vec<Entry>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidBannedExports;
@@ -15,7 +24,7 @@ impl Rule for AvoidBannedExports {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let entries = entries(ctx, "avoid-banned-exports");
+        let entries = &crate::lint::options::get::<Options>(ctx, Self::NAME).rules;
         let mut diagnostics = Vec::new();
         if !entries.is_empty() {
             for export in program.exports() {
@@ -26,7 +35,7 @@ impl Rule for AvoidBannedExports {
                 ) {
                     report(
                         ctx,
-                        &entries,
+                        entries,
                         &uri_value(uri),
                         uri.span(),
                         &mut diagnostics,

@@ -14,7 +14,7 @@
 //!
 //! ## Options
 //!
-//! `max_complexity` (integer, default: 20) — flag when the computed complexity
+//! `max-complexity` (integer, default: 20) — flag when the computed complexity
 //! exceeds this.
 
 use falcon_analyze::{
@@ -23,6 +23,21 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum cyclomatic complexity allowed for a function.
+    max_complexity: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_complexity: 20 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct CyclomaticComplexity;
@@ -43,13 +58,8 @@ impl Rule for CyclomaticComplexity {
     }
 }
 
-/// Read the `max_complexity` option (default 20). Malformed/missing → default.
 fn max_complexity_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::usize(
-        crate::lint::options::for_rule(ctx, CyclomaticComplexity::NAME),
-        "max_complexity",
-    )
-    .unwrap_or(20)
+    crate::lint::options::get::<Options>(ctx, CyclomaticComplexity::NAME).max_complexity
 }
 
 struct DecisionPoints<'a> {

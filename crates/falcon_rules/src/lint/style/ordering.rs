@@ -2,24 +2,14 @@ use falcon_analyze::AnalyzeContext;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::Identifier;
 
-#[derive(Clone, Copy)]
-pub(super) enum Order {
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Order {
     Ascending,
     Descending,
 }
 
 impl Order {
-    pub(super) fn configured(ctx: &AnalyzeContext<'_>, rule: &str) -> Option<Self> {
-        match crate::lint::options::for_rule(ctx, rule)?
-            .get("order")?
-            .as_str()?
-        {
-            "ascending" => Some(Self::Ascending),
-            "descending" => Some(Self::Descending),
-            _ => None,
-        }
-    }
-
     pub(super) fn is_out_of_order(self, previous: &str, current: &str) -> bool {
         match self {
             Self::Ascending => previous > current,

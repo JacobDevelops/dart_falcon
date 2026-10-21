@@ -9,7 +9,16 @@ use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePrep
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{Entry, entries, report};
+use super::avoid_banned_names::{Entry, report};
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Banned API-name globs and the diagnostic message to report on a match.
+    rules: Vec<Entry>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct BannedUsage;
@@ -20,7 +29,7 @@ impl Rule for BannedUsage {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let entries = entries(ctx, "banned-usage");
+        let entries = &crate::lint::options::get::<Options>(ctx, Self::NAME).rules;
         if entries.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
@@ -34,7 +43,7 @@ impl Rule for BannedUsage {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    entries: Vec<Entry<'a>>,
+    entries: &'a [Entry],
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -82,7 +91,7 @@ impl Collector<'_> {
     fn emit(&mut self, name: &str, span: Span) {
         report(
             self.ctx,
-            &self.entries,
+            self.entries,
             name,
             span,
             &mut self.diagnostics,

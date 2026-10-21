@@ -32,21 +32,7 @@
     },
     {
       "includes": [
-        "**/good_3.dart"
-      ],
-      "linter": {
-        "rules": {
-          "style": {
-            "enum-constants-ordering": {
-              "level": "warn",
-              "options": {}
-            }
-          }
-        }
-      }
-    },
-    {
-      "includes": [
+        "**/good_3.dart",
         "**/good_4.dart"
       ],
       "linter": {
@@ -54,9 +40,7 @@
           "style": {
             "enum-constants-ordering": {
               "level": "warn",
-              "options": {
-                "order": "invalid"
-              }
+              "options": {}
             }
           }
         }

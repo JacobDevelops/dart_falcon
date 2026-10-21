@@ -1,5 +1,5 @@
 //! Require Equatable semantics for configured class/file name patterns.
-//! Configure `class_name_pattern` or `file_name_pattern`; without either option,
+//! Configure `class-name-pattern` or `file-name-pattern`; without either option,
 //! this rule reports no diagnostics. Already equatable subtypes (including
 //! EquatableMixin users) and unresolved inheritance are conservatively skipped.
 
@@ -9,7 +9,18 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
-use regex::Regex;
+use crate::lint::options;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Regex selecting class names that must use Equatable semantics.
+    class_name_pattern: Option<options::Regex>,
+    /// Regex selecting file names whose classes must use Equatable semantics.
+    file_name_pattern: Option<options::Regex>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct ExtendEquatable;
@@ -20,15 +31,11 @@ impl Rule for ExtendEquatable {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, ExtendEquatable::NAME);
-        let class_pattern = options
-            .and_then(|options| options.get("class_name_pattern"))
-            .and_then(|value| value.as_str())
-            .and_then(|pattern| Regex::new(pattern).ok());
+        let options = options::get::<Options>(ctx, Self::NAME);
+        let class_pattern = options.class_name_pattern.as_ref();
         let file_matches = options
-            .and_then(|options| options.get("file_name_pattern"))
-            .and_then(|value| value.as_str())
-            .and_then(|pattern| Regex::new(pattern).ok())
+            .file_name_pattern
+            .as_ref()
             .is_some_and(|pattern| {
                 ctx.file_path()
                     .file_name()
@@ -49,7 +56,7 @@ impl Rule for ExtendEquatable {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    class_pattern: Option<Regex>,
+    class_pattern: Option<&'a options::Regex>,
     file_matches: bool,
     diagnostics: Vec<Diagnostic>,
 }

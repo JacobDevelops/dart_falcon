@@ -19,6 +19,21 @@
 /// The `no-magic-number` rule.
 pub use dcl::NoMagicNumber;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Numeric values that are exempt from magic-number diagnostics.
+    allowed: Vec<f64>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { allowed: vec![-1.0, 0.0, 1.0] }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 mod dcl {
     use std::collections::HashSet;
 
@@ -28,24 +43,13 @@ mod dcl {
     };
     use falcon_diagnostics::Diagnostic;
     use falcon_syntax::cst::*;
+    use super::Options;
 
     #[derive(Default)]
     pub struct NoMagicNumber;
 
     const EPS: f64 = 1e-9;
 
-    struct Cfg {
-        allowed: Vec<f64>,
-    }
-
-    fn cfg(ctx: &AnalyzeContext) -> Cfg {
-        let allowed = crate::lint::options::for_rule(ctx, NoMagicNumber::NAME)
-            .and_then(|o| o.get("allowed"))
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec![-1.0, 0.0, 1.0]);
-        Cfg { allowed }
-    }
 
     impl Rule for NoMagicNumber {
         fn prepare<'a>(
@@ -56,7 +60,7 @@ mod dcl {
             RulePreparation::Structural(Box::new(Collector {
                 diags: Vec::new(),
                 ctx,
-                cfg: cfg(ctx),
+                cfg: crate::lint::options::get::<Options>(ctx, Self::NAME),
                 in_const: 0,
                 exempt_literals: HashSet::new(),
             }))
@@ -74,7 +78,7 @@ mod dcl {
         v.parse::<f64>().ok()
     }
 
-    fn is_allowed(value: &str, cfg: &Cfg) -> bool {
+    fn is_allowed(value: &str, cfg: &Options) -> bool {
         match parse_num(value) {
             Some(n) => cfg.allowed.iter().any(|a| (a - n).abs() < EPS),
             None => true,
@@ -121,7 +125,7 @@ mod dcl {
     struct Collector<'a, 'ctx> {
         diags: Vec<Diagnostic>,
         ctx: &'a AnalyzeContext<'ctx>,
-        cfg: Cfg,
+        cfg: &'a Options,
         in_const: usize,
         exempt_literals: HashSet<usize>,
     }
@@ -138,7 +142,7 @@ mod dcl {
         fn flag(&mut self, value: &str, span: &Span) {
             if self.in_const != 0
                 || self.exempt_literals.contains(&span.start)
-                || is_allowed(value, &self.cfg)
+                || is_allowed(value, self.cfg)
             {
                 return;
             }

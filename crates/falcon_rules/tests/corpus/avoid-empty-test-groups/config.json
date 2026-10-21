@@ -5,7 +5,7 @@
         "avoid-empty-test-groups": {
           "level": "warn",
           "options": {
-            "include_methods": [
+            "include-methods": [
               "testCase"
             ]
           }

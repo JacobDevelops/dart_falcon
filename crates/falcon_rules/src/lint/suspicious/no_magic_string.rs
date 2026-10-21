@@ -1,8 +1,8 @@
 //! Extract inline string literals into named variables or constants.
 //! Exempts direct literal initializers, defaults, annotations, constant collections,
 //! indices, asserts, and direct string arguments of regex/URI/error constructors,
-//! common string operations and `ignored_invocations` (default ["print", "debugPrint"]).
-//! `allow_only_once` (false) allows values occurring only once across expression/pattern literals.
+//! common string operations and `ignored-invocations` (default ["print", "debugPrint"]).
+//! `allow-only-once` (false) allows values occurring only once across expression/pattern literals.
 //! Literal patterns are exempt from diagnostics but still count; directive strings do not count.
 
 use std::collections::HashMap;
@@ -15,6 +15,26 @@ use falcon_syntax::cst::*;
 
 use crate::lint::style::conditional_uri_does_not_exist::uri_value;
 
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Allow string literal values that occur only once.
+    allow_only_once: bool,
+    /// Invocation names whose direct string arguments are exempt from this rule.
+    ignored_invocations: Vec<String>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            allow_only_once: false,
+            ignored_invocations: vec!["print".into(), "debugPrint".into()],
+        }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
+
 #[derive(Default)]
 pub struct NoMagicString;
 
@@ -24,20 +44,11 @@ impl Rule for NoMagicString {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let options = crate::lint::options::for_rule(ctx, NoMagicString::NAME);
-        let allow_only_once = options
-            .and_then(|options| options.get("allow_only_once"))
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
-        let ignored = options
-            .and_then(|options| options.get("ignored_invocations"))
-            .and_then(|value| value.as_array())
-            .map(|values| values.iter().filter_map(|value| value.as_str()).collect())
-            .unwrap_or_else(|| vec!["print", "debugPrint"]);
+        let options = crate::lint::options::get::<Options>(ctx, Self::NAME);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            allow_only_once,
-            ignored,
+            allow_only_once: options.allow_only_once,
+            ignored: &options.ignored_invocations,
             literals: Vec::new(),
         }))
     }
@@ -46,7 +57,7 @@ impl Rule for NoMagicString {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     allow_only_once: bool,
-    ignored: Vec<&'a str>,
+    ignored: &'a [String],
     literals: Vec<(String, Span, bool)>,
 }
 
@@ -108,7 +119,7 @@ impl Collector<'_> {
                             _ => None,
                         };
                         if name.is_some_and(|name| {
-                            self.ignored.contains(&name) || exempt_invocation(name)
+                            self.ignored.iter().any(|ignored| ignored == name) || exempt_invocation(name)
                         }) {
                             return true;
                         }

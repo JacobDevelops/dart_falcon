@@ -5,7 +5,7 @@
 //! fields, constructors, static methods, then instance methods. Members are
 //! ranked by category and any pair out of sequence is reported. For Flutter
 //! `State` subclasses, a separate lifecycle ordering can be enforced with
-//! `widgets_order`.
+//! `widgets-order`.
 //!
 //! ## Options
 //!
@@ -16,7 +16,7 @@
 //! `methods`, `getters`, and `setters`. A member is ranked by the earliest
 //! token it qualifies for; members matching no token are ignored.
 //!
-//! `widgets_order` (list of lifecycle tokens, default: none) — for a class that
+//! `widgets-order` (list of lifecycle tokens, default: none) — for a class that
 //! `extends State`, orders lifecycle members by this list. Supported tokens:
 //! `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`,
 //! `dispose`, `build`, and `overridden-methods`.
@@ -27,7 +27,19 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::member_order::{category_rank, check_sequence, read_string_list};
+use crate::lint::options;
+use crate::member_order::{MemberCategory, WidgetCategory, category_rank, check_sequence};
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Optional member category sequence; unset uses the built-in ordering.
+    order: Option<Vec<MemberCategory>>,
+    /// Optional lifecycle sequence for classes extending `State`.
+    widgets_order: Option<Vec<WidgetCategory>>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MemberOrdering;
@@ -39,10 +51,11 @@ impl Rule for MemberOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        let options = options::get::<Options>(ctx, Self::NAME);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            order: read_string_list(ctx, MemberOrdering::NAME, "order"),
-            widgets_order: read_string_list(ctx, MemberOrdering::NAME, "widgets_order"),
+            order: options.order.as_deref(),
+            widgets_order: options.widgets_order.as_deref(),
             diags: Vec::new(),
         }))
     }
@@ -50,8 +63,8 @@ impl Rule for MemberOrdering {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    order: Option<Vec<String>>,
-    widgets_order: Option<Vec<String>>,
+    order: Option<&'a [MemberCategory]>,
+    widgets_order: Option<&'a [WidgetCategory]>,
     diags: Vec<Diagnostic>,
 }
 
@@ -62,19 +75,19 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 TopLevelDecl::Class(c) => check_class(
                     c.members(),
                     c.extends(),
-                    &self.order,
-                    &self.widgets_order,
+                    self.order,
+                    self.widgets_order,
                     &mut self.diags,
                     self.ctx,
                 ),
                 TopLevelDecl::Mixin(m) => {
-                    check_class(m.members(), None, &self.order, &self.widgets_order, &mut self.diags, self.ctx)
+                    check_class(m.members(), None, self.order, self.widgets_order, &mut self.diags, self.ctx)
                 }
                 TopLevelDecl::MixinClass(mc) => check_class(
                     mc.members(),
                     mc.extends(),
-                    &self.order,
-                    &self.widgets_order,
+                    self.order,
+                    self.widgets_order,
                     &mut self.diags,
                     self.ctx,
                 ),
@@ -92,8 +105,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 fn check_class(
     members: AstChildren<'_, ClassMember<'_>>,
     extends: Option<DartType<'_>>,
-    order: &Option<Vec<String>>,
-    widgets_order: &Option<Vec<String>>,
+    order: Option<&[MemberCategory]>,
+    widgets_order: Option<&[WidgetCategory]>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
@@ -130,25 +143,26 @@ fn extends_state(extends: Option<DartType<'_>>) -> bool {
 
 /// Lifecycle token for a State member, for `widgets_order`. `overridden-methods`
 /// is a best-effort catch-all for any other `@override` method.
-fn widget_token(member: ClassMember<'_>) -> Option<&'static str> {
+fn widget_token(member: ClassMember<'_>) -> Option<WidgetCategory> {
+    use WidgetCategory::*;
     match member {
-        ClassMember::Constructor(_) => Some("constructor"),
+        ClassMember::Constructor(_) => Some(Constructor),
         ClassMember::Method(m) => match m.name().name() {
-            "initState" => Some("init-state"),
-            "didChangeDependencies" => Some("did-change-dependencies"),
-            "didUpdateWidget" => Some("did-update-widget"),
-            "dispose" => Some("dispose"),
-            "build" => Some("build"),
-            _ if is_override(m.annotations()) => Some("overridden-methods"),
+            "initState" => Some(InitState),
+            "didChangeDependencies" => Some(DidChangeDependencies),
+            "didUpdateWidget" => Some(DidUpdateWidget),
+            "dispose" => Some(Dispose),
+            "build" => Some(Build),
+            _ if is_override(m.annotations()) => Some(OverriddenMethods),
             _ => None,
         },
         _ => None,
     }
 }
 
-fn widget_rank(member: ClassMember<'_>, seq: &[String]) -> Option<usize> {
+fn widget_rank(member: ClassMember<'_>, seq: &[WidgetCategory]) -> Option<usize> {
     let token = widget_token(member)?;
-    seq.iter().position(|t| t == token)
+    seq.iter().position(|t| *t == token)
 }
 
 use crate::member_order::is_override;

@@ -10,12 +10,7 @@
                 "files": ["lib/domain/**"],
                 "deny": ["dart:io", "package:flutter/**", "lib/data/**", "package:legacy/*.dart"],
                 "message": "Keep domain code independent of platform and data libraries."
-              },
-              {"files": ["lib/**"], "deny": ["["], "message": "Invalid glob must be ignored."},
-              {"files": ["lib/**", 42], "deny": ["dart:async"], "message": "Invalid selector must be ignored."},
-              {"files": ["lib/**"], "deny": ["dart:async", false], "message": "Invalid deny must be ignored."},
-              {"files": ["lib/**"], "deny": ["dart:async"], "message": " "},
-              {"deny": ["dart:async"], "message": "Missing files must be ignored."}
+              }
             ]
           }
         }

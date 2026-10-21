@@ -12,8 +12,8 @@
 //!
 //! ## Options
 //!
-//! `items` (list of objects, default: `[]`) — each entry maps a `class_name`
-//! (required) to steer away from, with an optional `use_instead` naming the
+//! `items` (list of objects, default: `[]`) — each entry maps a `class-name`
+//! (required) to steer away from, with an optional `use-instead` naming the
 //! design-system replacement to suggest in the message.
 //!
 //! Checks constructions throughout the program, including initializers and annotations.
@@ -27,13 +27,31 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct UseDesignSystemItem;
 
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Class names whose construction should be replaced with a design-system equivalent.
+    items: Vec<Item>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Item {
+    /// Class name of the construction to flag.
+    class_name: String,
+    /// Suggested design-system replacement name, shown in the diagnostic when provided.
+    use_instead: Option<String>,
+}
+
+crate::lint::options::impl_options!(Options);
+
 impl Rule for UseDesignSystemItem {
     fn prepare<'a>(
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let items = parse_config_items(ctx);
+        let items = &crate::lint::options::get::<Options>(ctx, Self::NAME).items;
         if items.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
@@ -48,7 +66,7 @@ impl Rule for UseDesignSystemItem {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    items: Vec<(&'a str, Option<&'a str>)>,
+    items: &'a [Item],
     diags: Vec<Diagnostic>,
 }
 
@@ -66,30 +84,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             _ => None,
         };
         if let Some((name, span)) = construction {
-            emit_for_base(name, span, &mut self.diags, self.ctx, &self.items);
+            emit_for_base(name, span, &mut self.diags, self.ctx, self.items);
         }
         StructuralTraversal::Continue
     }
 }
 }
 
-fn parse_config_items<'a>(ctx: &'a AnalyzeContext<'_>) -> Vec<(&'a str, Option<&'a str>)> {
-    let Some(items_array) = crate::lint::options::for_rule(ctx, UseDesignSystemItem::NAME)
-        .and_then(|opts| opts.get("items"))
-        .and_then(|v| v.as_array())
-    else {
-        return Vec::new();
-    };
-
-    items_array
-        .iter()
-        .filter_map(|item| {
-            let class_name = item.get("class_name").and_then(|v| v.as_str())?;
-            let use_instead = item.get("use_instead").and_then(|v| v.as_str());
-            Some((class_name, use_instead))
-        })
-        .collect()
-}
 
 fn callee_base_name(mut callee: Expr<'_>) -> Option<&str> {
     while let Expr::Call(call) = callee.unparenthesized() {
@@ -106,11 +107,12 @@ fn emit_for_base(
     span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
-    items: &[(&str, Option<&str>)],
+    items: &[Item],
 ) {
-    for (class_name, use_instead) in items {
-        if base_name == *class_name {
-            let message = if let Some(replacement) = use_instead {
+    for item in items {
+        let class_name = &item.class_name;
+        if base_name == class_name {
+            let message = if let Some(replacement) = &item.use_instead {
                 format!(
                     "Use '{}' from the design system instead of '{}'.",
                     replacement, class_name

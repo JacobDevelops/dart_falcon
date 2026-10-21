@@ -413,6 +413,14 @@ fn canonicalize_rules(rules: &mut Rules, path: &str, warnings: &mut Vec<String>)
             warnings,
         );
         entries.extend(canonical);
+        for (name, configuration) in entries {
+            if let falcon_config::RuleConfiguration::WithOptions { options, .. } = configuration {
+                warnings.extend(crate::canonicalize_option_keys(
+                    options.value_mut(),
+                    &format!("{path}.{group}.{name}.options"),
+                ));
+            }
+        }
     }
 }
 

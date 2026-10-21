@@ -16,10 +16,17 @@ use falcon_syntax::cst::*;
 
 use super::ordering::Order;
 
-const RULE: &str = "initializers-ordering";
-
 #[derive(Default)]
 pub struct InitializersOrdering;
+
+#[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Alphabetical initializer order; unset follows field declaration order.
+    order: Option<Order>,
+}
+
+crate::lint::options::impl_options!(Options);
 
 impl Rule for InitializersOrdering {
     fn prepare<'a>(
@@ -27,7 +34,7 @@ impl Rule for InitializersOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let order = Order::configured(ctx, RULE);
+        let order = crate::lint::options::get::<Options>(ctx, Self::NAME).order;
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             order,

@@ -9,12 +9,16 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use falcon_config::{KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, RulePlainConfiguration};
+use falcon_config::{
+    FalconConfig, KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, LoadedConfig, RulePlainConfiguration,
+};
 use falcon_rules::meta::{
     RULE_METADATA, RuleMeta, RuleSource, canonical_rule_name, canonicalize_rule_entries,
     canonicalize_rule_map, meta_for,
 };
 use falcon_rules::schema::SCHEMA_URL;
+use falcon_rules::{canonicalize_loaded_config, canonicalize_option_keys};
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 /// Upstream pyramid_lint ids whose rules were merged into a surviving
@@ -152,8 +156,7 @@ impl Migration {
 }
 
 /// Serialize a [`RuleConfig`] to its falcon.json value: `"off"`, `"warn"`, or
-/// `{ "level": "warn", "options": {...} }`. Option key names are passed through
-/// verbatim from the upstream config.
+/// `{ "level": "warn", "options": {...} }`.
 fn config_to_json(cfg: RuleConfig) -> Value {
     match cfg {
         RuleConfig::Disabled => json!(RulePlainConfiguration::Off),
@@ -166,12 +169,13 @@ fn config_to_json(cfg: RuleConfig) -> Value {
 
 /// Assemble a section's `rules` object: `recommended: false` plus each non-empty
 /// group. Groups are omitted when they contain no migrated rules.
-fn build_rules_object(groups: BTreeMap<String, Vec<(String, Value)>>) -> Value {
+fn build_rules_object(groups: BTreeMap<String, Vec<(String, Value)>>, path: &str) -> Value {
     let mut rules = Map::new();
     rules.insert("recommended".into(), json!(false));
     for (group, entries) in groups {
         if !entries.is_empty() {
-            let (entries, _warnings) = canonicalize_rule_entries(entries);
+            let (mut entries, _warnings) = canonicalize_rule_entries(entries);
+            canonicalize_group_options(&mut entries, &format!("{path}.rules.{group}"));
             rules.insert(group, Value::Object(entries));
         }
     }
@@ -182,8 +186,8 @@ fn build_rules_object(groups: BTreeMap<String, Vec<(String, Value)>>) -> Value {
 ///
 /// # Errors
 ///
-/// Returns an error string if the YAML cannot be parsed or the result cannot be
-/// serialized.
+/// Returns an error string if the YAML cannot be parsed, the migrated
+/// configuration is invalid, or the result cannot be serialized.
 pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     let doc: Value =
         serde_yaml::from_str(yaml).map_err(|e| format!("failed to parse YAML: {e}"))?;
@@ -221,18 +225,19 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
 
     let mut root = Map::new();
     root.insert("$schema".into(), json!(SCHEMA_URL));
-    root.insert("linter".into(), build_rules_object(migration.linter_groups));
+    root.insert(
+        "linter".into(),
+        build_rules_object(migration.linter_groups, "linter"),
+    );
     // Only emit the cross-file block when a cross-file rule was actually migrated.
     if !migration.cross_file_groups.is_empty() {
         root.insert(
             "cross-file".into(),
-            build_rules_object(migration.cross_file_groups),
+            build_rules_object(migration.cross_file_groups, "cross-file"),
         );
     }
 
-    let mut json = serde_json::to_string_pretty(&Value::Object(root))
-        .map_err(|e| format!("failed to serialize falcon.json: {e}"))?;
-    json.push('\n');
+    let json = serialize_config(&Value::Object(root))?;
 
     Ok(MigrationResult {
         json,
@@ -264,19 +269,18 @@ fn looks_like_falcon_json(content: &str) -> bool {
 /// `cross-file`, including each override's block) and `max_errors` → `max-errors`
 /// — then rewrite legacy rule ids (the pre-1.0 `snake_case` ids and the removed
 /// twin variants) to their canonical ids across `linter`/`cross-file` rule maps
-/// and every override, preserving each rule's level and options. When a legacy id
-/// and its canonical id (or two legacy twins) collide in the same group, the more
-/// severe level wins.
+/// and every override, preserving each rule's level and canonicalizing nested
+/// option keys to kebab-case. When a legacy id and its canonical id (or two legacy
+/// twins) collide in the same group, the more severe level wins.
 ///
 /// # Errors
 ///
-/// Returns an error string if the input is not valid JSON or cannot be
-/// re-serialized.
+/// Returns an error string if the input is not valid JSON, the migrated
+/// configuration is invalid, or the result cannot be serialized.
 pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     let mut root: Value =
         serde_json::from_str(json).map_err(|e| format!("failed to parse falcon.json: {e}"))?;
     let mut renamed = 0usize;
-    let mut unrecognized = Vec::new();
 
     for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
         rename_key(&mut root, legacy, canonical);
@@ -289,27 +293,47 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
 
     for section in ["linter", "cross-file"] {
         if let Some(s) = root.get_mut(section) {
-            canonicalize_section_rules(s, &mut renamed, &mut unrecognized);
+            canonicalize_section_rules(s, section, &mut renamed);
         }
     }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
-        for ov in overrides.iter_mut() {
+        for (index, ov) in overrides.iter_mut().enumerate() {
             for section in ["linter", "cross-file"] {
                 if let Some(s) = ov.get_mut(section) {
-                    canonicalize_section_rules(s, &mut renamed, &mut unrecognized);
+                    canonicalize_section_rules(
+                        s,
+                        &format!("overrides[{index}].{section}"),
+                        &mut renamed,
+                    );
                 }
             }
         }
     }
 
-    let mut out = serde_json::to_string_pretty(&root)
-        .map_err(|e| format!("failed to serialize falcon.json: {e}"))?;
-    out.push('\n');
+    let out = serialize_config(&root)?;
     Ok(MigrationResult {
         json: out,
-        unrecognized,
+        unrecognized: Vec::new(),
         migrated_count: renamed,
     })
+}
+
+/// Validate registered rule names and options before emitting the normalized config.
+///
+/// Structural key checks and `max-errors` validation remain the file loader's job;
+/// its deserialization entry point requires a path rather than an in-memory value.
+fn serialize_config(value: &Value) -> Result<String, String> {
+    let config = FalconConfig::deserialize(value)
+        .map_err(|e| format!("invalid migrated falcon.json: {e}"))?;
+    canonicalize_loaded_config(LoadedConfig {
+        config,
+        warnings: Vec::new(),
+    })
+    .map_err(|e| format!("invalid migrated falcon.json: {e}"))?;
+    let mut json = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("failed to serialize falcon.json: {e}"))?;
+    json.push('\n');
+    Ok(json)
 }
 
 fn rename_cross_file_section(value: &mut Value) {
@@ -341,39 +365,39 @@ fn rename_key(value: &mut Value, from: &str, to: &str) {
 
 /// Canonicalize the rule keys of one `linter`/`cross-file` section's `rules`
 /// object (each group is an object of rule id → configuration).
-fn canonicalize_section_rules(
-    section: &mut Value,
-    renamed: &mut usize,
-    unrecognized: &mut Vec<String>,
-) {
+fn canonicalize_section_rules(section: &mut Value, path: &str, renamed: &mut usize) {
     let Some(rules) = section.get_mut("rules").and_then(Value::as_object_mut) else {
         return;
     };
-    for group_val in rules.values_mut() {
+    for (name, group_val) in rules.iter_mut() {
         if let Some(group) = group_val.as_object_mut() {
-            canonicalize_group(group, renamed, unrecognized);
+            canonicalize_group(group, renamed);
+            canonicalize_group_options(group, &format!("{path}.rules.{name}"));
         }
     }
 }
 
 /// Rewrite every rule key in one group map to its canonical id, merging
 /// collisions by keeping the more severe level.
-fn canonicalize_group(
-    group: &mut Map<String, Value>,
-    renamed: &mut usize,
-    unrecognized: &mut Vec<String>,
-) {
+fn canonicalize_group(group: &mut Map<String, Value>, renamed: &mut usize) {
     for key in group.keys() {
         let canonical = canonical_rule_name(key);
-        if meta_for(canonical).is_none() {
-            if !unrecognized.contains(key) {
-                unrecognized.push(key.clone());
-            }
-        } else if canonical != key {
+        if canonical != key {
             *renamed += 1;
         }
     }
     let _warnings = canonicalize_rule_map(group);
+}
+
+/// Rewrite option payload keys using the shared loader alias policy.
+fn canonicalize_group_options(group: &mut Map<String, Value>, path: &str) {
+    for (name, config) in group {
+        if let Some(options) = config.get_mut("options") {
+            // These keys are already rewritten; loader deprecation advice to run
+            // this same migration would be misleading here.
+            let _warnings = canonicalize_option_keys(options, &format!("{path}.{name}.options"));
+        }
+    }
 }
 
 /// Read `input`, migrate it, print a summary to stderr, and either print the
@@ -420,18 +444,13 @@ pub fn run_migrate(input: Option<PathBuf>, write: bool, output: Option<PathBuf>)
         eprintln!("migrated {} rule(s)", result.migrated_count);
     }
     if !result.unrecognized.is_empty() {
-        let description = if upgrade {
-            "rule id(s) matched no known rule (left unchanged)"
-        } else {
-            "unrecognized upstream rule(s) skipped"
-        };
-        eprintln!("warning: {} {description}:", result.unrecognized.len());
+        eprintln!(
+            "warning: {} unrecognized upstream rule(s) skipped:",
+            result.unrecognized.len()
+        );
         for id in &result.unrecognized {
             eprintln!("  - {id}");
         }
-    }
-    if !upgrade {
-        eprintln!("note: rule option keys are passed through verbatim and may need manual review");
     }
 
     if write {

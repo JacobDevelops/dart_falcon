@@ -10,9 +10,11 @@
 use glob::Pattern;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 /// Top-level falcon.json configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -446,6 +448,81 @@ impl Rules {
     }
 }
 
+/// Raw rule options and their lazily initialized, rule-specific parsed data.
+///
+/// Serialization includes only the raw JSON value. Cloning an initialized
+/// wrapper shares its parsed data; mutating a clone's value clears only its cache.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RuleOptions {
+    value: serde_json::Value,
+    #[serde(skip)]
+    parsed: OnceLock<Arc<dyn Any + Send + Sync>>,
+}
+
+impl From<serde_json::Value> for RuleOptions {
+    fn from(value: serde_json::Value) -> Self {
+        Self {
+            value,
+            parsed: OnceLock::new(),
+        }
+    }
+}
+
+impl RuleOptions {
+    /// The original JSON options.
+    pub fn value(&self) -> &serde_json::Value {
+        &self.value
+    }
+
+    /// Mutate the JSON options, invalidating any previously parsed data.
+    pub fn value_mut(&mut self) -> &mut serde_json::Value {
+        let _ = self.parsed.take();
+        &mut self.value
+    }
+
+    /// Initialize the parsed data once and return it on subsequent accesses.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this wrapper was already initialized with a different type.
+    pub fn get_or_init<T: Any + Send + Sync>(
+        &self,
+        initializer: impl FnOnce(&serde_json::Value) -> T,
+    ) -> &T {
+        self.parsed
+            .get_or_init(|| Arc::new(initializer(&self.value)))
+            .downcast_ref()
+            .expect("rule options initialized with a different parsed type")
+    }
+
+    /// Initialize parsed data after successful validation, leaving errors uncached.
+    ///
+    /// Concurrent first accesses may run more than one initializer; the first
+    /// successful value stored is shared by all callers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this wrapper was already initialized with a different type.
+    pub fn get_or_try_init<T: Any + Send + Sync, E>(
+        &self,
+        initializer: impl FnOnce(&serde_json::Value) -> Result<T, E>,
+    ) -> Result<&T, E> {
+        let parsed = if let Some(parsed) = self.parsed.get() {
+            parsed
+        } else {
+            let value = initializer(&self.value)?;
+            let _ = self.parsed.set(Arc::new(value));
+            self.parsed
+                .get()
+                .expect("successful rule options initialization must populate the cache")
+        };
+        Ok(parsed
+            .downcast_ref()
+            .expect("rule options initialized with a different parsed type"))
+    }
+}
+
 /// A single rule's configuration: either a bare level or a level with options.
 ///
 /// Deserialization is hand-written (rather than `#[serde(untagged)]`) so that an
@@ -459,7 +536,7 @@ pub enum RuleConfiguration {
     /// `{ "level": "error", "options": { ... } }`.
     WithOptions {
         level: RulePlainConfiguration,
-        options: serde_json::Value,
+        options: RuleOptions,
     },
 }
 
@@ -475,8 +552,15 @@ impl RuleConfiguration {
     /// The configured options, or `None` if absent. The options-less
     /// `{ "level": "warn" }` form normalizes to `None`, matching the plain form.
     pub fn options(&self) -> Option<&serde_json::Value> {
+        self.options_data().map(RuleOptions::value)
+    }
+
+    /// The configured options and parsed cache, or `None` if absent or null.
+    pub fn options_data(&self) -> Option<&RuleOptions> {
         match self {
-            RuleConfiguration::WithOptions { options, .. } if !options.is_null() => Some(options),
+            RuleConfiguration::WithOptions { options, .. } if !options.value().is_null() => {
+                Some(options)
+            }
             _ => None,
         }
     }
@@ -516,7 +600,7 @@ impl<'de> Deserialize<'de> for RuleConfiguration {
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut level: Option<RulePlainConfiguration> = None;
-                let mut options: Option<serde_json::Value> = None;
+                let mut options: Option<RuleOptions> = None;
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "level" => {
@@ -532,7 +616,7 @@ impl<'de> Deserialize<'de> for RuleConfiguration {
                 let level = level.ok_or_else(|| de::Error::missing_field("level"))?;
                 Ok(RuleConfiguration::WithOptions {
                     level,
-                    options: options.unwrap_or(serde_json::Value::Null),
+                    options: options.unwrap_or_default(),
                 })
             }
         }
@@ -619,19 +703,59 @@ impl FalconConfig {
         group: &str,
         rule_name: &str,
     ) -> Option<&serde_json::Value> {
-        let mut result = self.rule_options(group, rule_name);
-        for ov in &self.overrides {
-            if !ov.matches(path) {
-                continue;
-            }
-            if let Some(opts) = ov
-                .linter
-                .as_ref()
-                .and_then(|l| l.rules.groups.get(group))
+        self.rule_options_data_for(path, group, rule_name)
+            .map(RuleOptions::value)
+    }
+
+    /// Return effective file-rule options and their parsed cache.
+    ///
+    /// Uses the same whole-value replacement semantics as [`Self::rule_options_for`].
+    pub fn rule_options_data_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+    ) -> Option<&RuleOptions> {
+        self.options_data_for(path, group, rule_name, Section::Linter)
+    }
+
+    /// Return effective cross-file-rule options and their parsed cache.
+    ///
+    /// Matching overrides replace the whole value in order; absent or null
+    /// options leave the previous value intact, independently of rule levels.
+    pub fn cross_file_options_data_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+    ) -> Option<&RuleOptions> {
+        self.options_data_for(path, group, rule_name, Section::CrossFile)
+    }
+
+    fn options_data_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+        section: Section,
+    ) -> Option<&RuleOptions> {
+        let rules = match section {
+            Section::Linter => &self.linter.rules,
+            Section::CrossFile => &self.cross_file.rules,
+        };
+        let mut result = rules
+            .groups
+            .get(group)
+            .and_then(|g| g.get(rule_name))
+            .and_then(RuleConfiguration::options_data);
+        for ov in self.overrides.iter().filter(|ov| ov.matches(path)) {
+            if let Some(options) = section
+                .override_rules(ov)
+                .and_then(|block| block.rules.groups.get(group))
                 .and_then(|g| g.get(rule_name))
-                .and_then(RuleConfiguration::options)
+                .and_then(RuleConfiguration::options_data)
             {
-                result = Some(opts);
+                result = Some(options);
             }
         }
         result
@@ -1183,5 +1307,151 @@ mod warning_tests {
         let loaded = super::deserialize_config(&path).unwrap();
         assert!(loaded.config.overrides[0].matches("anywhere.dart"));
         std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod option_tests {
+    use super::{FalconConfig, RuleConfiguration, RuleOptions};
+    use serde_json::json;
+
+    #[test]
+    fn failed_initialization_is_not_cached_and_success_is_reused() {
+        let options = RuleOptions::from(json!({ "limit": 4 }));
+        assert_eq!(
+            options.get_or_try_init::<u64, _>(|_| Err("invalid options")),
+            Err("invalid options"),
+        );
+        let parsed = options
+            .get_or_try_init::<u64, &str>(|value| Ok(value["limit"].as_u64().unwrap()))
+            .unwrap();
+        assert_eq!(*parsed, 4);
+        assert!(std::ptr::eq(
+            parsed,
+            options
+                .get_or_try_init::<u64, &str>(|_| panic!("must reuse validated data"))
+                .unwrap(),
+        ));
+    }
+
+    #[test]
+    fn parsed_options_are_cached_shared_on_clone_and_invalidated_on_mutation() {
+        let value = json!({ "limit": 4 });
+        let options = RuleOptions::from(value.clone());
+        let parsed = options.get_or_init(|value| value["limit"].as_u64().unwrap());
+        assert_eq!(*parsed, 4);
+        assert!(std::ptr::eq(
+            parsed,
+            options.get_or_init::<u64>(|_| panic!("must reuse cached data")),
+        ));
+
+        let mut cloned = options.clone();
+        assert!(std::ptr::eq(
+            parsed,
+            cloned.get_or_init::<u64>(|_| panic!("must share cached data")),
+        ));
+        cloned.value_mut()["limit"] = json!(7);
+        assert_eq!(
+            *cloned.get_or_init(|value| value["limit"].as_u64().unwrap()),
+            7,
+        );
+        assert_eq!(*parsed, 4);
+        assert_eq!(options.value(), &value);
+        assert_eq!(serde_json::to_value(&options).unwrap(), value);
+
+        let decoded: RuleOptions = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            *decoded.get_or_init(|_| String::from("fresh cache")),
+            "fresh cache",
+        );
+    }
+
+    #[test]
+    fn rule_configuration_keeps_its_json_shape_and_absent_options() {
+        for value in [
+            json!("warn"),
+            json!({ "level": "warn", "options": null }),
+            json!({ "level": "warn", "options": { "limit": 4 } }),
+        ] {
+            let config: RuleConfiguration = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&config).unwrap(), value);
+            assert_eq!(
+                config.options(),
+                config.options_data().map(RuleOptions::value),
+            );
+        }
+        let config: RuleConfiguration = serde_json::from_value(json!({ "level": "warn" })).unwrap();
+        assert!(config.options_data().is_none());
+        assert_eq!(
+            serde_json::to_value(&config).unwrap(),
+            json!({ "level": "warn", "options": null }),
+        );
+    }
+
+    #[test]
+    fn option_selectors_replace_values_and_ignore_levels_nulls_and_other_sections() {
+        for section in ["linter", "cross-file"] {
+            let config: FalconConfig = serde_json::from_value(json!({
+                section: {
+                    "rules": { "style": {
+                        "example": { "level": "warn", "options": { "base": true, "limit": 4 } }
+                    } }
+                },
+                "overrides": [
+                    {
+                        "includes": ["test/**"],
+                        section: { "rules": { "style": {
+                            "example": { "level": "warn", "options": { "limit": 2 } }
+                        } } }
+                    },
+                    {
+                        "includes": ["test/**"],
+                        section: { "rules": { "style": { "example": "off" } } }
+                    },
+                    {
+                        "includes": ["test/**"],
+                        section: { "rules": { "style": {
+                            "example": { "level": "error", "options": null }
+                        } } }
+                    },
+                    {
+                        "includes": ["test/special/**"],
+                        section: { "rules": { "style": {
+                            "example": { "level": "warn", "options": {} }
+                        } } }
+                    }
+                ]
+            }))
+            .unwrap();
+            for (path, expected) in [
+                ("lib/main.dart", json!({ "base": true, "limit": 4 })),
+                ("test/main.dart", json!({ "limit": 2 })),
+                ("test/special/main.dart", json!({})),
+            ] {
+                let file = config.rule_options_data_for(path, "style", "example");
+                let cross_file = config.cross_file_options_data_for(path, "style", "example");
+                let (selected, other) = if section == "linter" {
+                    (file, cross_file)
+                } else {
+                    (cross_file, file)
+                };
+                assert_eq!(selected.map(RuleOptions::value), Some(&expected));
+                assert!(other.is_none());
+                assert_eq!(
+                    config.rule_options_for(path, "style", "example"),
+                    file.map(RuleOptions::value),
+                );
+            }
+            assert!(
+                config
+                    .rule_options_data_for("test/main.dart", "wrong-group", "example")
+                    .is_none()
+            );
+            assert!(
+                config
+                    .cross_file_options_data_for("test/main.dart", "wrong-group", "example")
+                    .is_none()
+            );
+        }
     }
 }

@@ -1,12 +1,27 @@
 //! Reports long if/else-if chains; replace them with a switch or extracted helpers.
 //!
-//! `max_branches` (integer, default: 3) counts every if and the final else.
+//! `max-branches` (integer, default: 3) counts every if and the final else.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Options {
+    /// Maximum number of branches in an `if`/`else if` chain.
+    max_branches: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { max_branches: 3 }
+    }
+}
+
+crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct AvoidIfWithManyBranches;
@@ -19,11 +34,7 @@ impl Rule for AvoidIfWithManyBranches {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-            threshold: crate::lint::options::usize(
-                crate::lint::options::for_rule(ctx, AvoidIfWithManyBranches::NAME),
-                "max_branches",
-            )
-            .unwrap_or(3),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_branches,
             chained: None,
             parents: Vec::new(),
         }))

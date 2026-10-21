@@ -5,7 +5,7 @@
         "avoid-if-with-many-branches": {
           "level": "warn",
           "options": {
-            "max_branches": 2
+            "max-branches": 2
           }
         }
       }

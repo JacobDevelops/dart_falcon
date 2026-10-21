@@ -169,23 +169,106 @@ Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the 
 ## Rule options
 
 Some rules accept an `options` object under the `{ "level": ..., "options": {…} }`
-form. Options are read leniently: a missing or malformed value falls back to the
-rule's default, and a bad option never aborts a run.
+form. Missing options use the rule's defaults. Unknown keys and invalid option
+types reject the configuration at load time with the full configuration path.
+
+An individual option field set to `null` is invalid unless that field explicitly
+accepts null. For compatibility, setting the entire `options` value to `null`
+is treated like omitting options and uses the rule defaults.
 
 ```json
 {
   "linter": {
     "rules": {
       "complexity": {
-        "max-lines-for-file": { "level": "warn", "options": { "max_lines": 400 } },
-        "cyclomatic-complexity": { "level": "warn", "options": { "max_complexity": 15 } }
+        "max-lines-for-file": { "level": "warn", "options": { "max-lines": 400 } },
+        "cyclomatic-complexity": { "level": "warn", "options": { "max-complexity": 15 } }
       }
     }
   }
 }
 ```
 
-Option names use `snake_case` inside the `options` object.
+Option names use `kebab-case`. Historical `snake_case` option keys still load
+with a deprecation warning, including keys nested in arrays and objects.
+When an alias and canonical key are both present, the canonical key wins.
+`falcon migrate` rewrites these keys. The JSON schema provides rule-specific
+option completion, types, descriptions, and defaults.
+
+The table below is generated from the typed rule options by `cargo xtask docgen`.
+
+<!-- rule-options:start -->
+
+| Rule | Option | Type | Default | Description |
+|------|--------|------|---------|-------------|
+| `arguments-ordering` | `alphabetize` | boolean | `false` | Alphabetizes named arguments in ascending order when true. |
+| `arguments-ordering` | `order` | string &#124; null | `null` | Alphabetical ordering direction for named arguments; unset uses parameter declaration order. |
+| `avoid-banned-annotations` | `rules` | object[] | `[]` | Banned annotation-name globs and the diagnostic message to report on a match. |
+| `avoid-banned-exports` | `rules` | object[] | `[]` | Banned export-URI globs and the diagnostic message to report on a match. |
+| `avoid-banned-names` | `rules` | object[] | `[]` | Banned declaration-name globs and the diagnostic message to report on a match. |
+| `avoid-banned-types` | `rules` | object[] | `[]` | Banned type-name globs and the diagnostic message to report on a match. |
+| `avoid-complex-arithmetic-expressions` | `max-terms` | integer | `6` | Maximum number of arithmetic operands in one connected expression. |
+| `avoid-complex-conditions` | `threshold` | integer | `10` | Maximum number of logical operands in a condition. |
+| `avoid-complex-loop-conditions` | `threshold` | integer | `1` | Maximum number of logical operands in a loop condition. |
+| `avoid-empty-test-groups` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |
+| `avoid-if-with-many-branches` | `max-branches` | integer | `3` | Maximum number of branches in an &#96;if&#96;/&#96;else if&#96; chain. |
+| `avoid-long-records` | `max-fields` | integer | `6` | Maximum number of fields in a record. |
+| `avoid-negated-conditions` | `ignore-null-checks` | boolean | `false` | Exempt null comparisons from the negated-condition diagnostic. |
+| `avoid-nested-assignments` | `ignore-null-aware-assignments` | boolean | `false` | Exempt null-aware assignments (&#96;??=&#96;) from the nested-assignment diagnostic. |
+| `avoid-nested-switch-expressions` | `max-nesting` | integer | `1` | Maximum number of nested switch expressions. |
+| `avoid-nested-switches` | `max-nesting` | integer | `1` | Maximum number of nested switch statements. |
+| `avoid-nested-try-statements` | `max-nesting` | integer | `2` | Maximum number of nested &#96;try&#96; statements. |
+| `avoid-referencing-subclasses` | `ignored-annotations` | string[] | `["freezed","Freezed","unfreezed"]` | Annotation names that exempt a class from subclass-reference checks. |
+| `avoid-unnecessary-getter` | `ignore-upcast` | boolean | `true` | Ignore getters whose value is explicitly upcast to a broader type. |
+| `banned-imports` | `rules` | object[] | `[]` | Package-relative import boundaries applied to matching source files. |
+| `banned-usage` | `rules` | object[] | `[]` | Banned API-name globs and the diagnostic message to report on a match. |
+| `boolean-prefixes` | `valid-prefixes` | string[] | `[]` | Additional accepted prefixes for boolean names; these extend built-ins. |
+| `class-members-ordering` | `order` | array &#124; null | `null` | Optional member category sequence; unset uses the built-in ordering. |
+| `cognitive-complexity` | `max-complexity` | integer | `15` | Maximum cognitive complexity allowed for a function. |
+| `cyclomatic-complexity` | `max-complexity` | integer | `20` | Maximum cyclomatic complexity allowed for a function. |
+| `enum-constants-ordering` | `order` | string &#124; null | `null` | Alphabetical order for enum constants; unset leaves this rule inactive. |
+| `extend-equatable` | `class-name-pattern` | string &#124; null | `null` | Regex selecting class names that must use Equatable semantics. |
+| `extend-equatable` | `file-name-pattern` | string &#124; null | `null` | Regex selecting file names whose classes must use Equatable semantics. |
+| `format-comment` | `ignored-patterns` | string[] | `[]` | Regex patterns that exclude matching comments from formatting checks. |
+| `format-comment` | `only-doc-comments` | boolean | `false` | When true, checks only documentation comments (&#96;///&#96;). |
+| `initializers-ordering` | `order` | string &#124; null | `null` | Alphabetical initializer order; unset follows field declaration order. |
+| `map-keys-ordering` | `order` | string &#124; null | `null` | Alphabetical key order; unset leaves this rule inactive. |
+| `max-lines-for-file` | `max-lines` | integer | `200` | Maximum number of source lines allowed in a file. |
+| `max-lines-for-function` | `max-lines` | integer | `100` | Maximum number of source lines allowed in a function. |
+| `max-parameters-for-function` | `max-parameters` | integer | `5` | Maximum number of parameters allowed in a function. |
+| `max-statements` | `max-statements` | integer | `20` | Maximum number of statements allowed in a function. |
+| `max-switch-cases` | `max-cases` | integer | `10` | Maximum number of non-default cases in a switch. |
+| `maximum-nesting-level` | `max-nesting` | integer | `5` | Maximum nesting depth allowed in a function. |
+| `member-ordering` | `order` | array &#124; null | `null` | Optional member category sequence; unset uses the built-in ordering. |
+| `member-ordering` | `widgets-order` | array &#124; null | `null` | Optional lifecycle sequence for classes extending &#96;State&#96;. |
+| `missing-test-assertion` | `include-assertions` | string[] | `[]` | Additional assertion function names recognized within test callbacks. |
+| `move-variable-closer-to-its-usage` | `ignore-after-if` | boolean | `true` | Skip moving declarations that follow an &#96;if&#96; statement. |
+| `move-variable-closer-to-its-usage` | `ignore-const` | boolean | `false` | Skip const variables even when their literal initializer has no side effects. |
+| `no-magic-number` | `allowed` | number[] | `[-1.0,0.0,1.0]` | Numeric values that are exempt from magic-number diagnostics. |
+| `no-magic-string` | `allow-only-once` | boolean | `false` | Allow string literal values that occur only once. |
+| `no-magic-string` | `ignored-invocations` | string[] | `["print","debugPrint"]` | Invocation names whose direct string arguments are exempt from this rule. |
+| `parameters-ordering` | `order` | string &#124; null | `null` | Alphabetical order for named parameters; unset leaves this rule inactive. |
+| `pattern-fields-ordering` | `order` | string &#124; null | `null` | Alphabetical order for named pattern fields; unset leaves this rule inactive. |
+| `prefer-commenting-analyzer-ignores` | `ignore-global` | boolean | `true` | Do not require explanations for file-wide analyzer ignore directives. |
+| `prefer-container` | `min-sequence` | integer | `3` | Minimum number of compatible nested layout widgets required for a diagnostic; values below three are treated as three. |
+| `prefer-correct-callback-field-name` | `name-pattern` | string &#124; null | `null` | Regular expression matching callback field names; absent or empty patterns disable this rule. |
+| `prefer-correct-error-name` | `allowed-names` | string[] | `[]` | Accepted names for exception variables and error parameters; an empty list disables this rule. |
+| `prefer-correct-error-name` | `ignored-names` | string[] | `[]` | Names exempt from the accepted-name check. |
+| `prefer-correct-handler-name` | `ignore-public` | boolean | `false` | Whether to skip public handler methods. |
+| `prefer-correct-handler-name` | `name-pattern` | string &#124; null | `null` | Regular expression matching handler method names; absent or empty patterns disable this rule. |
+| `prefer-correct-identifier-length` | `exceptions` | string[] | `[]` | Identifier names exempt from length checks, compared after removing one leading privacy underscore. |
+| `prefer-correct-identifier-length` | `max-length` | integer | `300` | Longest permitted identifier length, excluding one leading privacy underscore. |
+| `prefer-correct-identifier-length` | `min-length` | integer | `3` | Shortest permitted identifier length, excluding one leading privacy underscore. |
+| `prefer-extracting-callbacks` | `allowed-line-count` | integer &#124; null | `null` | Callback body line threshold; &#96;None&#96; disables the length filter. |
+| `prefer-extracting-callbacks` | `ignored-named-arguments` | string[] | `[]` | Named widget-constructor arguments whose callbacks are ignored. |
+| `prefer-moving-to-variable` | `allowed-duplicated-chains` | integer | `2` | Minimum repeated expression-chain count for extraction (clamped to at least two). |
+| `prefer-named-parameters` | `max-number` | integer | `1` | Maximum number of positional parameters allowed before named parameters are preferred. |
+| `prefer-unique-test-names` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |
+| `record-fields-ordering` | `order` | string &#124; null | `null` | Lexicographic direction in which named fields in each record type must be ordered. |
+| `use-design-system-item` | `items` | object[] | `[]` | Class names whose construction should be replaced with a design-system equivalent. |
+| `widget-tree-depth` | `max-nesting` | integer | `8` | Maximum depth of nested widget construction allowed in a widget tree. |
+
+<!-- rule-options:end -->
 
 ### Banned declarations and API usage (group `suspicious`)
 
@@ -193,7 +276,7 @@ Option names use `snake_case` inside the `options` object.
 `avoid-banned-exports` and `banned-usage` do nothing until configured.
 Like `banned-imports`, each entry in `options.rules` contains a `deny` match
 list and a nonblank `message`. Matches are case-sensitive globs; malformed
-entries are ignored.
+entries reject the configuration with the full option path.
 
 ```json
 {
@@ -225,61 +308,29 @@ entries are ignored.
 For `banned-usage`, a bare class name matches references to the type itself,
 not construction. Ban `Client.new` or `Client.named` to target its constructors.
 
-### Suspicious expression rules
-
-| Rule | Option | Default | Meaning |
-|------|--------|---------|---------|
-| `avoid-nested-assignments` | `ignore_null_aware_assignments` | `false` | Exempt nested `??=` assignments. |
-| `avoid-negated-conditions` | `ignore_null_checks` | `false` | Exempt negated null checks. |
-| `no-magic-string` | `allow_only_once` | `false` | Allow a string value that occurs only once in the file. |
-| `no-magic-string` | `ignored_invocations` | `["print", "debugPrint"]` | Invocation names whose direct string arguments are exempt. |
-| `avoid-referencing-subclasses` | `ignored_annotations` | `["freezed", "Freezed", "unfreezed"]` | Replaces the defaults; exempt classes by exact, case-sensitive final annotation name segment. |
-
 ### Equatable selection
 
 `extend-equatable` (`style`, `equatable` domain) does nothing until configured.
-Set `class_name_pattern` and/or `file_name_pattern` to regular expressions selecting
+Set `class-name-pattern` and/or `file-name-pattern` to regular expressions selecting
 value classes that should extend Equatable. Either matching pattern selects a
-class; file patterns match the file basename, not its full path. Missing or invalid
-patterns select nothing. For example:
+class; file patterns match the file basename, not its full path. Missing patterns
+select nothing; invalid regular expressions reject the configuration. For example:
 
 ```json
 "extend-equatable": {
   "level": "warn",
-  "options": { "class_name_pattern": "State$" }
+  "options": { "class-name-pattern": "State$" }
 }
 ```
 
-### Metric thresholds (group `complexity`)
-
-| Rule | Option | Default | Meaning |
-|------|--------|---------|---------|
-| `max-lines-for-file` | `max_lines` | `200` | Flag files with more than this many lines. The message states the actual configured threshold. |
-| `max-lines-for-function` | `max_lines` | `100` | Flag functions/methods longer than this many lines. |
-| `max-parameters-for-function` | `max_parameters` | `5` | Flag functions/methods with more than this many parameters. Constructors are not counted (matching dart_code_linter's number-of-parameters metric), and `copyWith` methods are exempt. |
-| `max-switch-cases` | `max_cases` | `10` | Flag switch statements with more than this many non-default cases. |
-| `cyclomatic-complexity` | `max_complexity` | `20` | Flag functions whose cyclomatic complexity (1 + decision points: `if`, ternary, `&&`, `\|\|`, `??`, loops, `catch`, non-default `case`, pattern `when` guards) exceeds this value. |
-| `maximum-nesting-level` | `max_nesting` | `5` | Flag functions whose deepest nesting of control-flow blocks (`if`/`for`/`while`/`do`/`switch`/`try`) exceeds this value. |
-| `avoid-long-records` | `max_fields` | `6` | Limit positional and named fields together in record values and types. |
-| `avoid-complex-arithmetic-expressions` | `max_terms` | `6` | Limit connected numeric arithmetic terms; calls are opaque and parentheses do not reset the count. |
-| `avoid-if-with-many-branches` | `max_branches` | `3` | Limit branches in an if/else-if chain, including a final else. |
-| `avoid-nested-switches` | `max_nesting` | `1` | Limit nested switch statements; nested callable bodies restart the count. |
-| `avoid-nested-switch-expressions` | `max_nesting` | `1` | Limit nested switch expressions; nested callable bodies restart the count. |
-| `avoid-nested-try-statements` | `max_nesting` | `2` | Limit nested try statements; nested callable bodies restart the count. |
-| `max-statements` | `max_statements` | `20` | Limit statements per function body, excluding blocks, labels, empty statements, and local function declarations; nested bodies are independent. |
-| `cognitive-complexity` | `max_complexity` | `15` | Limit nesting-weighted decisions, catches, alternatives, and logical operator sequences; nested callable bodies are independent. |
-| `widget-tree-depth` | `max_nesting` | `8` | Limit resolved Flutter widget construction depth, counting the root as one and excluding SizedBox. Lists, parentheses, and conditional branches add no levels. Helper calls, callbacks, and extracted references establish independent trees. |
-| `avoid-complex-conditions` | `threshold` | `10` | Flag a connected `&&`/`\|\|` expression with more operands than this. Parentheses and `!` keep the count; any other expression is one operand. |
-| `avoid-complex-loop-conditions` | `threshold` | `1` | Same counting for `while`, `do`-`while` and C-style `for` conditions, including collection `for`. For-in iterables, initializers and updaters are not counted. |
-
 ### Test registration helpers
 
-`avoid-empty-test-groups` (`correctness`) and `prefer-unique-test-names` (`suspicious`) accept `include_methods` (array of strings, default `[]`). List custom test registration helper names, for example `"include_methods": ["testCase"]`, to count these calls as tests in addition to canonical test-framework registrations.
+`avoid-empty-test-groups` (`correctness`) and `prefer-unique-test-names` (`suspicious`) accept `include-methods` (array of strings, default `[]`). List custom test registration helper names, for example `"include-methods": ["testCase"]`, to count these calls as tests in addition to canonical test-framework registrations.
 
 ### Additional test assertions
 
 `missing-test-assertion` (`correctness`, `test` domain) accepts
-`include_assertions` (array of strings, default `[]`). These names extend the
+`include-assertions` (array of strings, default `[]`). These names extend the
 built-in framework expectations and mock verification calls with trusted project
 assertion helpers, including local functions. Names match their exact call-site
 spelling; include the prefix for prefixed calls.
@@ -287,7 +338,7 @@ spelling; include the prefix for prefixed calls.
 ```json
 "missing-test-assertion": {
   "level": "warn",
-  "options": { "include_assertions": ["assertResult", "helpers.verifyState"] }
+  "options": { "include-assertions": ["assertResult", "helpers.verifyState"] }
 }
 ```
 
@@ -295,52 +346,9 @@ Only `_test.dart` files importing `test` or `flutter_test` are checked, and the
 test registration must resolve to a framework package. Assertions in nested
 tests or unused local closures and functions do not satisfy the enclosing test.
 
-### Identifier and naming rules
-
-| Rule (group) | Option | Default | Meaning |
-|--------------|--------|---------|---------|
-| `prefer-correct-identifier-length` (`style`) | `min_length` | `3` | Flag identifiers shorter than this. Checks variable/field declarations, getter/setter names and enum constants, not parameters, catch clauses, for-each variables or plain function/method names. A single leading underscore is stripped before the length and exception checks. |
-| | `max_length` | `300` | Flag identifiers longer than this. |
-| | `exceptions` | `[]` | Names always allowed regardless of length (there is no built-in list). |
-| `boolean-prefixes` (`style`) | `valid_prefixes` | `["is","are","was","were","has","have","had","can","should","will","do","does","did"]` | Accepted boolean-name prefixes (dart-pyramid-lint defaults). User entries **extend** the defaults. Only variable/field declarations with a boolean-*literal* initializer, and bool-returning methods/getters/functions, are checked; parameters and uninitialized fields are not. Names are matched with a single leading underscore stripped, and `@override` methods are exempt. |
-| `prefer-correct-error-name` (`style`) | `allowed_names` | unset | Accepted exception parameter names in catch clauses and resolved SDK Future/Stream error callbacks. Inactive until a nonempty list is configured. |
-| | `ignored_names` | `[]` | Additional error parameter names to ignore. |
-| `prefer-correct-handler-name` (`style`) | `name_pattern` | unset | Regular expression required for callback handler method names, ignoring a privacy underscore. Inactive until a valid nonempty pattern is configured; inherited contracts and annotated methods are excluded. |
-| | `ignore_public` | `false` | Exclude public handler methods. |
-| `prefer-correct-callback-field-name` (`style`) | `name_pattern` | unset | Regular expression identifying callback fields. Function fields must match and non-function fields must not match. Inactive until a valid nonempty pattern is configured; `_` is ignored. |
-
-### `prefer-named-parameters` (`style`)
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `max_number` | `1` | Maximum positional parameters before named parameters are preferred. Inherited method contracts, extension types, closures, setters and operators are excluded. |
+### `boolean-prefixes` (`style`)
 
 The `prefer-boolean-prefixes` rule id is an alias for `boolean-prefixes` and uses the same options and declaration scope. Like the other legacy ids, the JSON schema only lists the canonical `boolean-prefixes`, so prefer that id in new configs.
-
-### `prefer-commenting-analyzer-ignores` (`style`)
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `ignore_global` | `true` | Exclude `ignore_for_file:` directives. Set to `false` to require explanations for both file-wide and line-specific analyzer ignores. |
-
-### `move-variable-closer-to-its-usage` (`performance`)
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `ignore_const` | `false` | Exclude const declarations. Only immutable scalar-literal declarations are considered. |
-| `ignore_after_if` | `true` | Skip declarations used only after an intervening if statement. Set to `false` to recommend moving these declarations as well as declarations used in one branch. |
-
-### `prefer-moving-to-variable` (`complexity`)
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `allowed_duplicated_chains` | `2` | The occurrence index at which a repeated expression is flagged. `2` flags the 2nd and later duplicates; `3` flags the 3rd and later. Values below `2` are clamped to `2`. |
-
-### `prefer-container` (`style`, `flutter`)
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `min_sequence` | `3` | How many directly nested Container-compatible widgets (e.g. `Padding` → `Align` → `DecoratedBox`) are needed before suggesting one `Container`. Values below `3` are raised to `3`. Only the outermost widget of a run is reported. |
 
 ### `format-comment` (`style`)
 
@@ -348,12 +356,7 @@ Checks that comments read like sentences (start upper-case, end with `.`/`!`/`?`
 Consecutive comment lines are treated as one block: a multi-line block is joined
 and split into sentences, so a sentence that wraps across lines is judged as a
 whole and continuation lines are never flagged on their own. Both `//` line
-comments and `///` doc comments are checked unless `only_doc_comments` is set.
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `only_doc_comments` | `false` | When `true`, only `///` doc comments are checked. |
-| `ignored_patterns` | `[]` | List of regular expressions; a comment matching any of them is skipped. Invalid patterns are ignored. |
+comments and `///` doc comments are checked unless `only-doc-comments` is set.
 
 ### `no-magic-number` (`style`)
 
@@ -362,41 +365,21 @@ exempt when they are in the allow-list, inside a variable/field initializer, a
 collection literal, a const map or const constructor, a `DateTime` constructor,
 or used directly as an index.
 
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `allowed` | `[-1, 0, 1]` | Numeric values that are never considered magic. |
-
 ### `prefer-extracting-callbacks` (`complexity`, `flutter`)
 
 Flags block-body function-expression callbacks passed as arguments to widget
 constructors inside a `Widget`/`State` subclass. Arrow (`=>`) callbacks, empty
 blocks and Flutter builders (first parameter `BuildContext`) are never flagged.
 
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `allowed_line_count` | _none_ | When set, only callbacks spanning more than this many lines are flagged; unset flags every qualifying callback. |
-| `ignored_named_arguments` | `[]` | Named-argument labels whose callbacks are ignored. |
-
 ### `member-ordering` (`style`)
 
 Without options, the built-in order applies (static const → static fields →
 instance fields → constructors → static methods → instance methods).
 
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `order` | built-in | List of category tokens giving the required member sequence. Supported tokens: `public-fields`, `private-fields`, `fields`, `static-fields`, `constructors`, `named-constructors`, `static-methods`, `private-methods`, `public-methods`, `methods`, `getters`, `setters`. A member is ranked by the earliest token in the list it qualifies for; members matching no token are ignored. |
-| `widgets_order` | none | For a class that `extends State`, orders lifecycle members by this list. Supported tokens: `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`, `dispose`, `build`, `overridden-methods`. |
-
-> `widgets_order` detects `State` from the written `extends State`/`State<T>` clause. Only recognized lifecycle members are ordered; `overridden-methods` matches any other `@override` method.
+> `widgets-order` detects `State` from the written `extends State`/`State<T>` clause. Only recognized lifecycle members are ordered; `overridden-methods` matches any other `@override` method.
 
 `class-members-ordering` (`style`) accepts the same `order` option with the same
 category tokens; it differs from `member-ordering` only in its default sequence.
-
-### `avoid-unnecessary-getter` (`style`)
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `ignore_upcast` | `true` | Preserve getters whose return type differs from their private final backing field. Set to `false` to report these getters too. |
 
 ### Name-ordering rules (`style`)
 
@@ -404,10 +387,6 @@ category tokens; it differs from `member-ordering` only in its default sequence.
 `pattern-fields-ordering`, and `record-fields-ordering` share the following option.
 Unlike DCM's alphabetical defaults, these config-driven falcon rules do nothing
 unless `order` is configured.
-
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `order` | none | `"ascending"` or `"descending"` lexicographic, case-sensitive name order. |
 
 `arguments-ordering` defaults to the callee's declared parameter order and skips
 calls whose signature is unknown. `initializers-ordering` defaults to the class's
@@ -516,7 +495,7 @@ different paths, for example a stricter `max-lines-for-file` under `test/`:
     "linter": {
       "rules": {
         "complexity": {
-          "max-lines-for-file": { "level": "warn", "options": { "max_lines": 1000 } }
+          "max-lines-for-file": { "level": "warn", "options": { "max-lines": 1000 } }
         }
       }
     }
@@ -624,7 +603,7 @@ Notes:
   }
   ```
 
-  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`). `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not. Both lists must be non-empty and `message` non-blank, otherwise the entry is ignored. Each matching entry reports once per import URI, so a matching conditional alternative gets its own report. Per-path overrides replace the base options.
+  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`). `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not. Both lists must be non-empty and `message` non-blank; invalid entries reject the configuration with the full option path. Each matching entry reports once per import URI, so a matching conditional alternative gets its own report. Per-path overrides replace the base options.
 
 ## Migrating from dart_code_linter / pyramid_lint
 
@@ -639,13 +618,13 @@ falcon migrate --input analysis_options.yaml
 falcon migrate --write
 ```
 
-Migration reads explicit rules from `dart_code_linter.rules`, legacy `custom_lint.rules`, and the analyzer's top-level `linter.rules` (list or map form). It doesn't expand `include:` presets or read `plugins:` configuration. Each mapped rule is emitted under its falcon group as `"warn"`; disabled entries become `"off"`, and options are preserved.
+Migration reads explicit rules from `dart_code_linter.rules`, legacy `custom_lint.rules`, and the analyzer's top-level `linter.rules` (list or map form). It doesn't expand `include:` presets or read `plugins:` configuration. Each mapped rule is emitted under its falcon group as `"warn"`; disabled entries become `"off"`, and supported option values are preserved.
 
 The generated `linter.rules` sets `recommended: false`. If cross-file rules are migrated, their block also sets `recommended: false`; otherwise the block is omitted and falcon's recommended cross-file rules remain active. Add `"cross-file": { "enabled": false }` if you don't want those checks.
 
 Notes:
 
-- Option **key names are passed through verbatim** and may need manual review. falcon's option schema is not guaranteed to match the upstream linter's.
+- Option keys are normalized to **kebab-case**, including nested keys. If both legacy and canonical spellings exist, the canonical value wins. Unsupported options or invalid option values reject the migration before any output is written; review upstream options against falcon's option schema.
 - Upstream rules with no falcon equivalent are reported as warnings on stderr and
   omitted from the output.
 - The former twin rules (`no_empty_block`/`avoid_empty_blocks`, `no_magic_number`,
@@ -657,12 +636,17 @@ Notes:
 
 `migrate` also upgrades a `falcon.json` written for an older falcon: pass it as
 the input and any legacy `snake_case` rule ids (and the removed twin ids) are
-rewritten to their canonical kebab-case form, preserving levels and options.
+rewritten to their canonical kebab-case form, preserving levels and supported option values while normalizing option keys to kebab-case.
 Duplicate twin entries collapse into the surviving rule, keeping the more severe
 level. The input kind is auto-detected.
 
 Upgrades preserve the order of configuration keys. Duplicate entries use the
 same severity ranking and canonical-name tie breaking as normal config loading.
+
+Unknown falcon rule ids and unsupported or invalid options reject the upgrade
+before writing; unlike unrecognized upstream YAML rules, unknown falcon ids are
+not skipped. Migration validates registered rule names and options, not the full
+structural configuration checks performed when falcon loads a file.
 
 Glob matching now uses the configuration file's directory in both the CLI and
 the editor, rather than paths as walked. User-level `~/.falcon.json` globs instead

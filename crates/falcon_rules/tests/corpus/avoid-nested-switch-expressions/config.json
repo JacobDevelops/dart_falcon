@@ -5,7 +5,7 @@
         "avoid-nested-switch-expressions": {
           "level": "warn",
           "options": {
-            "max_nesting": 1
+            "max-nesting": 1
           }
         }
       }
