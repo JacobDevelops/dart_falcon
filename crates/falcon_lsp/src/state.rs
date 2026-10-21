@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use lsp_types::Uri;
+use lsp_types::{MessageType, ShowMessageParams, Uri};
 
 use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalOrigin,
@@ -18,12 +18,12 @@ use falcon_analyze::{
     TypeIndex, canonical_or_lexical, environment::ExternalTarget, group_libraries, import_path,
     library_unit, syntax_error_diagnostics,
 };
-use falcon_config::{FalconConfig, load_config, load_or_default};
+use falcon_config::FalconConfig;
 use falcon_dart_parser::{lex_tree, parse_for_package};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
-    package_identities, requires_resolution, run_cross_file,
+    load_config, load_or_default, package_identities, requires_resolution, run_cross_file,
 };
 use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
@@ -213,6 +213,9 @@ pub struct LspState {
     documents: HashMap<String, DocumentState>,
     config: FalconConfig,
     config_path: Option<PathBuf>,
+    pending_config_messages: Vec<ShowMessageParams>,
+    last_config_messages: Vec<(MessageType, String)>,
+    config_start_dir: PathBuf,
     rules: RuleRegistry,
     /// Cross-file rules; empty unless enabled by config. When empty the
     /// cross-file pass is skipped entirely (the whole-workspace walk is expensive).
@@ -267,16 +270,39 @@ impl LspState {
             Option<&falcon_analyze::environment::PackageConfig>,
         ) -> Option<falcon_analyze::environment::DartSdk>,
     ) -> Self {
-        let config = load_from(config_path.as_deref());
+        let start_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::new_from(config_path, locator, start_dir)
+    }
+
+    fn new_from(
+        config_path: Option<PathBuf>,
+        locator: fn(
+            Option<&falcon_analyze::environment::PackageConfig>,
+        ) -> Option<falcon_analyze::environment::DartSdk>,
+        config_start_dir: PathBuf,
+    ) -> Self {
+        let (config, workspace_root, pending_config_messages) =
+            load_from(config_path.as_deref(), &config_start_dir);
+        let config = config.unwrap_or_else(|| {
+            let mut config = FalconConfig::default();
+            config.resolve_paths(&workspace_root);
+            config
+        });
+        let last_config_messages = pending_config_messages
+            .iter()
+            .map(|message| (message.typ, message.message.clone()))
+            .collect();
         let rules = build_registry(&config);
         let cross_file_rules = build_cross_file_registry(&config);
-        let workspace_root = workspace_root_for(config_path.as_deref());
         let cross_file_resolve_semantics = cross_file_requires_resolution(&config);
         let resolve_semantics = requires_resolution(&rules) || cross_file_resolve_semantics;
         Self {
             documents: HashMap::new(),
             config,
             config_path,
+            pending_config_messages,
+            last_config_messages,
+            config_start_dir,
             rules,
             cross_file_rules,
             cross_file_resolve_semantics,
@@ -301,6 +327,11 @@ impl LspState {
             cross_file_external_cache: None,
             cross_file_external_load_count: 0,
         }
+    }
+
+    /// Configuration warnings and errors awaiting delivery to the editor.
+    pub fn take_config_messages(&mut self) -> Vec<ShowMessageParams> {
+        std::mem::take(&mut self.pending_config_messages)
     }
 
     /// Mutable package roots for native LSP watching. Versioned hosted packages
@@ -664,6 +695,12 @@ impl LspState {
         } else {
             self.refresh_unresolved_paths();
         }
+        if !self.admits_project_dart(&self.documents[uri].path) {
+            let doc = self.documents.get_mut(uri).expect("open document");
+            doc.analyze_count += 1;
+            doc.last_diagnostics.clear();
+            return Vec::new();
+        }
         let file_path = self.documents[uri].path.clone();
         self.refresh_environment(std::iter::once(file_path.as_path()));
         self.refresh_document_versions();
@@ -759,7 +796,21 @@ impl LspState {
     /// against its cached CST (no re-parse). Returns per-document results
     /// for the caller to publish.
     pub fn reload_config(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
-        self.config = load_from(self.config_path.as_deref());
+        let (config, workspace_root, messages) =
+            load_from(self.config_path.as_deref(), &self.config_start_dir);
+        let fingerprints: Vec<_> = messages
+            .iter()
+            .map(|message| (message.typ, message.message.clone()))
+            .collect();
+        if fingerprints != self.last_config_messages {
+            self.pending_config_messages.extend(messages);
+            self.last_config_messages = fingerprints;
+        }
+        let Some(config) = config else {
+            return Vec::new();
+        };
+        self.workspace_root = workspace_root;
+        self.config = config;
         self.rules = build_registry(&self.config);
         self.cross_file_resolve_semantics = cross_file_requires_resolution(&self.config);
         self.resolve_semantics =
@@ -1358,7 +1409,13 @@ impl LspState {
         // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point into
         // the pub cache (same hazard the CLI walker fixed) and a long-lived LSP
         // would hold all of it in memory.
-        for entry in WalkDir::new(&self.workspace_root).follow_links(false) {
+        for entry in WalkDir::new(&self.workspace_root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| {
+                !entry.file_type().is_dir() || !filter.excludes_directory(entry.path())
+            })
+        {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {
@@ -1468,8 +1525,9 @@ mod source_size_tests {
         std::fs::write(directory.path().join("invalid.dart"), [0xff]).unwrap();
         std::fs::write(directory.path().join("pubspec.yaml"), [0xff]).unwrap();
         std::fs::create_dir(directory.path().join("directory.dart")).unwrap();
-        let mut state = LspState::new(None);
-        state.workspace_root = directory.path().to_path_buf();
+        let config = directory.path().join("falcon.json");
+        std::fs::write(&config, "{}").unwrap();
+        let mut state = LspState::new(Some(config));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
@@ -1666,38 +1724,54 @@ fn resolve_dependency(
     by_path.get(&import_path(from, uri, packages)?).copied()
 }
 
-/// The directory the cross-file pass walks: the config file's parent, else the
-/// current directory (`.` if even that is unavailable).
-fn workspace_root_for(config_path: Option<&Path>) -> PathBuf {
+/// A HOME fallback config supplies settings, not a workspace to traverse.
+fn workspace_root_for(config_path: Option<&Path>, explicit: bool, start_dir: &Path) -> PathBuf {
     let root = config_path
+        .filter(|path| explicit || path.file_name().is_some_and(|name| name == "falcon.json"))
         .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    canonical_or_lexical(&root)
+        .unwrap_or(start_dir);
+    canonical_or_lexical(root)
 }
 
-fn load_from(path: Option<&Path>) -> FalconConfig {
-    let mut config = match path {
-        Some(p) => load_config(p).unwrap_or_else(|e| {
-            warn!(
-                "failed to load config from {}: {} — using defaults",
-                p.display(),
-                e
-            );
-            FalconConfig::default()
-        }),
-        None => match std::env::current_dir() {
-            Ok(cwd) => load_or_default(&cwd).unwrap_or_else(|e| {
-                warn!("failed to load discovered config: {e} — using defaults");
-                FalconConfig::default()
-            }),
-            Err(_) => FalconConfig::default(),
-        },
+fn load_from(
+    path: Option<&Path>,
+    start_dir: &Path,
+) -> (Option<FalconConfig>, PathBuf, Vec<ShowMessageParams>) {
+    let discovered = path
+        .map(Path::to_path_buf)
+        .or_else(|| falcon_config::find_config(start_dir));
+    let workspace_root = workspace_root_for(discovered.as_deref(), path.is_some(), start_dir);
+    let loaded = match discovered.as_deref() {
+        Some(path) => load_config(path),
+        None => load_or_default(start_dir),
     };
-    // Rewrite any legacy rule ids in the config to their canonical ids so old
-    // falcon.json files keep resolving.
-    falcon_rules::meta::canonicalize_config(&mut config);
-    config
+    let label = discovered.as_deref().unwrap_or(start_dir).display();
+    match loaded {
+        Ok(loaded) => (
+            Some(loaded.config),
+            workspace_root,
+            loaded
+                .warnings
+                .into_iter()
+                .map(|message| ShowMessageParams {
+                    typ: MessageType::WARNING,
+                    message: format!("Falcon: {}: {message}", label),
+                })
+                .collect(),
+        ),
+        Err(error) => {
+            let message = format!("Falcon: failed to load config {}: {error}", label);
+            warn!("{message}");
+            (
+                None,
+                workspace_root,
+                vec![ShowMessageParams {
+                    typ: MessageType::ERROR,
+                    message,
+                }],
+            )
+        }
+    }
 }
 
 fn is_dart_file(path: &Path) -> bool {
@@ -1769,6 +1843,251 @@ pub(crate) fn uri_to_path(uri: &str) -> PathBuf {
             )
         })
         .unwrap_or_else(|| PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)))
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn canonicalizing_loader_preserves_legacy_rule_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("falcon.json");
+        std::fs::write(
+            &path,
+            r#"{
+            "linter": {"rules": {"recommended": false, "complexity": {"avoid_nested_if": "error"}}},
+            "cross-file": {"enabled": false}
+        }"#,
+        )
+        .unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(path), |_| None);
+        assert!(state.config.linter.rules.groups["complexity"].contains_key("avoid-nested-if"));
+        assert!(!state.config.linter.rules.groups["complexity"].contains_key("avoid_nested_if"));
+        assert!(
+            state
+                .take_config_messages()
+                .iter()
+                .any(|message| message.typ == MessageType::WARNING
+                    && message.message.contains("avoid_nested_if"))
+        );
+        let uri = format!("file://{}", dir.path().join("main.dart").display());
+        let diagnostics = state.open(
+            &uri,
+            "void f(bool a, bool b, bool c) { if (a) { if (b) { if (c) { print(a); } } } }\n"
+                .to_string(),
+            Some(1),
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "avoid-nested-if"
+                    && diagnostic.severity == falcon_diagnostics::Severity::Error)
+        );
+    }
+
+    const SOURCE: &str = "void f() { dynamic value = 1; print(value); }\n";
+
+    #[test]
+    fn relative_filters_and_overrides_match_absolute_documents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("falcon.json");
+        std::fs::write(
+            &path,
+            r#"{
+            "files": {"includes": ["lib/**", "!lib/generated/**"]},
+            "linter": {"rules": {"recommended": false, "suspicious": {"avoid-dynamic": "warn"}}},
+            "cross-file": {"enabled": false},
+            "overrides": [{
+                "includes": ["lib/quiet/*.dart"],
+                "linter": {"rules": {"suspicious": {"avoid-dynamic": "off"}}}
+            }]
+        }"#,
+        )
+        .unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(path), |_| None);
+        for (relative, expected) in [
+            ("lib/main.dart", true),
+            ("lib/quiet/main.dart", false),
+            ("lib/quiet/deep/main.dart", true),
+            ("lib/generated/main.dart", false),
+            ("test/main.dart", false),
+        ] {
+            let uri = format!("file://{}", dir.path().join(relative).display());
+            let diagnostics = state.open(&uri, SOURCE.to_string(), Some(1));
+            assert_eq!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "avoid-dynamic"),
+                expected,
+                "{relative}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn discovered_config_root_drives_workspace_collection() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join("nested")).unwrap();
+        std::fs::write(dir.path().join("falcon.json"), "{}").unwrap();
+        let main = dir.path().join("main.dart");
+        std::fs::write(&main, "void main() {}\n").unwrap();
+        let mut state = LspState::new_from(None, |_| None, dir.path().join("nested"));
+        assert_eq!(state.workspace_root, canonical_or_lexical(dir.path()));
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == canonical_or_lexical(&main))
+        );
+    }
+
+    #[test]
+    fn excluded_subtrees_do_not_make_workspace_collection_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("falcon.json");
+        std::fs::write(
+            &config,
+            r#"{
+            "files":{"includes":["!build/**"]},
+            "linter":{"rules":{"recommended":false}},
+            "cross-file":{"enabled":false}
+        }"#,
+        )
+        .unwrap();
+        let excluded = dir.path().join("build/deep");
+        std::fs::create_dir_all(&excluded).unwrap();
+        for name in ["oversized.dart", "pubspec.yaml"] {
+            std::fs::File::create(excluded.join(name))
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap();
+        }
+        let main = dir.path().join("main.dart");
+        std::fs::write(&main, "void main() {}\n").unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+        for view in [ProjectView::Semantic, ProjectView::CrossFile] {
+            let (files, complete) = state.collect_project_files(view);
+            assert!(complete);
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].path, canonical_or_lexical(&main));
+        }
+    }
+
+    #[test]
+    fn home_fallback_settings_do_not_expand_workspace_to_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let workspace = home.join("project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let config_path = home.join(".falcon.json");
+        std::fs::write(&config_path, r#"{"files":{"includes":["project/**"]}}"#).unwrap();
+        let loaded = load_config(&config_path).unwrap();
+        let root = workspace_root_for(Some(&config_path), false, &workspace);
+        assert_eq!(root, canonical_or_lexical(&workspace));
+        assert_eq!(
+            loaded.config.root_dir(),
+            Some(canonical_or_lexical(&home).as_path())
+        );
+        assert!(
+            loaded
+                .config
+                .files
+                .includes
+                .admits(&workspace.join("main.dart").to_string_lossy())
+        );
+        assert_eq!(
+            workspace_root_for(Some(&config_path), true, &workspace),
+            canonical_or_lexical(&home),
+            "an explicitly selected config still determines the workspace root"
+        );
+    }
+
+    #[test]
+    fn invalid_reload_preserves_rules_root_and_open_document_diagnostics() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("falcon.json");
+        std::fs::write(
+            &path,
+            r#"{
+            "linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},
+            "cross-file":{"enabled":false}
+        }"#,
+        )
+        .unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(path.clone()), |_| None);
+        let root = state.workspace_root.clone();
+        let uri = format!("file://{}", dir.path().join("main.dart").display());
+        let before = state.open(&uri, SOURCE.to_string(), Some(1));
+        std::fs::write(&path, r#"{"linter":{"enabledd":false}}"#).unwrap();
+        assert!(state.reload_config().is_empty());
+        assert_eq!(state.workspace_root, root);
+        assert!(!state.cross_file_rules_enabled());
+        assert_eq!(state.config.linter.rules.recommended, Some(false));
+        let after = state.analyze(&uri);
+        assert_eq!(before.len(), after.len());
+        assert!(
+            after
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "avoid-dynamic"
+                    && diagnostic.severity == falcon_diagnostics::Severity::Error)
+        );
+        let messages = state.take_config_messages();
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].message.contains(&path.display().to_string()));
+        assert!(messages[0].message.contains("linter.enabledd"));
+        state.reload_config();
+        assert!(state.take_config_messages().is_empty());
+    }
+
+    #[test]
+    fn nested_config_events_do_not_repeat_unchanged_active_warnings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("falcon.json");
+        std::fs::write(&path, r#"{"max_errors":10}"#).unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(path.clone()), |_| None);
+        let messages = state.take_config_messages();
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.message.contains(&path.display().to_string()))
+        );
+        state.reload_config();
+        assert!(state.take_config_messages().is_empty());
+        let nested = dir.path().join("nested/falcon.json");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, "{}").unwrap();
+        state.watched_files_changed(&[nested]);
+        assert!(state.take_config_messages().is_empty());
+    }
+
+    #[test]
+    fn config_messages_are_drained_and_reloaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("falcon.json");
+        std::fs::write(&path, r#"{"max_errors": 10}"#).unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(path.clone()), |_| None);
+        let messages = state.take_config_messages();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.typ == MessageType::WARNING
+                    && message.message.contains("max_errors"))
+        );
+        assert!(state.take_config_messages().is_empty());
+        std::fs::write(&path, r#"{"overrides": [{"incldues": ["lib/**"]}]}"#).unwrap();
+        state.reload_config();
+        let messages = state.take_config_messages();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.typ == MessageType::ERROR
+                    && message.message.contains("overrides[0].incldues"))
+        );
+        assert!(state.take_config_messages().is_empty());
+    }
 }
 
 #[cfg(test)]

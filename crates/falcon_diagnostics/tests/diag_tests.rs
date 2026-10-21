@@ -84,11 +84,23 @@ fn test_format_json_has_rule() {
 
 #[test]
 fn test_format_json_has_severity() {
-    let span = Span { start: 0, end: 5 };
-    let diag = Diagnostic::new("DCL001", Severity::Warning, "test", "file.dart", span);
-    let json = serde_json::to_value(&diag).unwrap();
-
-    assert!(json.get("severity").is_some());
+    for (severity, expected) in [
+        (Severity::Error, "error"),
+        (Severity::Warning, "warning"),
+        (Severity::Info, "info"),
+    ] {
+        let diag = Diagnostic::new(
+            "DCL001",
+            severity,
+            "test",
+            "file.dart",
+            Span { start: 0, end: 5 },
+        );
+        let json = serde_json::to_value(&diag).unwrap();
+        assert_eq!(json["severity"], expected);
+        assert!(json.get("line").is_none());
+        assert!(json.get("col").is_none());
+    }
 }
 
 #[test]

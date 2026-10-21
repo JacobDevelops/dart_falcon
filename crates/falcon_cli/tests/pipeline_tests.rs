@@ -42,13 +42,14 @@ fn oversized_sources_abort_before_partial_workspace_analysis() {
 }
 
 #[test]
-fn secure_pubspec_urls_uses_security_configuration_and_ignores_old_group() {
+fn secure_pubspec_urls_uses_security_configuration_and_rejects_old_group() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("pubspec.yaml"),
         "name: insecure_package\nhomepage: http://example.com\n",
     )
     .unwrap();
+    fs::write(temp.path().join("main.dart"), "void main() {}").unwrap();
     let config_path = temp.path().join("falcon.json");
     for (group, level, expected_severity) in [
         (
@@ -69,6 +70,15 @@ fn secure_pubspec_urls_uses_security_configuration_and_ignores_old_group() {
             }
         });
         fs::write(&config_path, config.to_string()).unwrap();
+        if group == "suspicious" {
+            let error =
+                collect_check(&options_for(temp.path(), Some(config_path.clone()))).unwrap_err();
+            assert!(
+                error.contains("cross-file.rules.suspicious.secure-pubspec-urls"),
+                "{error}"
+            );
+            continue;
+        }
         let output = collect_check(&options_for(temp.path(), Some(config_path.clone()))).unwrap();
         match expected_severity {
             Some(severity) => {
@@ -87,16 +97,192 @@ fn secure_pubspec_urls_uses_security_configuration_and_ignores_old_group() {
     }
 }
 
-/// Test 1: No files found returns zero exit code
 #[test]
-fn test_run_check_no_files_returns_zero() {
+fn manifest_discovery_does_not_turn_non_dart_inputs_into_processed_files() {
     let temp = tempdir().unwrap();
-    let exit_code = run_check(CheckOptions {
-        paths: vec![temp.path().to_path_buf()],
-        quiet: true,
+    fs::write(temp.path().join("pubspec.yaml"), "name: example\n").unwrap();
+    fs::write(temp.path().join("README.txt"), "package notes").unwrap();
+    let options = options_for(&temp.path().join("README.txt"), None);
+    let output = collect_check(&options).unwrap();
+    assert_eq!(output.exit_code, 1);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.rule == "unmatched-path")
+    );
+    assert_eq!(output.total_files, 0);
+    let output = collect_check(&CheckOptions {
+        no_errors_on_unmatched: true,
+        ..options
+    })
+    .unwrap();
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|d| d.rule != "unmatched-path")
+    );
+}
+
+#[test]
+fn excluded_manifests_cannot_report_cross_file_diagnostics_from_disk() {
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("main.dart"), "void main() {}").unwrap();
+    fs::write(
+        temp.path().join("pubspec.yaml"),
+        "name: example\nhomepage: http://example.com\n",
+    )
+    .unwrap();
+    let config = temp.path().join("falcon.json");
+    for cli_exclude in [false, true] {
+        let mut settings = serde_json::json!({
+            "linter": {"rules": {"recommended": false}},
+            "cross-file": {"rules": {
+                "recommended": false,
+                "security": {"secure-pubspec-urls": "error"}
+            }}
+        });
+        if !cli_exclude {
+            settings["files"] = serde_json::json!({"includes": ["**", "!pubspec.yaml"]});
+        }
+        fs::write(&config, settings.to_string()).unwrap();
+        let options = CheckOptions {
+            exclude_patterns: if cli_exclude {
+                vec!["pubspec.yaml".to_owned()]
+            } else {
+                Vec::new()
+            },
+            ..options_for(temp.path(), Some(config.clone()))
+        };
+        let output = collect_check(&options).unwrap();
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert_eq!(output.exit_code, 0);
+    }
+}
+
+#[test]
+fn unmatched_inputs_are_error_diagnostics_unless_opted_out() {
+    let temp = tempdir().unwrap();
+    for path in [temp.path().to_path_buf(), temp.path().join("missing.dart")] {
+        let mut options = options_for(&path, None);
+        options.error_exit_code = 0;
+        let output = collect_check(&options).unwrap();
+        assert_eq!(output.exit_code, 1);
+        assert_eq!(output.total_files, 0);
+        assert_eq!(output.diagnostics.len(), 1);
+        assert_eq!(output.diagnostics[0].rule, "unmatched-path");
+        assert_eq!(output.diagnostics[0].severity, Severity::Error);
+
+        options.no_errors_on_unmatched = true;
+        let output = collect_check(&options).unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.diagnostics.is_empty());
+    }
+}
+
+#[test]
+fn non_directory_input_components_are_unmatched_even_with_a_valid_input() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let source = temp.path().join("main.dart");
+    fs::write(&source, "void main() {}").unwrap();
+    for invalid in [
+        source.join("child.dart"),
+        PathBuf::from(format!("{}/", source.display())),
+    ] {
+        let mut options = CheckOptions {
+            paths: vec![source.clone(), invalid.clone()],
+            error_exit_code: 0,
+            ..options_for(temp.path(), Some(config.clone()))
+        };
+        let output = collect_check(&options).unwrap();
+        assert_eq!(output.total_files, 1);
+        assert_eq!(output.exit_code, 1);
+        assert_eq!(output.diagnostics.len(), 1);
+        assert_eq!(output.diagnostics[0].rule, "unmatched-path");
+        assert_eq!(output.diagnostics[0].file_path, invalid.to_string_lossy());
+        options.no_errors_on_unmatched = true;
+        let output = collect_check(&options).unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.diagnostics.is_empty());
+    }
+}
+
+#[test]
+fn no_paths_defaults_to_the_current_directory() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let output = collect_check(&CheckOptions {
+        config_path: Some(config),
+        exclude_patterns: vec![
+            std::env::current_dir()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        ],
         ..Default::default()
-    });
-    assert_eq!(exit_code, 0);
+    })
+    .unwrap();
+    assert_eq!(output.exit_code, 1);
+    assert_eq!(output.total_files, 0);
+    assert_eq!(output.diagnostics.len(), 1);
+    assert_eq!(output.diagnostics[0].file_path, ".");
+    assert_eq!(output.diagnostics[0].message, "No files were processed.");
+}
+
+#[test]
+fn missing_input_does_not_hide_valid_file_diagnostics() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(&config, r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#).unwrap();
+    let source = temp.path().join("broken.dart");
+    fs::write(&source, "void main( {").unwrap();
+    let output = collect_check(&CheckOptions {
+        paths: vec![source, temp.path().join("missing.dart")],
+        config_path: Some(config),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(output.total_files, 1);
+    assert_eq!(output.exit_code, 1);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.rule == "unmatched-path")
+    );
+    assert!(output.diagnostics.iter().any(|d| d.rule == "syntax-error"));
+}
+
+#[test]
+fn max_errors_limits_printing_not_collected_diagnostics_or_status() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(&config, r#"{"max-errors":1,"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#).unwrap();
+    fs::write(temp.path().join("broken.dart"), "void main( {").unwrap();
+    fs::write(temp.path().join("also_broken.dart"), "void other( {").unwrap();
+    for max_errors in [None, Some(0), Some(1)] {
+        let options = CheckOptions {
+            max_errors,
+            error_exit_code: 7,
+            ..options_for(temp.path(), Some(config.clone()))
+        };
+        let output = collect_check(&options).unwrap();
+        assert!(output.diagnostics.len() >= 2);
+        assert_eq!(output.exit_code, 7);
+        assert_eq!(run_check(options), 7);
+    }
 }
 
 /// Test 2: A violation-free Dart file returns zero
@@ -105,27 +291,31 @@ fn test_run_check_with_clean_dart_file_returns_zero() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
+        "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
-        ..Default::default()
+        ..options_for(temp.path(), None)
     });
     assert_eq!(exit_code, 0);
 }
 
-/// Test 3: max_errors = Some(0) truncates diagnostics; still zero because no rules
+/// A clean file still succeeds with a zero print limit.
 #[test]
 fn test_run_check_max_errors_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {}").unwrap();
+    fs::write(
+        temp.path().join("test.dart"),
+        "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
+    )
+    .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         max_errors: Some(0),
         quiet: true,
-        ..Default::default()
+        ..options_for(temp.path(), None)
     });
     assert_eq!(exit_code, 0);
 }
@@ -136,14 +326,14 @@ fn test_run_check_json_format_no_panic() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
+        "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: false,
         format: OutputFormat::Json,
-        ..Default::default()
+        ..options_for(temp.path(), None)
     });
     assert_eq!(exit_code, 0);
 }
@@ -154,13 +344,13 @@ fn test_run_check_quiet_mode() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
+        "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
-        ..Default::default()
+        ..options_for(temp.path(), None)
     });
     assert_eq!(exit_code, 0);
 }
@@ -175,6 +365,8 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
         paths: vec![temp.path().to_path_buf()],
         config_path: Some(PathBuf::from("/nonexistent/falcon.json")),
         quiet: true,
+        error_exit_code: 0,
+        max_errors: Some(0),
         ..Default::default()
     });
     assert_eq!(exit_code, 1);
@@ -195,7 +387,7 @@ fn test_run_check_default_clean_imports_returns_zero() {
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
-        ..Default::default()
+        ..options_for(temp.path(), None)
     });
     assert_eq!(exit_code, 0);
 }
@@ -206,14 +398,14 @@ fn test_run_check_custom_exit_code_no_violations_returns_zero() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
+        "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
         error_exit_code: 2,
-        ..Default::default()
+        ..options_for(temp.path(), None)
     });
     // No violations → exit 0 regardless of error_exit_code
     assert_eq!(exit_code, 0);
@@ -301,6 +493,16 @@ use std::path::PathBuf;
 const DYNAMIC_SRC: &str = "void f() {\n  dynamic x = 1;\n  print(x);\n}\n";
 
 fn options_for(dir: &std::path::Path, config: Option<PathBuf>) -> CheckOptions {
+    let config = config.or_else(|| {
+        let base = if dir.is_dir() {
+            dir
+        } else {
+            dir.parent().unwrap()
+        };
+        let path = base.join("falcon.json");
+        fs::write(&path, "{}").unwrap();
+        Some(path)
+    });
     CheckOptions {
         paths: vec![dir.to_path_buf()],
         config_path: config,
@@ -499,7 +701,7 @@ fn unnecessary_nullable_is_independent_of_enabled_file_rules() {
                 "rules": { "recommended": false, "correctness": { "unnecessary-nullable": "warn" } }
             }
         }).to_string()).unwrap();
-        let loaded = falcon_config::load_config(&config).unwrap();
+        let loaded = falcon_rules::load_config(&config).unwrap().config;
         assert_eq!(
             falcon_rules::requires_resolution(&falcon_rules::build_registry(&loaded)),
             enabled
@@ -518,7 +720,7 @@ fn unnecessary_nullable_is_independent_of_enabled_file_rules() {
     assert_eq!(results[0], results[1]);
 }
 
-/// max_errors from falcon.json truncates diagnostics; CLI flag wins over config.
+/// max_errors controls output only; the CLI flag wins over the config value.
 #[test]
 fn test_config_max_errors_and_cli_precedence() {
     let temp = tempdir().unwrap();
@@ -531,14 +733,17 @@ fn test_config_max_errors_and_cli_precedence() {
     fs::write(&config, r#"{ "max_errors": 1 }"#).unwrap();
 
     let out = collect_check(&options_for(temp.path(), Some(config.clone()))).unwrap();
-    assert_eq!(out.diagnostics.len(), 1, "config max_errors must truncate");
+    assert!(out.diagnostics.len() > 2);
+    assert_eq!(out.max_errors, Some(1));
+    let diagnostic_count = out.diagnostics.len();
 
     let mut opts = options_for(temp.path(), Some(config));
     opts.max_errors = Some(2);
     let out = collect_check(&opts).unwrap();
+    assert_eq!(out.diagnostics.len(), diagnostic_count);
     assert_eq!(
-        out.diagnostics.len(),
-        2,
+        out.max_errors,
+        Some(2),
         "CLI max_errors must override config"
     );
 }
@@ -565,7 +770,7 @@ fn test_default_output_matches_ordered_sequential_diagnostics() {
         r#"{ "linter": { "rules": { "recommended": false, "suspicious": { "avoid-dynamic": "warn" }, "complexity": { "no-boolean-literal-compare": "warn" } } }, "cross-file": { "rules": { "recommended": false, "correctness": { "unused-files": "warn" } } } }"#,
     )
     .unwrap();
-    let config = falcon_config::load_config(&config_path).unwrap();
+    let config = falcon_rules::load_config(&config_path).unwrap().config;
     let registry = falcon_rules::build_registry(&config);
     assert!(falcon_rules::requires_resolution(&registry));
     let cross_file_registry = falcon_rules::build_cross_file_registry(&config);
@@ -638,7 +843,7 @@ fn test_default_output_matches_ordered_sequential_diagnostics() {
     let limited = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
     assert_eq!(
         serde_json::to_value(&limited.diagnostics).unwrap(),
-        serde_json::to_value(&sequential[..2]).unwrap()
+        serde_json::to_value(&sequential).unwrap()
     );
 }
 

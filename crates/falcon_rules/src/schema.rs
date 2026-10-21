@@ -17,9 +17,9 @@ pub const SCHEMA_URL: &str = concat!(
     "/schema/falcon.schema.json"
 );
 
-/// The `rules` sub-schema for one section: `recommended` plus one object per
-/// group listing exactly that section's rules (file rules unless `cross_file`).
-fn section_rules(cross_file: bool) -> Value {
+/// The `rules` sub-schema for one section, with optional preset configuration.
+/// Groups list exactly that section's rules (file rules unless `cross_file`).
+fn section_rules(cross_file: bool, preset_allowed: bool) -> Value {
     let mut groups: Map<String, Value> = RuleGroup::ALL
         .iter()
         .map(|group| {
@@ -53,24 +53,29 @@ fn section_rules(cross_file: bool) -> Value {
             );
     }
     let mut props = Map::new();
-    props.insert(
-        "recommended".into(),
-        json!({
-            "type": "boolean",
-            "default": true,
-            "description": "Enable the recommended preset for this section. \
-                When on, every rule in the preset reports at its default severity \
-                unless individually overridden. Defaults to true.",
-        }),
-    );
+    if preset_allowed {
+        props.insert(
+            "recommended".into(),
+            json!({
+                "type": "boolean",
+                "default": true,
+                "description": "Enable the recommended preset for this section. \
+                    When on, every rule in the preset reports at its default severity \
+                    unless individually overridden. Defaults to true.",
+            }),
+        );
+    }
     for (group, schema) in groups {
         props.insert(group, schema);
     }
     json!({
         "type": "object",
         "additionalProperties": false,
-        "description": "Rule severity levels grouped by category, plus the \
-            `recommended` preset toggle.",
+        "description": if preset_allowed {
+            "Rule severity levels grouped by category, plus the `recommended` preset toggle."
+        } else {
+            "Explicit rule severity levels grouped by category."
+        },
         "properties": Value::Object(props),
     })
 }
@@ -119,8 +124,9 @@ pub fn config_schema() -> Value {
                 "description": "Which files falcon discovers and analyzes.",
                 "properties": {
                     "includes": string_globs(
-                        "Glob patterns for the files falcon analyzes. When omitted, \
-                         every Dart file under the working directory is analyzed."
+                        "Glob patterns relative to the configuration directory. \
+                         A single star stops at directory separators; a double star \
+                         crosses them. When omitted, every Dart file is a candidate."
                     )
                 }
             },
@@ -142,7 +148,7 @@ pub fn config_schema() -> Value {
                             (for example Flutter rules).",
                         "properties": Value::Object(domain_props)
                     },
-                    "rules": section_rules(false)
+                    "rules": section_rules(false, true)
                 }
             },
             "cross-file": {
@@ -157,7 +163,7 @@ pub fn config_schema() -> Value {
                         "description": "Master switch for cross-file analysis. Set to \
                             false to disable all cross-file rules. Defaults to true."
                     },
-                    "rules": section_rules(true)
+                    "rules": section_rules(true, true)
                 }
             },
             "overrides": {
@@ -171,7 +177,9 @@ pub fn config_schema() -> Value {
                         linter/cross-file settings to apply to the matched files.",
                     "properties": {
                         "includes": string_globs(
-                            "Glob patterns selecting the files this override applies to."
+                            "Glob patterns relative to the configuration directory \
+                             selecting the files this override applies to. Omitted \
+                             patterns apply to every file."
                         ),
                         "linter": { "$ref": "#/definitions/overrideLinter" },
                         "cross-file": { "$ref": "#/definitions/overrideCrossFile" }
@@ -182,9 +190,9 @@ pub fn config_schema() -> Value {
                 "type": ["integer", "null"],
                 "minimum": 1,
                 "default": null,
-                "description": "Stop after emitting this many diagnostics. Null (the \
-                    default) means no limit. Must be at least 1; 0 is rejected because \
-                    it would suppress every diagnostic."
+                "description": "Print at most this many diagnostics without changing \
+                    the exit code. Null (the default) means no limit. Must be at \
+                    least 1 in configuration; use the CLI flag to hide all output."
             }
         },
         "definitions": {
@@ -224,7 +232,7 @@ pub fn config_schema() -> Value {
                         "description": "Master switch for the single-file linter within \
                             this override."
                     },
-                    "rules": section_rules(false)
+                    "rules": section_rules(false, false)
                 }
             },
             "overrideCrossFile": {
@@ -237,7 +245,7 @@ pub fn config_schema() -> Value {
                         "description": "Master switch for cross-file analysis within this \
                             override."
                     },
-                    "rules": section_rules(true)
+                    "rules": section_rules(true, false)
                 }
             }
         }

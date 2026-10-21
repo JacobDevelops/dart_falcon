@@ -11,10 +11,22 @@ use std::{
 pub(crate) struct DiagnosticJson {
     pub(crate) rule: String,
     pub(crate) message: String,
-    pub(crate) line: usize,
-    pub(crate) col: usize,
+    pub(crate) line: Option<usize>,
+    pub(crate) col: Option<usize>,
     #[serde(default)]
     pub(crate) file_path: String,
+}
+
+impl DiagnosticJson {
+    pub(crate) fn resolved_position(&self) -> Result<(usize, usize), String> {
+        match (self.line, self.col) {
+            (Some(line), Some(col)) if line > 0 && col > 0 => Ok((line, col)),
+            _ => Err(format!(
+                "diagnostic `{}` in {} has no resolved source position: {}",
+                self.rule, self.file_path, self.message
+            )),
+        }
+    }
 }
 
 #[path = "../../crates/falcon_rules/tests/support/sdk_fixture.rs"]
@@ -69,6 +81,16 @@ impl FalconRunner {
             || file.to_path_buf(),
             |(project, directory)| sdk_fixture::staged_file(project.path(), directory, file),
         );
+        let staged_config = match (&staged, config) {
+            (Some((project, directory)), Some(config)) => Some(write_staged_config(
+                config,
+                project.path(),
+                directory,
+                file,
+            )?),
+            _ => None,
+        };
+        let config = staged_config.as_deref().or(config);
         let mut cmd = Command::new(&self.binary);
         cmd.args(["check", "--format", "json"]);
         cmd.arg(&analyzed_file);
@@ -119,6 +141,66 @@ impl FalconRunner {
     }
 }
 
+/// Preserve original source-path selection when SDK staging changes file roots.
+/// Directory targets retain independent override matching for each source file.
+fn write_staged_config(
+    original_config: &Path,
+    project: &Path,
+    source_directory: &Path,
+    target: &Path,
+) -> Result<PathBuf, String> {
+    let mut config = falcon_rules::load_config(original_config)
+        .map_err(|error| error.to_string())?
+        .config;
+    let files = if target.is_dir() {
+        recursive_files(target)
+            .into_iter()
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "dart")
+            })
+            .collect()
+    } else {
+        vec![target.to_path_buf()]
+    };
+    let paths: Vec<_> = files
+        .iter()
+        .map(|original| {
+            let staged = sdk_fixture::staged_file(project, source_directory, original);
+            (
+                original.to_string_lossy().into_owned(),
+                glob::Pattern::escape(&staged.to_string_lossy()),
+            )
+        })
+        .collect();
+    let mut included: Vec<_> = paths
+        .iter()
+        .filter(|(original, _)| config.files.includes.admits(original))
+        .map(|(_, staged)| staged.clone())
+        .collect();
+    if included.is_empty() {
+        included.push("!**".to_string());
+    }
+    config.files.includes = included.into();
+    config.overrides.retain_mut(|entry| {
+        let included: Vec<_> = paths
+            .iter()
+            .filter(|(original, _)| entry.matches(original))
+            .map(|(_, staged)| staged.clone())
+            .collect();
+        if included.is_empty() {
+            return false;
+        }
+        entry.includes = included.into();
+        true
+    });
+    let path = project.join("falcon.json");
+    let contents = serde_json::to_vec(&config).map_err(|error| error.to_string())?;
+    fs::write(&path, contents)
+        .map_err(|error| format!("cannot write staged config {}: {error}", path.display()))?;
+    Ok(path)
+}
+
 fn corpus_fixture_sdk(workspace: &Path, corpus: &Path) -> Option<PathBuf> {
     let bundled = workspace.join("crates/falcon_rules/tests/corpus");
     (falcon_analyze::canonical_or_lexical(corpus) == falcon_analyze::canonical_or_lexical(&bundled))
@@ -151,7 +233,7 @@ pub(crate) fn build_falcon(release: bool) -> PathBuf {
     );
     let cargo = std::env::var_os("CARGO_CMD").unwrap_or_else(|| "cargo".into());
     let mut command = Command::new(&cargo);
-    command.args(["build", "--locked", "--bin", "falcon"]);
+    command.args(["build", "--locked", "-p", "dart_falcon", "--bin", "falcon"]);
     if release {
         command.arg("--release");
     }
@@ -242,6 +324,80 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cli_max_errors_caps_json_stdout_without_changing_exit_status() {
+        let binary = build_falcon(false);
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("falcon.json");
+        fs::write(
+            &config,
+            r#"{"max-errors":1,"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#,
+        )
+        .unwrap();
+        for name in ["first.dart", "second.dart"] {
+            fs::write(directory.path().join(name), "void broken( {").unwrap();
+        }
+        for (limit, expected_count) in [(None, 1), (Some("0"), 0), (Some("1"), 1)] {
+            let mut command = Command::new(&binary);
+            command
+                .current_dir(directory.path())
+                .args(["check", "--format", "json", "--exit-code", "7"])
+                .arg("--config")
+                .arg(&config);
+            if let Some(limit) = limit {
+                command.args(["--max-errors", limit]);
+            }
+            let output = command.output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(7),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let diagnostics: Vec<DiagnosticJson> = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(diagnostics.len(), expected_count);
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.rule == "syntax-error")
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_json_keeps_unresolved_positions_absent() {
+        let diagnostic: DiagnosticJson = serde_json::from_value(json!({
+            "rule": "config",
+            "message": "Cannot load configuration.",
+            "file_path": "falcon.json"
+        }))
+        .unwrap();
+        assert_eq!(diagnostic.line, None);
+        assert_eq!(diagnostic.col, None);
+        let error = diagnostic.resolved_position().unwrap_err();
+        assert!(error.contains("config"), "{error}");
+        assert!(error.contains("falcon.json"), "{error}");
+    }
+
+    #[test]
+    fn diagnostic_json_requires_complete_nonzero_positions_for_source_examples() {
+        for (line, col, expected) in [
+            (Some(2), Some(3), Some((2, 3))),
+            (Some(2), None, None),
+            (None, Some(3), None),
+            (Some(0), Some(0), None),
+        ] {
+            let diagnostic: DiagnosticJson = serde_json::from_value(json!({
+                "rule": "example",
+                "message": "Example.",
+                "line": line,
+                "col": col
+            }))
+            .unwrap();
+            assert_eq!(diagnostic.resolved_position().ok(), expected);
+        }
+    }
+
+    #[test]
     fn binary_path_uses_cargo_metadata_target_directory() {
         let metadata = json!({ "target_directory": "/custom/build output" });
         for (release, profile) in [(false, "debug"), (true, "release")] {
@@ -276,6 +432,78 @@ mod tests {
             config
         );
     }
+    #[test]
+    fn staged_config_preserves_source_filters_override_order_and_options() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("source");
+        fs::create_dir(&original).unwrap();
+        for name in ["bad[1].dart", "good.dart", "excluded.dart"] {
+            fs::write(original.join(name), "void f() {}").unwrap();
+        }
+        let config_path = original.join("config.json");
+        let contents = json!({
+            "files": { "includes": ["**/*.dart", "!**/excluded.dart"] },
+            "overrides": [
+                { "includes": ["**/*.dart"], "linter": { "rules": { "performance": {
+                    "move-variable-closer-to-its-usage": {
+                        "level": "warn", "options": { "ignore_after_if": true }
+                    }
+                } } } },
+                { "includes": ["**/bad[[]1].dart"], "linter": { "rules": { "performance": {
+                    "move-variable-closer-to-its-usage": {
+                        "level": "warn", "options": { "ignore_after_if": false }
+                    }
+                } } } },
+                { "includes": ["**/absent.dart"], "linter": { "rules": { "performance": {
+                    "move-variable-closer-to-its-usage": {
+                        "level": "warn", "options": { "ignore_after_if": true }
+                    }
+                } } } }
+            ]
+        });
+        let contents = serde_json::to_string(&contents).unwrap();
+        fs::write(&config_path, &contents).unwrap();
+        let staged = sdk_fixture::stage_project(&original);
+        for target in [
+            &original,
+            &original.join("bad[1].dart"),
+            &original.join("excluded.dart"),
+        ] {
+            let path = write_staged_config(&config_path, staged.path(), &original, target).unwrap();
+            let config = falcon_rules::load_config(&path).unwrap().config;
+            let bad =
+                sdk_fixture::staged_file(staged.path(), &original, &original.join("bad[1].dart"));
+            let excluded =
+                sdk_fixture::staged_file(staged.path(), &original, &original.join("excluded.dart"));
+            assert!(!config.files.includes.admits(&excluded.to_string_lossy()));
+            if target.file_name().unwrap() != "excluded.dart" {
+                assert!(config.files.includes.admits(&bad.to_string_lossy()));
+                assert_eq!(config.overrides.len(), 2);
+                assert_eq!(
+                    config.rule_options_for(
+                        &bad.to_string_lossy(),
+                        "performance",
+                        "move-variable-closer-to-its-usage",
+                    ),
+                    Some(&json!({ "ignore_after_if": false })),
+                );
+                let good =
+                    sdk_fixture::staged_file(staged.path(), &original, &original.join("good.dart"));
+                assert_eq!(
+                    config.rule_options_for(
+                        &good.to_string_lossy(),
+                        "performance",
+                        "move-variable-closer-to-its-usage",
+                    ),
+                    target
+                        .is_dir()
+                        .then_some(&json!({ "ignore_after_if": true })),
+                );
+            }
+            assert_eq!(fs::read_to_string(&config_path).unwrap(), contents);
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn runner_distinguishes_diagnostic_exit_codes_from_process_failures() {

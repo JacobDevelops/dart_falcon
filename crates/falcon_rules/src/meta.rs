@@ -1,7 +1,7 @@
 //! The rule table supplies constructors, execution identities, and configuration metadata.
 
 use falcon_analyze::{CrossFileRule, Rule};
-use falcon_config::{FalconConfig, RuleConfiguration, RulePlainConfiguration, Rules};
+use falcon_config::{FalconConfig, RulePlainConfiguration, Rules};
 
 use crate::{cross_file, lint};
 
@@ -3503,44 +3503,152 @@ pub fn suppression_lookup(name: &str) -> Option<(&'static str, &'static str, boo
     meta_for(name).map(|m| (m.name, m.group.as_str(), m.is_cross_file()))
 }
 
-/// Rewrite legacy rule ids used as config keys to their canonical ids, across
-/// the base `linter`/`cross_file` rule maps and every override. Applied once
-/// after a config is loaded so old `falcon.json` files keep resolving against the
-/// canonical rule table. When a legacy id and its canonical id (or two legacy
-/// twins) collide in the same group, the more severe level is kept — matching
-/// the `falcon migrate` upgrade path.
-pub fn canonicalize_config(config: &mut FalconConfig) {
-    canonicalize_rules(&mut config.linter.rules);
-    canonicalize_rules(&mut config.cross_file.rules);
-    for ov in &mut config.overrides {
+/// Canonicalize every configured rule map and return deprecation warnings.
+pub fn canonicalize_config(config: &mut FalconConfig) -> Vec<String> {
+    let mut warnings = Vec::new();
+    canonicalize_rules(&mut config.linter.rules, "linter.rules", &mut warnings);
+    canonicalize_rules(
+        &mut config.cross_file.rules,
+        "cross-file.rules",
+        &mut warnings,
+    );
+    for (index, ov) in config.overrides.iter_mut().enumerate() {
         if let Some(linter) = &mut ov.linter {
-            canonicalize_rules(&mut linter.rules);
+            canonicalize_rules(
+                &mut linter.rules,
+                &format!("overrides[{index}].linter.rules"),
+                &mut warnings,
+            );
         }
         if let Some(cross_file) = &mut ov.cross_file {
-            canonicalize_rules(&mut cross_file.rules);
+            canonicalize_rules(
+                &mut cross_file.rules,
+                &format!("overrides[{index}].cross-file.rules"),
+                &mut warnings,
+            );
         }
+    }
+    warnings
+}
+
+fn canonicalize_rules(rules: &mut Rules, path: &str, warnings: &mut Vec<String>) {
+    for (group, entries) in &mut rules.groups {
+        let canonical = canonicalize_entries(
+            std::mem::take(entries),
+            |value| rule_level_rank(value.level()),
+            &format!("{path}.{group}"),
+            warnings,
+        );
+        entries.extend(canonical);
     }
 }
 
-fn canonicalize_rules(rules: &mut Rules) {
-    for group in rules.groups.values_mut() {
-        for &(old, canonical) in RULE_ALIASES {
-            let Some(cfg) = group.remove(old) else {
-                continue;
+/// Rewrite one JSON rule map using the same collision policy as config loading.
+///
+/// The first occurrence determines the key's position. Highest severity wins;
+/// canonical names win ties, then the first alias in [`RULE_ALIASES`] wins.
+/// Unknown names and their values are preserved.
+pub fn canonicalize_rule_map(
+    entries: &mut serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    let (canonical, warnings) = canonicalize_rule_entries(std::mem::take(entries));
+    *entries = canonical;
+    warnings
+}
+
+/// Canonicalize JSON rule entries without losing duplicate input names.
+///
+/// Uses the same severity, canonical-name tie priority, and insertion ordering
+/// as [`canonicalize_rule_map`].
+pub fn canonicalize_rule_entries(
+    entries: impl IntoIterator<Item = (String, serde_json::Value)>,
+) -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let canonical = canonicalize_entries(
+        entries,
+        |value| {
+            let level = value
+                .as_str()
+                .or_else(|| value.get("level").and_then(|v| v.as_str()));
+            level
+                .and_then(|level| falcon_config::level_from_str::<serde_json::Error>(level).ok())
+                .map(rule_level_rank)
+                .unwrap_or(0)
+        },
+        "",
+        &mut warnings,
+    );
+    (canonical.into_iter().collect(), warnings)
+}
+
+fn canonicalize_entries<T: std::fmt::Debug>(
+    entries: impl IntoIterator<Item = (String, T)>,
+    rank: impl Fn(&T) -> u8,
+    path: &str,
+    warnings: &mut Vec<String>,
+) -> Vec<(String, T)> {
+    use std::collections::HashMap;
+
+    let entries = entries.into_iter();
+    let capacity = entries.size_hint().0;
+    let mut positions = HashMap::<String, usize>::with_capacity(capacity);
+    let mut canonical_entries: Vec<(String, T)> = Vec::with_capacity(capacity);
+    let mut priorities = Vec::with_capacity(capacity);
+    for (name, value) in entries {
+        let canonical = canonical_rule_name(&name);
+        let alias_index = RULE_ALIASES.iter().position(|(alias, _)| *alias == name);
+        if alias_index.is_some() {
+            let key_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
             };
-            match group.get(canonical) {
-                Some(existing) if severity_rank(existing) >= severity_rank(&cfg) => {}
-                _ => {
-                    group.insert(canonical.to_owned(), cfg);
-                }
+            warnings.push(format!(
+                "deprecated rule key `{key_path}`; use `{canonical}` — \
+                 run `falcon migrate` to update"
+            ));
+        }
+        let priority = (
+            rank(&value),
+            alias_index.is_none(),
+            std::cmp::Reverse(alias_index.unwrap_or(0)),
+        );
+        if let Some(&index) = positions.get(canonical) {
+            let discarded = if priority > priorities[index] {
+                &canonical_entries[index].1
+            } else {
+                &value
+            };
+            let key_path = if path.is_empty() {
+                canonical.to_owned()
+            } else {
+                format!("{path}.{canonical}")
+            };
+            warnings.push(format!(
+                "duplicate rule key `{key_path}`: discarded configuration {discarded:?}; \
+                 highest severity wins, then canonical names, then legacy alias priority"
+            ));
+            if priority > priorities[index] {
+                canonical_entries[index].1 = value;
+                priorities[index] = priority;
             }
+        } else {
+            let canonical = if canonical == name {
+                name
+            } else {
+                canonical.to_owned()
+            };
+            positions.insert(canonical.clone(), canonical_entries.len());
+            canonical_entries.push((canonical, value));
+            priorities.push(priority);
         }
     }
+    canonical_entries
 }
 
-/// Severity ordering used to merge colliding config entries: higher wins.
-fn severity_rank(cfg: &RuleConfiguration) -> u8 {
-    match cfg.level() {
+/// Shared collision ordering: higher severity wins; `on` and `warn` tie.
+pub fn rule_level_rank(level: RulePlainConfiguration) -> u8 {
+    match level {
         RulePlainConfiguration::Off => 1,
         RulePlainConfiguration::Info => 2,
         RulePlainConfiguration::On | RulePlainConfiguration::Warn => 3,

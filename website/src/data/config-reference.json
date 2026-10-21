@@ -1,150 +1,99 @@
 [
   {
-    "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors.",
     "path": "$schema",
-    "type": "string"
+    "type": "string",
+    "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors."
   },
   {
-    "default": true,
-    "description": "Master switch for cross-file analysis. Set to false to disable all cross-file rules. Defaults to true.",
-    "path": "cross-file.enabled",
-    "type": "boolean"
-  },
-  {
-    "default": true,
-    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
-    "path": "cross-file.rules.recommended",
-    "type": "boolean"
-  },
-  {
-    "allowedValues": [
-      "off",
-      "on",
-      "info",
-      "warn",
-      "error"
-    ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
-    "path": "cross-file.rules.<group>.<rule>",
-    "type": "rule level (or object with level + options)"
-  },
-  {
-    "description": "Glob patterns for the files falcon analyzes. When omitted, every Dart file under the working directory is analyzed.",
     "path": "files.includes",
-    "type": "string[]"
+    "type": "string[]",
+    "description": "Glob patterns relative to the configuration directory. A single star stops at directory separators; a double star crosses them. When omitted, every Dart file is a candidate."
   },
   {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `bloc` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.bloc",
-    "type": "string"
-  },
-  {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `equatable` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.equatable",
-    "type": "string"
-  },
-  {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `flutter` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.flutter",
-    "type": "string"
-  },
-  {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `flutter_hooks` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.flutter_hooks",
-    "type": "string"
-  },
-  {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `provider` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.provider",
-    "type": "string"
-  },
-  {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `riverpod` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.riverpod",
-    "type": "string"
-  },
-  {
-    "allowedValues": [
-      "all",
-      "recommended",
-      "none"
-    ],
-    "description": "Activation level for the `test` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
-    "path": "linter.domains.test",
-    "type": "string"
-  },
-  {
-    "default": true,
-    "description": "Master switch for the single-file linter. Set to false to disable all file rules. Defaults to true.",
     "path": "linter.enabled",
-    "type": "boolean"
+    "type": "boolean",
+    "default": true,
+    "description": "Master switch for the single-file linter. Set to false to disable all file rules. Defaults to true."
   },
   {
-    "default": true,
-    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
+    "path": "linter.domains.flutter",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `flutter` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
+    "path": "linter.domains.test",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `test` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
+    "path": "linter.domains.bloc",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `bloc` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
+    "path": "linter.domains.riverpod",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `riverpod` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
+    "path": "linter.domains.provider",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `provider` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
+    "path": "linter.domains.flutter_hooks",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `flutter_hooks` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
+    "path": "linter.domains.equatable",
+    "type": "string",
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `equatable` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
+  },
+  {
     "path": "linter.rules.recommended",
-    "type": "boolean"
+    "type": "boolean",
+    "default": true,
+    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true."
   },
   {
-    "allowedValues": [
-      "off",
-      "on",
-      "info",
-      "warn",
-      "error"
-    ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
     "path": "linter.rules.<group>.<rule>",
-    "type": "rule level (or object with level + options)"
-  },
-  {
-    "default": null,
-    "description": "Stop after emitting this many diagnostics. Null (the default) means no limit. Must be at least 1; 0 is rejected because it would suppress every diagnostic.",
-    "path": "max-errors",
-    "type": "integer | null"
-  },
-  {
-    "description": "Master switch for cross-file analysis within this override.",
-    "path": "overrides[].cross-file.enabled",
-    "type": "boolean"
-  },
-  {
-    "default": true,
-    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
-    "path": "overrides[].cross-file.rules.recommended",
-    "type": "boolean"
-  },
-  {
+    "type": "rule level (or object with level + options)",
     "allowedValues": [
       "off",
       "on",
@@ -152,27 +101,45 @@
       "warn",
       "error"
     ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
-    "path": "overrides[].cross-file.rules.<group>.<rule>",
-    "type": "rule level (or object with level + options)"
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
   },
   {
-    "description": "Glob patterns selecting the files this override applies to.",
+    "path": "cross-file.enabled",
+    "type": "boolean",
+    "default": true,
+    "description": "Master switch for cross-file analysis. Set to false to disable all cross-file rules. Defaults to true."
+  },
+  {
+    "path": "cross-file.rules.recommended",
+    "type": "boolean",
+    "default": true,
+    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true."
+  },
+  {
+    "path": "cross-file.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)",
+    "allowedValues": [
+      "off",
+      "on",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+  },
+  {
     "path": "overrides[].includes",
-    "type": "string[]"
+    "type": "string[]",
+    "description": "Glob patterns relative to the configuration directory selecting the files this override applies to. Omitted patterns apply to every file."
   },
   {
-    "description": "Master switch for the single-file linter within this override.",
     "path": "overrides[].linter.enabled",
-    "type": "boolean"
+    "type": "boolean",
+    "description": "Master switch for the single-file linter within this override."
   },
   {
-    "default": true,
-    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
-    "path": "overrides[].linter.rules.recommended",
-    "type": "boolean"
-  },
-  {
+    "path": "overrides[].linter.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)",
     "allowedValues": [
       "off",
       "on",
@@ -180,8 +147,29 @@
       "warn",
       "error"
     ],
-    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
-    "path": "overrides[].linter.rules.<group>.<rule>",
-    "type": "rule level (or object with level + options)"
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+  },
+  {
+    "path": "overrides[].cross-file.enabled",
+    "type": "boolean",
+    "description": "Master switch for cross-file analysis within this override."
+  },
+  {
+    "path": "overrides[].cross-file.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)",
+    "allowedValues": [
+      "off",
+      "on",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`."
+  },
+  {
+    "path": "max-errors",
+    "type": "integer | null",
+    "default": null,
+    "description": "Print at most this many diagnostics without changing the exit code. Null (the default) means no limit. Must be at least 1 in configuration; use the CLI flag to hide all output."
   }
 ]

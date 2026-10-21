@@ -76,6 +76,7 @@ Lint the current directory, specific paths, or the whole project:
 
 ```sh
 falcon check .            # lint the current directory
+falcon check              # equivalent to falcon check .
 falcon check lib/ test/   # lint specific paths
 falcon check . --config ./falcon.json   # point at an explicit config
 ```
@@ -88,18 +89,19 @@ Emit machine-readable output for tooling:
 falcon check . --format json
 ```
 
-Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code units. The half-open `span.start` and `span.end` are UTF-8 byte offsets into the source file, not a column and length. To compare a diagnostic range with `dart analyze --format=machine`, count the UTF-16 code units in the source slice covered by `span`.
+Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code units; unresolved positions are omitted from JSON rather than reported as zero. JSON severities are lowercase (`error`, `warning`, `info`). The half-open `span.start` and `span.end` are UTF-8 byte offsets into the source file, not a column and length. To compare a diagnostic range with `dart analyze --format=machine`, count the UTF-16 code units in the source slice covered by `span`.
 
 The `eol-at-end-of-file` rule can report a virtual one-character range at EOF. In that case `span.end` is one byte beyond the file; preserve the extra unit when computing the UTF-16 range length.
 
 falcon discovers `falcon.json` automatically: the current directory, then the
 enclosing git root, then `~/.falcon.json`.
 
-**Exit codes:** `falcon check` exits `0` when clean and `1` when diagnostics (including info or warnings) are reported. `--exit-code` changes the findings exit code. Configuration failures and source files larger than 4 GiB (4,294,967,295 bytes) exit `1` regardless of that flag; unreadable or non-UTF-8 files are skipped with a warning. Use `--max-errors` to cap reported diagnostics:
+**Exit codes:** `falcon check` exits `0` when clean and `1` when diagnostics (including info or warnings) are reported. `--exit-code` changes the findings exit code. Configuration and analysis pipeline failures exit `1` regardless of that flag. A missing path or a run with no matching Dart files reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. Omitting paths checks the current directory. Unreadable or non-UTF-8 files are skipped with a warning. `--max-errors` limits printing only, not the exit code:
 
 ```sh
 falcon check . --exit-code 2    # use exit code 2 on findings
 falcon check . --max-errors 50  # report at most 50 diagnostics
+falcon check missing.dart --no-errors-on-unmatched  # tolerate unmatched paths
 ```
 
 ## Editor setup

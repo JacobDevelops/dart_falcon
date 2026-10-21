@@ -17,7 +17,7 @@ use lsp_server::{
 };
 use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
-    DidSaveTextDocument, Notification as _, PublishDiagnostics,
+    DidSaveTextDocument, Notification as _, PublishDiagnostics, ShowMessage,
 };
 use lsp_types::request::{HoverRequest, RegisterCapability, Request as _, UnregisterCapability};
 use lsp_types::{
@@ -328,6 +328,7 @@ fn watched_files_and_publish(
         return Ok(());
     }
     let affected = state.watched_files_changed(paths);
+    publish_config_messages(connection, state)?;
     if affected.is_empty() {
         return Ok(());
     }
@@ -397,6 +398,7 @@ fn run_with_state(
     };
     connection.initialize_finish(initialize_id, serde_json::to_value(initialize_result)?)?;
     info!("LSP server initialized");
+    publish_config_messages(&connection, &mut state)?;
 
     let mut debounce = Debounce::default();
     watching.refresh(&connection, &state)?;
@@ -553,6 +555,18 @@ fn run_with_state(
         }
         watching.refresh(&connection, &state)?;
     }
+}
+
+fn publish_config_messages(
+    connection: &Connection,
+    state: &mut LspState,
+) -> Result<(), ServerError> {
+    for params in state.take_config_messages() {
+        connection
+            .sender
+            .send(ServerNotification::new(ShowMessage::METHOD.to_string(), params).into())?;
+    }
+    Ok(())
 }
 
 fn handle_request(

@@ -9,11 +9,11 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use falcon_config::{
-    KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, ResolvedSeverity, RulePlainConfiguration,
-    level_from_str, level_to_severity,
+use falcon_config::{KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, RulePlainConfiguration};
+use falcon_rules::meta::{
+    RULE_METADATA, RuleMeta, RuleSource, canonical_rule_name, canonicalize_rule_entries,
+    canonicalize_rule_map, meta_for,
 };
-use falcon_rules::meta::{RULE_METADATA, RuleMeta, RuleSource, canonical_rule_name, meta_for};
 use falcon_rules::schema::SCHEMA_URL;
 use serde_json::{Map, Value, json};
 
@@ -119,8 +119,8 @@ fn parse_linter_rules(rules: &Value) -> Vec<(String, RuleConfig)> {
 
 #[derive(Default)]
 struct Migration {
-    linter_groups: BTreeMap<String, Map<String, Value>>,
-    cross_file_groups: BTreeMap<String, Map<String, Value>>,
+    linter_groups: BTreeMap<String, Vec<(String, Value)>>,
+    cross_file_groups: BTreeMap<String, Vec<(String, Value)>>,
     unrecognized: Vec<String>,
     migrated_count: usize,
 }
@@ -136,10 +136,17 @@ impl Migration {
         } else {
             &mut self.linter_groups
         };
+        // Preserve aliases until the shared merge so canonical names and alias
+        // precedence break equal-severity ties exactly as configuration loading.
+        let name = if canonical_rule_name(&id) == meta.name {
+            id
+        } else {
+            meta.name.to_string()
+        };
         target
             .entry(meta.group.as_str().to_string())
             .or_default()
-            .insert(meta.name.to_string(), config_to_json(cfg));
+            .push((name, config_to_json(cfg)));
         self.migrated_count += 1;
     }
 }
@@ -159,11 +166,12 @@ fn config_to_json(cfg: RuleConfig) -> Value {
 
 /// Assemble a section's `rules` object: `recommended: false` plus each non-empty
 /// group. Groups are omitted when they contain no migrated rules.
-fn build_rules_object(groups: BTreeMap<String, Map<String, Value>>) -> Value {
+fn build_rules_object(groups: BTreeMap<String, Vec<(String, Value)>>) -> Value {
     let mut rules = Map::new();
     rules.insert("recommended".into(), json!(false));
     for (group, entries) in groups {
         if !entries.is_empty() {
+            let (entries, _warnings) = canonicalize_rule_entries(entries);
             rules.insert(group, Value::Object(entries));
         }
     }
@@ -318,12 +326,16 @@ fn rename_key(value: &mut Value, from: &str, to: &str) {
     let Some(obj) = value.as_object_mut() else {
         return;
     };
-    if obj.contains_key(to) {
-        obj.remove(from);
+    if !obj.contains_key(from) {
         return;
     }
-    if let Some(v) = obj.remove(from) {
-        obj.insert(to.to_string(), v);
+    if obj.contains_key(to) {
+        obj.shift_remove(from);
+        return;
+    }
+    let entries = std::mem::take(obj);
+    for (key, value) in entries {
+        obj.insert(if key == from { to.to_string() } else { key }, value);
     }
 }
 
@@ -351,35 +363,17 @@ fn canonicalize_group(
     renamed: &mut usize,
     unrecognized: &mut Vec<String>,
 ) {
-    for (key, value) in std::mem::take(group) {
-        let canonical = canonical_rule_name(&key).to_string();
-        if meta_for(&canonical).is_none() {
-            if !unrecognized.contains(&key) {
+    for key in group.keys() {
+        let canonical = canonical_rule_name(key);
+        if meta_for(canonical).is_none() {
+            if !unrecognized.contains(key) {
                 unrecognized.push(key.clone());
             }
-            // Unknown key: keep it verbatim (it was never renamed).
-            group.entry(key).or_insert(value);
-            continue;
-        }
-        let renamed_key = canonical != key;
-        match group.get(&canonical) {
-            Some(existing) if level_rank(&value) <= level_rank(existing) => {}
-            _ => {
-                group.insert(canonical, value);
-                // Count only entries actually written under a new id.
-                if renamed_key {
-                    *renamed += 1;
-                }
-            }
+        } else if canonical != key {
+            *renamed += 1;
         }
     }
-}
-
-/// Severity ordering for merging duplicate twin entries: higher wins.
-fn level_rank(value: &Value) -> Option<Option<ResolvedSeverity>> {
-    level_from_str::<serde_json::Error>(value.get("level").unwrap_or(value).as_str()?)
-        .ok()
-        .map(level_to_severity)
+    let _warnings = canonicalize_rule_map(group);
 }
 
 /// Read `input`, migrate it, print a summary to stderr, and either print the

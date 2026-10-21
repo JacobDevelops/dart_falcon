@@ -278,7 +278,8 @@ fn canonicalize_config_rewrites_legacy_rule_keys() {
     }))
     .expect("valid config");
 
-    canonicalize_config(&mut config);
+    let warnings = canonicalize_config(&mut config);
+    assert_eq!(warnings.len(), 2);
 
     assert_eq!(
         config.resolve_rule("complexity", "max-lines-for-file", false, &[]),
@@ -316,9 +317,10 @@ fn canonicalization_preserves_collisions_unknown_keys_and_all_override_maps() {
             }]
         }))
         .expect("valid config");
-        canonicalize_config(&mut config);
+        let warnings = canonicalize_config(&mut config);
+        assert_eq!(warnings.len(), 16);
         let once = serde_json::to_value(&config).expect("serializable config");
-        canonicalize_config(&mut config);
+        assert!(canonicalize_config(&mut config).is_empty());
         assert_eq!(serde_json::to_value(&config).unwrap(), once);
         for rules in [
             &config.linter.rules,
@@ -357,7 +359,7 @@ fn equal_severity_collisions_preserve_canonical_options_then_first_legacy_option
             "linter": { "rules": { "suspicious": group } }
         }))
         .unwrap();
-        canonicalize_config(&mut config);
+        let _ = canonicalize_config(&mut config);
         let result = &config.linter.rules.groups["suspicious"];
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -647,4 +649,58 @@ void main() {
         }
     }
     assert_eq!(diagnostics_only, expected);
+}
+
+#[test]
+fn typed_and_json_canonicalization_share_severity_options_and_tie_policy() {
+    use falcon_config::FalconConfig;
+    use falcon_rules::meta::{canonicalize_config, canonicalize_rule_map};
+
+    for alias_level in ["off", "info", "on", "warn", "error"] {
+        for canonical_level in ["off", "info", "on", "warn", "error"] {
+            for alias_first in [true, false] {
+                let alias = serde_json::json!({
+                    "level": alias_level, "options": { "source": "alias" }
+                });
+                let canonical = serde_json::json!({
+                    "level": canonical_level, "options": { "source": "canonical" }
+                });
+                let mut entries = serde_json::Map::new();
+                let pairs = if alias_first {
+                    [("no_empty_block", alias), ("no-empty-block", canonical)]
+                } else {
+                    [("no-empty-block", canonical), ("no_empty_block", alias)]
+                };
+                entries.extend(
+                    pairs
+                        .into_iter()
+                        .map(|(key, value)| (key.to_owned(), value)),
+                );
+                let mut typed: FalconConfig = serde_json::from_value(serde_json::json!({
+                    "linter": { "rules": { "suspicious": entries } }
+                }))
+                .unwrap();
+                let json_warnings = canonicalize_rule_map(&mut entries);
+                let typed_warnings = canonicalize_config(&mut typed);
+                assert_eq!(json_warnings.len(), 2);
+                assert_eq!(typed_warnings.len(), 2);
+                assert!(
+                    json_warnings
+                        .iter()
+                        .any(|warning| warning.contains("discarded") && warning.contains("source"))
+                );
+                assert!(
+                    typed_warnings
+                        .iter()
+                        .any(|warning| warning.contains("discarded") && warning.contains("source"))
+                );
+                assert_eq!(
+                    serde_json::to_value(&typed.linter.rules.groups["suspicious"]).unwrap(),
+                    serde_json::Value::Object(entries.clone()),
+                    "{alias_level}/{canonical_level}, alias first: {alias_first}"
+                );
+                assert!(canonicalize_rule_map(&mut entries).is_empty());
+            }
+        }
+    }
 }

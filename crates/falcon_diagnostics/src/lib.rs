@@ -17,12 +17,19 @@ pub struct Diagnostic {
     pub span: Span,
     /// 1-based line of `span.start`, resolved from source via
     /// [`Diagnostic::resolve_position`]. 0 means unresolved.
+    #[serde(skip_serializing_if = "is_zero")]
     pub line: u32,
     /// 1-based column of `span.start`. 0 means unresolved.
+    #[serde(skip_serializing_if = "is_zero")]
     pub col: u32,
 }
 
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,

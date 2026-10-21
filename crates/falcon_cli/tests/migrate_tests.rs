@@ -2,7 +2,7 @@
 //! options passthrough, disabled entries, unrecognized rules, and round-trip
 //! back through `FalconConfig`.
 
-use falcon_cli::{migrate_existing_config, migrate_yaml_to_config};
+use falcon_cli::{migrate_existing_config, migrate_yaml_to_config, run_migrate};
 use serde_json::Value;
 
 /// Parse the emitted JSON so assertions target structure, not whitespace.
@@ -384,4 +384,168 @@ fn upgrade_collision_levels_preserve_unknown_off_and_tied_options() {
             expected
         );
     }
+}
+
+#[test]
+fn run_migrate_upgrades_in_place_without_reordering_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("falcon.json");
+    std::fs::write(
+        &input,
+        r#"{
+  "max_errors": 4,
+  "project": {"enabled": false},
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "no_empty_block": "error",
+        "no_self_comparisons": "warn"
+      },
+      "recommended": false
+    },
+    "enabled": true
+  },
+  "$schema": "https://example.com/schema.json"
+}"#,
+    )
+    .unwrap();
+    assert_eq!(run_migrate(Some(input.clone()), true, None), 0);
+    assert_eq!(
+        std::fs::read_to_string(&input).unwrap(),
+        r#"{
+  "max-errors": 4,
+  "cross-file": {
+    "enabled": false
+  },
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "no-empty-block": "error",
+        "no-self-comparisons": "warn"
+      },
+      "recommended": false
+    },
+    "enabled": true
+  },
+  "$schema": "https://example.com/schema.json"
+}
+"#
+    );
+}
+
+#[test]
+fn run_migrate_converts_yaml_to_explicit_output_without_changing_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("analysis_options.yaml");
+    let output = dir.path().join("converted.json");
+    let yaml = "linter:\n  rules:\n    - avoid_print\n";
+    std::fs::write(&input, yaml).unwrap();
+    assert_eq!(
+        run_migrate(Some(input.clone()), true, Some(output.clone())),
+        0
+    );
+    assert_eq!(std::fs::read_to_string(input).unwrap(), yaml);
+    let value: Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["avoid-print"],
+        "warn"
+    );
+}
+
+#[test]
+fn run_migrate_detects_json_content_and_dry_run_does_not_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("config.txt");
+    let output = dir.path().join("ignored.json");
+    let json = r#"{"linter":{"rules":{"suspicious":{"no_empty_block":"warn"}}}}"#;
+    std::fs::write(&input, json).unwrap();
+    assert_eq!(
+        run_migrate(Some(input.clone()), false, Some(output.clone())),
+        0
+    );
+    assert_eq!(std::fs::read_to_string(&input).unwrap(), json);
+    assert!(!output.exists());
+    assert_eq!(run_migrate(Some(input.clone()), true, None), 0);
+    let value: Value = serde_json::from_str(&std::fs::read_to_string(input).unwrap()).unwrap();
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["no-empty-block"],
+        "warn"
+    );
+}
+
+#[test]
+fn run_migrate_reports_read_parse_and_write_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("falcon.json");
+    assert_eq!(run_migrate(Some(input.clone()), true, None), 1);
+    for (name, malformed) in [("falcon.json", "{"), ("analysis_options.yaml", "linter: [")] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, malformed).unwrap();
+        assert_eq!(run_migrate(Some(path.clone()), true, None), 1);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), malformed);
+    }
+    std::fs::write(&input, r#"{"linter":{}}"#).unwrap();
+    assert_eq!(
+        run_migrate(Some(input), true, Some(dir.path().to_path_buf())),
+        1
+    );
+}
+
+#[test]
+fn upgrade_equal_rank_prefers_canonical_options_in_either_input_order() {
+    for entries in [
+        r#""no_empty_block":{"level":"on","options":{"legacy":true}},"no-empty-block":{"level":"warn","options":{"canonical":true}}"#,
+        r#""no-empty-block":{"level":"warn","options":{"canonical":true}},"no_empty_block":{"level":"on","options":{"legacy":true}}"#,
+    ] {
+        let input = format!(r#"{{"linter":{{"rules":{{"suspicious":{{{entries}}}}}}}}}"#);
+        let result = migrate_existing_config(&input).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(
+            value["linter"]["rules"]["suspicious"]["no-empty-block"],
+            serde_json::json!({"level": "warn", "options": {"canonical": true}})
+        );
+    }
+}
+
+#[test]
+fn yaml_collisions_keep_highest_severity_across_upstream_linters() {
+    for (dcl, pyramid) in [("true", "false"), ("false", "true")] {
+        let yaml = format!(
+            "dart_code_linter:\n  rules:\n    - no-empty-block: {dcl}\n\
+             custom_lint:\n  rules:\n    - avoid_empty_blocks: {pyramid}\n"
+        );
+        let (value, unrecognized, count) = parse(&yaml);
+        assert!(unrecognized.is_empty());
+        assert_eq!(count, 2);
+        assert_eq!(
+            value["linter"]["rules"]["suspicious"]["no-empty-block"],
+            "warn"
+        );
+    }
+}
+
+#[test]
+fn yaml_collision_keeps_canonical_options_on_equal_severity() {
+    let (value, unrecognized, count) = parse(
+        "dart_code_linter:\n  rules:\n    - no-empty-block:\n        canonical: true\n\
+         custom_lint:\n  rules:\n    - avoid_empty_blocks:\n        legacy: true\n",
+    );
+    assert!(unrecognized.is_empty());
+    assert_eq!(count, 2);
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["no-empty-block"],
+        serde_json::json!({"level": "warn", "options": {"canonical": true}})
+    );
+}
+
+#[test]
+fn yaml_duplicate_rule_entries_do_not_let_off_replace_warn() {
+    let (value, unrecognized, count) =
+        parse("dart_code_linter:\n  rules:\n    - no-empty-block\n    - no-empty-block: false\n");
+    assert!(unrecognized.is_empty());
+    assert_eq!(count, 2);
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["no-empty-block"],
+        "warn"
+    );
 }

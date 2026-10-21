@@ -36,7 +36,7 @@ pub struct FalconConfig {
     /// later entries win over earlier ones, and all win over the base config.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub overrides: Vec<Override>,
-    /// Maximum number of errors before stopping. Defaults to None (unlimited).
+    /// Maximum number of printed diagnostics. Defaults to None (unlimited).
     /// Accepts the legacy key `max_errors` as a deserialization alias.
     #[serde(rename = "max-errors", alias = "max_errors")]
     pub max_errors: Option<usize>,
@@ -49,8 +49,7 @@ pub struct FalconConfig {
 pub struct Override {
     /// Glob patterns selecting the files this override applies to. Same syntax
     /// as `files.includes`: plain entries are positive includes, `!`-prefixed
-    /// entries are exclusions. Relative globs match paths as walked; absolute
-    /// paths require absolute globs or a leading `**/`.
+    /// entries are exclusions. Relative globs resolve from the config directory.
     pub includes: PathFilter,
     /// Partial linter (file-rule) configuration applied to matching files. Rule
     /// levels, per-rule `options`, and an optional `enabled` master switch are
@@ -99,37 +98,20 @@ pub struct PathFilter {
     patterns: Vec<String>,
     include: Vec<Pattern>,
     exclude: Vec<Pattern>,
+    base_dir: Option<PathBuf>,
+    lexical_base: Option<PathBuf>,
+    working_dir: Option<PathBuf>,
+    warnings: Vec<String>,
 }
 
 impl From<Vec<String>> for PathFilter {
     fn from(patterns: Vec<String>) -> Self {
-        let negatives = patterns
-            .iter()
-            .filter(|pattern| pattern.starts_with('!'))
-            .count();
-        let mut include = Vec::with_capacity(patterns.len() - negatives);
-        let mut exclude = Vec::with_capacity(negatives);
-        for pattern in &patterns {
-            let (target, raw) = match pattern.strip_prefix('!') {
-                Some(raw) => (&mut exclude, raw),
-                None => (&mut include, pattern.as_str()),
-            };
-            match Pattern::new(raw) {
-                Ok(pattern) => target.push(pattern),
-                Err(error) => tracing::warn!(pattern = raw, %error, "invalid path pattern"),
-            }
-        }
-        if patterns
-            .iter()
-            .any(|pattern| pattern == "**" || pattern == "**/*")
-        {
-            include.clear();
-        }
-        Self {
+        let mut filter = Self {
             patterns,
-            include,
-            exclude,
-        }
+            ..Self::default()
+        };
+        filter.compile();
+        filter
     }
 }
 
@@ -145,19 +127,127 @@ impl PathFilter {
     }
 
     pub fn extend_excludes(&mut self, patterns: &[String]) {
-        for raw in patterns {
-            match Pattern::new(raw) {
-                Ok(pattern) => {
-                    self.exclude.push(pattern);
-                    self.patterns.push(format!("!{raw}"));
-                }
-                Err(error) => tracing::warn!(pattern = raw, %error, "invalid path pattern"),
+        self.patterns
+            .extend(patterns.iter().map(|raw| format!("!{raw}")));
+        self.compile();
+    }
+
+    pub fn set_base_dir(&mut self, base: &Path) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let lexical = normalize_path(&cwd.join(base));
+        self.base_dir = Some(std::fs::canonicalize(&lexical).unwrap_or_else(|_| lexical.clone()));
+        self.lexical_base = Some(lexical);
+        self.working_dir = Some(cwd);
+        self.compile();
+    }
+
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    fn compile(&mut self) {
+        self.include.clear();
+        self.exclude.clear();
+        self.warnings.clear();
+        for pattern in &self.patterns {
+            let (target, raw) = match pattern.strip_prefix('!') {
+                Some(raw) => (&mut self.exclude, raw),
+                None => (&mut self.include, pattern.as_str()),
+            };
+            let resolved = if Path::new(raw).is_absolute() {
+                let path = normalize_path(Path::new(raw));
+                let path = if let (Some(lexical), Some(canonical)) =
+                    (&self.lexical_base, &self.base_dir)
+                    && let Ok(suffix) = path
+                        .strip_prefix(lexical)
+                        .or_else(|_| path.strip_prefix(canonical))
+                {
+                    Path::new(&Pattern::escape(&lexical.to_string_lossy())).join(suffix)
+                } else {
+                    path
+                };
+                Some(path.to_string_lossy().into_owned())
+            } else {
+                self.lexical_base.as_ref().map(|base| {
+                    let escaped = Pattern::escape(&base.to_string_lossy());
+                    let path = normalize_path(&Path::new(&escaped).join(raw));
+                    path.to_string_lossy().into_owned()
+                })
+            };
+            match Pattern::new(resolved.as_deref().unwrap_or(raw)) {
+                Ok(pattern) => target.push(pattern),
+                Err(error) => self
+                    .warnings
+                    .push(format!("invalid path pattern `{raw}`: {error}")),
             }
+        }
+        if self.base_dir.is_none()
+            && self
+                .patterns
+                .iter()
+                .any(|pattern| pattern == "**" || pattern == "**/*")
+        {
+            self.include.clear();
+        }
+    }
+
+    fn matching_path<'a>(&self, path: &'a str) -> std::borrow::Cow<'a, str> {
+        let Some(cwd) = &self.working_dir else {
+            return path.into();
+        };
+        let input = Path::new(path);
+        let normalized = if !input.is_absolute() {
+            std::borrow::Cow::Owned(normalize_path(&cwd.join(input)))
+        } else if path.contains("//")
+            || path.contains("/./")
+            || path.contains("/../")
+            || path.ends_with("/.")
+            || path.ends_with("/..")
+            || path.ends_with('/')
+        {
+            std::borrow::Cow::Owned(normalize_path(input))
+        } else {
+            std::borrow::Cow::Borrowed(input)
+        };
+        if let (Some(lexical), Some(canonical)) = (&self.lexical_base, &self.base_dir)
+            && lexical != canonical
+            && !normalized.starts_with(lexical)
+            && let Ok(suffix) = normalized.strip_prefix(canonical)
+        {
+            return lexical.join(suffix).to_string_lossy().into_owned().into();
+        }
+        match normalized {
+            std::borrow::Cow::Borrowed(_) => path.into(),
+            std::borrow::Cow::Owned(path) => path.to_string_lossy().into_owned().into(),
         }
     }
 
     pub fn excludes(&self, path: &str) -> bool {
-        self.exclude.iter().any(|pattern| pattern.matches(path))
+        let path = self.matching_path(path);
+        self.excludes_resolved(&path)
+    }
+
+    fn excludes_resolved(&self, path: &str) -> bool {
+        Path::new(path).ancestors().any(|ancestor| {
+            let ancestor = ancestor.to_string_lossy();
+            self.exclude
+                .iter()
+                .any(|pattern| matches_path(pattern, &ancestor))
+        })
+    }
+
+    pub fn excludes_directory(&self, path: &Path) -> bool {
+        let raw = path.to_string_lossy();
+        let mut path = self.matching_path(&raw).into_owned();
+        if self.excludes_resolved(&path) {
+            return true;
+        }
+        if !path.ends_with('/') {
+            path.push('/');
+        }
+        self.exclude
+            .iter()
+            .any(|pattern| matches_path(pattern, &path))
     }
 
     pub fn patterns(&self) -> &[String] {
@@ -165,8 +255,58 @@ impl PathFilter {
     }
 
     pub fn admits(&self, path: &str) -> bool {
-        !self.excludes(path)
-            && (self.include.is_empty() || self.include.iter().any(|pattern| pattern.matches(path)))
+        let path = self.matching_path(path);
+        !self.excludes_resolved(&path)
+            && (self.include.is_empty()
+                || self
+                    .include
+                    .iter()
+                    .any(|pattern| matches_path(pattern, &path)))
+    }
+}
+
+fn matches_path(pattern: &Pattern, path: &str) -> bool {
+    pattern.matches_with(
+        path,
+        glob::MatchOptions {
+            require_literal_separator: true,
+            ..glob::MatchOptions::new()
+        },
+    )
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                result.pop();
+            }
+            component => result.push(component.as_os_str()),
+        }
+    }
+    result
+}
+
+impl FalconConfig {
+    pub fn root_dir(&self) -> Option<&Path> {
+        self.files.includes.base_dir.as_deref()
+    }
+
+    pub fn path_warnings(&self) -> Vec<String> {
+        let mut warnings = self.files.includes.warnings.clone();
+        for entry in &self.overrides {
+            warnings.extend_from_slice(entry.includes.warnings());
+        }
+        warnings
+    }
+
+    pub fn resolve_paths(&mut self, base: &Path) {
+        self.files.includes.set_base_dir(base);
+        for entry in &mut self.overrides {
+            entry.includes.set_base_dir(base);
+        }
     }
 }
 
@@ -679,72 +819,142 @@ pub const LEGACY_TOP_LEVEL_KEYS: &[(&str, &str)] = &[
     ("max_errors", "max-errors"),
 ];
 
-/// Warnings for a config's top-level keys: a deprecation notice for each legacy
-/// spelling, and an "unknown key" notice for anything unrecognized (typo
-/// protection). Unknown keys are ignored by serde, so without this a mistyped
-/// section vanishes silently. Legacy-flat-schema keys are handled earlier (hard
-/// error) and never reach here.
-fn top_level_key_warnings(value: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = value.as_object() else {
-        return Vec::new();
-    };
-    let mut warnings: Vec<String> = obj
-        .keys()
-        .filter(|k| !KNOWN_TOP_LEVEL_KEYS.contains(&k.as_str()))
-        .map(|key| {
-            match LEGACY_TOP_LEVEL_KEYS
-                .iter()
-                .find(|(legacy, _)| legacy == key)
-            {
-                Some((_, canonical)) => format!(
-                    "warning: falcon.json uses the deprecated top-level key `{key}`; it \
-                     still works but is a legacy spelling of `{canonical}` — run \
-                     `falcon migrate` to update"
-                ),
-                None => format!(
-                    "warning: falcon.json contains unknown top-level key `{key}`; it is ignored"
-                ),
-            }
-        })
-        .collect();
-    // Override entries accept `project`/`cross_file` as serde aliases for
-    // `cross-file`; they load, but deserve the same deprecation nudge.
-    if let Some(overrides) = obj.get("overrides").and_then(|v| v.as_array()) {
-        for (i, entry) in overrides.iter().enumerate() {
-            let Some(entry) = entry.as_object() else {
-                continue;
-            };
-            for &(legacy, _) in LEGACY_TOP_LEVEL_KEYS
-                .iter()
-                .filter(|(_, canonical)| *canonical == "cross-file")
-            {
-                if entry.contains_key(legacy) {
-                    warnings.push(format!(
-                        "warning: falcon.json `overrides[{i}]` uses the deprecated key \
-                         `{legacy}`; it still works but is a legacy spelling of \
-                         `cross-file` — run `falcon migrate` to update"
-                    ));
-                }
-            }
-        }
-    }
-    warnings
+/// A loaded configuration and all warnings produced while loading it.
+#[derive(Debug)]
+pub struct LoadedConfig {
+    pub config: FalconConfig,
+    pub warnings: Vec<String>,
 }
 
-/// Load a config from a specific file path.
+/// Rule groups accepted by structural configuration parsing.
+pub const RULE_GROUPS: &[&str] = &[
+    "a11y",
+    "complexity",
+    "correctness",
+    "performance",
+    "security",
+    "style",
+    "suspicious",
+];
+/// Domain names accepted by structural configuration parsing.
+pub const DOMAINS: &[&str] = &[
+    "flutter",
+    "test",
+    "bloc",
+    "riverpod",
+    "provider",
+    "flutter_hooks",
+    "equatable",
+];
+
+#[derive(Clone, Copy)]
+enum ConfigObject {
+    Root,
+    Files,
+    Linter,
+    CrossFile,
+    Override,
+    OverrideRules,
+    Rules,
+    OverrideRuleEntries,
+    RuleGroup,
+    Rule,
+    Domains,
+}
+
+fn validate_keys(
+    value: &serde_json::Value,
+    path: &str,
+    kind: ConfigObject,
+    warnings: &mut Vec<String>,
+) -> Result<(), ConfigError> {
+    let Some(object) = value.as_object() else {
+        return Ok(()); // Serde reports wrong value types.
+    };
+    for (key, value) in object {
+        let full_path = if path.is_empty() {
+            key.clone()
+        } else {
+            format!("{path}.{key}")
+        };
+        let canonical = if matches!(kind, ConfigObject::Root | ConfigObject::Override) {
+            LEGACY_TOP_LEVEL_KEYS
+                .iter()
+                .find(|(legacy, canonical)| {
+                    *legacy == key
+                        && (matches!(kind, ConfigObject::Root) || *canonical == "cross-file")
+                })
+                .map(|(_, canonical)| *canonical)
+                .unwrap_or(key)
+        } else {
+            key
+        };
+        if canonical != key {
+            warnings.push(format!(
+                "falcon.json uses deprecated key `{full_path}` (`{key}`); \
+                 use `{canonical}` — run `falcon migrate` to update"
+            ));
+        }
+        use ConfigObject as Object;
+        let child = match (kind, canonical) {
+            (Object::Root, "$schema" | "max-errors")
+            | (Object::Files | Object::Override, "includes")
+            | (Object::Linter | Object::CrossFile | Object::OverrideRules, "enabled")
+            | (Object::Rules, "recommended")
+            | (Object::Rule, "level" | "options") => None,
+            (Object::Root, "files") => Some(Object::Files),
+            (Object::Root, "linter") => Some(Object::Linter),
+            (Object::Root, "cross-file") => Some(Object::CrossFile),
+            (Object::Root, "overrides") => {
+                if let Some(entries) = value.as_array() {
+                    for (index, entry) in entries.iter().enumerate() {
+                        validate_keys(
+                            entry,
+                            &format!("{full_path}[{index}]"),
+                            Object::Override,
+                            warnings,
+                        )?;
+                    }
+                }
+                None
+            }
+            (Object::Override, "linter" | "cross-file") => Some(Object::OverrideRules),
+            (Object::Linter | Object::CrossFile, "rules") => Some(Object::Rules),
+            (Object::OverrideRules, "rules") => Some(Object::OverrideRuleEntries),
+            (Object::Linter, "domains") => Some(Object::Domains),
+            (Object::Rules | Object::OverrideRuleEntries, group)
+                if RULE_GROUPS.contains(&group) =>
+            {
+                Some(Object::RuleGroup)
+            }
+            (Object::RuleGroup, _) => Some(Object::Rule),
+            (Object::Domains, domain) if DOMAINS.contains(&domain) => None,
+            _ => {
+                let description = if matches!(kind, Object::Domains) {
+                    "unknown domain"
+                } else {
+                    "unknown key"
+                };
+                return Err(ConfigError(format!("{description} `{full_path}`")));
+            }
+        };
+        if let Some(child) = child {
+            validate_keys(value, &full_path, child, warnings)?;
+        }
+    }
+    Ok(())
+}
+
+/// Load structural configuration and return warnings without printing them.
 ///
-/// Prints a stderr warning for any unknown top-level key (typo protection) and
-/// for any legacy key spelling (`project`, `cross_file`, `max_errors`), which
-/// still load but are deprecated.
+/// Application consumers must use the canonicalizing loader in `falcon_rules`,
+/// which additionally validates registered rules and returns all warnings.
 ///
 /// # Errors
 ///
-/// Returns `ConfigError` if the file cannot be read, if JSON deserialization
-/// fails, if the file uses the legacy flat schema (top-level `rules`,
-/// `exclude_patterns`, or `severity_override`) — which serde would otherwise
-/// silently accept as an all-defaults config — or if `max-errors` is `0`, which
-/// would suppress every diagnostic.
-pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
+/// Returns an error for unreadable files, invalid JSON or configuration keys,
+/// the legacy flat schema, and a zero `max-errors` value.
+pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| ConfigError(format!("failed to read config file: {}", e)))?;
     let value: serde_json::Value = serde_json::from_str(&content)
@@ -762,22 +972,23 @@ pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
         ));
     }
 
-    for warning in top_level_key_warnings(&value) {
-        eprintln!("{warning}");
-    }
+    let mut warnings = Vec::new();
+    validate_keys(&value, "", ConfigObject::Root, &mut warnings)?;
 
-    let config: FalconConfig = serde_json::from_value(value)
+    let mut config: FalconConfig = serde_json::from_value(value)
         .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
 
     if config.max_errors == Some(0) {
         return Err(ConfigError(
-            "`max-errors` must be at least 1; 0 would suppress every diagnostic and pass a \
-             run with violations present. Omit it (or use null) for no limit."
+            "`max-errors` must be at least 1; use the CLI --max-errors 0 flag to hide output. \
+             Omit it (or use null) for no limit."
                 .to_string(),
         ));
     }
 
-    Ok(config)
+    config.resolve_paths(path.parent().unwrap_or(Path::new(".")));
+    warnings.extend(config.path_warnings());
+    Ok(LoadedConfig { config, warnings })
 }
 
 /// Find a config file starting from `start_dir`, following this priority order:
@@ -818,92 +1029,102 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Load discovered config or defaults; errors in a discovered config propagate.
-pub fn load_or_default(start_dir: &Path) -> Result<FalconConfig, ConfigError> {
-    match find_config(start_dir) {
-        Some(path) => load_config(&path),
-        None => Ok(FalconConfig::default()),
-    }
-}
-
 #[cfg(test)]
 mod warning_tests {
-    use super::top_level_key_warnings;
+    use super::{ConfigObject, validate_keys};
     use serde_json::json;
 
     #[test]
-    fn unknown_top_level_key_is_warned() {
-        let warnings = top_level_key_warnings(&json!({ "linterr": {}, "totallyBogus": 5 }));
-        assert_eq!(warnings.len(), 2);
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("unknown top-level key `linterr`"))
-        );
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("unknown top-level key `totallyBogus`"))
-        );
-    }
-
-    /// An override entry using a legacy alias (`project`/`cross_file`) for
-    /// `cross-file` earns the same deprecation warning, indexed by entry.
-    #[test]
-    fn override_level_legacy_alias_is_deprecation_warned() {
-        let warnings = top_level_key_warnings(&json!({
-            "linter": {},
-            "overrides": [
-                { "includes": ["test/**"], "cross-file": { "enabled": false } },
-                { "includes": ["lib/**"], "project": { "enabled": false } }
-            ]
-        }));
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(warnings[0].contains("overrides[1]"));
-        assert!(warnings[0].contains("deprecated"));
-        assert!(warnings[0].contains("`project`"));
-        assert!(warnings[0].contains("falcon migrate"));
-    }
-
-    /// Findings 3/4: legacy spellings load but earn a deprecation warning naming
-    /// their canonical key and pointing at `falcon migrate`.
-    #[test]
-    fn legacy_spellings_are_deprecation_warned_not_unknown() {
-        let warnings = top_level_key_warnings(&json!({
-            "project": {}, "cross_file": {}, "max_errors": 10
-        }));
-        assert_eq!(warnings.len(), 3);
-        for w in &warnings {
-            assert!(
-                w.contains("deprecated"),
-                "should be a deprecation, not unknown: {w}"
-            );
-            assert!(w.contains("falcon migrate"));
+    fn unknown_keys_report_full_paths_at_every_structural_depth() {
+        for (value, path) in [
+            (json!({ "linterr": {} }), "linterr"),
+            (json!({ "files": { "include": [] } }), "files.include"),
+            (json!({ "linter": { "enable": false } }), "linter.enable"),
+            (
+                json!({ "cross-file": { "enable": false } }),
+                "cross-file.enable",
+            ),
+            (
+                json!({ "linter": { "rules": { "stile": {} } } }),
+                "linter.rules.stile",
+            ),
+            (
+                json!({ "linter": { "domains": { "fluter": "all" } } }),
+                "linter.domains.fluter",
+            ),
+            (
+                json!({ "overrides": [{ "include": [] }] }),
+                "overrides[0].include",
+            ),
+            (
+                json!({ "overrides": [{ "linter": { "domains": {} } }] }),
+                "overrides[0].linter.domains",
+            ),
+            (
+                json!({ "overrides": [{ "cross-file": { "rules": { "stile": {} } } }] }),
+                "overrides[0].cross-file.rules.stile",
+            ),
+            (
+                json!({ "overrides": [{ "linter": { "rules": { "style": { "x": { "level": "warn", "option": {} } } } } }] }),
+                "overrides[0].linter.rules.style.x.option",
+            ),
+        ] {
+            let error = validate_keys(&value, "", ConfigObject::Root, &mut Vec::new())
+                .expect_err("unknown keys must fail");
+            assert!(error.0.contains(path), "{error}: expected {path}");
         }
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("`project`") && w.contains("`cross-file`"))
-        );
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("`cross_file`") && w.contains("`cross-file`"))
-        );
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("`max_errors`") && w.contains("`max-errors`"))
-        );
     }
 
-    /// Canonical keys produce no noise.
     #[test]
-    fn canonical_keys_produce_no_warnings() {
-        let warnings = top_level_key_warnings(&json!({
-            "$schema": "x", "files": {}, "linter": {}, "cross-file": {},
-            "overrides": [], "max-errors": 50
-        }));
-        assert!(warnings.is_empty(), "unexpected: {warnings:?}");
+    fn legacy_keys_return_warnings_and_rule_options_remain_opaque() {
+        let value = json!({
+            "project": {}, "max_errors": 10,
+            "linter": { "rules": { "style": {
+                "x": { "level": "warn", "options": { "rule-specific": {} } }
+            } } },
+            "overrides": [{ "cross_file": {} }]
+        });
+        let mut warnings = Vec::new();
+        validate_keys(&value, "", ConfigObject::Root, &mut warnings).unwrap();
+        assert_eq!(warnings.len(), 3);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("overrides[0].cross_file"))
+        );
+        assert!(warnings.iter().all(|warning| warning.contains("deprecated")
+            && warning.contains("falcon migrate")));
+    }
+    #[test]
+    fn structural_config_typos_fail_without_falling_back_to_defaults() {
+        let directory =
+            std::env::temp_dir().join(format!("falcon-strict-config-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("falcon.json");
+        for (value, key_path) in [
+            (
+                json!({ "overrides": [{ "include": ["test/**"] }] }),
+                "overrides[0].include",
+            ),
+            (
+                json!({ "linter": { "domains": { "fluter": "recommended" } } }),
+                "linter.domains.fluter",
+            ),
+        ] {
+            std::fs::write(&path, value.to_string()).unwrap();
+            let error = super::deserialize_config(&path).unwrap_err();
+            assert!(error.0.contains(key_path), "{error}");
+        }
+        std::fs::write(
+            &path,
+            json!({
+                "overrides": [{ "linter": { "enabled": false } }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let loaded = super::deserialize_config(&path).unwrap();
+        assert!(loaded.config.overrides[0].matches("anywhere.dart"));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

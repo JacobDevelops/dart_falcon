@@ -44,7 +44,7 @@ struct MissedExpectation {
 #[derive(Debug)]
 struct UnexpectedDiagnostic {
     rule: String,
-    line: usize,
+    line: Option<usize>,
     message: String,
 }
 
@@ -90,7 +90,7 @@ fn validate_file(
             if matched_diag_indices.contains(&idx) {
                 continue;
             }
-            if diag.rule != exp.rule || diag.line != exp.line {
+            if diag.rule != exp.rule || diag.line != Some(exp.line) {
                 continue;
             }
             // Rule + line match. If expected_msg set, do fuzzy check.
@@ -168,7 +168,7 @@ fn validate_cross_file_dir(
             )),
         }
     }
-    let mut diag_keys: Vec<(String, usize)> = diags
+    let mut diag_keys: Vec<(String, Option<usize>)> = diags
         .iter()
         .filter(|d| d.rule == rule_name)
         .map(|d| (d.file_path.clone(), d.line))
@@ -177,7 +177,10 @@ fn validate_cross_file_dir(
     let expected = expectations.len();
     let mut matched = 0usize;
     for exp in &expectations {
-        if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
+        if let Some(pos) = diag_keys
+            .iter()
+            .position(|(path, line)| path == &exp.0 && *line == Some(exp.1))
+        {
             diag_keys.remove(pos);
             matched += 1;
         } else {
@@ -190,7 +193,10 @@ fn validate_cross_file_dir(
     for key in diag_keys {
         failures.push(format!(
             "EXTRA {}:{} — rule `{}` fired unexpectedly",
-            key.0, key.1, rule_name
+            key.0,
+            key.1
+                .map_or_else(|| "unresolved".to_string(), |line| line.to_string()),
+            rule_name
         ));
     }
     (expected, matched, failures)
@@ -396,7 +402,8 @@ fn validate_rule_dir(
                 format!(
                     "EXTRA {}:{} — rule `{}` fired unexpectedly: {}",
                     dart_file.display(),
-                    fp.line,
+                    fp.line
+                        .map_or_else(|| "unresolved".to_string(), |line| line.to_string()),
                     fp.rule,
                     fp.message
                 )

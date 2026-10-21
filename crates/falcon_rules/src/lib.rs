@@ -23,10 +23,96 @@ use falcon_analyze::{
     CrossFileRule, CrossFileRuleRegistry, FileSuppressions, PackageIdentity, ProjectFile, Rule,
     RuleRegistry, SemanticIndexes, canonical_or_lexical,
 };
-use falcon_config::{FalconConfig, ResolvedSeverity, Rules};
+use falcon_config::{ConfigError, FalconConfig, LoadedConfig, ResolvedSeverity, Rules};
 use falcon_diagnostics::{Diagnostic, Severity};
 
 use crate::meta::{RULE_METADATA, RuleKind, meta_for, suppression_lookup};
+
+/// Load configuration, canonicalize legacy rule ids, and return all warnings.
+///
+/// # Errors
+///
+/// Returns an error when the configuration cannot be read or is invalid.
+pub fn load_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
+    falcon_config::deserialize_config(path).and_then(canonicalize_loaded_config)
+}
+
+/// Load a discovered configuration or defaults through the canonicalizing loader.
+///
+/// # Errors
+///
+/// Returns an error when a discovered configuration cannot be loaded.
+pub fn load_or_default(start_dir: &Path) -> Result<LoadedConfig, ConfigError> {
+    match falcon_config::find_config(start_dir) {
+        Some(path) => load_config(&path),
+        None => {
+            let mut config = FalconConfig::default();
+            config.resolve_paths(start_dir);
+            canonicalize_loaded_config(LoadedConfig {
+                config,
+                warnings: Vec::new(),
+            })
+        }
+    }
+}
+
+fn canonicalize_loaded_config(mut loaded: LoadedConfig) -> Result<LoadedConfig, ConfigError> {
+    validate_rule_names(&loaded.config.linter.rules, "linter.rules", Section::Linter)?;
+    validate_rule_names(
+        &loaded.config.cross_file.rules,
+        "cross-file.rules",
+        Section::CrossFile,
+    )?;
+    for (index, entry) in loaded.config.overrides.iter().enumerate() {
+        if let Some(linter) = &entry.linter {
+            validate_rule_names(
+                &linter.rules,
+                &format!("overrides[{index}].linter.rules"),
+                Section::Linter,
+            )?;
+        }
+        if let Some(cross_file) = &entry.cross_file {
+            validate_rule_names(
+                &cross_file.rules,
+                &format!("overrides[{index}].cross-file.rules"),
+                Section::CrossFile,
+            )?;
+        }
+    }
+    loaded
+        .warnings
+        .extend(meta::canonicalize_config(&mut loaded.config));
+    loaded.warnings.extend(config_warnings(&loaded.config));
+    Ok(loaded)
+}
+
+fn validate_rule_names(rules: &Rules, path: &str, section: Section) -> Result<(), ConfigError> {
+    for (group, entries) in &rules.groups {
+        for name in entries.keys() {
+            let Some(metadata) = meta_for(name) else {
+                return Err(ConfigError(format!(
+                    "unknown rule key `{path}.{group}.{name}`"
+                )));
+            };
+            if metadata.group.as_str() != group
+                || metadata.is_cross_file() != matches!(section, Section::CrossFile)
+            {
+                let expected_section = if metadata.is_cross_file() {
+                    "cross-file"
+                } else {
+                    "linter"
+                };
+                return Err(ConfigError(format!(
+                    "unknown rule key `{path}.{group}.{name}`; configure it under \
+                     `{expected_section}.rules.{}.{}`",
+                    metadata.group.as_str(),
+                    metadata.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Whether a registered rule needs semantic resolution; unknown names return false.
 pub fn rule_requires_resolution(name: &str) -> bool {
@@ -60,9 +146,6 @@ pub fn cross_file_requires_resolution(config: &FalconConfig) -> bool {
 fn resolve_rules(
     config: &FalconConfig,
 ) -> impl Iterator<Item = (&'static str, Box<dyn Rule>)> + '_ {
-    for warning in config_warnings(config) {
-        eprintln!("{warning}");
-    }
     RULE_METADATA.iter().filter_map(|meta| match meta.kind {
         RuleKind::File { make, .. }
             if config.is_rule_enabled_anywhere(
@@ -205,7 +288,8 @@ fn to_severity(sev: ResolvedSeverity) -> Severity {
     }
 }
 
-fn config_warnings(config: &FalconConfig) -> Vec<String> {
+/// Return registry validation warnings without printing or constructing rules.
+pub fn config_warnings(config: &FalconConfig) -> Vec<String> {
     let mut warnings = Vec::new();
     check_rule_groups(
         &config.linter.rules,
@@ -242,13 +326,13 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
         for name in group_rules.keys() {
             let Some(meta) = meta_for(name) else {
                 warnings.push(format!(
-                    "warning: {ctx} configures unknown rule `{name}` (under group `{group}`)"
+                    "{ctx} configures unknown rule `{name}` (under group `{group}`)"
                 ));
                 continue;
             };
             if meta.group.as_str() != group.as_str() {
                 warnings.push(format!(
-                    "warning: {ctx} configures rule `{name}` under group `{group}`, \
+                    "{ctx} configures rule `{name}` under group `{group}`, \
                      but it belongs to `{}`",
                     meta.group.as_str()
                 ));
@@ -256,11 +340,11 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
             }
             match (section, meta.is_cross_file()) {
                 (Section::Linter, true) => warnings.push(format!(
-                    "warning: {ctx} configures `{name}` under `linter.rules`, but it is a \
+                    "{ctx} configures `{name}` under `linter.rules`, but it is a \
                      cross-file rule; configure it under `cross-file.rules`"
                 )),
                 (Section::CrossFile, false) => warnings.push(format!(
-                    "warning: {ctx} configures `{name}` under `cross-file.rules`, but it is a \
+                    "{ctx} configures `{name}` under `cross-file.rules`, but it is a \
                      file-level rule; configure it under `linter.rules`"
                 )),
                 _ => {}
@@ -415,5 +499,99 @@ mod tests {
             "missing file-rule-under-cross-file warning: {warnings:?}"
         );
         assert_eq!(warnings.len(), 2, "unexpected warnings: {warnings:?}");
+    }
+    #[test]
+    fn unified_loader_returns_legacy_path_and_registry_warnings() {
+        let path = std::env::temp_dir().join(format!(
+            "falcon-loader-warnings-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "project": { "rules": { "correctness": { "unused-files": "warn" } } },
+                "files": { "includes": ["["] },
+                "linter": { "rules": {
+                    "style": { "no_magic_number": "error", "no-magic-number": "warn" }
+                } },
+                "overrides": [{
+                    "includes": ["**"],
+                    "linter": { "rules": { "style": { "no_magic_number": "off" } } }
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let loaded = super::load_config(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(loaded.config.linter.rules.groups["style"].contains_key("no-magic-number"));
+        assert!(!loaded.config.linter.rules.groups["style"].contains_key("no_magic_number"));
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("`project`"))
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("linter.rules.style.no_magic_number"))
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("overrides[0].linter.rules.style.no_magic_number"))
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("discarded"))
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("invalid") && warning.contains('['))
+        );
+        assert_eq!(loaded.warnings.len(), 5, "{:?}", loaded.warnings);
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .all(|warning| !warning.starts_with("warning:"))
+        );
+    }
+
+    #[test]
+    fn loader_rejects_unknown_rule_ids_in_every_rule_map() {
+        for (value, path) in [
+            (
+                serde_json::json!({ "linter": { "rules": { "style": { "typo": "off" } } } }),
+                "linter.rules.style.typo",
+            ),
+            (
+                serde_json::json!({ "cross-file": { "rules": { "style": { "typo": "off" } } } }),
+                "cross-file.rules.style.typo",
+            ),
+            (
+                serde_json::json!({ "overrides": [{ "linter": { "rules": { "style": { "typo": "off" } } } }] }),
+                "overrides[0].linter.rules.style.typo",
+            ),
+            (
+                serde_json::json!({ "overrides": [{ "cross-file": { "rules": { "style": { "typo": "off" } } } }] }),
+                "overrides[0].cross-file.rules.style.typo",
+            ),
+        ] {
+            let config = serde_json::from_value(value).unwrap();
+            let loaded = falcon_config::LoadedConfig {
+                config,
+                warnings: Vec::new(),
+            };
+            let error = super::canonicalize_loaded_config(loaded).unwrap_err();
+            assert!(error.0.contains(path), "{error}: expected {path}");
+        }
     }
 }

@@ -616,8 +616,8 @@ pub fn run(options: &Options) -> Result<()> {
         write_json(&config_path, &project_config)?;
         let filter = serde_json::from_value(project_config["files"]["includes"].clone())?;
         std::env::set_current_dir(&project)?;
-        let discovered =
-            falcon_cli::walk_files(&[PathBuf::from(".")], &filter).map(|files| files.len());
+        let discovered = falcon_cli::walk_project(&[PathBuf::from(".")], &filter, false)
+            .map(|output| output.files.len());
         std::env::set_current_dir(&root)?;
         let discovered = discovered?;
         if discovered != files {
@@ -991,7 +991,12 @@ mod tests {
     fn exclusions_preserve_normal_relative_paths_and_match_source_counts() {
         let excluded: Vec<_> = EXCLUDED.iter().map(|path| (*path).to_owned()).collect();
         let filter = serde_json::from_value(json!(falcon_includes(&excluded))).unwrap();
-        assert!(falcon_cli::walk_files(&[], &filter).unwrap().is_empty());
+        assert!(
+            falcon_cli::walk_project(&[], &filter, false)
+                .unwrap()
+                .files
+                .is_empty()
+        );
         assert!(filter.admits("./lib/a.dart"));
         assert!(!filter.admits("./pkg/.agents/a.dart"));
         assert!(!filter.admits("./.agents/a.dart"));

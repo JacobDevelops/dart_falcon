@@ -32,7 +32,7 @@ corpus/
 Config-gated or threshold-based rules may ship a `config.json` next to their fixtures.
 The file uses the full `falcon.json` shape and is applied by both harnesses when
 validating that directory (the xtask harness passes it to the binary via `--config`;
-the in-process harness loads it with `falcon_config::load_config`):
+the in-process harness loads it with `falcon_rules::load_config`):
 
 ```json
 {

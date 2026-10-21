@@ -131,8 +131,9 @@ fn run_rule(
 fn corpus_config(rule_dir: &Path) -> FalconConfig {
     let path = rule_dir.join("config.json");
     if path.exists() {
-        falcon_config::load_config(&path)
+        falcon_rules::load_config(&path)
             .unwrap_or_else(|e| panic!("invalid corpus config {}: {e}", path.display()))
+            .config
     } else {
         FalconConfig::default()
     }

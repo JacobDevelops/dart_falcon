@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 use clap::{Args, ValueEnum};
@@ -10,15 +10,14 @@ use falcon_analyze::environment::{DartSdk, PackageConfig};
 use falcon_analyze::{
     AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
 };
-use falcon_config::{load_config, load_or_default};
 use falcon_dart_parser::lex_tree;
-use falcon_diagnostics::{Diagnostic, LineIndex};
+use falcon_diagnostics::{Diagnostic, LineIndex, Severity, Span};
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
-    package_identities, requires_resolution, run_cross_file,
+    load_config, load_or_default, package_identities, requires_resolution, run_cross_file,
 };
 
-use crate::file_walker::{walk_files, walk_pubspecs};
+use crate::file_walker::walk_project;
 use crate::output;
 
 /// Output format for diagnostics.
@@ -31,7 +30,7 @@ pub enum OutputFormat {
 /// Options for the check pipeline.
 #[derive(Debug, Clone, Args)]
 pub struct CheckOptions {
-    /// Paths to lint
+    /// Paths to lint (defaults to the current directory)
     pub paths: Vec<PathBuf>,
     /// Path to falcon.json config
     #[arg(id = "config", long = "config", value_name = "CONFIG")]
@@ -39,15 +38,18 @@ pub struct CheckOptions {
     /// Output format for diagnostics
     #[arg(long, default_value = "text", value_name = "FORMAT")]
     pub format: OutputFormat,
-    /// Glob patterns to exclude (repeatable)
+    /// Config-relative glob patterns to exclude (repeatable)
     #[arg(id = "exclude", long = "exclude", value_name = "GLOB")]
     pub exclude_patterns: Vec<String>,
-    /// Stop after this many diagnostics
+    /// Limit the number of printed diagnostics without changing the exit status
     #[arg(long, value_name = "N")]
     pub max_errors: Option<usize>,
     /// Suppress all diagnostic output
     #[arg(long)]
     pub quiet: bool,
+    /// Do not report missing paths or runs that process no files
+    #[arg(long)]
+    pub no_errors_on_unmatched: bool,
     /// Exit code to use when violations are found (default: 1)
     #[arg(
         id = "exit_code",
@@ -66,6 +68,7 @@ impl Default for CheckOptions {
             exclude_patterns: vec![],
             max_errors: None,
             quiet: false,
+            no_errors_on_unmatched: false,
             format: OutputFormat::Text,
             error_exit_code: 1,
         }
@@ -78,6 +81,8 @@ pub struct CheckOutput {
     pub diagnostics: Vec<Diagnostic>,
     pub total_files: usize,
     pub exit_code: i32,
+    /// Effective print limit; `diagnostics` always contains every finding.
+    pub max_errors: Option<usize>,
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -99,7 +104,7 @@ pub fn collect_check_with_sdk_locator(
     options: &CheckOptions,
     sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
 ) -> Result<CheckOutput, String> {
-    let mut config = match &options.config_path {
+    let loaded = match &options.config_path {
         Some(path) => load_config(path).map_err(|e| e.to_string())?,
         None => {
             let cwd = std::env::current_dir()
@@ -107,9 +112,17 @@ pub fn collect_check_with_sdk_locator(
             load_or_default(&cwd).map_err(|e| e.to_string())?
         }
     };
-    // Rewrite any legacy rule ids in the config to their canonical ids so old
-    // falcon.json files keep resolving.
-    falcon_rules::meta::canonicalize_config(&mut config);
+    for warning in loaded.warnings {
+        eprintln!("warning: {warning}");
+    }
+    let config = loaded.config;
+    let default_paths;
+    let paths = if options.paths.is_empty() {
+        default_paths = [PathBuf::from(".")];
+        &default_paths[..]
+    } else {
+        &options.paths
+    };
 
     let mut cli_filter;
     let filter = if options.exclude_patterns.is_empty() {
@@ -117,18 +130,40 @@ pub fn collect_check_with_sdk_locator(
     } else {
         cli_filter = config.files.includes.clone();
         cli_filter.extend_excludes(&options.exclude_patterns);
+        for warning in &cli_filter.warnings()[config.files.includes.warnings().len()..] {
+            eprintln!("warning: {warning}");
+        }
         &cli_filter
     };
-    let mut files = walk_files(&options.paths, filter)?;
+    let max_errors = options.max_errors.or(config.max_errors);
     let registry = build_registry(&config);
     let cross_file_registry = build_cross_file_registry(&config);
     let collect_programs = !cross_file_registry.is_empty();
     let resolve = requires_resolution(&registry) || cross_file_requires_resolution(&config);
-    let mut manifests = if collect_programs || resolve {
-        walk_pubspecs(&options.paths, filter)?
-    } else {
-        Vec::new()
-    };
+    let walked = walk_project(paths, filter, collect_programs || resolve)?;
+    let mut files = walked.files;
+    let mut manifests = walked.manifests;
+    let mut unmatched = Vec::new();
+    if !options.no_errors_on_unmatched {
+        unmatched.extend(walked.missing_paths.iter().map(|path| {
+            Diagnostic::new(
+                "unmatched-path",
+                Severity::Error,
+                "Input path does not exist.",
+                path.to_string_lossy(),
+                Span { start: 0, end: 0 },
+            )
+        }));
+        if files.is_empty() && unmatched.is_empty() {
+            unmatched.push(Diagnostic::new(
+                "unmatched-path",
+                Severity::Error,
+                "No files were processed.",
+                paths[0].to_string_lossy(),
+                Span { start: 0, end: 0 },
+            ));
+        }
+    }
     let packages = if resolve {
         package_identities(
             files
@@ -141,9 +176,10 @@ pub fn collect_check_with_sdk_locator(
     };
     if files.is_empty() && manifests.is_empty() {
         return Ok(CheckOutput {
-            diagnostics: vec![],
+            exit_code: i32::from(!unmatched.is_empty()),
+            diagnostics: unmatched,
             total_files: 0,
-            exit_code: 0,
+            max_errors,
         });
     }
     info!(
@@ -171,7 +207,7 @@ pub fn collect_check_with_sdk_locator(
         resolve,
         workspace,
     );
-    let total_files = files.len() + manifests.len();
+    let total_files = files.len();
     if collect_programs {
         project_files.extend(manifests.drain(..).map(|(path, source)| {
             let tree = lex_tree(&source);
@@ -187,7 +223,12 @@ pub fn collect_check_with_sdk_locator(
         files.clear();
     }
 
+    let mut pipeline_failed = diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.rule == falcon_analyze::RULES_THREAD_ERROR);
     apply_severities(&mut diagnostics, &config);
+    let has_unmatched = !unmatched.is_empty();
+    diagnostics.append(&mut unmatched);
 
     if collect_programs {
         match run_cross_file(
@@ -197,13 +238,29 @@ pub fn collect_check_with_sdk_locator(
             indexes.as_ref(),
         ) {
             Ok(cross_file) => diagnostics.extend(cross_file),
-            Err(error) => diagnostics.extend(
-                project_files
-                    .first()
-                    .map(|file| falcon_analyze::rules_thread_diagnostic(&file.path, &error)),
-            ),
+            Err(error) => {
+                pipeline_failed = true;
+                diagnostics.extend(
+                    project_files
+                        .first()
+                        .map(|file| falcon_analyze::rules_thread_diagnostic(&file.path, &error)),
+                );
+            }
         }
     }
+
+    diagnostics.retain(|diagnostic| {
+        diagnostic.rule == "unmatched-path"
+            || diagnostic.rule == falcon_analyze::RULES_THREAD_ERROR
+            || if Path::new(&diagnostic.file_path)
+                .extension()
+                .is_some_and(|ext| ext == "dart")
+            {
+                filter.admits(&diagnostic.file_path)
+            } else {
+                !filter.excludes(&diagnostic.file_path)
+            }
+    });
 
     // Resolve 1-based line/col for every diagnostic from its file's source, so
     // text and JSON output carry navigable positions rather than byte offsets.
@@ -239,12 +296,9 @@ pub fn collect_check_with_sdk_locator(
             .then(a.message.cmp(&b.message))
     });
 
-    // CLI flag takes precedence over the config value.
-    if let Some(max) = options.max_errors.or(config.max_errors) {
-        diagnostics.truncate(max);
-    }
-
-    let exit_code = if diagnostics.is_empty() {
+    let exit_code = if pipeline_failed || has_unmatched {
+        1
+    } else if diagnostics.is_empty() {
         0
     } else {
         options.error_exit_code
@@ -253,6 +307,7 @@ pub fn collect_check_with_sdk_locator(
         diagnostics,
         total_files,
         exit_code,
+        max_errors,
     })
 }
 
@@ -275,20 +330,20 @@ pub fn run_check_with_sdk_locator(
         }
     };
 
-    if result.total_files == 0 {
-        eprintln!("No .dart files found");
-        return result.exit_code;
-    }
-
+    let print_count = result
+        .max_errors
+        .unwrap_or(usize::MAX)
+        .min(result.diagnostics.len());
+    let printed = &result.diagnostics[..print_count];
     if !options.quiet {
         match options.format {
             OutputFormat::Text => {
-                let text = output::format_text(&result.diagnostics);
+                let text = output::format_text(printed);
                 if !text.is_empty() {
                     println!("{}", text);
                 }
             }
-            OutputFormat::Json => println!("{}", output::format_json(&result.diagnostics)),
+            OutputFormat::Json => println!("{}", output::format_json(printed)),
         }
     }
 

@@ -22,6 +22,24 @@ pub fn requires_sdk(file: &Path) -> bool {
     sdk_fixture::requires_sdk(file)
 }
 
+// Semantic analysis uses staged SDK paths, but user globs select original source
+// files. Freeze that selection before changing the file's filesystem identity.
+fn config_for_source_file<'a>(
+    config: &'a FalconConfig,
+    file: &Path,
+) -> std::borrow::Cow<'a, FalconConfig> {
+    if config.overrides.is_empty() {
+        return std::borrow::Cow::Borrowed(config);
+    }
+    let mut config = config.clone();
+    let path = file.to_string_lossy();
+    config.overrides.retain(|entry| entry.matches(&path));
+    for entry in &mut config.overrides {
+        entry.includes = falcon_config::PathFilter::default();
+    }
+    std::borrow::Cow::Owned(config)
+}
+
 pub fn analyze(
     rule: &dyn Rule,
     file: &Path,
@@ -100,7 +118,8 @@ pub fn analyze(
         &identities,
         &types,
     );
-    let context = AnalyzeContext::new(&app, config, &parsed)
+    let config = config_for_source_file(config, file);
+    let context = AnalyzeContext::new(&app, &config, &parsed)
         .with_types(&types)
         .with_identities(&identities)
         .with_signatures(&signatures)
@@ -146,4 +165,57 @@ pub fn assert_lints(rule_name: &str, source: &str, count: usize) {
         &FalconConfig::default(),
     );
     assert_diagnostics(source, rule_name, &diagnostics, count);
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn staged_paths_preserve_original_rooted_override_selection_and_order() {
+        let root = std::env::temp_dir().join("falcon-sdk-original-config-root");
+        let mut original: FalconConfig = serde_json::from_value(json!({
+            "overrides": [
+                { "includes": ["**/bad.dart"], "linter": { "rules": { "performance": {
+                    "move-variable-closer-to-its-usage": {
+                        "level": "warn", "options": { "ignore_after_if": true }
+                    }
+                } } } },
+                { "includes": ["**/bad.dart"], "linter": { "rules": { "performance": {
+                    "move-variable-closer-to-its-usage": {
+                        "level": "warn", "options": { "ignore_after_if": false }
+                    }
+                } } } },
+                { "includes": ["**/other.dart"], "linter": { "rules": { "performance": {
+                    "move-variable-closer-to-its-usage": {
+                        "level": "warn", "options": { "ignore_after_if": true }
+                    }
+                } } } }
+            ]
+        }))
+        .unwrap();
+        original.resolve_paths(&root);
+        let staged_path = std::env::temp_dir().join("falcon-sdk-staged/app/lib/bad.dart");
+        let projected = config_for_source_file(&original, &root.join("bad.dart"));
+        assert_eq!(projected.overrides.len(), 2);
+        assert_eq!(
+            projected.rule_options_for(
+                &staged_path.to_string_lossy(),
+                "performance",
+                "move-variable-closer-to-its-usage",
+            ),
+            Some(&json!({ "ignore_after_if": false })),
+        );
+        assert!(
+            original
+                .rule_options_for(
+                    &staged_path.to_string_lossy(),
+                    "performance",
+                    "move-variable-closer-to-its-usage",
+                )
+                .is_none()
+        );
+        assert_eq!(original.overrides.len(), 3);
+    }
 }

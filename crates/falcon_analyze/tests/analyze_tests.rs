@@ -282,7 +282,7 @@ fn test_end_to_end_parse_analyze_serialize() {
 
     let json_value = serde_json::to_value(&diagnostics[0]).unwrap();
     assert_eq!(json_value["rule"], "always_error");
-    assert_eq!(json_value["severity"], "Error");
+    assert_eq!(json_value["severity"], "error");
     assert!(json_value["file_path"].as_str().is_some());
 }
 

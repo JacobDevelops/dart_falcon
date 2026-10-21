@@ -225,6 +225,89 @@ fn initialize_shutdown_cycle() {
     client.shutdown();
 }
 
+#[test]
+fn config_warnings_reach_editor_on_startup_and_watched_reload_without_open_documents() {
+    let mut client = TestClient::start(Duration::ZERO, Some(r#"{"max_errors": 10}"#));
+    let receive_message = |client: &TestClient| {
+        let Message::Notification(notification) = client.recv() else {
+            panic!("expected configuration notification");
+        };
+        assert_eq!(
+            notification.method,
+            lsp_types::notification::ShowMessage::METHOD
+        );
+        serde_json::from_value::<lsp_types::ShowMessageParams>(notification.params).unwrap()
+    };
+    let warning = receive_message(&client);
+    assert_eq!(warning.typ, lsp_types::MessageType::WARNING);
+    assert!(warning.message.contains("max_errors"), "{warning:?}");
+    assert!(
+        warning
+            .message
+            .contains(&client.config_path().display().to_string())
+    );
+    client.assert_quiet(Duration::from_millis(50));
+
+    fs::write(
+        client.config_path(),
+        r#"{"linter": {"domains": {"fluter": "on"}}}"#,
+    )
+    .unwrap();
+    client.notify(
+        lsp_types::notification::DidChangeWatchedFiles::METHOD,
+        DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Uri::from_str(&format!("file://{}", client.config_path().display())).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        },
+    );
+    let error = receive_message(&client);
+    assert_eq!(error.typ, lsp_types::MessageType::ERROR);
+    assert!(error.message.contains("linter.domains.fluter"), "{error:?}");
+    assert!(
+        error
+            .message
+            .contains(&client.config_path().display().to_string())
+    );
+    client.assert_quiet(Duration::from_millis(50));
+
+    fs::write(client.config_path(), r#"{"max_errors": 20}"#).unwrap();
+    client.notify(
+        lsp_types::notification::DidSaveTextDocument::METHOD,
+        DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(&format!("file://{}", client.config_path().display())).unwrap(),
+            },
+            text: None,
+        },
+    );
+    let warning = receive_message(&client);
+    assert_eq!(warning.typ, lsp_types::MessageType::WARNING);
+    assert!(warning.message.contains("max_errors"), "{warning:?}");
+    client.assert_quiet(Duration::from_millis(50));
+    let nested = client
+        .config_path()
+        .parent()
+        .unwrap()
+        .join("nested/falcon.json");
+    fs::create_dir_all(nested.parent().unwrap()).unwrap();
+    fs::write(&nested, "{}").unwrap();
+    for path in [client.config_path(), nested] {
+        client.notify(
+            lsp_types::notification::DidChangeWatchedFiles::METHOD,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: Uri::from_str(&format!("file://{}", path.display())).unwrap(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        );
+        client.assert_quiet(Duration::from_millis(50));
+    }
+    client.shutdown();
+}
+
 /// didOpen publishes diagnostics for a violating file.
 #[test]
 fn did_open_publishes_diagnostics() {
@@ -845,7 +928,7 @@ fn debounce_coalesces_rapid_changes() {
 /// diagnostics in LSP mode, just like the CLI.
 #[test]
 fn config_override_disables_rule_not_published() {
-    // DOC_URI resolves to `/test/a.dart`; `**/a.dart` matches that walked path.
+    // Relative override globs are rooted at the config directory.
     let config = r#"{
         "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } },
         "overrides": [ {
@@ -854,12 +937,15 @@ fn config_override_disables_rule_not_published() {
         } ]
     }"#;
     let mut client = TestClient::start(Duration::ZERO, Some(config));
-    client.open("file:///test/b.dart", VIOLATING_SRC, 1);
+    let root = client.config_path().parent().unwrap().to_path_buf();
+    let baseline_uri = format!("file://{}", root.join("b.dart").display());
+    let overridden_uri = format!("file://{}", root.join("a.dart").display());
+    client.open(&baseline_uri, VIOLATING_SRC, 1);
     let baseline = client.recv_publish();
-    assert_eq!(baseline.uri.as_str(), "file:///test/b.dart");
+    assert_eq!(baseline.uri.as_str(), baseline_uri);
     assert!(has_rule(&baseline, "avoid-dynamic"), "{baseline:?}");
 
-    client.open(DOC_URI, VIOLATING_SRC, 1);
+    client.open(&overridden_uri, VIOLATING_SRC, 1);
     let params = client.recv_publish();
     assert!(
         !has_rule(&params, "avoid-dynamic"),

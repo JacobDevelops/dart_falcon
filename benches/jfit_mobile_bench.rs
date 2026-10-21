@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 use falcon_analyze::{analyze_parallel, analyze_sequential};
-use falcon_cli::{format_text, walk_files};
+use falcon_cli::{format_text, walk_project};
 use falcon_config::{FalconConfig, PathFilter};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
@@ -37,7 +37,9 @@ fn corpus_root() -> Option<PathBuf> {
 /// Load every .dart file in the corpus via the same walker the CLI uses.
 fn load_corpus() -> Option<Vec<(PathBuf, String)>> {
     let root = corpus_root()?;
-    let files = walk_files(&[root], &PathFilter::default()).expect("read benchmark corpus");
+    let files = walk_project(&[root], &PathFilter::default(), false)
+        .expect("read benchmark corpus")
+        .files;
     (!files.is_empty()).then_some(files)
 }
 

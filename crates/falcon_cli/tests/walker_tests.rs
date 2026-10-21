@@ -1,8 +1,31 @@
-use falcon_cli::{file_walker::walk_pubspecs, walk_files};
+use falcon_cli::file_walker::walk_project;
 use falcon_config::PathFilter;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
+
+#[test]
+fn one_walk_prunes_excluded_directories_and_collects_manifests_once() {
+    let temp = tempdir().unwrap();
+    let excluded = temp.path().join("build");
+    fs::create_dir(&excluded).unwrap();
+    for name in ["oversized.dart", "pubspec.yaml"] {
+        fs::File::create(excluded.join(name))
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+    }
+    let source = temp.path().join("main.dart");
+    fs::write(&source, "void main() {}").unwrap();
+    let manifest = temp.path().join("pubspec.yaml");
+    fs::write(&manifest, "name: package\n").unwrap();
+    let mut filter = PathFilter::from_includes(&["**/*.dart".into(), "!build".into()]);
+    filter.set_base_dir(temp.path());
+    let output = walk_project(&[temp.path().to_path_buf(), source.clone()], &filter, true).unwrap();
+    assert_eq!(output.files, [(source, "void main() {}".into())]);
+    assert_eq!(output.manifests, [(manifest, "name: package\n".into())]);
+    assert!(output.missing_paths.is_empty());
+}
 
 #[test]
 fn test_walk_single_dart_file() {
@@ -10,7 +33,13 @@ fn test_walk_single_dart_file() {
     let dart_file = temp.path().join("test.dart");
     fs::write(&dart_file, "void main() {}").unwrap();
 
-    let results = walk_files(std::slice::from_ref(&dart_file), &PathFilter::default()).unwrap();
+    let results = walk_project(
+        std::slice::from_ref(&dart_file),
+        &PathFilter::default(),
+        false,
+    )
+    .unwrap()
+    .files;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, dart_file);
     assert_eq!(results[0].1, "void main() {}");
@@ -18,21 +47,18 @@ fn test_walk_single_dart_file() {
 
 #[test]
 fn oversized_sources_and_manifests_abort_collection() {
-    let temp = tempdir().unwrap();
     for name in ["oversized.dart", "pubspec.yaml"] {
+        let temp = tempdir().unwrap();
         fs::File::create(temp.path().join(name))
             .unwrap()
             .set_len(u64::from(u32::MAX) + 1)
             .unwrap();
+        fs::write(temp.path().join("small.dart"), "void main() {}").unwrap();
+        let error =
+            walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), true).unwrap_err();
+        assert!(error.contains(name));
+        assert!(error.contains("maximum supported source size"));
     }
-    fs::write(temp.path().join("small.dart"), "void main() {}").unwrap();
-    let paths = [temp.path().to_path_buf()];
-    let error = walk_files(&paths, &PathFilter::default()).unwrap_err();
-    assert!(error.contains("oversized.dart"));
-    assert!(error.contains("maximum supported source size"));
-    let error = walk_pubspecs(&paths, &PathFilter::default()).unwrap_err();
-    assert!(error.contains("pubspec.yaml"));
-    assert!(error.contains("maximum supported source size"));
 }
 
 #[test]
@@ -49,10 +75,14 @@ fn ordinary_read_errors_skip_sources_and_ancestor_manifests() {
     fs::write(&manifest, "name: local\n").unwrap();
     let paths = [lib];
     assert_eq!(
-        walk_files(&paths, &PathFilter::default()).unwrap(),
+        walk_project(&paths, &PathFilter::default(), false)
+            .unwrap()
+            .files,
         [(valid, "void main() {}".to_string())]
     );
-    let manifests = walk_pubspecs(&paths, &PathFilter::default()).unwrap();
+    let manifests = walk_project(&paths, &PathFilter::default(), true)
+        .unwrap()
+        .manifests;
     assert!(manifests.contains(&(manifest, "name: local\n".to_string())));
     assert!(
         manifests
@@ -74,10 +104,16 @@ fn excluded_oversized_files_do_not_abort_collection() {
     }
     let filter = PathFilter::from_includes(&["!**/excluded/**".to_string()]);
     let paths = [temp.path().to_path_buf()];
-    assert!(walk_files(&paths, &filter).unwrap().is_empty());
     assert!(
-        walk_pubspecs(&paths, &filter)
+        walk_project(&paths, &filter, false)
             .unwrap()
+            .files
+            .is_empty()
+    );
+    assert!(
+        walk_project(&paths, &filter, true)
+            .unwrap()
+            .manifests
             .iter()
             .all(|(path, _)| !path.starts_with(&excluded))
     );
@@ -96,7 +132,9 @@ fn test_walk_directory_finds_dart_files() {
     fs::write(&dart3, "dart3").unwrap();
     fs::write(&rust_file, "rust").unwrap();
 
-    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default()).unwrap();
+    let results = walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), false)
+        .unwrap()
+        .files;
     assert_eq!(results.len(), 3);
 
     let paths: Vec<_> = results.iter().map(|(p, _)| p).collect();
@@ -108,7 +146,9 @@ fn test_walk_directory_finds_dart_files() {
 #[test]
 fn test_walk_empty_directory() {
     let temp = tempdir().unwrap();
-    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default()).unwrap();
+    let results = walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), false)
+        .unwrap()
+        .files;
     assert_eq!(results.len(), 0);
 }
 
@@ -127,7 +167,9 @@ fn test_walk_exclude_pattern() {
     fs::write(&build_output, "build").unwrap();
 
     let filter = PathFilter::from_includes(&["!**/build/**".to_string()]);
-    let results = walk_files(&[temp.path().to_path_buf()], &filter).unwrap();
+    let results = walk_project(&[temp.path().to_path_buf()], &filter, false)
+        .unwrap()
+        .files;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, lib_main);
@@ -147,7 +189,9 @@ fn test_walk_nested_directory() {
     fs::write(&b_dart, "nested").unwrap();
     fs::write(&c_dart, "shallow").unwrap();
 
-    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default()).unwrap();
+    let results = walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), false)
+        .unwrap()
+        .files;
     assert_eq!(results.len(), 2);
 
     let paths: Vec<_> = results.iter().map(|(p, _)| p).collect();
@@ -156,10 +200,17 @@ fn test_walk_nested_directory() {
 }
 
 #[test]
-fn test_walk_nonexistent_path_returns_empty() {
+fn test_walk_nonexistent_path_reports_missing() {
     let nonexistent = PathBuf::from("/nonexistent/path/to/file.dart");
-    let results = walk_files(&[nonexistent], &PathFilter::default()).unwrap();
-    assert_eq!(results.len(), 0);
+    let output = walk_project(
+        std::slice::from_ref(&nonexistent),
+        &PathFilter::default(),
+        true,
+    )
+    .unwrap();
+    assert!(output.files.is_empty());
+    assert!(output.manifests.is_empty());
+    assert_eq!(output.missing_paths, [nonexistent]);
 }
 
 #[cfg(unix)]
@@ -174,7 +225,9 @@ fn test_walk_does_not_follow_symlinked_dirs() {
     // A self-referential link must not cycle the walk either.
     std::os::unix::fs::symlink(temp.path(), temp.path().join("self_link")).unwrap();
 
-    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default()).unwrap();
+    let results = walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), false)
+        .unwrap()
+        .files;
     assert_eq!(results.len(), 1);
     assert!(results[0].0.ends_with("local.dart"));
 }
@@ -184,7 +237,9 @@ fn test_walk_pubspec_only_package() {
     let temp = tempdir().unwrap();
     let pubspec = temp.path().join("pubspec.yaml");
     fs::write(&pubspec, "name: package\n").unwrap();
-    let results = walk_pubspecs(&[temp.path().to_path_buf()], &PathFilter::default()).unwrap();
+    let results = walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), true)
+        .unwrap()
+        .manifests;
     assert_eq!(results, [(pubspec, "name: package\n".to_string())]);
 }
 
@@ -199,21 +254,24 @@ fn dart_includes_do_not_hide_package_manifests() {
     fs::write(&pubspec, "name: package\n").unwrap();
     let mut filter = PathFilter::from_includes(&["**/lib/**".to_string()]);
     assert_eq!(
-        walk_files(&[temp.path().to_path_buf()], &filter)
+        walk_project(&[temp.path().to_path_buf()], &filter, false)
             .unwrap()
+            .files
             .len(),
         1
     );
     assert_eq!(
-        walk_pubspecs(&[temp.path().to_path_buf()], &filter)
+        walk_project(&[temp.path().to_path_buf()], &filter, true)
             .unwrap()
+            .manifests
             .len(),
         1
     );
     filter.extend_excludes(&["**/pubspec.yaml".to_string()]);
     assert!(
-        walk_pubspecs(&[temp.path().to_path_buf()], &filter)
+        walk_project(&[temp.path().to_path_buf()], &filter, true)
             .unwrap()
+            .manifests
             .is_empty()
     );
 }

@@ -1,6 +1,6 @@
 use falcon_config::{
     ConfigError, DomainValue, FalconConfig, Override, ResolvedSeverity, RuleConfiguration,
-    RulePlainConfiguration, find_config, load_config, load_or_default,
+    RulePlainConfiguration, deserialize_config, find_config,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -361,8 +361,18 @@ fn test_load_valid_config() {
     }"#;
     fs::write(&path, json).expect("write temp file");
 
-    let cfg = load_config(&path).expect("load valid config");
-    assert!(cfg.files.includes.excludes("generated.tmp"));
+    let loaded = deserialize_config(&path).expect("load valid config");
+    assert_eq!(loaded.warnings.len(), 1);
+    let cfg = loaded.config;
+    assert!(
+        cfg.files.includes.excludes(
+            &path
+                .parent()
+                .unwrap()
+                .join("generated.tmp")
+                .to_string_lossy()
+        )
+    );
     assert_eq!(cfg.max_errors, Some(100));
 
     cleanup(&path);
@@ -373,7 +383,7 @@ fn test_load_empty_object_is_all_defaults() {
     let path = temp_file_path("empty.json");
     fs::write(&path, "{}").expect("write temp file");
 
-    let cfg = load_config(&path).expect("load empty config");
+    let cfg = deserialize_config(&path).expect("load empty config").config;
     assert!(cfg.linter.enabled);
     assert_eq!(cfg.max_errors, None);
 
@@ -384,14 +394,14 @@ fn test_load_empty_object_is_all_defaults() {
 fn test_load_invalid_json() {
     let path = temp_file_path("invalid_json.json");
     fs::write(&path, "{ invalid json }").expect("write temp file");
-    assert!(load_config(&path).is_err());
+    assert!(deserialize_config(&path).is_err());
     cleanup(&path);
 }
 
 #[test]
 fn test_load_missing_file() {
     let path = temp_file_path("nonexistent.json");
-    assert!(load_config(&path).is_err());
+    assert!(deserialize_config(&path).is_err());
 }
 
 #[test]
@@ -403,7 +413,7 @@ fn test_legacy_schema_is_rejected() {
     ] {
         let path = temp_file_path("legacy.json");
         fs::write(&path, legacy).expect("write temp file");
-        let err = load_config(&path).expect_err("legacy schema must be rejected");
+        let err = deserialize_config(&path).expect_err("legacy schema must be rejected");
         assert!(
             err.to_string().contains("legacy flat schema"),
             "error should mention legacy schema: {err}"
@@ -450,72 +460,12 @@ fn test_config_error_display() {
     assert!(err.to_string().contains("test error message"));
 }
 
+/// Configuration caps must be positive; the CLI separately permits hiding output.
 #[test]
-fn test_load_or_default_missing() {
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("falcon_test_load_or_default_{}", id));
-    fs::create_dir_all(&dir).expect("create temp dir");
-
-    let cfg = load_or_default(&dir).expect("no config found yields default");
-    assert!(cfg.linter.enabled);
-    assert_eq!(cfg.max_errors, None);
-
-    let _ = fs::remove_dir(&dir);
-}
-
-#[test]
-fn test_load_or_default_with_file() {
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("falcon_test_load_or_default_file_{}", id));
-    fs::create_dir_all(&dir).expect("create temp dir");
-
-    let config_path = dir.join("falcon.json");
-    let json = r#"{ "linter": { "rules": { "recommended": true } }, "max_errors": 50 }"#;
-    fs::write(&config_path, json).expect("write config");
-
-    let cfg = load_or_default(&dir).expect("valid discovered config loads");
-    assert_eq!(cfg.linter.rules.recommended, Some(true));
-    assert_eq!(cfg.max_errors, Some(50));
-
-    fs::remove_file(&config_path).expect("cleanup config");
-    let _ = fs::remove_dir(&dir);
-}
-
-/// Malformed discovered configuration must not silently re-enable rules.
-#[test]
-fn test_load_or_default_errors_on_malformed_discovered_config() {
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("falcon_test_bad_discovered_{}", id));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let config_path = dir.join("falcon.json");
-
-    // Wrong-typed value (a trailing-comma typo would fail even earlier at JSON parse).
-    fs::write(&config_path, r#"{ "max-errors": "100" }"#).expect("write config");
-    assert!(
-        load_or_default(&dir).is_err(),
-        "wrong-typed value must error, not fall back to defaults"
-    );
-
-    // Legacy flat schema is likewise a hard error via discovery, matching the
-    // explicit --config path.
-    fs::write(
-        &config_path,
-        r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#,
-    )
-    .expect("write config");
-    let err = load_or_default(&dir).expect_err("legacy flat schema must error");
-    assert!(err.to_string().contains("legacy flat schema"));
-
-    fs::remove_file(&config_path).expect("cleanup config");
-    let _ = fs::remove_dir(&dir);
-}
-
-/// A zero error cap would silently pass CI with violations present.
-#[test]
-fn test_load_config_rejects_max_errors_zero() {
+fn test_deserialize_config_rejects_max_errors_zero() {
     let path = temp_file_path("max_errors_zero.json");
     fs::write(&path, r#"{ "max-errors": 0 }"#).expect("write temp file");
-    let err = load_config(&path).expect_err("max-errors 0 must be rejected");
+    let err = deserialize_config(&path).expect_err("max-errors 0 must be rejected");
     assert!(
         err.to_string().contains("max-errors"),
         "error should name max-errors: {err}"
@@ -526,7 +476,10 @@ fn test_load_config_rejects_max_errors_zero() {
     let ok = temp_file_path("max_errors_one.json");
     fs::write(&ok, r#"{ "max_errors": 1 }"#).expect("write temp file");
     assert_eq!(
-        load_config(&ok).expect("max-errors 1 loads").max_errors,
+        deserialize_config(&ok)
+            .expect("max-errors 1 loads")
+            .config
+            .max_errors,
         Some(1)
     );
     cleanup(&ok);
@@ -884,7 +837,7 @@ fn test_options_in_override_load_ok() {
         }"#,
     )
     .expect("write config");
-    load_config(&path).expect("override with options must load");
+    deserialize_config(&path).expect("override with options must load");
     cleanup(&path);
 }
 

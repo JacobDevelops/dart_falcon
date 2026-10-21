@@ -19,14 +19,16 @@ rule.
 
 ## Unknown and legacy keys
 
-Unknown top-level keys are **warned about by name** and then ignored, so a
-mistyped section (`linterr` for `linter`, `crossfile` for `cross-file`) never
-vanishes silently. The deprecated spellings `project` and `cross_file` (for
-`cross-file`) and `max_errors` (for `max-errors`) still load, but each earns a
-deprecation warning pointing at `falcon migrate`, including when the legacy
-spelling appears inside an `overrides` entry. The published JSON schema
-validates only the canonical kebab-case keys, so an editor will flag a legacy
-spelling even though falcon still accepts it, which is your cue to migrate.
+Unknown keys at any configuration depth and unknown domain names are **errors**:
+the message names the full key path, and the configuration does not load. Rule
+`options` retain their rule-specific validation. An override may omit `includes`
+to apply everywhere, but a misspelled `includes` is rejected.
+
+The deprecated spellings `project` and `cross_file` (for `cross-file`) and
+`max_errors` (for `max-errors`) still load with deprecation warnings pointing at
+`falcon migrate`, including inside overrides. Registered legacy rule ids also
+load with warnings. The CLI prints configuration warnings; the language server
+sends them to the editor. The published JSON schema accepts canonical keys only.
 
 ## Editor autocomplete (`$schema`)
 
@@ -89,11 +91,15 @@ Invalid glob patterns produce a warning and are skipped consistently in CLI
 file selection, LSP selection, and overrides. If no valid positive patterns
 remain, positive filtering is unrestricted; valid exclusions still win.
 
-Positive globs match paths **as walked from the CLI argument**, not as absolute
-paths. Running `falcon check .` from the project root walks paths like
-`lib/foo.dart`, so `lib/**` matches; passing an absolute path to `falcon check`
-walks absolute paths, so a positive glob would need to be absolute to match.
-A bare `**` (or `**/*`) entry disables positive filtering entirely.
+All globs resolve relative to the directory containing `falcon.json`, including
+CLI `--exclude` patterns and override filters. With no config, the current
+directory is the base. CLI relative paths, absolute paths, and LSP document paths
+therefore select the same files. `*` never crosses `/`; `**` crosses directories.
+For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also
+matches nested files. An exclusion matching a directory excludes its whole
+subtree, and that directory is pruned before traversal. For example, `!build`
+excludes the build directory and its contents, while `!lib/*.dart` excludes only
+direct Dart children (unless a matching child is itself a directory).
 
 ## `linter`
 
@@ -106,6 +112,11 @@ A bare `**` (or `**/*`) entry disables positive filtering entirely.
 ### Language server reloads
 
 The language server reloads configuration and mutable dependencies when the editor sends watched-file notifications. This includes path and git dependencies, Flutter SDK packages, and newly generated Dart files.
+
+Configuration warnings and errors appear in the editor and identify the source
+file. Invalid reloads keep the last successfully loaded settings until the file
+is fixed. Repeated notifications with unchanged warnings do not show duplicate
+messages.
 
 Out-of-workspace dependency watches need editor support for LSP 3.17 relative patterns. Without it, restart the server after changing those dependencies. If watched-file registration is unavailable or fails, saving workspace configuration files still reloads configuration; restart after dependency changes. Restart after manually editing hosted-package or Dart SDK sources too.
 
@@ -146,7 +157,7 @@ With no config file, only falcon's recommended rules run, at warning severity.
 
 ## `max-errors`
 
-Optional cap on reported diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value. Use a positive value: the CLI currently accepts `--max-errors 0`, which hides every diagnostic and can return a clean exit code even when violations exist. The legacy config key `max_errors` still loads with a deprecation warning.
+Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic. The cap never changes the exit code: all diagnostics count, including those not printed. The legacy config key `max_errors` still loads with a deprecation warning.
 
 ## Rule options
 
@@ -457,7 +468,12 @@ given.
 
 ### `overrides[].linter` and `overrides[].cross-file`
 
-Each block accepts an optional `enabled` switch and a `rules` object shaped like `linter.rules`, with grouped rule levels and options. Neither block accepts `domains`, nested `overrides`, or `files`. An override may carry either or both blocks. The legacy cross-file keys `project` and `cross_file` still load.
+Each block accepts an optional `enabled` switch and a `rules` object with grouped
+rule levels and options. Unlike base rule blocks, override rule blocks do not
+accept `recommended`; set explicit rule levels or use `enabled` instead. Neither
+block accepts `domains`, nested `overrides`, or `files`. An override may carry
+either or both blocks. The legacy cross-file keys `project` and `cross_file`
+still load with deprecation warnings.
 
 - Each explicit rule entry (under its group) **replaces** the base resolution
   for that rule on matching files: `off` disables it; `on`/`info`/`warn`/`error`
@@ -475,13 +491,11 @@ later overrides win over earlier ones, and all win over the base config. A rule
 is registered (and run) if it is enabled for *any* path (base or override), so
 an override can re-enable a rule the base config turned off.
 
-### Path-matching caveat
+### Path matching
 
-Overrides match the file path **as walked**, exactly like `files.includes`.
-Running `falcon check .` from the project root walks paths like `test/foo.dart`,
-so `test/**` matches; passing an absolute path (or LSP, which resolves document
-URIs to absolute paths) walks absolute paths, so a glob must be absolute or use
-a leading `**/` (e.g. `**/theme.dart`) to match.
+Overrides use the same config-directory-relative matching as `files.includes`.
+For a config in the project root, `test/**` selects test files in both the CLI
+and the editor, regardless of how the CLI paths were supplied.
 
 ### Per-path options
 
@@ -546,13 +560,13 @@ accepted as deprecated aliases (each warns on load; run `falcon migrate`):
   as `linter.rules` (level strings or `{ "level", "options" }` objects), but with
   **no `domains`** gating, since cross-file rules are not domain-scoped.
 
-Cross-file rules are grouped under their category (`correctness`, `style`, or `suspicious`),
+Cross-file rules are grouped under their category (`correctness`, `style`, `security`, or `suspicious`),
 share the same metadata table as file rules, and are suppressible with
 `// falcon-ignore cross-file/<group>/<rule>: <reason>` comments (or the
 `// falcon-ignore-all` variant). Configuring a cross-file rule under
-`linter.rules` (or a file rule under `cross-file.rules`) is a mistake: falcon
-warns and steers you to the right section, and the misplaced entry does not take
-effect.
+`linter.rules` (or a file rule under `cross-file.rules`) is an error. The message
+identifies the full key path and the correct section and group, and the
+configuration does not load.
 
 | Rule                     | Group        | Recommended | Replaces (dart_code_linter)   |
 |--------------------------|--------------|-------------|-------------------------------|
@@ -639,6 +653,16 @@ the input and any legacy `snake_case` rule ids (and the removed twin ids) are
 rewritten to their canonical kebab-case form, preserving levels and options.
 Duplicate twin entries collapse into the surviving rule, keeping the more severe
 level. The input kind is auto-detected.
+
+Upgrades preserve the order of configuration keys. Duplicate entries use the
+same severity ranking and canonical-name tie breaking as normal config loading.
+
+Glob matching now uses the configuration file's directory in both the CLI and
+the editor, rather than paths as walked. Review filters when upgrading:
+`!build/**` now excludes the project's build directory with `falcon check .`,
+and `*` no longer spans directory separators. Replace `lib/*.dart` with
+`lib/**/*.dart` when nested files should match. `migrate` preserves glob text;
+it does not guess whether a single-level pattern was intended to be recursive.
 
 ```sh
 # Rewrite legacy rule ids in place

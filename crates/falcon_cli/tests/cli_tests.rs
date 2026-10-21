@@ -21,6 +21,7 @@ fn check_options_parse_with_stable_argument_ids() {
         "max_errors",
         "quiet",
         "exit_code",
+        "no_errors_on_unmatched",
     ] {
         assert!(ids.contains(&id), "missing argument id {id}");
     }
@@ -46,6 +47,7 @@ fn check_options_parse_with_stable_argument_ids() {
         "--quiet",
         "--exit-code",
         "2",
+        "--no-errors-on-unmatched",
     ])
     .unwrap();
     let Command::Check(options) = cli.command else {
@@ -61,6 +63,7 @@ fn check_options_parse_with_stable_argument_ids() {
     assert_eq!(options.max_errors, Some(10));
     assert!(options.quiet);
     assert_eq!(options.error_exit_code, 2);
+    assert!(options.no_errors_on_unmatched);
 }
 
 #[test]
@@ -77,12 +80,15 @@ fn test_run_check_integration_clean_file_exit_zero() {
     // avoids print (now a recommended rule), so a fully clean program exits 0.
     fs::write(
         dir.path().join("test.dart"),
-        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
+        "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
+    let config = dir.path().join("falcon.json");
+    fs::write(&config, "{}").unwrap();
     let code = run_check_with_sdk_locator(
         CheckOptions {
             paths: vec![dir.path().to_path_buf()],
+            config_path: Some(config),
             quiet: true,
             ..Default::default()
         },

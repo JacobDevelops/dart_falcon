@@ -1,106 +1,141 @@
-//! File walker: discovers `.dart` files recursively using a compiled path filter.
+//! Discover Dart sources and package manifests in one pruning directory walk.
 
 use falcon_config::PathFilter;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// Walk `paths` and return matching `.dart` files with their contents.
+#[cfg(test)]
+thread_local! {
+    static VISITED_ENTRIES: std::cell::RefCell<Vec<PathBuf>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+}
+
+#[derive(Debug, Default)]
+pub struct WalkOutput {
+    pub files: Vec<(PathBuf, String)>,
+    pub manifests: Vec<(PathBuf, String)>,
+    pub missing_paths: Vec<PathBuf>,
+}
+
+/// Collect matching Dart sources and, when requested, package manifests.
 ///
-/// Directories are walked recursively. Ordinary I/O errors warn and skip files;
-/// oversized sources abort collection rather than analyzing a partial project.
-pub fn walk_files(
+/// Includes select Dart files only. Exclusions prune directories and apply to
+/// manifests, including manifests discovered in input paths' ancestors.
+/// Ordinary source read and traversal errors warn and skip; oversized sources
+/// abort collection rather than analyzing a partial source.
+///
+/// # Errors
+///
+/// Returns an error if a source exceeds the size limit.
+pub fn walk_project(
     paths: &[PathBuf],
     filter: &PathFilter,
-) -> Result<Vec<(PathBuf, String)>, String> {
-    let mut results = Vec::new();
+    collect_manifests: bool,
+) -> Result<WalkOutput, String> {
+    let mut output = WalkOutput::default();
+    let mut seen = HashSet::new();
     for path in paths {
-        if !path.exists() {
-            continue;
-        }
-        if path.is_file() {
-            if let Some(entry) = try_read_dart(path, filter)? {
-                results.push(entry);
+        let metadata = match path.metadata() {
+            Ok(metadata) => metadata,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                output.missing_paths.push(path.clone());
+                continue;
             }
-        } else if path.is_dir() {
-            // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point
-            // into the pub cache, turning a project walk into a multi-minute
-            // crawl of every dependency (and risking cycles).
-            for item in WalkDir::new(path).follow_links(false) {
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error, "failed to access input");
+                continue;
+            }
+        };
+        if collect_manifests && !filter.excludes_directory(path) {
+            let start = if metadata.is_file() {
+                path.parent().unwrap_or(path)
+            } else {
+                path.as_path()
+            };
+            for ancestor in start.ancestors() {
+                let manifest = ancestor.join("pubspec.yaml");
+                if manifest.is_file() {
+                    collect_file(&manifest, filter, true, &mut seen, &mut output)?;
+                }
+            }
+        }
+        if metadata.is_file() {
+            collect_file(path, filter, collect_manifests, &mut seen, &mut output)?;
+        } else if metadata.is_dir() {
+            // Flutter plugin symlinks point into dependency caches and may cycle.
+            for item in WalkDir::new(path)
+                .follow_links(false)
+                .into_iter()
+                .filter_entry(|entry| {
+                    !entry.file_type().is_dir() || !filter.excludes_directory(entry.path())
+                })
+            {
                 let entry = match item {
                     Ok(entry) => entry,
                     Err(error) => {
-                        tracing::warn!(%error, "error walking directory");
+                        tracing::warn!(%error, "failed to walk directory");
                         continue;
                     }
                 };
-                if let Some(entry) = try_read_dart(entry.path(), filter)? {
-                    results.push(entry);
+                #[cfg(test)]
+                VISITED_ENTRIES.with_borrow_mut(|visited| visited.push(entry.path().to_path_buf()));
+                if entry.file_type().is_file()
+                    || (entry.file_type().is_symlink() && entry.path().is_file())
+                {
+                    collect_file(
+                        entry.path(),
+                        filter,
+                        collect_manifests,
+                        &mut seen,
+                        &mut output,
+                    )?;
                 }
             }
         }
     }
-    Ok(results)
+    output.files.sort_by(|a, b| a.0.cmp(&b.0));
+    output.manifests.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(output)
 }
 
-/// Walk input directories and their ancestors for package manifests used by
-/// pubspec-backed rules. Exclusions apply, but Dart includes never hide manifests.
-pub fn walk_pubspecs(
-    paths: &[PathBuf],
+fn collect_file(
+    path: &Path,
     filter: &PathFilter,
-) -> Result<Vec<(PathBuf, String)>, String> {
-    let mut manifests = Vec::new();
-    for path in paths {
-        let start = if path.is_file() {
-            path.parent().unwrap_or(path)
+    collect_manifests: bool,
+    seen: &mut HashSet<PathBuf>,
+    output: &mut WalkOutput,
+) -> Result<(), String> {
+    let is_manifest = collect_manifests
+        && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
+    let is_dart = path.extension().and_then(|extension| extension.to_str()) == Some("dart");
+    if !is_manifest && !is_dart {
+        return Ok(());
+    }
+    let admitted = if is_manifest {
+        !filter.excludes(&path.to_string_lossy())
+    } else {
+        filter.admits(&path.to_string_lossy())
+    };
+    if !admitted || seen.contains(path) {
+        return Ok(());
+    }
+    seen.insert(path.to_path_buf());
+    if let Some(source) = read_source(path)? {
+        let results = if is_manifest {
+            &mut output.manifests
         } else {
-            path.as_path()
+            &mut output.files
         };
-        manifests.extend(
-            start
-                .ancestors()
-                .map(|ancestor| ancestor.join("pubspec.yaml"))
-                .filter(|manifest| manifest.is_file()),
-        );
-
-        if path.is_dir() {
-            for entry in WalkDir::new(path).follow_links(false) {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(error) => {
-                        tracing::warn!(%error, "error walking directory");
-                        continue;
-                    }
-                };
-                if entry.file_name().to_str() == Some("pubspec.yaml") {
-                    manifests.push(entry.into_path());
-                }
-            }
-        } else if path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml") {
-            manifests.push(path.clone());
-        }
+        results.push((path.to_path_buf(), source));
     }
-    manifests.sort();
-    manifests.dedup();
-    manifests
-        .into_iter()
-        .filter(|path| !filter.excludes(&path.to_string_lossy()))
-        .filter_map(|path| {
-            read_source(&path)
-                .transpose()
-                .map(|result| result.map(|source| (path, source)))
-        })
-        .collect()
-}
-
-fn is_dart(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()) == Some("dart")
-}
-
-fn try_read_dart(path: &Path, filter: &PathFilter) -> Result<Option<(PathBuf, String)>, String> {
-    if !is_dart(path) || !filter.admits(&path.to_string_lossy()) {
-        return Ok(None);
-    }
-    read_source(path).map(|source| source.map(|contents| (path.to_path_buf(), contents)))
+    Ok(())
 }
 
 fn read_source(path: &Path) -> Result<Option<String>, String> {
@@ -113,5 +148,29 @@ fn read_source(path: &Path) -> Result<Option<String>, String> {
             tracing::warn!(path = %path.display(), %error, "failed to read file");
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excluded_directories_are_not_traversed() {
+        let directory = tempfile::tempdir().unwrap();
+        let excluded = directory.path().join("build");
+        std::fs::create_dir_all(excluded.join("nested")).unwrap();
+        let hidden = excluded.join("nested/hidden.dart");
+        std::fs::write(&hidden, "void hidden() {}").unwrap();
+        let source = directory.path().join("main.dart");
+        std::fs::write(&source, "void main() {}").unwrap();
+        let mut filter = PathFilter::from_includes(&["**".into(), "!build".into()]);
+        filter.set_base_dir(directory.path());
+        VISITED_ENTRIES.with_borrow_mut(Vec::clear);
+        walk_project(&[directory.path().to_path_buf()], &filter, true).unwrap();
+        VISITED_ENTRIES.with_borrow(|visited| {
+            assert!(visited.contains(&source));
+            assert!(!visited.iter().any(|path| path.starts_with(&excluded)));
+        });
     }
 }

@@ -8,4 +8,6 @@ description       = "falcon.json configuration schema and loader"
 glob.workspace       = true
 serde.workspace      = true
 serde_json.workspace = true
-tracing.workspace    = true
+
+[dev-dependencies]
+tempfile.workspace = true

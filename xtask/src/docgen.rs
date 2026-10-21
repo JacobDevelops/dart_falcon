@@ -487,9 +487,8 @@ fn config_leaf(root: &Value, node: &Value, path: &str) -> Value {
     Value::Object(obj)
 }
 
-/// Emit the two entries for a `rules` section: the `recommended` preset toggle
-/// and a single templated `<path>.<group>.<rule>` entry (per-rule detail lives
-/// in rules.json, so the reference stays structural).
+/// Emit the optional `recommended` toggle and a templated rule entry (per-rule
+/// detail lives in rules.json, so the reference stays structural).
 fn emit_rules_section(root: &Value, node: &Value, path: &str, out: &mut Vec<Value>) {
     if let Some(rec) = node.pointer("/properties/recommended") {
         out.push(config_leaf(root, rec, &format!("{path}.recommended")));
@@ -512,8 +511,7 @@ fn walk_config_schema(root: &Value, node: &Value, path: &str, out: &mut Vec<Valu
     let resolved = schema_resolve(root, node);
 
     if let Some(Value::Object(props)) = resolved.get("properties") {
-        // A `recommended` property uniquely marks a `rules` section in this schema.
-        if props.contains_key("recommended") {
+        if path.ends_with(".rules") {
             emit_rules_section(root, resolved, path, out);
             return;
         }
@@ -696,10 +694,11 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
                         .iter()
                         .find(|(path, _)| path == &relative)
                         .map_or("", |(_, source)| source.as_str());
+                    let (line, col) = d.resolved_position()?;
                     diagnostics.push(json!({
                         "message": d.message,
-                        "line": d.line,
-                        "column": character_column(source, d.line, d.col),
+                        "line": line,
+                        "column": character_column(source, line, col),
                         "file": relative,
                     }));
                 }
@@ -712,10 +711,11 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
                 .into_iter()
                 .filter(|d| d.rule == meta.name)
             {
+                let (line, col) = d.resolved_position()?;
                 diagnostics.push(json!({
                     "message": d.message,
-                    "line": d.line,
-                    "column": character_column(source, d.line, d.col),
+                    "line": line,
+                    "column": character_column(source, line, col),
                     "file": Value::Null,
                 }));
             }
@@ -848,6 +848,22 @@ fn write_or_check(path: &Path, contents: &str, check: bool) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn override_rule_reference_stays_structural_without_a_preset_toggle() {
+        let schema = falcon_rules::schema::config_schema();
+        let mut entries = Vec::new();
+        walk_config_schema(&schema, &schema, "", &mut entries);
+        for section in ["linter", "cross-file"] {
+            let prefix = format!("overrides[].{section}.rules");
+            let paths: Vec<_> = entries
+                .iter()
+                .filter_map(|entry| entry["path"].as_str())
+                .filter(|path| path.starts_with(&prefix))
+                .collect();
+            assert_eq!(paths, [format!("{prefix}.<group>.<rule>")]);
+        }
+    }
 
     #[test]
     fn docgen_allows_missing_optional_fixtures() {
