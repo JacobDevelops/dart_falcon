@@ -31,7 +31,7 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 
 Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports. Any time after batch 15.
 
-- [ ] **Analysis cleanups.** Typed receiver slot instead of `"this"`; `dyn` lookup closures; Fx hashing for substitution maps; per-alias cache without a mutex.
+- [ ] **Analysis cleanups.** `dyn` lookup closures; Fx hashing for substitution maps; per-alias cache without a mutex.
 
 ### Stage 6: editor and CI workflows
 

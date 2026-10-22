@@ -1,5 +1,5 @@
 use super::*;
-use crate::resolve::lexical_scope::LexicalScopes;
+use crate::resolve::lexical_scope::{LexicalScopes, ScopeStorage};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct FlowBinding {
@@ -27,11 +27,39 @@ impl FlowBinding {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ReceiverBinding {
+    ty: ResolvedType,
+    fields: HashMap<String, ResolvedType>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct FlowScope {
+    bindings: FxHashMap<String, FlowBinding>,
+    receiver: Option<ReceiverBinding>,
+}
+
+impl ScopeStorage for FlowScope {
+    type Binding = FlowBinding;
+
+    fn get(&self, name: &str) -> Option<&FlowBinding> {
+        self.bindings.get(name)
+    }
+
+    fn get_mut(&mut self, name: &str) -> Option<&mut FlowBinding> {
+        self.bindings.get_mut(name)
+    }
+
+    fn insert(&mut self, name: String, binding: FlowBinding) -> &mut FlowBinding {
+        self.bindings.entry(name).insert_entry(binding).into_mut()
+    }
+}
+
 /// Lexical flow state with copy-on-write scopes for independent branch snapshots.
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnvironment {
     // Branch snapshots share scopes until a write touches that scope.
-    pub(super) scopes: LexicalScopes<Arc<FxHashMap<String, FlowBinding>>>,
+    pub(super) scopes: LexicalScopes<Arc<FlowScope>>,
     callable_boundaries: Vec<usize>,
     /// Whether the library's language version promotes private fields.
     pub(super) field_promotions: bool,
@@ -108,6 +136,34 @@ impl TypeEnvironment {
         }
     }
 
+    /// Declares the implicit receiver independently of named lexical bindings.
+    pub fn declare_receiver(&mut self, ty: ResolvedType) {
+        let scope = self.scopes.last_mut().expect("lexical scope");
+        if scope
+            .receiver
+            .as_ref()
+            .is_some_and(|receiver| receiver.ty == ty && receiver.fields.is_empty())
+        {
+            return;
+        }
+        Arc::make_mut(scope).receiver = Some(ReceiverBinding {
+            ty,
+            fields: HashMap::new(),
+        });
+    }
+
+    pub fn receiver(&self) -> ResolvedType {
+        self.receiver_depth()
+            .and_then(|index| self.scopes[index].receiver.as_ref())
+            .map_or(ResolvedType::Unknown, |receiver| receiver.ty.clone())
+    }
+
+    fn receiver_depth(&self) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rposition(|scope| scope.receiver.is_some())
+    }
+
     /// Declares a syntax binding, retaining its lexical declaration identity.
     pub fn declare_at(&mut self, name: impl Into<String>, ty: ResolvedType, span: Span) {
         self.declare_binding(name.into(), ty, true).declaration = Some(span);
@@ -180,18 +236,17 @@ impl TypeEnvironment {
     }
 
     pub fn promoted_this_field(&self, field: &str) -> Option<ResolvedType> {
-        let (index, receiver) = self.scopes.lookup("this")?;
-        let scope = &self.scopes[index];
-        if let Some(binding) = scope.get(field) {
+        let scope = &self.scopes[self.receiver_depth()?];
+        if let Some(binding) = scope.bindings.get(field) {
             return binding.promoted.last().cloned();
         }
-        receiver.fields.get(field).cloned()
+        scope.receiver.as_ref()?.fields.get(field).cloned()
     }
 
     pub fn promote_this_field(&mut self, field: &str, ty: ResolvedType) {
-        if let Some((index, _)) = self.scopes.lookup("this") {
+        if let Some(index) = self.receiver_depth() {
             let scope = &mut self.scopes[index];
-            if let Some(binding) = scope.get(field) {
+            if let Some(binding) = scope.bindings.get(field) {
                 if !binding.promotable
                     || binding.captured
                     || (binding.promoted.last() == Some(&ty) && binding.tested.contains(&ty))
@@ -199,18 +254,17 @@ impl TypeEnvironment {
                     return;
                 }
             } else if scope
-                .get("this")
-                .is_some_and(|binding| binding.fields.get(field) == Some(&ty))
+                .receiver
+                .as_ref()
+                .is_some_and(|receiver| receiver.fields.get(field) == Some(&ty))
             {
                 return;
             }
             let scope = Arc::make_mut(scope);
-            if let Some(binding) = scope.get_mut(field) {
-                if binding.promotable && !binding.captured {
-                    binding.push_promotion(ty);
-                }
-            } else if let Some(binding) = scope.get_mut("this") {
-                binding.fields.insert(field.to_owned(), ty);
+            if let Some(binding) = scope.bindings.get_mut(field) {
+                binding.push_promotion(ty);
+            } else if let Some(receiver) = scope.receiver.as_mut() {
+                receiver.fields.insert(field.to_owned(), ty);
             }
         }
     }
@@ -323,20 +377,32 @@ impl TypeEnvironment {
             {
                 continue;
             }
-            let changed = scope.keys().any(|name| {
-                let before = entry.scopes.get(index).and_then(|scope| scope.get(name));
-                let after = end.scopes.get(index).and_then(|scope| scope.get(name));
-                after.is_some() && before != after
+            let before = entry.scopes.get(index);
+            let after = end.scopes.get(index);
+            let before_receiver = before.and_then(|scope| scope.receiver.as_ref());
+            let after_receiver = after.and_then(|scope| scope.receiver.as_ref());
+            let receiver_changed = scope.receiver.is_some()
+                && after_receiver.is_some()
+                && before_receiver != after_receiver
+                && scope.receiver.as_ref() != after_receiver;
+            let bindings_changed = scope.bindings.iter().any(|(name, binding)| {
+                let old = before.and_then(|scope| scope.bindings.get(name));
+                let new = after.and_then(|scope| scope.bindings.get(name));
+                new.is_some() && old != new && Some(binding) != new
             });
-            if !changed {
+            if !receiver_changed && !bindings_changed {
                 continue;
             }
-            for (name, binding) in Arc::make_mut(scope) {
-                let before = entry.scopes.get(index).and_then(|scope| scope.get(name));
-                if let Some(after) = end.scopes.get(index).and_then(|scope| scope.get(name))
-                    && before != Some(after)
+            let scope = Arc::make_mut(scope);
+            if receiver_changed {
+                scope.receiver = after_receiver.cloned();
+            }
+            for (name, binding) in &mut scope.bindings {
+                let old = before.and_then(|scope| scope.bindings.get(name));
+                if let Some(new) = after.and_then(|scope| scope.bindings.get(name))
+                    && old != Some(new)
                 {
-                    binding.clone_from(after);
+                    binding.clone_from(new);
                 }
             }
         }
@@ -359,12 +425,12 @@ impl TypeEnvironment {
 
     pub fn demote_captured(&mut self) {
         for scope in self.scopes.iter_mut() {
-            if !scope.values().any(|binding| {
+            if !scope.bindings.values().any(|binding| {
                 binding.captured && (!binding.promoted.is_empty() || !binding.fields.is_empty())
             }) {
                 continue;
             }
-            for binding in Arc::make_mut(scope).values_mut() {
+            for binding in Arc::make_mut(scope).bindings.values_mut() {
                 if binding.captured {
                     binding.promoted.clear();
                     binding.fields.clear();
@@ -376,7 +442,6 @@ impl TypeEnvironment {
     fn receiver_name<'syntax>(object: Expr<'syntax>) -> Option<&'syntax str> {
         match object {
             Expr::Ident(identifier) => Some(identifier.name()),
-            Expr::This(_) => Some("this"),
             _ => None,
         }
     }
@@ -414,15 +479,29 @@ impl TypeEnvironment {
             if other
                 .scopes
                 .get(index)
-                .is_some_and(|peer| Arc::ptr_eq(scope, peer))
+                .is_some_and(|peer| Arc::ptr_eq(scope, peer) || scope.as_ref() == peer.as_ref())
                 && scope
+                    .bindings
                     .values()
                     .all(|binding| !binding.captured || !binding.promotable)
             {
                 continue;
             }
-            for (name, binding) in Arc::make_mut(scope) {
-                let peer = other.scopes.get(index).and_then(|scope| scope.get(name));
+            let scope = Arc::make_mut(scope);
+            if let Some(receiver) = scope.receiver.as_mut() {
+                let peer = other
+                    .scopes
+                    .get(index)
+                    .and_then(|scope| scope.receiver.as_ref());
+                receiver
+                    .fields
+                    .retain(|name, ty| peer.is_some_and(|peer| peer.fields.get(name) == Some(ty)));
+            }
+            for (name, binding) in &mut scope.bindings {
+                let peer = other
+                    .scopes
+                    .get(index)
+                    .and_then(|scope| scope.bindings.get(name));
                 binding.captured |= peer.is_some_and(|peer| peer.captured);
                 if binding.captured {
                     binding.promotable = false;

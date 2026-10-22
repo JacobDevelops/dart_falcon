@@ -552,7 +552,7 @@ impl SignatureIndex {
                 extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
             };
             let mut environment = TypeEnvironment::new();
-            environment.declare("this", receiver);
+            environment.declare_receiver(receiver);
             for member in members {
                 match member {
                     ClassMember::Field(field) if field.field_type().is_none() => {

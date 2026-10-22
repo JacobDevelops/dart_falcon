@@ -28,22 +28,19 @@ impl<B, H: BuildHasher + Default> ScopeStorage for HashMap<String, B, H> {
     }
 }
 
-impl<B: Clone, H: BuildHasher + Default + Clone> ScopeStorage for Arc<HashMap<String, B, H>> {
-    type Binding = B;
+impl<S: ScopeStorage + Clone> ScopeStorage for Arc<S> {
+    type Binding = S::Binding;
 
-    fn get(&self, name: &str) -> Option<&B> {
+    fn get(&self, name: &str) -> Option<&Self::Binding> {
         self.as_ref().get(name)
     }
 
-    fn get_mut(&mut self, name: &str) -> Option<&mut B> {
+    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Binding> {
         Arc::make_mut(self).get_mut(name)
     }
 
-    fn insert(&mut self, name: String, value: B) -> &mut B {
-        Arc::make_mut(self)
-            .entry(name)
-            .insert_entry(value)
-            .into_mut()
+    fn insert(&mut self, name: String, value: Self::Binding) -> &mut Self::Binding {
+        Arc::make_mut(self).insert(name, value)
     }
 }
 

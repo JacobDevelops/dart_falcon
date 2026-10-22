@@ -750,7 +750,7 @@ impl TypeEnvironment {
         if matches!(object, Expr::Super(_)) {
             context
                 .signatures
-                .super_receiver(&self.lookup("this"), name, context.model)
+                .super_receiver(&self.receiver(), name, context.model)
                 .unwrap_or(ResolvedType::Unknown)
         } else {
             let inference = queries::context_copy(context);
@@ -774,7 +774,7 @@ impl TypeEnvironment {
         &'a ResolvedSignature,
         HashMap<TypeParameterId, ResolvedType>,
     )> {
-        let this = self.lookup("this");
+        let this = self.receiver();
         let mut bound = &this;
         while let ResolvedType::TypeParameter { bound: next, .. }
         | ResolvedType::NonNullTypeParameter { bound: next, .. } = bound

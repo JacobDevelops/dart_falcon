@@ -700,7 +700,7 @@ impl<'a> SemanticState<'a> {
         }
         self.environment
             .implicit_this_method(name, &self.model, &self.signatures)?;
-        let receiver = self.environment.lookup("this");
+        let receiver = self.environment.receiver();
         if let ResolvedType::Interface { identity, .. } = &receiver
             && self
                 .signatures
@@ -2005,8 +2005,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 .unwrap_or("new");
             self.with_scope(|walker| {
                 walker.bind_params(primary.params(), Some(super_constructor), false, None);
-                walker.state.environment.declare_unpromotable(
-                    "this",
+                walker.state.environment.declare_receiver(
                     walker
                         .state
                         .enclosing_type
@@ -2816,8 +2815,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 let previous_primary = walker.primary_environment.take();
                 let previous_primary_body = walker.primary_body_environment.take();
                 walker.declare_fields(effective_members.clone());
-                walker.state.environment.declare_unpromotable(
-                    "this",
+                walker.state.environment.declare_receiver(
                     walker
                         .state
                         .enclosing_type

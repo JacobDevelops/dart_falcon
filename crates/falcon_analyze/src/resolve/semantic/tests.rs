@@ -772,7 +772,7 @@ fn typedef_provenance_preserves_resolved_type_size() {
 #[test]
 fn no_op_flow_mutations_preserve_shared_scopes() {
     let mut environment = TypeEnvironment::new();
-    environment.declare("this", ResolvedType::Dynamic);
+    environment.declare_receiver(ResolvedType::Dynamic);
     environment.declare("plain", ResolvedType::Dynamic);
     environment.declare("value", ResolvedType::Dynamic);
     environment.declare_unpromotable("blocked", ResolvedType::Dynamic);
@@ -881,12 +881,13 @@ fn missing_flow_mutations_preserve_every_shared_scope() {
 }
 
 #[test]
-fn synthetic_this_promotions_copy_only_the_nearest_receiver_scope() {
+fn this_promotions_copy_only_the_nearest_receiver_scope() {
     let mut environment = TypeEnvironment::new();
-    environment.declare("this", ResolvedType::Dynamic);
+    environment.declare_receiver(ResolvedType::Dynamic);
     environment.promote_this_field("field", ResolvedType::Dynamic);
     environment.push_scope();
-    environment.declare("this", ResolvedType::Dynamic);
+    environment.declare_receiver(ResolvedType::Null);
+    assert_eq!(environment.receiver(), ResolvedType::Null);
     environment.push_scope();
     environment.declare("field", ResolvedType::Dynamic);
     let snapshot = environment.clone();
@@ -903,10 +904,163 @@ fn synthetic_this_promotions_copy_only_the_nearest_receiver_scope() {
     assert!(Arc::ptr_eq(&environment.scopes[2], &snapshot.scopes[2]));
     environment.pop_scope();
     environment.pop_scope();
+    assert_eq!(environment.receiver(), ResolvedType::Dynamic);
     assert_eq!(
         environment.promoted_this_field("field"),
         Some(ResolvedType::Dynamic)
     );
+}
+
+#[test]
+fn receiver_slot_is_not_a_named_binding() {
+    let mut environment = TypeEnvironment::new();
+    environment.declare_receiver(ResolvedType::Dynamic);
+    environment.promote_this_field("field", ResolvedType::Null);
+    assert!(!environment.is_bound("this"));
+    assert_eq!(environment.binding_depth("this"), None);
+    assert_eq!(environment.binding_declaration("this"), None);
+    assert_eq!(environment.lookup("this"), ResolvedType::Unknown);
+    assert_eq!(environment.declared_type("this"), ResolvedType::Unknown);
+    let snapshot = environment.clone();
+    environment.enter_callable();
+    assert!(!environment.assign("this", vec![ResolvedType::Null]));
+    environment.promote("this", ResolvedType::Null);
+    environment.demote("this");
+    environment.mark_captured("this");
+    environment.demote_captured();
+    assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
+    assert_eq!(environment.receiver(), ResolvedType::Dynamic);
+    assert_eq!(
+        environment.promoted_this_field("field"),
+        Some(ResolvedType::Null)
+    );
+
+    environment.declare("this", ResolvedType::Null);
+    environment.mark_captured("this");
+    assert_eq!(environment.lookup("this"), ResolvedType::Null);
+    assert_eq!(environment.receiver(), ResolvedType::Dynamic);
+    assert_eq!(
+        environment.promoted_this_field("field"),
+        Some(ResolvedType::Null)
+    );
+}
+
+#[test]
+fn this_field_promotions_prefer_bindings_in_the_receiver_scope() {
+    let mut environment = TypeEnvironment::new();
+    environment.declare_receiver(ResolvedType::Dynamic);
+    environment.promote_this_field("field", ResolvedType::Dynamic);
+    environment.declare("field", ResolvedType::Dynamic);
+    assert_eq!(environment.promoted_this_field("field"), None);
+    environment.push_scope();
+    environment.declare("field", ResolvedType::Dynamic);
+    environment.promote_this_field("field", ResolvedType::Null);
+    assert_eq!(environment.lookup("field"), ResolvedType::Dynamic);
+    assert_eq!(
+        environment.promoted_this_field("field"),
+        Some(ResolvedType::Null)
+    );
+    environment.pop_scope();
+    assert_eq!(environment.lookup("field"), ResolvedType::Null);
+}
+
+#[test]
+fn receiver_promotions_join_and_finally_transfer_independently() {
+    let mut entry = TypeEnvironment::new();
+    entry.declare_receiver(ResolvedType::Dynamic);
+    entry.promote_this_field("unchanged", ResolvedType::Dynamic);
+    entry.push_scope();
+    entry.declare("local", ResolvedType::Dynamic);
+    let mut left = entry.clone();
+    let mut right = entry.clone();
+    left.promote_this_field("shared", ResolvedType::Null);
+    right.promote_this_field("shared", ResolvedType::Null);
+    left.promote_this_field("left", ResolvedType::Null);
+    right.promote_this_field("right", ResolvedType::Null);
+    let joined = left.join(&right);
+    assert_eq!(joined.receiver(), ResolvedType::Dynamic);
+    assert_eq!(
+        joined.promoted_this_field("shared"),
+        Some(ResolvedType::Null)
+    );
+    assert_eq!(joined.promoted_this_field("left"), None);
+    assert_eq!(joined.promoted_this_field("right"), None);
+    assert!(Arc::ptr_eq(&joined.scopes[1], &entry.scopes[1]));
+
+    let mut target = left.clone();
+    target.attach_finally(&entry, &right);
+    assert_eq!(
+        target.promoted_this_field("shared"),
+        Some(ResolvedType::Null)
+    );
+    assert_eq!(target.promoted_this_field("left"), None);
+    assert_eq!(
+        target.promoted_this_field("right"),
+        Some(ResolvedType::Null)
+    );
+    assert_eq!(
+        target.promoted_this_field("unchanged"),
+        Some(ResolvedType::Dynamic)
+    );
+    assert!(Arc::ptr_eq(&target.scopes[1], &entry.scopes[1]));
+    assert_eq!(entry.promoted_this_field("shared"), None);
+}
+
+#[test]
+fn receiver_no_ops_preserve_scope_snapshots() {
+    let mut entry = TypeEnvironment::new();
+    entry.declare_receiver(ResolvedType::Dynamic);
+    let snapshot = entry.clone();
+    entry.declare_receiver(ResolvedType::Dynamic);
+    assert!(entry.same_flow_state(&snapshot));
+
+    let mut left = entry.clone();
+    let mut right = entry.clone();
+    left.promote_this_field("field", ResolvedType::Null);
+    right.promote_this_field("field", ResolvedType::Null);
+    let snapshot = left.clone();
+    left.promote_this_field("field", ResolvedType::Null);
+    left.attach_finally(&entry, &right);
+    assert!(left.same_flow_state(&snapshot));
+    assert!(left.join(&right).same_flow_state(&snapshot));
+    assert!(left.join(&left).same_flow_state(&snapshot));
+}
+
+#[test]
+fn receiver_join_with_missing_peer_preserves_type_without_promotions() {
+    let mut environment = TypeEnvironment::new();
+    environment.declare_receiver(ResolvedType::Dynamic);
+    environment.promote_this_field("field", ResolvedType::Null);
+    let joined = environment.join(&TypeEnvironment::new());
+    assert_eq!(joined.receiver(), ResolvedType::Dynamic);
+    assert_eq!(joined.promoted_this_field("field"), None);
+    assert_eq!(
+        environment.promoted_this_field("field"),
+        Some(ResolvedType::Null)
+    );
+}
+
+#[test]
+fn finally_transfer_preserves_receiver_presence_and_snapshot_sharing() {
+    let missing = TypeEnvironment::new();
+    let mut present = TypeEnvironment::new();
+    present.declare_receiver(ResolvedType::Dynamic);
+    present.promote_this_field("field", ResolvedType::Null);
+
+    let mut target = present.clone();
+    target.attach_finally(&present, &missing);
+    assert!(target.same_flow_state(&present));
+    assert_eq!(target.receiver(), ResolvedType::Dynamic);
+    assert_eq!(
+        target.promoted_this_field("field"),
+        Some(ResolvedType::Null)
+    );
+
+    let mut target = missing.clone();
+    target.attach_finally(&missing, &present);
+    assert!(target.same_flow_state(&missing));
+    assert_eq!(target.receiver(), ResolvedType::Unknown);
+    assert_eq!(target.promoted_this_field("field"), None);
 }
 
 #[test]
@@ -4546,7 +4700,7 @@ fn block_closures_preserve_private_field_promotion_mode() {
                 extension_type: false,
             };
             let mut environment = TypeEnvironment::with_field_promotions(true);
-            environment.declare("this", receiver.clone());
+            environment.declare_receiver(receiver.clone());
             let lookup = |name: &str| {
                 signatures
                     .resolved_field(&receiver, name, model)

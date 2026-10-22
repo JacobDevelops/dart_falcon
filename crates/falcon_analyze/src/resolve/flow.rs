@@ -176,7 +176,7 @@ impl FlowContext<'_, '_> {
             if let Some(ty) = environment.promoted_this_field(name.name()) {
                 return ty;
             }
-            let receiver = environment.lookup("this");
+            let receiver = environment.receiver();
             if let Some((ty, substitutions)) = self
                 .signatures
                 .resolved_field(&receiver, name.name(), self.model)
@@ -480,7 +480,7 @@ impl FlowContext<'_, '_> {
             Expr::Ident(name)
                 if self.field_promotions
                     && self.signatures.is_promotable_field(
-                        &environment.lookup("this"),
+                        &environment.receiver(),
                         name.name(),
                         self.model,
                     ) =>

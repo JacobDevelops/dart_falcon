@@ -101,7 +101,7 @@ impl TypeEnvironment {
             segments.first().is_some_and(|head| {
                 !self.is_bound(head)
                     && (context.lookup)(head).is_none()
-                    && !matches!(self.lookup("this"),
+                    && !matches!(self.receiver(),
                         ResolvedType::Interface { identity, .. }
                         if context.signatures.declared_member_facts(&identity, head)
                             .iter().any(|facts| facts.kind == MemberKind::Method))
@@ -747,10 +747,9 @@ mod tests {
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
-                environment.declare(
-                    "this",
-                    ResolvedType::interface_identity(model.resolve_name("Box").unwrap()),
-                );
+                environment.declare_receiver(ResolvedType::interface_identity(
+                    model.resolve_name("Box").unwrap(),
+                ));
                 let context = InferenceContext {
                     model,
                     signatures,
@@ -791,7 +790,7 @@ mod tests {
                     .function(&model.resolve_value("probe").unwrap())
                     .unwrap();
                 let mut environment = TypeEnvironment::new();
-                environment.declare("this", signature.positional[0].clone());
+                environment.declare_receiver(signature.positional[0].clone());
                 assert!(
                     environment
                         .infer_with_signatures(
@@ -824,10 +823,9 @@ mod tests {
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
-                environment.declare(
-                    "this",
-                    ResolvedType::interface_identity(model.resolve_name("Box").unwrap()),
-                );
+                environment.declare_receiver(ResolvedType::interface_identity(
+                    model.resolve_name("Box").unwrap(),
+                ));
                 let callback = environment.lookup("callback");
                 let lookup = |name: &str| (name == "action").then(|| callback.clone());
                 let context = InferenceContext {
@@ -949,7 +947,7 @@ mod tests {
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
-                environment.declare("this", environment.lookup("owner"));
+                environment.declare_receiver(environment.lookup("owner"));
                 let context = InferenceContext {
                     model,
                     signatures,

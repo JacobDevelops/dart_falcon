@@ -606,7 +606,7 @@ impl TypeEnvironment {
                 })
                 .unwrap_or(ResolvedType::Unknown)
             }
-            Expr::This(_) => self.lookup("this"),
+            Expr::This(_) => self.receiver(),
             Expr::Ident(identifier) => {
                 // Bindings this environment adds (pattern variables of an
                 // inferred switch arm) shadow the lexical lookup.
