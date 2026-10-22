@@ -13,23 +13,14 @@ fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
     None
 }
 
-const RULES_STACK_SIZE: usize = 256 * 1024 * 1024;
-
-/// Deep legal ASTs can exhaust default worker stacks; all rule-execution paths need this guard.
-pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> std::io::Result<T> {
-    std::thread::scope(|scope| {
-        let handle = std::thread::Builder::new()
-            .stack_size(RULES_STACK_SIZE)
-            .spawn_scoped(scope, f)?;
-        Ok(handle.join().expect("rules thread panicked"))
-    })
-}
+/// Run rules on the same large-stack workers used by parsing and parallel analysis.
+pub use falcon_dart_parser::with_stack as with_rules_stack;
 
 pub fn rules_thread_diagnostic(path: &std::path::Path, error: &std::io::Error) -> Diagnostic {
     Diagnostic::new(
         falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID,
         falcon_diagnostics::Severity::Error,
-        format!("could not start rules thread: {error}"),
+        format!("rules worker failed: {error}"),
         path.to_string_lossy().into_owned(),
         falcon_diagnostics::Span { start: 0, end: 0 },
     )

@@ -6,6 +6,7 @@ description       = "Hand-rolled Dart 3.x recursive-descent parser for falcon"
 
 [dependencies]
 falcon_syntax     = { path = "../falcon_syntax" }
+rayon.workspace   = true
 tracing.workspace = true
 
 [dev-dependencies]

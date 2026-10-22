@@ -6,8 +6,8 @@ use rayon::prelude::*;
 use tracing::{info, info_span};
 
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse_for_package;
 use falcon_dart_parser::parser::ParseError;
+use falcon_dart_parser::try_parse_for_package;
 use falcon_diagnostics::{Diagnostic, SYNTAX_ERROR_DIAGNOSTIC_ID, Severity, Span};
 use falcon_syntax::cst::Program;
 use falcon_syntax::language_version::LanguageVersion;
@@ -37,10 +37,14 @@ fn analyze_file(
         return (vec![diagnostic], None);
     }
     let package_version = workspace.package_language_version(path);
+    let parsed_result = match try_parse_for_package(source, package_version) {
+        Ok(parsed) => parsed,
+        Err(error) => return (vec![crate::rules_thread_diagnostic(path, &error)], None),
+    };
     let falcon_dart_parser::ParseResult {
         errors: parse_errors,
         tree,
-    } = parse_for_package(source, package_version);
+    } = parsed_result;
     let parsed = Arc::new(ParsedFile {
         source: source.into(),
         tree,
@@ -100,16 +104,21 @@ struct Parsed<'src> {
     parse_errors: Vec<ParseError>,
 }
 
-fn parse_one<'src>(path: &'src Path, source: Box<str>, workspace: Workspace<'_>) -> Parsed<'src> {
+fn parse_one<'src>(
+    path: &'src Path,
+    source: Box<str>,
+    workspace: Workspace<'_>,
+) -> Result<Parsed<'src>, Box<Diagnostic>> {
     let falcon_dart_parser::ParseResult {
         errors: parse_errors,
         tree,
-    } = parse_for_package(&source, workspace.package_language_version(path));
-    Parsed {
+    } = try_parse_for_package(&source, workspace.package_language_version(path))
+        .map_err(|error| Box::new(crate::rules_thread_diagnostic(path, &error)))?;
+    Ok(Parsed {
         path,
         parsed: Arc::new(ParsedFile { source, tree }),
         parse_errors,
-    }
+    })
 }
 
 /// Retain the parsed programs as [`ProjectFile`]s for the cross-file pass, or drop
@@ -177,9 +186,18 @@ fn analyze_indexed(
                 .map(|source| (path.to_path_buf(), source.into_boxed_str()))
         })
         .collect();
+    let mut companion_diagnostics = Vec::new();
     let companions: Vec<Parsed<'_>> = companion_sources
         .iter_mut()
-        .map(|(path, source)| parse_one(path, std::mem::take(source), workspace))
+        .filter_map(
+            |(path, source)| match parse_one(path, std::mem::take(source), workspace) {
+                Ok(parsed) => Some(parsed),
+                Err(diagnostic) => {
+                    companion_diagnostics.push(*diagnostic);
+                    None
+                }
+            },
+        )
         .collect();
     let semantic_parsed: Vec<&Parsed<'_>> = parsed.iter().chain(&companions).collect();
     let project_files: Vec<(PathBuf, Program<'_>)> = semantic_parsed
@@ -263,11 +281,12 @@ fn analyze_indexed(
         info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
         diagnostics
     };
-    let diagnostics = if parallel {
+    let mut diagnostics: Vec<Diagnostic> = if parallel {
         parsed.par_iter().enumerate().flat_map(run_one).collect()
     } else {
         parsed.iter().enumerate().flat_map(run_one).collect()
     };
+    diagnostics.extend(companion_diagnostics);
     (
         diagnostics,
         SemanticIndexes {
@@ -369,6 +388,36 @@ pub fn analyze_parallel_collecting_resolving(
     resolve: bool,
     workspace: Workspace<'_>,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+    crate::with_rules_stack(|| {
+        analyze_parallel_inner(
+            registry,
+            files,
+            config,
+            collect_programs,
+            resolve,
+            workspace,
+        )
+    })
+    .unwrap_or_else(|error| {
+        (
+            files
+                .iter()
+                .map(|(path, _)| crate::rules_thread_diagnostic(path, &error))
+                .collect(),
+            Vec::new(),
+            None,
+        )
+    })
+}
+
+fn analyze_parallel_inner(
+    registry: &RuleRegistry,
+    files: &[(PathBuf, String)],
+    config: &FalconConfig,
+    collect_programs: bool,
+    resolve: bool,
+    workspace: Workspace<'_>,
+) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
     if !resolve {
         let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
             .par_iter()
@@ -383,7 +432,7 @@ pub fn analyze_parallel_collecting_resolving(
         );
     }
     let mut diagnostics = Vec::new();
-    let parsed: Vec<Parsed<'_>> = if files
+    let parsed: Vec<Result<Parsed<'_>, Box<Diagnostic>>> = if files
         .iter()
         .all(|(_, source)| source.len() as u64 <= u64::from(u32::MAX))
     {
@@ -406,6 +455,16 @@ pub fn analyze_parallel_collecting_resolving(
             })
             .collect()
     };
+    let parsed: Vec<_> = parsed
+        .into_iter()
+        .filter_map(|result| match result {
+            Ok(parsed) => Some(parsed),
+            Err(diagnostic) => {
+                diagnostics.push(*diagnostic);
+                None
+            }
+        })
+        .collect();
     let (file_diagnostics, indexes) = analyze_indexed(registry, &parsed, config, true, workspace);
     if diagnostics.is_empty() {
         diagnostics = file_diagnostics;
@@ -417,6 +476,36 @@ pub fn analyze_parallel_collecting_resolving(
 
 /// Sequential counterpart of [`analyze_parallel_collecting_resolving`].
 pub fn analyze_sequential_collecting_resolving(
+    registry: &RuleRegistry,
+    files: &[(PathBuf, String)],
+    config: &FalconConfig,
+    collect_programs: bool,
+    resolve: bool,
+    workspace: Workspace<'_>,
+) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+    crate::with_rules_stack(|| {
+        analyze_sequential_inner(
+            registry,
+            files,
+            config,
+            collect_programs,
+            resolve,
+            workspace,
+        )
+    })
+    .unwrap_or_else(|error| {
+        (
+            files
+                .iter()
+                .map(|(path, _)| crate::rules_thread_diagnostic(path, &error))
+                .collect(),
+            Vec::new(),
+            None,
+        )
+    })
+}
+
+fn analyze_sequential_inner(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
     config: &FalconConfig,
@@ -443,7 +532,13 @@ pub fn analyze_sequential_collecting_resolving(
                 diagnostics.push(diagnostic);
                 None
             } else {
-                Some(parse_one(path, source.as_str().into(), workspace))
+                match parse_one(path, source.as_str().into(), workspace) {
+                    Ok(parsed) => Some(parsed),
+                    Err(diagnostic) => {
+                        diagnostics.push(*diagnostic);
+                        None
+                    }
+                }
             }
         })
         .collect();

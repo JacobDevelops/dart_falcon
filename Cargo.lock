@@ -411,6 +411,7 @@ dependencies = [
  "criterion",
  "falcon_syntax",
  "insta",
+ "rayon",
  "tracing",
  "walkdir",
 ]

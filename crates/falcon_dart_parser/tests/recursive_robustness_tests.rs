@@ -300,3 +300,33 @@ fn overflow_diagnostic_does_not_disable_later_type_and_pattern_lists() {
     assert_eq!(object.fields().len(), 1);
     Walk.visit_program(parsed.tree.program(&source));
 }
+
+#[test]
+fn nested_pool_parsing_preserves_deep_input_on_a_small_caller_stack() {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024)
+        .spawn(|| {
+            falcon_dart_parser::with_stack(|| {
+                let source = format!(
+                    "typedef Deep = {}int{};",
+                    "List<".repeat(96),
+                    ">".repeat(96)
+                );
+                for _ in 0..8 {
+                    let parsed = parse(&source);
+                    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+                    assert!(parsed.tree.is_lossless(&source));
+                    Walk.visit_program(parsed.tree.program(&source));
+                }
+                assert_depth_limited(&format!(
+                    "typedef TooDeep = {}int{};",
+                    "List<".repeat(512),
+                    ">".repeat(512)
+                ));
+            })
+            .unwrap();
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

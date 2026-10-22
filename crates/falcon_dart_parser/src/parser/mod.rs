@@ -26,10 +26,6 @@ pub struct ParseResult {
 /// Parse Dart into a CST and recoverable errors at the language version of a
 /// file outside any package: its `// @dart` override, else
 /// [`LanguageVersion::CURRENT`].
-///
-/// # Panics
-///
-/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
 pub fn parse(source: &str) -> ParseResult {
     parse_for_package(source, None)
 }
@@ -37,25 +33,16 @@ pub fn parse(source: &str) -> ParseResult {
 /// Parse Dart into a CST and recoverable errors at the file's effective
 /// language version — its `// @dart` override, else `package_version`, else
 /// [`LanguageVersion::CURRENT`] — on a depth-bounded worker stack, so deeply
-/// nested input cannot exhaust the caller's stack. A worker that cannot start
-/// yields an empty program with one error; use [`try_parse_for_package`] to
-/// tell that apart from a real parse.
-///
-/// # Panics
-///
-/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+/// nested input cannot exhaust the caller's stack. A worker failure yields an
+/// empty program with one error; use [`try_parse_for_package`] to tell that
+/// apart from a real parse.
 pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>) -> ParseResult {
     try_parse_for_package(source, package_version).unwrap_or_else(|error| {
-        let tokens = Lexer::new(source).tokenize();
-        let tree = SyntaxTree::build(
-            source,
-            &lexical::cst_tokens(&tokens, source, &[]),
-            Vec::new(),
-        );
+        let tree = SyntaxTree::build("", &[], Vec::new());
         ParseResult {
             errors: vec![ParseError {
                 kind: ParseErrorKind::Syntax,
-                message: format!("could not start parser thread: {error}"),
+                message: format!("parser worker failed: {error}"),
                 offset: 0,
             }],
             tree,
@@ -63,15 +50,11 @@ pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>)
     })
 }
 
-/// [`parse_for_package`], failing when the parser worker thread cannot start.
+/// [`parse_for_package`], failing when the shared worker pool or parser fails.
 ///
 /// # Errors
 ///
-/// Returns the spawn error when the worker thread cannot be created.
-///
-/// # Panics
-///
-/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+/// Returns an error if the worker pool cannot start or the parser panics.
 pub fn try_parse_for_package(
     source: &str,
     package_version: Option<LanguageVersion>,
@@ -79,20 +62,8 @@ pub fn try_parse_for_package(
     let version = LanguageVersion::file_override(source)
         .or(package_version)
         .unwrap_or(LanguageVersion::CURRENT);
-    std::thread::scope(|scope| {
-        let handle = std::thread::Builder::new()
-            .stack_size(PARSER_STACK_SIZE)
-            .spawn_scoped(scope, || parse_inner(source, version))?;
-        Ok(handle
-            .join()
-            .unwrap_or_else(|payload| std::panic::resume_unwind(payload)))
-    })
+    crate::with_stack(|| parse_inner(source, version))
 }
-
-/// Stack for the parser worker thread. Sized so a descent to the full
-/// [`MAX_PARSE_DEPTH`](Parser::MAX_PARSE_DEPTH) ceiling clears with wide margin
-/// (that ceiling costs well under 16 MB of native stack).
-const PARSER_STACK_SIZE: usize = 256 * 1024 * 1024;
 
 fn parse_inner(source: &str, version: LanguageVersion) -> ParseResult {
     debug!("parsing file");

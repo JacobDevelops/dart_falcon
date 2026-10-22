@@ -484,3 +484,103 @@ fn context_rejects_invalid_rule_fixes() {
         }
     }
 }
+
+#[test]
+fn panicking_rules_report_worker_errors_and_leave_the_pool_usable() {
+    struct PanickingRule;
+    impl Rule for PanickingRule {
+        fn prepare<'a>(
+            &self,
+            _program: Program<'a>,
+            ctx: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
+            if ctx.file_path() == Path::new("panic.dart") {
+                panic!("deliberate rule panic");
+            }
+            RulePreparation::Diagnostics(vec![
+                ctx.diagnostic("healthy file survives", Span { start: 0, end: 0 }),
+            ])
+        }
+    }
+
+    let mut registry = RuleRegistry::new();
+    registry.register("panicking-rule", Box::new(PanickingRule));
+    let files = vec![
+        ("panic.dart".into(), "void main() {}".into()),
+        ("healthy.dart".into(), "void main() {}".into()),
+    ];
+    let config = FalconConfig::default();
+    for resolve in [false, true] {
+        for analyze in [
+            falcon_analyze::analyze_sequential_collecting_resolving,
+            falcon_analyze::analyze_parallel_collecting_resolving,
+        ] {
+            let (diagnostics, retained, _) = analyze(
+                &registry,
+                &files,
+                &config,
+                true,
+                resolve,
+                falcon_analyze::Workspace::default(),
+            );
+            assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+            let failure = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+                })
+                .unwrap();
+            assert_eq!(failure.severity, Severity::Error);
+            assert_eq!(failure.file_path, "panic.dart");
+            assert!(failure.message.contains("deliberate rule panic"));
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.rule == "panicking-rule" && diagnostic.message == "healthy file survives"
+            }));
+            assert_eq!(retained.len(), files.len());
+        }
+    }
+    assert!(falcon_analyze::analyze_parallel(&RuleRegistry::new(), &files, &config).is_empty());
+}
+
+#[test]
+fn parallel_rules_run_on_shared_stack_workers_with_and_without_resolution() {
+    struct CheckWorker;
+    impl Rule for CheckWorker {
+        fn prepare<'a>(
+            &self,
+            _program: Program<'a>,
+            _ctx: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
+            assert!(
+                std::thread::current()
+                    .name()
+                    .unwrap()
+                    .starts_with("falcon-stack-")
+            );
+            let worker = std::thread::current().id();
+            assert_eq!(
+                falcon_dart_parser::with_stack(|| std::thread::current().id()).unwrap(),
+                worker
+            );
+            RulePreparation::Diagnostics(Vec::new())
+        }
+    }
+
+    let mut registry = RuleRegistry::new();
+    registry.register("check-worker", Box::new(CheckWorker));
+    let files: Vec<_> = (0..32)
+        .map(|index| (format!("file{index}.dart").into(), "void main() {}".into()))
+        .collect();
+    for resolve in [false, true] {
+        let (diagnostics, retained, _) = falcon_analyze::analyze_parallel_collecting_resolving(
+            &registry,
+            &files,
+            &FalconConfig::default(),
+            true,
+            resolve,
+            falcon_analyze::Workspace::default(),
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(retained.len(), files.len());
+    }
+}

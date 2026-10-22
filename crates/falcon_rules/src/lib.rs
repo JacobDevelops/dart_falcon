@@ -464,7 +464,7 @@ pub fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry
 
 /// # Errors
 ///
-/// Returns the spawn error when the rules thread cannot start.
+/// Returns an error when the shared workers cannot start or a rule panics.
 pub fn run_cross_file(
     environment: &falcon_analyze::AnalysisEnvironment,
     registry: &CrossFileRuleRegistry,

@@ -80,8 +80,6 @@ pub struct ExternalLibraries {
     eviction_roots: FxHashMap<PathBuf, usize>,
     project_companions: std::collections::BTreeMap<PathBuf, Vec<PathBuf>>,
     companion_dependencies: FxHashMap<PathBuf, CompanionDependencies>,
-    /// Defining files whose parser thread could not start; the next extend retries them.
-    retry: Vec<(u32, PathBuf, Option<usize>)>,
 }
 
 /// Source-validated directives: unchanged snapshots need not reparse unopened parts.
@@ -254,7 +252,6 @@ impl ExternalLibraries {
                 }
             }
         }
-        wave.append(&mut self.retry);
         self.load_waves(environment, wave, &is_project);
         self.group_instances(environment);
         if !self.companion_dependencies.is_empty() {
@@ -493,8 +490,6 @@ impl ExternalLibraries {
                     Ok(loaded) => loaded,
                     Err(error) => {
                         environment.warn(&path, format!("parser worker failed: {error}"));
-                        self.states[id as usize].attempted = false;
-                        self.retry.push((id, path, context));
                         continue;
                     }
                 };
@@ -519,16 +514,6 @@ impl ExternalLibraries {
                 } else {
                     self.states[id as usize].primary = Some(self.libraries.len());
                     self.libraries.push(library);
-                    let mut pending = Vec::new();
-                    self.retry.retain(|(retry_id, retry_path, retry_context)| {
-                        if *retry_id == id {
-                            pending.push((*retry_id, retry_path.clone(), *retry_context));
-                            false
-                        } else {
-                            true
-                        }
-                    });
-                    revisits.extend(pending);
                 }
                 let collect_targets = !sdk
                     && self.states[id as usize].primary.is_some()
@@ -548,15 +533,12 @@ impl ExternalLibraries {
                     }
                 }
             }
-            for (id, path, context) in revisits {
+            for (id, _, context) in revisits {
                 let state = &self.states[id as usize];
                 if state.sdk == Some(true) {
                     continue;
                 }
                 let Some(index) = state.primary else {
-                    if !state.attempted {
-                        self.retry.push((id, path, context));
-                    }
                     continue;
                 };
                 if context == state.context {
@@ -1111,8 +1093,7 @@ fn dependencies(
 ///
 /// # Errors
 ///
-/// Returns the spawn error when a parser thread cannot start, so the load is
-/// retried instead of cached as unloadable or missing a part.
+/// Returns an error when the shared parser worker fails.
 fn load_library(
     environment: &AnalysisEnvironment,
     canonical_paths: &CanonicalPaths,

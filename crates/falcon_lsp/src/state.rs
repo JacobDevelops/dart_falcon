@@ -19,7 +19,7 @@ use falcon_analyze::{
     library_unit, package_identities, syntax_error_diagnostics,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::{lex_tree, parse_for_package};
+use falcon_dart_parser::{lex_tree, try_parse_for_package};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
@@ -28,6 +28,33 @@ use falcon_rules::{
 use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
+
+struct DocumentParse {
+    tree: falcon_syntax::cst::SyntaxTree,
+    diagnostics: Vec<Diagnostic>,
+    has_errors: bool,
+    worker_failed: bool,
+}
+
+fn document_parse_result(
+    path: &Path,
+    result: std::io::Result<falcon_dart_parser::ParseResult>,
+) -> DocumentParse {
+    match result {
+        Ok(parsed) => DocumentParse {
+            diagnostics: syntax_error_diagnostics(path, &parsed.errors),
+            has_errors: !parsed.errors.is_empty(),
+            tree: parsed.tree,
+            worker_failed: false,
+        },
+        Err(error) => DocumentParse {
+            tree: falcon_syntax::cst::SyntaxTree::build("", &[], Vec::new()),
+            diagnostics: vec![falcon_analyze::rules_thread_diagnostic(path, &error)],
+            has_errors: true,
+            worker_failed: true,
+        },
+    }
+}
 
 /// One open document: full text, cached syntax tree, and instrumentation counters.
 pub struct DocumentState {
@@ -40,9 +67,9 @@ pub struct DocumentState {
     /// Whether the last parse produced errors — carried so the cross-file pass
     /// can populate [`ProjectFile::has_parse_errors`] without re-parsing.
     has_parse_errors: bool,
-    /// Rejected buffers keep no text or syntax; only their size diagnostic survives.
+    /// Rejected buffers keep no usable syntax and publish only ingestion diagnostics.
     source_rejected: bool,
-    /// Syntax-error diagnostics from the last parse, kept so `analyze` can
+    /// Parse and worker diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
     /// Most recent published output (byte spans) — read by hover. May include
@@ -232,6 +259,10 @@ pub struct LspState {
     resolve_semantics: bool,
     /// Lazily rebuilt after document, config, or watched-workspace changes.
     semantic_snapshot: Option<SemanticSnapshot>,
+    /// A failed project parse invalidates the complete view until its inputs change.
+    semantic_snapshot_error: Option<std::io::Error>,
+    #[cfg(test)]
+    parser_failure_path: Option<PathBuf>,
     /// Dependents from the graph before an edit, retained until that edit is analyzed.
     pending_semantic_affected: HashMap<String, HashSet<String>>,
     /// Instrumentation for incremental tests: number of semantic snapshot builds.
@@ -324,6 +355,9 @@ impl LspState {
             workspace_root,
             resolve_semantics,
             semantic_snapshot: None,
+            semantic_snapshot_error: None,
+            #[cfg(test)]
+            parser_failure_path: None,
             pending_semantic_affected: HashMap::new(),
             semantic_snapshot_build_count: 0,
             semantic_topology_build_count: 0,
@@ -494,8 +528,11 @@ impl LspState {
             if language_version == doc.language_version {
                 continue;
             }
-            let falcon_dart_parser::ParseResult { tree, errors } =
-                parse_for_package(doc.text(), Some(language_version));
+            let parsed = document_parse_result(
+                &doc.path,
+                try_parse_for_package(doc.text(), Some(language_version)),
+            );
+            let tree = parsed.tree;
             if let Some(parsed) = Arc::get_mut(&mut doc.parsed) {
                 parsed.tree = tree;
             } else {
@@ -504,8 +541,9 @@ impl LspState {
                     tree,
                 });
             }
-            doc.has_parse_errors = !errors.is_empty();
-            doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &errors);
+            doc.has_parse_errors = parsed.has_errors;
+            doc.source_rejected = parsed.worker_failed;
+            doc.syntax_diagnostics = parsed.diagnostics;
             doc.language_version = language_version;
             doc.parse_count += 1;
             changed = true;
@@ -562,13 +600,14 @@ impl LspState {
         }
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
-        let falcon_dart_parser::ParseResult {
-            tree,
-            errors: parse_errors,
-        } = parse_for_package(&text, package_version);
+        let result = try_parse_for_package(&text, package_version);
+        #[cfg(test)]
+        let result = self.inject_parser_failure(&path, result);
+        let parsed = document_parse_result(&path, result);
+        let tree = parsed.tree;
         let language_version = self.environment.language_version(&path, &text);
-        let mut syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
-        let source_rejected = source_error.is_some();
+        let mut syntax_diagnostics = parsed.diagnostics;
+        let source_rejected = source_error.is_some() || parsed.worker_failed;
         syntax_diagnostics.extend(source_error);
         self.documents.insert(
             uri.to_string(),
@@ -581,7 +620,7 @@ impl LspState {
                 }),
                 version,
                 language_version,
-                has_parse_errors: source_rejected || !parse_errors.is_empty(),
+                has_parse_errors: source_rejected || parsed.has_errors,
                 source_rejected,
                 syntax_diagnostics,
                 last_diagnostics: Vec::new(),
@@ -629,13 +668,14 @@ impl LspState {
         let source_error = reject_oversized_buffer(&path, &mut text);
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
+        let result = try_parse_for_package(&text, package_version);
+        #[cfg(test)]
+        let result = self.inject_parser_failure(&path, result);
+        let parsed = document_parse_result(&path, result);
         let doc = self.documents.get_mut(uri).expect("document checked above");
-        let falcon_dart_parser::ParseResult {
-            tree,
-            errors: parse_errors,
-        } = parse_for_package(&text, package_version);
-        doc.syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
-        doc.source_rejected = source_error.is_some();
+        let tree = parsed.tree;
+        doc.syntax_diagnostics = parsed.diagnostics;
+        doc.source_rejected = source_error.is_some() || parsed.worker_failed;
         doc.syntax_diagnostics.extend(source_error);
         doc.parsed = Arc::new(ParsedFile {
             source: text.into_boxed_str(),
@@ -643,7 +683,7 @@ impl LspState {
         });
         doc.version = version;
         doc.language_version = self.environment.language_version(&doc.path, doc.text());
-        doc.has_parse_errors = doc.source_rejected || !parse_errors.is_empty();
+        doc.has_parse_errors = doc.source_rejected || parsed.has_errors;
         doc.parse_count += 1;
         self.invalidate_semantic_snapshot();
         true
@@ -756,6 +796,9 @@ impl LspState {
                 .with_library(&library);
         }
         let mut diagnostics = self.rules.run_all(doc.parsed.program(), &ctx);
+        if let Some(error) = &self.semantic_snapshot_error {
+            diagnostics.push(falcon_analyze::rules_thread_diagnostic(&doc.path, error));
+        }
         diagnostics.extend(doc.syntax_diagnostics.iter().cloned());
         apply_severities(&mut diagnostics, &self.config);
         diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
@@ -894,8 +937,8 @@ impl LspState {
                 .documents
                 .get(&uri)
                 .is_some_and(|d| d.had_cross_file_diags);
-            // Nothing to add and nothing to clear: leave the last publish intact.
-            if !has_now && !had_before {
+            // Project worker failures belong to per-file publication, never both maps.
+            if !has_now && !had_before && self.semantic_snapshot_error.is_none() {
                 continue;
             }
             let mut merged = self.analyze(&uri);
@@ -921,6 +964,12 @@ impl LspState {
         if self.cross_file_rules.is_empty()
             || self.documents.values().any(|doc| doc.source_rejected)
         {
+            return HashMap::new();
+        }
+        if self.resolve_semantics && !self.documents.is_empty() {
+            self.ensure_semantic_snapshot();
+        }
+        if self.semantic_snapshot_error.is_some() {
             return HashMap::new();
         }
         let (files, complete) = self.collect_project_files(ProjectView::CrossFile);
@@ -967,7 +1016,7 @@ impl LspState {
             Ok(diags) => diags,
             Err(error) => {
                 // Editors only show open buffers, so every open document carries the failure.
-                warn!("could not start cross-file rules thread: {error}");
+                warn!("cross-file rules worker failed: {error}");
                 return self
                     .documents
                     .values()
@@ -1211,6 +1260,39 @@ impl LspState {
 
     fn invalidate_semantic_snapshot(&mut self) {
         self.semantic_snapshot = None;
+        self.semantic_snapshot_error = None;
+    }
+
+    fn record_semantic_worker_failure(&mut self, path: &Path, error: std::io::Error) {
+        self.semantic_snapshot = None;
+        self.semantic_snapshot_error = Some(error);
+        if !self
+            .watched_local_sources
+            .iter()
+            .any(|source| source == path)
+        {
+            self.watched_local_sources.push(path.to_path_buf());
+            self.watched_local_sources.sort_unstable();
+        }
+        let watched = watched_path(path);
+        if !self.watched_local_paths.contains(&watched) {
+            self.watched_local_paths.push(watched);
+            self.watched_local_paths.sort_unstable();
+            self.watched_dependency_generation += 1;
+        }
+    }
+
+    #[cfg(test)]
+    fn inject_parser_failure(
+        &self,
+        path: &Path,
+        result: std::io::Result<falcon_dart_parser::ParseResult>,
+    ) -> std::io::Result<falcon_dart_parser::ParseResult> {
+        if self.parser_failure_path.as_deref() == Some(path) {
+            falcon_dart_parser::with_stack(|| panic!("project parser regression"))
+        } else {
+            result
+        }
     }
 
     fn refresh_unresolved_paths(&mut self) {
@@ -1264,10 +1346,16 @@ impl LspState {
         self.refresh_unresolved_paths();
         self.refresh_environment(std::iter::empty());
         self.refresh_document_versions();
-        if self.semantic_snapshot.is_some() || !self.resolve_semantics {
+        if self.semantic_snapshot.is_some()
+            || self.semantic_snapshot_error.is_some()
+            || !self.resolve_semantics
+        {
             return;
         }
         let (mut files, _) = self.collect_project_files(ProjectView::Semantic);
+        if self.semantic_snapshot_error.is_some() {
+            return;
+        }
         {
             let project_paths: HashSet<&Path> = files
                 .iter()
@@ -1306,14 +1394,33 @@ impl LspState {
                 .filter(|doc| doc.source_rejected)
                 .map(|doc| doc.path.clone()),
         );
+        let mut companion_failure = None;
         for path in self.external_libraries.project_companions() {
             if !seen.insert(path.to_path_buf()) {
                 continue;
             }
             match falcon_analyze::source::read_source(path) {
                 Ok(source) => {
-                    let falcon_dart_parser::ParseResult { tree, errors } =
-                        parse_for_package(&source, self.environment.package_language_version(path));
+                    let result = try_parse_for_package(
+                        &source,
+                        self.environment.package_language_version(path),
+                    );
+                    #[cfg(test)]
+                    let result = self.inject_parser_failure(path, result);
+                    let parsed = match result {
+                        Ok(parsed) => parsed,
+                        Err(error) => {
+                            companion_failure = Some((
+                                path.to_path_buf(),
+                                std::io::Error::other(format!(
+                                    "parsing companion {}: {error}",
+                                    path.display()
+                                )),
+                            ));
+                            break;
+                        }
+                    };
+                    let falcon_dart_parser::ParseResult { tree, errors } = parsed;
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
                         parsed: Arc::new(ParsedFile {
@@ -1325,6 +1432,10 @@ impl LspState {
                 }
                 Err(error) => warn!("failed to read {}: {}", path.display(), error),
             }
+        }
+        if let Some((path, error)) = companion_failure {
+            self.record_semantic_worker_failure(&path, error);
+            return;
         }
         let external = ExternalSources {
             libraries: &self.external_libraries,
@@ -1478,6 +1589,7 @@ impl LspState {
         let capacity = paths.len() + self.documents.len();
         let mut files = Vec::with_capacity(capacity);
         let mut seen = HashSet::with_capacity(capacity);
+        let mut worker_failure = None;
         for (normalized, is_dart) in paths {
             let path = normalized.as_path();
             seen.insert(normalized.clone());
@@ -1496,7 +1608,23 @@ impl LspState {
                     Ok(source) => {
                         let (tree, has_parse_errors) = if is_dart {
                             let package_version = self.environment.package_language_version(path);
-                            let parsed = parse_for_package(&source, package_version);
+                            let result = try_parse_for_package(&source, package_version);
+                            #[cfg(test)]
+                            let result = self.inject_parser_failure(path, result);
+                            let parsed = match result {
+                                Ok(parsed) => parsed,
+                                Err(error) => {
+                                    worker_failure = Some((
+                                        normalized.clone(),
+                                        std::io::Error::other(format!(
+                                            "parsing {}: {error}",
+                                            path.display()
+                                        )),
+                                    ));
+                                    complete = false;
+                                    break;
+                                }
+                            };
                             (parsed.tree, !parsed.errors.is_empty())
                         } else {
                             (lex_tree(&source), false)
@@ -1530,6 +1658,9 @@ impl LspState {
                 }
             }
         }
+        if let Some((path, error)) = worker_failure {
+            self.record_semantic_worker_failure(&path, error);
+        }
         (files, complete)
     }
 }
@@ -1545,6 +1676,150 @@ fn reject_oversized_buffer(path: &Path, text: &mut String) -> Option<Diagnostic>
 #[cfg(test)]
 mod source_size_tests {
     use super::*;
+
+    #[test]
+    fn parser_worker_panics_publish_worker_diagnostics_not_syntax_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.dart");
+        let uri = format!("file://{}", path.display());
+        let config = directory.path().join("falcon.json");
+        std::fs::write(&config, "{}").unwrap();
+        std::fs::write(&path, "void main() {}").unwrap();
+        let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+        let failure_path = canonical_or_lexical(&path);
+        let assert_failure = |diagnostics: &[Diagnostic]| {
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(
+                diagnostics[0].rule,
+                falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            );
+            assert!(diagnostics[0].message.contains("project parser regression"));
+        };
+        state.parser_failure_path = Some(failure_path.clone());
+        assert_failure(&state.open(&uri, "void main() {}".into(), Some(1)));
+        assert!(state.document(&uri).unwrap().source_rejected);
+        state.parser_failure_path = None;
+        assert!(state.change(&uri, "void main() {}".into(), Some(2)));
+        assert!(!state.document(&uri).unwrap().source_rejected);
+        state.parser_failure_path = Some(failure_path);
+        assert!(state.change(&uri, "void main() {}".into(), Some(3)));
+        assert_failure(&state.analyze(&uri));
+        assert!(state.document(&uri).unwrap().source_rejected);
+        state.parser_failure_path = None;
+        assert!(state.change(&uri, "void main() {}".into(), Some(4)));
+        assert!(!state.document(&uri).unwrap().source_rejected);
+        assert!(
+            state.analyze(&uri).iter().all(|diagnostic| diagnostic.rule
+                != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID)
+        );
+    }
+
+    #[test]
+    fn project_parse_failures_publish_once_skip_cross_rules_and_recover_on_disk_events() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountCrossRuns(Arc<AtomicUsize>);
+        impl falcon_analyze::CrossFileRule for CountCrossRuns {
+            fn prepare_project(
+                &self,
+                _environment: &AnalysisEnvironment,
+                _files: &[ProjectFile],
+                _config: &FalconConfig,
+                _indexes: Option<&SemanticIndexes>,
+            ) -> Vec<Diagnostic> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Vec::new()
+            }
+        }
+
+        for companion in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let app = directory.path().join("app");
+            let dep = directory.path().join("dep/lib");
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(&dep).unwrap();
+            std::fs::write(
+                app.join(".dart_tool/package_config.json"),
+                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":""},{"name":"dep","rootUri":"../../dep","packageUri":"lib/"}]}"#,
+            )
+            .unwrap();
+            let config = app.join("falcon.json");
+            std::fs::write(&config, "{}").unwrap();
+            let mut state = LspState::new_from(Some(config), |_| None, app.clone());
+            state.resolve_semantics = true;
+            let failed = if companion {
+                let defining = dep.join("leaf.dart");
+                std::fs::write(
+                    &defining,
+                    "library leaf; part 'leaf_part.dart'; class Leaf {}",
+                )
+                .unwrap();
+                let part = dep.join("leaf_part.dart");
+                std::fs::write(&part, "part of leaf; class OnDisk {}").unwrap();
+                state.open(
+                    &format!("file://{}", part.display()),
+                    "part of leaf; class Buffered {}".into(),
+                    Some(1),
+                );
+                defining
+            } else {
+                let failed = app.join("failed.dart");
+                std::fs::write(&failed, "class DiskFile {}").unwrap();
+                state.open(
+                    &format!("file://{}", app.join("healthy.dart").display()),
+                    "void healthy() {}".into(),
+                    Some(1),
+                );
+                failed
+            };
+            state.open(
+                &format!("file://{}", app.join("main.dart").display()),
+                if companion {
+                    "import 'package:dep/leaf.dart';".into()
+                } else {
+                    "void main() {}".into()
+                },
+                Some(1),
+            );
+            let failed = canonical_or_lexical(&failed);
+            state.parser_failure_path = Some(failed.clone());
+            state.invalidate_semantic_snapshot();
+            let runs = Arc::new(AtomicUsize::new(0));
+            state.cross_file_rules.register(
+                "count-cross-runs",
+                Box::new(CountCrossRuns(Arc::clone(&runs))),
+            );
+            let published = state.cross_file_pass();
+            assert_eq!(published.len(), 2);
+            for (_, diagnostics) in published {
+                let failures: Vec<_> = diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+                    })
+                    .collect();
+                assert_eq!(failures.len(), 1, "{diagnostics:?}");
+                assert!(failures[0].message.contains("project parser regression"));
+            }
+            assert_eq!(runs.load(Ordering::SeqCst), 0);
+            assert!(state.semantic_snapshot.is_none());
+            assert!(state.semantic_snapshot_error.is_some());
+            assert!(state.watched_local_sources.contains(&failed));
+            assert!(state.watched_local_paths.contains(&watched_path(&failed)));
+            state.parser_failure_path = None;
+            let recovered = state.watched_files_changed(&[failed]);
+            assert_eq!(recovered.len(), 2);
+            assert!(
+                recovered
+                    .iter()
+                    .all(|(_, diagnostics)| diagnostics.iter().all(|diagnostic| {
+                        diagnostic.rule != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+                    }))
+            );
+            assert!(state.semantic_snapshot_error.is_none());
+            assert!(state.semantic_snapshot.is_some());
+        }
+    }
 
     #[test]
     fn ordinary_disk_read_errors_keep_project_collection_complete() {
@@ -1582,6 +1857,7 @@ mod source_size_tests {
         let uri = format!("file://{}", directory.path().join("main.dart").display());
         let mut state = LspState::new(None);
         state.workspace_root = directory.path().to_path_buf();
+        state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         state.open(&uri, String::new(), Some(1));
         let doc = state.documents.get_mut(&uri).unwrap();
         doc.source_rejected = true;
@@ -1612,6 +1888,16 @@ mod source_size_tests {
                 .is_empty()
         );
         assert!(state.cross_file_diagnostics().is_empty());
+
+        let healthy = canonical_or_lexical(&directory.path().join("healthy.dart"));
+        let healthy_uri = format!("file://{}", healthy.display());
+        state.resolve_semantics = true;
+        state.open(&healthy_uri, "void healthy() {}".into(), Some(1));
+        state.ensure_semantic_snapshot();
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0].path, healthy);
+        assert!(state.semantic_snapshot_error.is_none());
 
         assert!(state.change(&uri, "void main() {}".into(), Some(2)));
         assert!(!state.document(&uri).unwrap().source_rejected);
@@ -1672,6 +1958,18 @@ mod source_size_tests {
                     .iter()
                     .all(|diagnostic| diagnostic.rule != "unused-files")
             );
+            state.resolve_semantics = true;
+            state.invalidate_semantic_snapshot();
+            state.ensure_semantic_snapshot();
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            assert!(
+                snapshot
+                    .files
+                    .iter()
+                    .any(|file| file.path == canonical_or_lexical(&orphan))
+            );
+            assert!(snapshot.files.iter().all(|file| file.path != rejected));
+            assert!(state.semantic_snapshot_error.is_none());
 
             std::fs::remove_file(rejected).unwrap();
             assert!(state.cross_file_diagnostics().values().any(|diagnostics| {

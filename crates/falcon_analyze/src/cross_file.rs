@@ -155,8 +155,8 @@ impl CrossFileRuleRegistry {
     ///
     /// # Errors
     ///
-    /// Returns the spawn error when the rules thread cannot start; callers
-    /// choose which files report it with [`crate::rules_thread_diagnostic`].
+    /// Returns an error if the shared worker pool cannot start or a rule panics;
+    /// callers choose which files report it with [`crate::rules_thread_diagnostic`].
     pub fn run_all(
         &self,
         environment: &crate::AnalysisEnvironment,
@@ -198,5 +198,34 @@ mod tests {
         };
         assert_eq!(retained.expr().syntax().text(), "42");
         assert!(std::ptr::eq(retained.view().tree(), &retained.file.tree));
+    }
+
+    #[test]
+    fn panicking_cross_file_rules_return_worker_errors() {
+        struct PanickingRule;
+        impl CrossFileRule for PanickingRule {
+            fn prepare_project(
+                &self,
+                _environment: &crate::AnalysisEnvironment,
+                _files: &[ProjectFile],
+                _config: &FalconConfig,
+                _indexes: Option<&SemanticIndexes>,
+            ) -> Vec<Diagnostic> {
+                panic!("deliberate cross-file panic");
+            }
+        }
+
+        let mut registry = CrossFileRuleRegistry::new();
+        registry.register("panicking-rule", Box::new(PanickingRule));
+        let environment = crate::AnalysisEnvironment::with_sdk_locator(|_| None);
+        let error = registry
+            .run_all(&environment, &[], &FalconConfig::default(), None)
+            .unwrap_err();
+        assert!(error.to_string().contains("deliberate cross-file panic"));
+        let diagnostic = crate::rules_thread_diagnostic(std::path::Path::new("main.dart"), &error);
+        assert_eq!(
+            diagnostic.rule,
+            falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+        );
     }
 }
