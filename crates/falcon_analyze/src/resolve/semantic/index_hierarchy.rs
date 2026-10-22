@@ -1,4 +1,6 @@
+use super::super::{hierarchy, sdk_hierarchy::SDK_HIERARCHY};
 use super::*;
+use std::ops::ControlFlow;
 
 impl SignatureIndex {
     pub fn unrelated(
@@ -138,16 +140,11 @@ impl SignatureIndex {
         edges: impl Fn(&DeclarationIdentity) -> Option<&'s [ResolvedType]>,
         matches: &impl Fn(&DeclarationIdentity) -> bool,
     ) -> Truth {
-        let mut visited = HashSet::new();
-        let mut stack = vec![identity];
-        let mut complete = true;
-        while let Some(identity) = stack.pop() {
-            if !visited.insert(identity) {
-                continue;
-            }
+        match hierarchy::walk(identity, |identity, stack| {
             if matches(identity) {
-                return Truth::Yes;
+                return ControlFlow::Break(());
             }
+            let mut complete = true;
             match edges(identity) {
                 Some(supertypes) => {
                     complete &= !matches!(identity, DeclarationIdentity::Package { .. });
@@ -158,10 +155,14 @@ impl SignatureIndex {
                         }
                     }
                 }
-                None => complete &= *identity == DeclarationIdentity::OBJECT,
+                None => complete = *identity == DeclarationIdentity::OBJECT,
             }
+            ControlFlow::Continue(complete)
+        }) {
+            ControlFlow::Break(()) => Truth::Yes,
+            ControlFlow::Continue(true) => Truth::No,
+            ControlFlow::Continue(false) => Truth::Unknown,
         }
-        if complete { Truth::No } else { Truth::Unknown }
     }
 
     /// A raw use of a generic interface (no type arguments) denotes its
@@ -551,11 +552,9 @@ impl SignatureIndex {
             | ResolvedType::NonNullTypeParameter { bound, .. } => {
                 self.implements_sdk(bound, library, name)
             }
-            ResolvedType::Interface { identity, .. } => self.identity_implements(
-                identity,
-                &|identity| identity.is_sdk(library, name),
-                &mut HashSet::new(),
-            ),
+            ResolvedType::Interface { identity, .. } => {
+                self.identity_implements(identity, &|identity| identity.is_sdk(library, name))
+            }
             _ => Truth::Unknown,
         }
     }
@@ -598,53 +597,40 @@ impl SignatureIndex {
         &self,
         identity: &DeclarationIdentity,
         is_target: &impl Fn(&DeclarationIdentity) -> bool,
-        visited: &mut HashSet<DeclarationIdentity>,
     ) -> Truth {
-        if is_target(identity) {
-            return Truth::Yes;
-        }
-        if *identity == DeclarationIdentity::OBJECT || !visited.insert(identity.clone()) {
-            return Truth::No;
-        }
-        let Some((_, supertypes)) = self
-            .type_facts
-            .get(identity)
-            .and_then(|facts| facts.supertypes.as_ref())
-        else {
-            return SDK_HIERARCHY
-                .iter()
-                .find(|(library, name, _, _)| identity.is_sdk(library, name))
-                .map_or(Truth::Unknown, |(_, _, _, supertypes)| {
-                    let mut result = Truth::No;
-                    for (library, name) in *supertypes {
-                        match self.identity_implements(
-                            &DeclarationIdentity::sdk(library, name),
-                            is_target,
-                            visited,
-                        ) {
-                            Truth::Yes => return Truth::Yes,
-                            Truth::Unknown => result = Truth::Unknown,
-                            Truth::No => {}
-                        }
-                    }
-                    result
-                });
-        };
-        let mut result = Truth::No;
-        for supertype in supertypes {
-            let found = match supertype {
-                ResolvedType::Interface { identity, .. } => {
-                    self.identity_implements(identity, is_target, visited)
-                }
-                _ => Truth::Unknown,
-            };
-            match found {
-                Truth::Yes => return Truth::Yes,
-                Truth::Unknown => result = Truth::Unknown,
-                Truth::No => {}
+        match hierarchy::walk(identity, |identity, stack| {
+            if is_target(identity) {
+                return ControlFlow::Break(());
             }
+            if *identity == DeclarationIdentity::OBJECT {
+                return ControlFlow::Continue(true);
+            }
+            let mut complete = true;
+            if let Some((_, supertypes)) = self
+                .type_facts
+                .get(identity)
+                .and_then(|facts| facts.supertypes.as_ref())
+            {
+                for supertype in supertypes.iter().rev() {
+                    match supertype {
+                        ResolvedType::Interface { identity, .. } => stack.push(identity),
+                        _ => complete = false,
+                    }
+                }
+            } else if let Some(entry) = SDK_HIERARCHY
+                .iter()
+                .find(|entry| entry.semantic && identity.is_sdk(entry.library, entry.name))
+            {
+                stack.extend(entry.supertypes.iter().rev());
+            } else {
+                complete = false;
+            }
+            ControlFlow::Continue(complete)
+        }) {
+            ControlFlow::Break(()) => Truth::Yes,
+            ControlFlow::Continue(true) => Truth::No,
+            ControlFlow::Continue(false) => Truth::Unknown,
         }
-        result
     }
 }
 

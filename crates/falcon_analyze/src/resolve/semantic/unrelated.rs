@@ -13,7 +13,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::{DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex, Truth};
 use crate::resolve::{MemberKind, TypeKind};
@@ -500,11 +500,9 @@ impl SignatureIndex {
                             self.subtype_memoized(sub, sup, model, prove_unknown_top, memo)
                         }))
                 }
-                None => match self.identity_implements(
-                    sub_identity,
-                    &|identity| identity == sup_identity,
-                    &mut HashSet::new(),
-                ) {
+                None => match self
+                    .identity_implements(sub_identity, &|identity| identity == sup_identity)
+                {
                     Truth::No => Truth::No,
                     _ => Truth::Unknown,
                 },

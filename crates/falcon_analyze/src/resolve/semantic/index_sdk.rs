@@ -1,3 +1,4 @@
+use super::super::sdk_hierarchy::SDK_HIERARCHY;
 use super::*;
 
 impl SignatureIndex {
@@ -265,11 +266,11 @@ impl SignatureIndex {
     /// resource-tracking rules need to type (`Stream.listen`,
     /// `StreamController.stream`, `File.openWrite`).
     fn add_sdk_hierarchy(&mut self) {
-        let arity = |library: &str, name: &str| {
+        let arity = |identity: &DeclarationIdentity| {
             SDK_HIERARCHY
                 .iter()
-                .find(|entry| entry.0 == library && entry.1 == name)
-                .map_or(0, |entry| entry.2)
+                .find(|entry| entry.semantic && identity.is_sdk(entry.library, entry.name))
+                .map_or(0, |entry| entry.arity)
         };
         let sdk = |library: &'static str, name: &'static str, arguments: Vec<ResolvedType>| {
             ResolvedType::Interface {
@@ -280,39 +281,46 @@ impl SignatureIndex {
                 extension_type: false,
             }
         };
-        for &(library, name, own_arity, supertypes) in SDK_HIERARCHY {
-            let parameters: Vec<_> = (0..own_arity)
-                .map(|ordinal| sdk_parameter(name, ordinal))
+        for entry in SDK_HIERARCHY.iter().filter(|entry| entry.semantic) {
+            let parameters: Vec<_> = (0..entry.arity)
+                .map(|ordinal| sdk_parameter(entry.name, ordinal))
                 .collect();
-            let resolved = supertypes
+            let resolved = entry
+                .supertypes
                 .iter()
-                .map(|&(super_library, super_name)| {
-                    let arguments =
-                        if own_arity > 0 && arity(super_library, super_name) == own_arity {
-                            parameters
-                                .iter()
-                                .map(|id| ResolvedType::TypeParameter {
-                                    id: id.clone(),
-                                    bound: Arc::new(ResolvedType::Dynamic),
-                                    nullable: false,
-                                })
-                                .collect()
-                        } else if (super_library, super_name) == ("dart:core", "Comparable") {
-                            // Every listed implementer is `Comparable<Self>`.
-                            vec![sdk(library, name, Vec::new())]
-                        } else {
-                            Vec::new()
-                        };
-                    sdk(super_library, super_name, arguments)
+                .map(|identity| {
+                    let arguments = if entry.arity > 0 && arity(identity) == entry.arity {
+                        parameters
+                            .iter()
+                            .map(|id| ResolvedType::TypeParameter {
+                                id: id.clone(),
+                                bound: Arc::new(ResolvedType::Dynamic),
+                                nullable: false,
+                            })
+                            .collect()
+                    } else if identity.is_sdk("dart:core", "Comparable") {
+                        // Every listed implementer is `Comparable<Self>`.
+                        vec![sdk(entry.library, entry.name, Vec::new())]
+                    } else {
+                        Vec::new()
+                    };
+                    ResolvedType::Interface {
+                        occurrence: Default::default(),
+                        identity: identity.clone(),
+                        arguments: arguments.into(),
+                        nullable: false,
+                        extension_type: false,
+                    }
                 })
                 .chain(
-                    supertypes
+                    entry
+                        .supertypes
                         .is_empty()
                         .then(|| sdk("dart:core", "Object", Vec::new())),
                 )
                 .collect();
             self.type_facts
-                .entry(DeclarationIdentity::sdk(library, name))
+                .entry(DeclarationIdentity::sdk(entry.library, entry.name))
                 .or_default()
                 .supertypes
                 .get_or_insert((parameters, resolved));
@@ -392,190 +400,151 @@ pub(super) const SDK_INTERFACE_MEMBERS: &[SdkInterfaceMembersEntry] = &[(
     ],
 )];
 
-/// `(library, name, arity, supertypes)`; each supertype is `(library, name)`.
-type SdkHierarchyEntry = (
-    &'static str,
-    &'static str,
-    usize,
-    &'static [(&'static str, &'static str)],
-);
-
-/// Curated SDK supertype graph: `(library, name, arity, supertypes)`.
-///
-/// Each entry lists every public supertype of its declaration other than
-/// `Object`; `add_sdk_hierarchy` supplies that implicit root for leaf entries.
-/// Generic supertypes with the same arity receive the declaration's own
-/// type parameters; others are recorded raw.
-pub(super) const SDK_HIERARCHY: &[SdkHierarchyEntry] = &[
-    ("dart:core", "Function", 0, &[]),
-    ("dart:core", "Record", 0, &[]),
-    ("dart:core", "Type", 0, &[]),
-    ("dart:core", "Symbol", 0, &[]),
-    ("dart:core", "bool", 0, &[]),
-    ("dart:core", "Comparable", 1, &[]),
-    ("dart:core", "Pattern", 0, &[]),
-    ("dart:core", "num", 0, &[("dart:core", "Comparable")]),
-    ("dart:core", "int", 0, &[("dart:core", "num")]),
-    ("dart:core", "double", 0, &[("dart:core", "num")]),
-    (
-        "dart:core",
-        "String",
-        0,
-        &[("dart:core", "Comparable"), ("dart:core", "Pattern")],
-    ),
-    ("dart:core", "RegExp", 0, &[("dart:core", "Pattern")]),
-    ("dart:core", "BigInt", 0, &[("dart:core", "Comparable")]),
-    ("dart:core", "Duration", 0, &[("dart:core", "Comparable")]),
-    ("dart:core", "DateTime", 0, &[("dart:core", "Comparable")]),
-    ("dart:core", "Uri", 0, &[]),
-    ("dart:core", "StackTrace", 0, &[]),
-    ("dart:core", "Enum", 0, &[]),
-    ("dart:core", "Iterable", 1, &[]),
-    ("dart:core", "Iterator", 1, &[]),
-    ("dart:core", "Map", 2, &[]),
-    ("dart:core", "MapEntry", 2, &[]),
-    ("dart:core", "Exception", 0, &[]),
-    (
-        "dart:core",
-        "FormatException",
-        0,
-        &[("dart:core", "Exception")],
-    ),
-    (
-        "dart:core",
-        "IntegerDivisionByZeroException",
-        0,
-        &[
-            ("dart:core", "Exception"),
-            ("dart:core", "UnsupportedError"),
-        ],
-    ),
-    ("dart:core", "Error", 0, &[]),
-    ("dart:core", "AssertionError", 0, &[("dart:core", "Error")]),
-    ("dart:core", "TypeError", 0, &[("dart:core", "Error")]),
-    ("dart:core", "ArgumentError", 0, &[("dart:core", "Error")]),
-    (
-        "dart:core",
-        "RangeError",
-        0,
-        &[("dart:core", "ArgumentError")],
-    ),
-    (
-        "dart:core",
-        "IndexError",
-        0,
-        &[("dart:core", "ArgumentError"), ("dart:core", "RangeError")],
-    ),
-    ("dart:core", "StateError", 0, &[("dart:core", "Error")]),
-    (
-        "dart:core",
-        "UnsupportedError",
-        0,
-        &[("dart:core", "Error")],
-    ),
-    (
-        "dart:core",
-        "UnimplementedError",
-        0,
-        &[("dart:core", "UnsupportedError")],
-    ),
-    (
-        "dart:core",
-        "ConcurrentModificationError",
-        0,
-        &[("dart:core", "Error")],
-    ),
-    (
-        "dart:core",
-        "OutOfMemoryError",
-        0,
-        &[("dart:core", "Error")],
-    ),
-    (
-        "dart:core",
-        "StackOverflowError",
-        0,
-        &[("dart:core", "Error")],
-    ),
-    (
-        "dart:core",
-        "NoSuchMethodError",
-        0,
-        &[("dart:core", "Error")],
-    ),
-    ("dart:core", "Sink", 1, &[]),
-    ("dart:core", "StringSink", 0, &[]),
-    ("dart:async", "Future", 1, &[]),
-    ("dart:async", "Completer", 1, &[]),
-    ("dart:async", "Timer", 0, &[]),
-    ("dart:async", "Stream", 1, &[]),
-    ("dart:async", "StreamSubscription", 1, &[]),
-    ("dart:async", "EventSink", 1, &[("dart:core", "Sink")]),
-    ("dart:async", "StreamConsumer", 1, &[]),
-    (
-        "dart:async",
-        "StreamSink",
-        1,
-        &[
-            ("dart:async", "EventSink"),
-            ("dart:async", "StreamConsumer"),
-        ],
-    ),
-    (
-        "dart:async",
-        "StreamController",
-        1,
-        &[("dart:async", "StreamSink")],
-    ),
-    (
-        "dart:async",
-        "TimeoutException",
-        0,
-        &[("dart:core", "Exception")],
-    ),
-    ("dart:async", "AsyncError", 0, &[("dart:core", "Error")]),
-    ("dart:io", "FileSystemEntity", 0, &[]),
-    ("dart:io", "File", 0, &[("dart:io", "FileSystemEntity")]),
-    (
-        "dart:io",
-        "Directory",
-        0,
-        &[("dart:io", "FileSystemEntity")],
-    ),
-    ("dart:io", "Link", 0, &[("dart:io", "FileSystemEntity")]),
-    (
-        "dart:io",
-        "IOSink",
-        0,
-        &[("dart:async", "StreamSink"), ("dart:core", "StringSink")],
-    ),
-    (
-        "dart:io",
-        "Socket",
-        0,
-        &[("dart:async", "Stream"), ("dart:io", "IOSink")],
-    ),
-    ("dart:io", "IOException", 0, &[("dart:core", "Exception")]),
-    ("dart:io", "OSError", 0, &[("dart:core", "Exception")]),
-    (
-        "dart:io",
-        "FileSystemException",
-        0,
-        &[("dart:io", "IOException")],
-    ),
-    ("dart:io", "HttpException", 0, &[("dart:io", "IOException")]),
-    (
-        "dart:io",
-        "SocketException",
-        0,
-        &[("dart:io", "IOException")],
-    ),
-];
-
 pub(super) fn sdk_parameter(owner: &'static str, ordinal: usize) -> TypeParameterId {
     TypeParameterId {
         owner: ParameterOwner::Sdk(owner),
         ordinal,
         name: format!("{owner}#{ordinal}").into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semantic_hierarchy_projects_only_its_original_sdk_rows() {
+        let mut signatures = SignatureIndex::default();
+        signatures.add_sdk_hierarchy();
+        assert_eq!(
+            SDK_HIERARCHY.iter().filter(|entry| entry.semantic).count(),
+            62
+        );
+        for entry in SDK_HIERARCHY {
+            assert!(!entry.supertypes.contains(&DeclarationIdentity::OBJECT));
+            let identity = DeclarationIdentity::sdk(entry.library, entry.name);
+            let facts = signatures.type_facts.get(&identity);
+            if !entry.semantic {
+                assert!(
+                    facts.is_none(),
+                    "unexpected semantic graph for {identity:?}"
+                );
+                continue;
+            }
+            let (parameters, supertypes) = facts.unwrap().supertypes.as_ref().unwrap();
+            assert_eq!(parameters.len(), entry.arity);
+            let mut expected = entry.supertypes.to_vec();
+            if expected.is_empty() {
+                expected.push(DeclarationIdentity::OBJECT);
+            }
+            let actual: Vec<_> = supertypes
+                .iter()
+                .map(|ty| match ty {
+                    ResolvedType::Interface { identity, .. } => identity.clone(),
+                    _ => panic!("SDK supertype must be an interface"),
+                })
+                .collect();
+            assert_eq!(actual, expected, "{identity:?}");
+        }
+        for (name, expected) in [
+            ("String", &["Comparable", "Pattern"][..]),
+            ("num", &["Comparable"][..]),
+        ] {
+            let identity = DeclarationIdentity::sdk("dart:core", name);
+            let (_, supertypes) = signatures.type_facts[&identity]
+                .supertypes
+                .as_ref()
+                .unwrap();
+            assert_eq!(supertypes.len(), expected.len());
+            for (ty, target) in supertypes.iter().zip(expected) {
+                assert!(matches!(
+                    ty,
+                    ResolvedType::Interface { identity, .. }
+                        if identity.is_sdk("dart:core", target)
+                ));
+            }
+            assert!(matches!(
+                &supertypes[0],
+                ResolvedType::Interface { arguments, .. }
+                    if matches!(arguments.as_ref(), [
+                        ResolvedType::Interface { identity: argument, arguments, .. }
+                    ] if argument == &identity && arguments.is_empty())
+            ));
+        }
+    }
+
+    #[test]
+    fn semantic_sdk_edges_forward_generic_parameters() {
+        let mut signatures = SignatureIndex::default();
+        signatures.add_sdk_hierarchy();
+        for (name, expected) in [
+            ("EventSink", &[("dart:core", "Sink")][..]),
+            (
+                "StreamSink",
+                &[
+                    ("dart:async", "EventSink"),
+                    ("dart:async", "StreamConsumer"),
+                ][..],
+            ),
+        ] {
+            let identity = DeclarationIdentity::sdk("dart:async", name);
+            let (parameters, supertypes) = signatures.type_facts[&identity]
+                .supertypes
+                .as_ref()
+                .unwrap();
+            assert_eq!(parameters, &[sdk_parameter(name, 0)]);
+            assert_eq!(supertypes.len(), expected.len());
+            for (ty, (library, target)) in supertypes.iter().zip(expected) {
+                assert!(matches!(
+                    ty,
+                    ResolvedType::Interface { identity, arguments, .. }
+                        if identity.is_sdk(library, target)
+                            && matches!(arguments.as_ref(), [
+                                ResolvedType::TypeParameter { id, bound, nullable: false }
+                            ] if id == &parameters[0]
+                                && matches!(bound.as_ref(), ResolvedType::Dynamic))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn shared_sdk_edges_do_not_override_source_or_duplicate_manual_collections() {
+        let mut signatures = SignatureIndex::default();
+        let string = DeclarationIdentity::sdk("dart:core", "String");
+        signatures
+            .type_facts
+            .entry(string.clone())
+            .or_default()
+            .supertypes = Some((Vec::new(), Vec::new()));
+        signatures.add_sdk_signatures();
+        assert!(
+            signatures
+                .type_facts
+                .get(&string)
+                .unwrap()
+                .supertypes
+                .as_ref()
+                .unwrap()
+                .1
+                .is_empty()
+        );
+        for name in ["List", "Set"] {
+            let identity = DeclarationIdentity::sdk("dart:core", name);
+            let (parameters, supertypes) = signatures
+                .type_facts
+                .get(&identity)
+                .unwrap()
+                .supertypes
+                .as_ref()
+                .unwrap();
+            assert_eq!(parameters.len(), 1);
+            assert_eq!(supertypes.len(), 1);
+            assert!(matches!(
+                &supertypes[0],
+                ResolvedType::Interface { identity, arguments, .. }
+                    if identity.is_sdk("dart:core", "Iterable") && arguments.len() == 1
+            ));
+        }
     }
 }

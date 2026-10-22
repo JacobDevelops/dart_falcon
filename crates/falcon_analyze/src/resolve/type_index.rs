@@ -432,13 +432,7 @@ impl TypeIndex {
         ) -> Option<T>,
     ) -> ControlFlow<T, bool> {
         let object = DeclarationIdentity::OBJECT;
-        let mut visited = HashSet::new();
-        let mut stack = vec![root];
-        let mut complete = true;
-        while let Some(identity) = stack.pop() {
-            if !visited.insert(identity) {
-                continue;
-            }
+        super::hierarchy::walk(root, |identity, stack| {
             let entry = self.declaration(identity);
             let core = entry
                 .is_none()
@@ -447,8 +441,9 @@ impl TypeIndex {
             if let Some(value) = find(identity, entry, core) {
                 return ControlFlow::Break(value);
             }
+            let mut complete = true;
             if let Some(entry) = entry {
-                complete &= !entry.has_unresolved_parts;
+                complete = !entry.has_unresolved_parts;
                 for ancestor in &entry.ancestors {
                     match ancestor {
                         Some(identity) => stack.push(identity),
@@ -456,18 +451,17 @@ impl TypeIndex {
                     }
                 }
             } else if let Some(core) = core {
-                stack.extend(&core.ancestor_identities);
+                stack.extend(core.supertypes);
             } else {
                 // No resolved shape: not even known to be a class type, so
                 // nothing (including `Object`) may be proven through it.
-                complete = false;
-                continue;
+                return ControlFlow::Continue(false);
             }
             if identity != &DeclarationIdentity::OBJECT {
                 stack.push(&object);
             }
-        }
-        ControlFlow::Continue(complete)
+            ControlFlow::Continue(complete)
+        })
     }
 
     pub fn superclass_chain_is_immutable_identity(&self, identity: &DeclarationIdentity) -> Truth {
@@ -600,33 +594,28 @@ impl TypeIndex {
         root: &'a str,
         mut find: impl FnMut(&str, Option<Resolved<'a>>) -> Option<T>,
     ) -> ControlFlow<T, bool> {
-        let mut visited = HashSet::new();
-        let mut stack = vec![root];
-        let mut complete = true;
-        while let Some(name) = stack.pop() {
-            if !visited.insert(name) {
-                continue;
-            }
+        super::hierarchy::walk(root, |name, stack| {
             let resolved = self.resolve(name);
             if let Some(found) = find(name, resolved) {
                 return ControlFlow::Break(found);
             }
-            match resolved {
-                None | Some(Resolved::Ambiguous) => complete = false,
+            let complete = match resolved {
+                None | Some(Resolved::Ambiguous) => false,
                 Some(Resolved::User(entry)) => {
-                    complete &= !entry.has_unresolved_parts;
-                    push_ancestors(
-                        name,
-                        entry.supertypes.iter().map(String::as_str),
-                        &mut stack,
-                    );
+                    push_ancestors(name, entry.supertypes.iter().map(String::as_str), stack);
+                    !entry.has_unresolved_parts
                 }
                 Some(Resolved::Core(core)) => {
-                    push_ancestors(name, core.supertypes.iter().copied(), &mut stack);
+                    push_ancestors(
+                        name,
+                        core.supertypes.iter().map(DeclarationIdentity::name),
+                        stack,
+                    );
+                    true
                 }
-            }
-        }
-        ControlFlow::Continue(complete)
+            };
+            ControlFlow::Continue(complete)
+        })
     }
 
     /// Whether a named constructor is declared or implicitly available as const.
@@ -951,8 +940,7 @@ fn collect_members(members: EffectiveMembers<'_>) -> HashMap<String, MemberKind>
 
 /// A curated core-library type: its subtype edges and its common members.
 struct CoreType {
-    supertypes: Vec<&'static str>,
-    ancestor_identities: Vec<DeclarationIdentity>,
+    supertypes: &'static [DeclarationIdentity],
     members: Vec<(&'static str, MemberKind)>,
 }
 
@@ -973,17 +961,17 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     use MemberKind::{Getter, Method, Operator};
     let mut t: HashMap<&'static str, CoreType> = HashMap::new();
 
-    let ty = |supertypes: &[&'static str], members: Vec<(&'static str, MemberKind)>| CoreType {
-        supertypes: supertypes.to_vec(),
-        ancestor_identities: supertypes
+    let ty = |name: &str, members: Vec<(&'static str, MemberKind)>| CoreType {
+        supertypes: super::sdk_hierarchy::SDK_HIERARCHY
             .iter()
-            .map(|name| DeclarationIdentity::sdk("dart:core", name))
-            .collect(),
+            .find(|entry| entry.name == name)
+            .expect("every curated core type has shared SDK edges")
+            .supertypes,
         members,
     };
 
     let object = ty(
-        &[],
+        "Object",
         vec![
             ("==", Operator),
             ("toString", Method),
@@ -997,7 +985,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "Iterable",
         ty(
-            &["Object"],
+            "Iterable",
             vec![
                 ("length", Getter),
                 ("isEmpty", Getter),
@@ -1036,7 +1024,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "List",
         ty(
-            &["Iterable"],
+            "List",
             vec![
                 ("[]", Operator),
                 ("[]=", Operator),
@@ -1071,7 +1059,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "Set",
         ty(
-            &["Iterable"],
+            "Set",
             vec![
                 ("add", Method),
                 ("addAll", Method),
@@ -1094,7 +1082,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "Map",
         ty(
-            &["Object"],
+            "Map",
             vec![
                 ("[]", Operator),
                 ("[]=", Operator),
@@ -1124,7 +1112,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "String",
         ty(
-            &["Object", "Comparable", "Pattern"],
+            "String",
             vec![
                 ("[]", Operator),
                 ("length", Getter),
@@ -1161,7 +1149,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "num",
         ty(
-            &["Object", "Comparable"],
+            "num",
             vec![
                 ("isNaN", Getter),
                 ("isFinite", Getter),
@@ -1188,7 +1176,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "int",
         ty(
-            &["num"],
+            "int",
             vec![
                 ("isEven", Getter),
                 ("isOdd", Getter),
@@ -1206,7 +1194,7 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert(
         "double",
         ty(
-            &["num"],
+            "double",
             vec![
                 ("roundToDouble", Method),
                 ("floorToDouble", Method),
@@ -1216,20 +1204,20 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
         ),
     );
 
-    t.insert("bool", ty(&["Object"], vec![]));
+    t.insert("bool", ty("bool", vec![]));
 
     t.insert(
         "Enum",
-        ty(&["Object"], vec![("index", Getter), ("name", Getter)]),
+        ty("Enum", vec![("index", Getter), ("name", Getter)]),
     );
 
-    t.insert("Comparable", ty(&["Object"], vec![("compareTo", Method)]));
-    t.insert("Pattern", ty(&["Object"], vec![("allMatches", Method)]));
+    t.insert("Comparable", ty("Comparable", vec![("compareTo", Method)]));
+    t.insert("Pattern", ty("Pattern", vec![("allMatches", Method)]));
 
     t.insert(
         "Queue",
         ty(
-            &["Iterable"],
+            "Queue",
             vec![
                 ("add", Method),
                 ("addFirst", Method),
@@ -1243,12 +1231,12 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
         ),
     );
 
-    t.insert("LinkedHashMap", ty(&["Map"], vec![]));
-    t.insert("HashMap", ty(&["Map"], vec![]));
-    t.insert("SplayTreeMap", ty(&["Map"], vec![]));
-    t.insert("LinkedHashSet", ty(&["Set"], vec![]));
-    t.insert("HashSet", ty(&["Set"], vec![]));
-    t.insert("SplayTreeSet", ty(&["Set"], vec![]));
+    t.insert("LinkedHashMap", ty("LinkedHashMap", vec![]));
+    t.insert("HashMap", ty("HashMap", vec![]));
+    t.insert("SplayTreeMap", ty("SplayTreeMap", vec![]));
+    t.insert("LinkedHashSet", ty("LinkedHashSet", vec![]));
+    t.insert("HashSet", ty("HashSet", vec![]));
+    t.insert("SplayTreeSet", ty("SplayTreeSet", vec![]));
 
     t
 }
@@ -1259,6 +1247,64 @@ mod tests {
     use crate::ParsedFile;
     use falcon_dart_parser::parse;
     use std::sync::Arc;
+
+    #[test]
+    fn core_table_borrows_shared_edges_without_expanding_name_coverage() {
+        let expected = [
+            "Object",
+            "Iterable",
+            "List",
+            "Set",
+            "Map",
+            "String",
+            "num",
+            "int",
+            "double",
+            "bool",
+            "Enum",
+            "Comparable",
+            "Pattern",
+            "Queue",
+            "LinkedHashMap",
+            "HashMap",
+            "SplayTreeMap",
+            "LinkedHashSet",
+            "HashSet",
+            "SplayTreeSet",
+        ];
+        let table = core_table();
+        assert_eq!(table.len(), expected.len());
+        let index = TypeIndex::default();
+        for name in expected {
+            let core = table.get(name).unwrap();
+            let shared = super::super::sdk_hierarchy::SDK_HIERARCHY
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap();
+            assert_eq!(core.supertypes, shared.supertypes, "{name}");
+            assert_eq!(index.is_subtype(name, "Object"), Truth::Yes, "{name}");
+            assert_eq!(
+                index.is_subtype_identity(
+                    &DeclarationIdentity::sdk(shared.library, name),
+                    &DeclarationIdentity::OBJECT,
+                ),
+                Truth::Yes,
+                "{name}",
+            );
+        }
+        assert_eq!(
+            table["String"].supertypes,
+            &[
+                DeclarationIdentity::sdk("dart:core", "Comparable"),
+                DeclarationIdentity::sdk("dart:core", "Pattern"),
+            ],
+        );
+        assert_eq!(
+            table["num"].supertypes,
+            &[DeclarationIdentity::sdk("dart:core", "Comparable")],
+        );
+        assert!(table["Object"].supertypes.is_empty());
+    }
 
     fn program(src: &str) -> Arc<ParsedFile> {
         let falcon_dart_parser::ParseResult { tree, errors } = parse(src);

@@ -2,10 +2,12 @@
 
 pub mod flow;
 pub mod flow_writes;
+mod hierarchy;
 mod identity;
 pub(crate) mod lexical_scope;
 pub mod lexical_usage;
 mod library;
+mod sdk_hierarchy;
 mod semantic;
 mod type_index;
 
