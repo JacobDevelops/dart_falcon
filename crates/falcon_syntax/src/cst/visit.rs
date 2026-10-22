@@ -994,6 +994,7 @@ pub fn walk_stmt<'a, V: Visitor<'a>>(v: &mut V, node: Stmt<'a>) {
 #[derive(Clone, Copy)]
 enum Work<'a> {
     Expr(Expr<'a>),
+    ExitExpr(Expr<'a>),
     Pattern(Pattern<'a>),
     Type(DartType<'a>),
     Name(Identifier<'a>),
@@ -1010,21 +1011,36 @@ pub fn walk_expr_chain<'a, V: Visitor<'a>>(
     node: Expr<'a>,
     enter: impl FnMut(&mut V, Expr<'a>) -> bool,
 ) {
-    walk_chain(visitor, Work::Expr(node), enter);
+    walk_chain::<_, _, _, false>(visitor, Work::Expr(node), enter, |_, _| {});
+}
+
+/// Like [`walk_expr_chain`], with a matching exit after each expression's children.
+/// An expression pruned by `enter` still receives its exit synchronously.
+pub fn walk_expr_chain_with_exit<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    node: Expr<'a>,
+    enter: impl FnMut(&mut V, Expr<'a>) -> bool,
+    exit: impl FnMut(&mut V, Expr<'a>),
+) {
+    walk_chain::<_, _, _, true>(visitor, Work::Expr(node), enter, exit);
 }
 
 // Default hooks flatten chains; explicit walkers retain synchronous overrides.
 #[inline(never)]
 fn walk_default_chain<'a, V: Visitor<'a>>(v: &mut V, work: Work<'a>) {
-    walk_chain(v, work, |_, _| true);
+    walk_chain::<_, _, _, false>(v, work, |_, _| true, |_, _| {});
 }
 
 #[inline(never)]
-fn walk_chain<'a, V: Visitor<'a>>(
+fn walk_chain<'a, V: Visitor<'a>, E, X, const EXITS: bool>(
     v: &mut V,
     mut work: Work<'a>,
-    mut enter: impl FnMut(&mut V, Expr<'a>) -> bool,
-) {
+    mut enter: E,
+    mut exit: X,
+) where
+    E: FnMut(&mut V, Expr<'a>) -> bool,
+    X: FnMut(&mut V, Expr<'a>),
+{
     struct WorkStack<'a> {
         inline: [Option<Work<'a>>; 4],
         len: usize,
@@ -1058,6 +1074,9 @@ fn walk_chain<'a, V: Visitor<'a>>(
     loop {
         match work {
             Work::Expr(node) if enter(v, node) => {
+                if EXITS {
+                    pending.push(Work::ExitExpr(node));
+                }
                 let child = match node {
                     Expr::Binary(n) => {
                         pending.push(Work::Expr(n.right()));
@@ -1112,7 +1131,12 @@ fn walk_chain<'a, V: Visitor<'a>>(
                     continue;
                 }
             }
-            Work::Expr(_) => {}
+            Work::Expr(node) => {
+                if EXITS {
+                    exit(v, node);
+                }
+            }
+            Work::ExitExpr(node) => exit(v, node),
             Work::Pattern(node) => {
                 let child = match node {
                     Pattern::LogicalOr(n) => {
@@ -1922,8 +1946,10 @@ pub fn for_each_expr<'a>(root: Expr<'a>, f: &mut impl FnMut(Expr<'a>)) {
     struct Expressions<'f, F>(&'f mut F);
     impl<'a, F: FnMut(Expr<'a>)> Visitor<'a> for Expressions<'_, F> {
         fn visit_expr(&mut self, node: Expr<'a>) {
-            (self.0)(node);
-            walk_expr(self, node);
+            walk_expr_chain(self, node, |visitor, node| {
+                (visitor.0)(node);
+                true
+            });
         }
     }
     Expressions(f).visit_expr(root);

@@ -607,67 +607,69 @@ impl FlowContext<'_, '_> {
         expression: Expr<'_>,
         truth: bool,
     ) {
-        let expression = expression.unparenthesized();
-        match expression {
-            Expr::Unary(unary) if unary.op() == UnaryOp::Bang => {
-                self.assume_condition(environment, unary.operand(), !truth)
-            }
-            Expr::Binary(binary) if binary.op() == BinaryOp::And && truth => {
-                self.assume_condition(environment, binary.left(), true);
-                self.assume_condition(environment, binary.right(), true);
-            }
-            Expr::Binary(binary) if binary.op() == BinaryOp::Or && !truth => {
-                self.assume_condition(environment, binary.left(), false);
-                self.assume_condition(environment, binary.right(), false);
-            }
-            _ => {
-                CompletedPromotions {
-                    context: self,
-                    environment,
+        let mut pending = vec![(expression, truth)];
+        while let Some((expression, truth)) = pending.pop() {
+            let expression = expression.unparenthesized();
+            match expression {
+                Expr::Unary(unary) if unary.op() == UnaryOp::Bang => {
+                    pending.push((unary.operand(), !truth));
                 }
-                .visit_expr(expression);
-                match expression {
-                    Expr::Is(test) => {
-                        let expr = test.expr();
-                        let tested = self
-                            .model
-                            .resolve_type_in(test.dart_type(), self.type_parameters);
-                        if let Expr::Ident(name) = expr.unparenthesized() {
-                            environment.record_tested_type(name.name(), tested.clone());
-                        }
-                        let ty = if truth != test.negated() {
-                            tested
-                        } else {
-                            self.factor(&self.infer(environment, expr), &tested)
-                        };
-                        // An impossible type-test branch does not change the
-                        // variable's static type to Never.
-                        if ty != ResolvedType::NEVER {
-                            self.promote_without_test(environment, expr, ty);
-                        }
+                Expr::Binary(binary)
+                    if (binary.op() == BinaryOp::And && truth)
+                        || (binary.op() == BinaryOp::Or && !truth) =>
+                {
+                    pending.push((binary.right(), truth));
+                    pending.push((binary.left(), truth));
+                }
+                _ => {
+                    CompletedPromotions {
+                        context: self,
+                        environment,
                     }
-                    Expr::Binary(binary)
-                        if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) =>
-                    {
-                        let left = binary.left();
-                        let right = binary.right();
-                        let operand = if matches!(right.unparenthesized(), Expr::NullLit(_)) {
-                            left
-                        } else if matches!(left.unparenthesized(), Expr::NullLit(_)) {
-                            right
-                        } else {
-                            return;
-                        };
-                        let non_null = (binary.op() == BinaryOp::NotEq) == truth;
-                        if non_null {
-                            self.promote(
-                                environment,
-                                operand,
-                                self.infer(environment, operand).non_null(),
-                            );
+                    .visit_expr(expression);
+                    match expression {
+                        Expr::Is(test) => {
+                            let expr = test.expr();
+                            let tested = self
+                                .model
+                                .resolve_type_in(test.dart_type(), self.type_parameters);
+                            if let Expr::Ident(name) = expr.unparenthesized() {
+                                environment.record_tested_type(name.name(), tested.clone());
+                            }
+                            let ty = if truth != test.negated() {
+                                tested
+                            } else {
+                                self.factor(&self.infer(environment, expr), &tested)
+                            };
+                            // An impossible type-test branch does not change the
+                            // variable's static type to Never.
+                            if ty != ResolvedType::NEVER {
+                                self.promote_without_test(environment, expr, ty);
+                            }
                         }
+                        Expr::Binary(binary)
+                            if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) =>
+                        {
+                            let left = binary.left();
+                            let right = binary.right();
+                            let operand = if matches!(right.unparenthesized(), Expr::NullLit(_)) {
+                                left
+                            } else if matches!(left.unparenthesized(), Expr::NullLit(_)) {
+                                right
+                            } else {
+                                continue;
+                            };
+                            let non_null = (binary.op() == BinaryOp::NotEq) == truth;
+                            if non_null {
+                                self.promote(
+                                    environment,
+                                    operand,
+                                    self.infer(environment, operand).non_null(),
+                                );
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
@@ -1134,32 +1136,23 @@ impl<'tree> Visitor<'tree> for CompletedPromotions<'_, '_, '_> {
     fn visit_expr(&mut self, expression: Expr<'tree>) {
         match expression {
             Expr::FuncExpr(_) | Expr::Cascade(_) => return,
-            Expr::Binary(binary)
-                if matches!(
-                    binary.op(),
-                    BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
-                ) =>
-            {
-                self.visit_expr(binary.left())
-            }
             Expr::Binary(binary) => {
                 let mut pending = Vec::new();
-                let mut operand = binary.left();
+                let mut operand = Expr::Binary(binary);
+                // Only eager right operands execute on every path.
                 while let Expr::Binary(next) = operand {
-                    if matches!(
+                    if !matches!(
                         next.op(),
                         BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
                     ) {
-                        break;
+                        pending.push(next.right());
                     }
-                    pending.push(next.right());
                     operand = next.left();
                 }
                 self.visit_expr(operand);
                 for right in pending.into_iter().rev() {
                     self.visit_expr(right);
                 }
-                self.visit_expr(binary.right());
             }
             Expr::Conditional(conditional) => self.visit_expr(conditional.condition()),
             Expr::Switch(switch) => self.visit_expr(switch.subject()),

@@ -388,20 +388,65 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
     }
 }
 
+#[test]
+fn initializer_dependencies_walk_long_chains_in_postorder() {
+    let source = format!("final value = a{};", " + a".repeat(99_999));
+    let parsed = falcon_dart_parser::parse(&source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let TopLevelDecl::Variable(declaration) =
+        parsed.tree.program(&source).declarations().next().unwrap()
+    else {
+        panic!("expected a variable");
+    };
+    let expression = declaration
+        .declarators()
+        .next()
+        .unwrap()
+        .initializer()
+        .unwrap();
+    let mut identifiers = 0;
+    let mut binaries = 0;
+    InitializerDependencies {
+        environment: TypeEnvironment::new(),
+        inspect: |expression: Expr<'_>, _: &TypeEnvironment| match expression {
+            Expr::Ident(_) => identifiers += 1,
+            Expr::Binary(_) => {
+                binaries += 1;
+                assert_eq!(identifiers, binaries + 1);
+            }
+            _ => panic!("unexpected expression"),
+        },
+    }
+    .visit_expr(expression);
+    assert_eq!(identifiers, 100_000);
+    assert_eq!(binaries, 99_999);
+}
+
 impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDependencies<F> {
     fn visit_expr(&mut self, expression: Expr<'a>) {
-        if let Expr::FuncExpr(function) = expression {
-            self.scoped(|visitor| {
-                for parameter in function.params().params() {
-                    visitor.bind(parameter.name().name());
+        falcon_syntax::cst::visit::walk_expr_chain_with_exit(
+            self,
+            expression,
+            |visitor, expression| {
+                if let Expr::FuncExpr(function) = expression {
+                    visitor.scoped(|visitor| {
+                        for parameter in function.params().params() {
+                            visitor.bind(parameter.name().name());
+                        }
+                        walk_expr(visitor, expression);
+                        (visitor.inspect)(expression, &visitor.environment);
+                    });
+                    false
+                } else {
+                    true
                 }
-                walk_expr(visitor, expression);
-                (visitor.inspect)(expression, &visitor.environment);
-            });
-        } else {
-            walk_expr(self, expression);
-            (self.inspect)(expression, &self.environment);
-        }
+            },
+            |visitor, expression| {
+                if !matches!(expression, Expr::FuncExpr(_)) {
+                    (visitor.inspect)(expression, &visitor.environment);
+                }
+            },
+        );
     }
 
     fn visit_block(&mut self, block: falcon_syntax::cst::Block<'a>) {

@@ -860,7 +860,78 @@ fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
             "{kind:?}",
         );
         assert_eq!(counter.types, LINKS * types_per_link, "{kind:?}",);
+        let mut expressions = 0;
+        for_each_expr(Expr::cast(tree.root(&source)).unwrap(), &mut |_| {
+            expressions += 1;
+        });
+        let expression_children = match kind {
+            NodeKind::FieldExpr
+            | NodeKind::GenericInstantiationExpr
+            | NodeKind::AsExpr
+            | NodeKind::IsExpr
+            | NodeKind::CascadeExpr => 0,
+            _ => identifiers_per_link,
+        };
+        assert_eq!(
+            expressions,
+            1 + LINKS * (1 + expression_children),
+            "{kind:?}"
+        );
     }
+}
+
+#[test]
+fn expression_helper_preserves_preorder_across_synchronous_children() {
+    let source = "var value = a + b * f(c, d);";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let TopLevelDecl::Variable(variable) =
+        parsed.tree.program(source).declarations().next().unwrap()
+    else {
+        panic!("expected variable");
+    };
+    let expression = variable
+        .declarators()
+        .next()
+        .unwrap()
+        .initializer()
+        .unwrap();
+    let mut order = Vec::new();
+    for_each_expr(expression, &mut |node| {
+        let span = node.span();
+        order.push(&source[span.start..span.end]);
+    });
+    assert_eq!(
+        order,
+        [
+            "a + b * f(c, d)",
+            "a",
+            "b * f(c, d)",
+            "b",
+            "f(c, d)",
+            "f",
+            "c",
+            "d"
+        ],
+    );
+
+    struct Pruned(usize, usize);
+    impl<'a> Visitor<'a> for Pruned {
+        fn visit_expr(&mut self, node: Expr<'a>) {
+            walk_expr_chain_with_exit(
+                self,
+                node,
+                |visitor, _| {
+                    visitor.0 += 1;
+                    false
+                },
+                |visitor, _| visitor.1 += 1,
+            );
+        }
+    }
+    let mut pruned = Pruned(0, 0);
+    pruned.visit_expr(expression);
+    assert_eq!((pruned.0, pruned.1), (1, 1));
 }
 
 #[test]

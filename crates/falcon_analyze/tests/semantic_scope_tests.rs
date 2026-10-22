@@ -1422,6 +1422,158 @@ fn binary_chain_visits_on_the_normal_stack() {
 }
 
 #[test]
+fn optional_binary_chains_visit_every_operand_on_the_normal_stack() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let operands = 100_000;
+    for (operator, parameter) in [("&&", "bool"), ("||", "bool"), ("??", "int?")] {
+        let chain = vec!["a"; operands].join(&format!(" {operator} "));
+        let source =
+            format!("void f({parameter} a) {{ var value = {chain}; consume({chain}); {chain}; }}");
+        let result = parse(&source);
+        assert!(result.errors.is_empty(), "{operator}: {:?}", result.errors);
+        let parsed = Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: result.tree,
+        });
+        let path = Path::new("/project/main.dart");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path,
+                parsed: &parsed,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let config = FalconConfig::default();
+        let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+        #[derive(Default)]
+        struct Count {
+            binaries: usize,
+            operands: usize,
+        }
+        impl<'a> SemanticRuleVisitor<'a> for Count {
+            fn visit_expr(&mut self, node: Expr<'a>, _: &SemanticState<'a>) {
+                match node {
+                    Expr::Binary(_) => self.binaries += 1,
+                    Expr::Ident(name) if name.name() == "a" => self.operands += 1,
+                    _ => {}
+                }
+            }
+        }
+        let program = parsed.program();
+        let mut count = Count::default();
+        visit_program(
+            &mut count,
+            program,
+            SemanticState::new(program, &context).unwrap(),
+        );
+        assert_eq!(count.binaries, 3 * (operands - 1), "{operator}");
+        assert_eq!(count.operands, 3 * operands, "{operator}");
+    }
+}
+
+#[test]
+fn optional_binary_callbacks_keep_preorder_context_and_write_promotions() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let source = r#"
+void f(bool a, bool b, bool c, int? n, int? m, int tail, Object? value) {
+  bool logical = a && b || c;
+  int? optional = n ?? m ?? tail;
+  value is String && value != null && promotedAnd(value);
+  value is! String || value == null || promotedOr(value);
+  a && value is String && promotedRight(value);
+  a && value != null && comparedRight(value);
+  a || value == null || comparedOrRight(value);
+  value is String && ((value = 0) == 0 && afterWrite(value));
+}
+"#;
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    struct Observed {
+        events: Vec<(String, Option<ResolvedType>)>,
+        calls: usize,
+        context_end: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if node.span().start < self.context_end
+                && matches!(node, Expr::Binary(_) | Expr::Ident(_))
+            {
+                self.events
+                    .push((node.syntax().text().to_owned(), state.expected().cloned()));
+            }
+            if let Expr::Call(call) = node
+                && let Expr::Ident(name) = call.callee()
+            {
+                let expected = match name.name() {
+                    "promotedAnd" | "promotedOr" | "promotedRight" => "String",
+                    "afterWrite" | "comparedRight" | "comparedOrRight" => "Object",
+                    _ => return,
+                };
+                let argument = call.args().positional().next().unwrap();
+                assert_eq!(
+                    state.infer(argument),
+                    state.model.core_type(expected, false),
+                    "{}",
+                    name.name(),
+                );
+                self.calls += 1;
+            }
+        }
+    }
+    let program = parsed.program();
+    let state = SemanticState::new(program, &context).unwrap();
+    let boolean = state.model.core_type("bool", false);
+    let nullable_int = state.model.core_type("int", true);
+    let mut observed = Observed {
+        events: Vec::new(),
+        calls: 0,
+        context_end: source.find("value is String").unwrap(),
+    };
+    visit_program(&mut observed, program, state);
+    let unknown = Some(ResolvedType::UNKNOWN);
+    assert_eq!(
+        observed.events,
+        [
+            ("a && b || c".into(), Some(boolean)),
+            ("a && b".into(), unknown.clone()),
+            ("a".into(), unknown.clone()),
+            ("b".into(), unknown.clone()),
+            ("c".into(), unknown.clone()),
+            ("n ?? m ?? tail".into(), Some(nullable_int.clone())),
+            ("n ?? m".into(), unknown.clone()),
+            ("n".into(), unknown),
+            ("m".into(), Some(nullable_int.clone())),
+            ("tail".into(), Some(nullable_int)),
+        ],
+    );
+    assert_eq!(observed.calls, 6);
+}
+
+#[test]
 fn flow_joins_preserve_reachable_paths_and_nested_scope_depth() {
     use falcon_analyze::{IdentityIndex, IdentitySource};
     use falcon_config::FalconConfig;

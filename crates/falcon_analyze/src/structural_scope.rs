@@ -17,6 +17,43 @@ pub enum StructuralTraversal {
 macro_rules! structural_nodes {
     (@visit visit_collection_element, $ty:ty) => {};
     (@visit visit_map_element, $ty:ty) => {};
+    (@method visit_expr, $kind:ident, $ty:ty, [$($walk:ident)?]) => {
+        fn visit_expr(&mut self, node: $ty) {
+            visitor::walk_expr_chain_with_exit(
+                self,
+                node,
+                |visitor, node| {
+                    let child = StructuralNode::Expr(node);
+                    visitor.enter_node(child.clone());
+                    visitor.expression_parents.push(visitor.parent.replace(child));
+                    visitor.depth += 1;
+                    true
+                },
+                |visitor, node| {
+                    visitor.depth -= 1;
+                    visitor.parent = visitor.expression_parents.pop().unwrap();
+                    visitor.exit_node(StructuralNode::Expr(node));
+                },
+            );
+        }
+    };
+    (@method $visit:ident, $kind:ident, $ty:ty, [$($walk:ident)?]) => {
+        fn $visit(&mut self, node: $ty) {
+            let child = StructuralNode::$kind(node.clone());
+            self.enter_node(child.clone());
+            $(
+                let mut children = StructuralVisitors {
+                    collectors: self.collectors,
+                    subscribers: self.subscribers,
+                    parent: Some(child.clone()),
+                    depth: self.depth + 1,
+                    expression_parents: self.expression_parents,
+                };
+                structural_nodes!(@walk $walk, &mut children, node.clone());
+            )?
+            self.exit_node(child);
+        }
+    };
     (@visit $visit:ident, $ty:ty) => {
         fn $visit(&mut self, node: $ty) {
             StructuralVisitors::$visit(self, node);
@@ -139,54 +176,56 @@ macro_rules! structural_nodes {
         }
 
         impl<$lifetime> StructuralVisitors<'_, $lifetime> {
-            $(
-                fn $visit(&mut self, node: $ty) {
-                    let kind = StructuralKind::$kind;
-                    let child = StructuralNode::$kind(node.clone());
-                    for &index in self.subscribers.for_kind(kind) {
-                        let collector = &mut self.collectors[index];
-                        if collector.suppressed.is_some() {
-                            continue;
-                        }
-                        if collector.interests.routing
-                            && let Some(parent) = self.parent.clone()
-                            && !collector.visitor.route_child(parent, child.clone())
-                        {
-                            collector.suppressed = Some((self.depth, false));
-                            continue;
-                        }
-                        if collector.interests.enters(kind)
-                            && collector.visitor.$visit(node.clone()) == StructuralTraversal::SkipChildren
-                        {
-                            collector.suppressed = Some((self.depth, true));
-                        }
-                    }
-                    $(
-                        let mut children = StructuralVisitors {
-                            collectors: self.collectors,
-                            subscribers: self.subscribers,
-                            parent: Some(child),
-                            depth: self.depth + 1,
-                        };
-                        structural_nodes!(@walk $walk, &mut children, node.clone());
-                    )?
-                    for &index in self.subscribers.for_kind(kind) {
-                        let collector = &mut self.collectors[index];
-                        if let Some((owner, entered)) = collector.suppressed {
-                            if owner != self.depth {
+            $(structural_nodes!(@method $visit, $kind, $ty, [$($walk)?]);)*
+
+            fn enter_node(&mut self, child: StructuralNode<$lifetime>) {
+                match child.clone() {
+                    $(StructuralNode::$kind(node) => {
+                        let kind = StructuralKind::$kind;
+                        for &index in self.subscribers.for_kind(kind) {
+                            let collector = &mut self.collectors[index];
+                            if collector.suppressed.is_some() {
                                 continue;
                             }
-                            collector.suppressed = None;
-                            if !entered {
+                            if collector.interests.routing
+                                && let Some(parent) = self.parent.clone()
+                                && !collector.visitor.route_child(parent, child.clone())
+                            {
+                                collector.suppressed = Some((self.depth, false));
                                 continue;
                             }
+                            if collector.interests.enters(kind)
+                                && collector.visitor.$visit(node.clone()) == StructuralTraversal::SkipChildren
+                            {
+                                collector.suppressed = Some((self.depth, true));
+                            }
                         }
-                        if collector.interests.exits(kind) {
-                            collector.visitor.$exit(node.clone());
-                        }
-                    }
+                    })*
                 }
-            )*
+            }
+
+            fn exit_node(&mut self, child: StructuralNode<$lifetime>) {
+                match child {
+                    $(StructuralNode::$kind(node) => {
+                        let kind = StructuralKind::$kind;
+                        for &index in self.subscribers.for_kind(kind) {
+                            let collector = &mut self.collectors[index];
+                            if let Some((owner, entered)) = collector.suppressed {
+                                if owner != self.depth {
+                                    continue;
+                                }
+                                collector.suppressed = None;
+                                if !entered {
+                                    continue;
+                                }
+                            }
+                            if collector.interests.exits(kind) {
+                                collector.visitor.$exit(node.clone());
+                            }
+                        }
+                    })*
+                }
+            }
         }
     };
 }
@@ -480,6 +519,7 @@ struct StructuralVisitors<'v, 'a> {
     subscribers: &'v Subscriptions,
     parent: Option<StructuralNode<'a>>,
     depth: usize,
+    expression_parents: &'v mut Vec<Option<StructuralNode<'a>>>,
 }
 
 /// Run one existing Visitor traversal and consume every collector in input order.
@@ -508,6 +548,7 @@ pub(crate) fn visit_program<'a>(
         subscribers: &subscribers,
         parent: None,
         depth: 0,
+        expression_parents: &mut Vec::new(),
     }
     .visit_program(program);
     collectors
@@ -519,6 +560,98 @@ pub(crate) fn visit_program<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct BalancedExpressions<'a> {
+        stack: Vec<Expr<'a>>,
+        count: usize,
+        expected: usize,
+        skip: bool,
+        reject_right: bool,
+    }
+
+    crate::structural_visitor! {
+        impl<'a> StructuralRuleVisitor<'a> for BalancedExpressions<'a> {
+            fn route_child(&mut self, parent: StructuralNode<'a>, child: StructuralNode<'a>) -> bool {
+                if let StructuralNode::Expr(parent) = parent {
+                    assert_eq!(self.stack.last().unwrap().syntax().id(), parent.syntax().id());
+                }
+                !(self.reject_right
+                    && matches!(child, StructuralNode::Expr(Expr::Ident(name)) if name.name() == "right"))
+            }
+
+            fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
+                self.stack.push(node);
+                self.count += 1;
+                if self.skip {
+                    StructuralTraversal::SkipChildren
+                } else {
+                    StructuralTraversal::Continue
+                }
+            }
+
+            fn exit_expr(&mut self, node: Expr<'a>) {
+                assert_eq!(self.stack.pop().unwrap().syntax().id(), node.syntax().id());
+            }
+
+            fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+                assert!(self.stack.is_empty());
+                assert_eq!(self.count, self.expected);
+                Vec::new()
+            }
+        }
+    }
+
+    #[test]
+    fn expression_dispatch_preserves_nested_hooks_routing_and_independent_pruning() {
+        let source = "var value = left + call(right);";
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let visitors = [(false, false, 5), (true, false, 1), (false, true, 4)]
+            .into_iter()
+            .map(|(skip, reject_right, expected)| {
+                Box::new(BalancedExpressions {
+                    stack: Vec::new(),
+                    count: 0,
+                    expected,
+                    skip,
+                    reject_right,
+                }) as Box<dyn StructuralRuleVisitor<'_>>
+            })
+            .collect();
+        visit_program(parsed.tree.program(source), visitors);
+    }
+
+    #[test]
+    fn expression_dispatch_handles_hundred_thousand_operands_on_normal_stack() {
+        const OPERANDS: usize = 100_000;
+        for (operand, operator) in [
+            ("1", "+"),
+            ("true", "&&"),
+            ("false", "||"),
+            ("null", "??"),
+            ("'s'", "+"),
+        ] {
+            let mut source = String::from("var value = ");
+            source.push_str(operand);
+            for _ in 1..OPERANDS {
+                source.push_str(operator);
+                source.push_str(operand);
+            }
+            source.push(';');
+            let parsed = falcon_dart_parser::parse(&source);
+            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+            visit_program(
+                parsed.tree.program(&source),
+                vec![Box::new(BalancedExpressions {
+                    stack: Vec::new(),
+                    count: 0,
+                    expected: OPERANDS * 2 - 1,
+                    skip: false,
+                    reject_right: false,
+                })],
+            );
+        }
+    }
 
     struct Subscribed;
 

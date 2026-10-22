@@ -5005,6 +5005,158 @@ fn block_closures_demote_guarded_locals_after_writes() {
 }
 
 #[test]
+fn nested_coalescing_preserves_collection_and_callable_contexts() {
+    with_model(
+        "class Callable { int call() => 1; } \
+         List<num> collection(List<num>? a, List<num> b) => [] ?? a ?? b; \
+         int Function() callable(Callable? a, Callable b) => a ?? b ?? b;",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let scope = TypeParameterScope::default();
+            for declaration in program.declarations() {
+                let TopLevelDecl::Function(function) = declaration else {
+                    continue;
+                };
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
+                    panic!("expected arrow body");
+                };
+                let expected = model.resolve_type(function.return_type().unwrap());
+                let mut environment = TypeEnvironment::new();
+                environment.bind_params(function.params().unwrap(), model, &scope);
+                assert_eq!(
+                    environment.infer_with_context(
+                        body.expr(),
+                        model,
+                        &signatures,
+                        &scope,
+                        Some(&expected),
+                        &|_| None,
+                    ),
+                    expected,
+                    "{}",
+                    function.name().name(),
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn block_closures_visit_long_optional_chains_on_the_normal_test_stack() {
+    for operator in ["&&", "||", "??"] {
+        let chain = format!("{}flag", format!("flag {operator} ").repeat(99_999));
+        for statement in [
+            format!("final value = {chain};"),
+            format!("consume({chain});"),
+            format!("{chain};"),
+        ] {
+            let source = format!(
+                "bool Function(bool) chained() => (bool flag) {{ {statement} return flag; }}; \
+                 void consume(bool value) {{}}"
+            );
+            with_model(&source, |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let TopLevelDecl::Function(function) = program.declarations().next().unwrap()
+                else {
+                    panic!("expected function");
+                };
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
+                    panic!("expected arrow body");
+                };
+                assert_eq!(
+                    TypeEnvironment::new().infer_with_signatures(
+                        body.expr(),
+                        model,
+                        &signatures,
+                        &TypeParameterScope::default(),
+                    ),
+                    model.resolve_type(function.return_type().unwrap()),
+                    "{operator}: {statement}",
+                );
+            });
+        }
+    }
+}
+
+#[test]
+fn block_closures_preserve_optional_binary_write_order_and_joins() {
+    with_model(
+        "int? Function(bool, int?) andWrite() => (bool flag, int? other) { \
+         int? value = other; if (value == null) return 0; \
+         flag && ((value = other) != null); return value; }; \
+         int? Function(bool, int?) orWrite() => (bool flag, int? other) { \
+         int? value = other; if (value == null) return 0; \
+         flag || ((value = other) != null); return value; }; \
+         int? Function(int?, int?) coalesceWrite() => (int? first, int? other) { \
+         int? value = other; if (value == null) return 0; \
+         first ?? (value = other); return value; }; \
+         int Function(bool, int?) ordered() => (bool flag, int? other) { \
+         int? value = other; ((value = 1) != null) && flag || flag; return value; };",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            for declaration in program.declarations() {
+                let TopLevelDecl::Function(function) = declaration else {
+                    panic!("expected function");
+                };
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
+                    panic!("expected arrow body");
+                };
+                assert_eq!(
+                    TypeEnvironment::new().infer_with_signatures(
+                        body.expr(),
+                        model,
+                        &signatures,
+                        &TypeParameterScope::default(),
+                    ),
+                    model.resolve_type(function.return_type().unwrap()),
+                    "{}",
+                    function.name().name(),
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn long_conditions_preserve_only_unconditional_completed_promotions() {
+    for operator in ["&&", "||", "??"] {
+        let chain = format!(
+            "(value! == 0) {operator} {}(other! == 0)",
+            format!("flag {operator} ").repeat(99_998),
+        );
+        let source = format!("bool test(int? value, int? other, bool flag) => {chain};");
+        with_model(&source, |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let scope = TypeParameterScope::default();
+            let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
+                panic!("expected function");
+            };
+            let Some(FunctionBody::Arrow(body)) = function.body() else {
+                panic!("expected arrow body");
+            };
+            for truth in [false, true] {
+                let mut environment = TypeEnvironment::new();
+                environment.bind_params(function.params().unwrap(), model, &scope);
+                super::flow::FlowContext {
+                    model,
+                    signatures: &signatures,
+                    type_parameters: &scope,
+                    field_promotions: false,
+                }
+                .assume_condition(&mut environment, body.expr(), truth);
+                assert_eq!(environment.lookup("value"), model.core_type("int", false),);
+                let other_promoted = (operator == "&&" && truth) || (operator == "||" && !truth);
+                assert_eq!(
+                    environment.lookup("other"),
+                    model.core_type("int", !other_promoted),
+                    "{operator}: {truth}",
+                );
+            }
+        });
+    }
+}
+
+#[test]
 fn block_closures_demote_branch_locals_after_writes() {
     with_parsed_core(
         "int? Function(List<int?>) branch() => (List<int?> values) { \

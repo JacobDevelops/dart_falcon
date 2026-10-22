@@ -6,7 +6,7 @@
 //! containing a node is the containing entry with the greatest start offset.
 
 use falcon_syntax::cst::visit::{
-    Visitor, walk_constructor_decl, walk_expr, walk_function_decl, walk_getter_decl,
+    Visitor, walk_constructor_decl, walk_expr_chain, walk_function_decl, walk_getter_decl,
     walk_method_decl, walk_program, walk_setter_decl, walk_stmt,
 };
 use falcon_syntax::cst::*;
@@ -217,14 +217,51 @@ impl<'a> Visitor<'a> for FunctionBodies<'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::FuncExpr(function) = node {
-            self.push(
-                BodyOwner::Closure,
-                function.async_marker(),
-                None,
-                Some(function.body()),
-            );
+        walk_expr_chain(self, node, |collector, node| {
+            if let Expr::FuncExpr(function) = node {
+                collector.push(
+                    BodyOwner::Closure,
+                    function.async_marker(),
+                    None,
+                    Some(function.body()),
+                );
+            }
+            true
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_initializer_indexes_nested_closures_on_the_normal_stack() {
+        let source = format!(
+            "void f(int a) {{ var value = (() {{ return () => 11; }}) + {} + (() => 22); }}",
+            vec!["a"; 100_000 - 2].join(" + ")
+        );
+        let parsed = falcon_dart_parser::parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let bodies = FunctionBodies::new(parsed.tree.program(&source));
+        assert_eq!(bodies.bodies.len(), 4);
+        assert_eq!(bodies.body_parents, vec![None, Some(0), Some(1), Some(0)]);
+        assert_eq!(bodies.bodies[0].owner, BodyOwner::TopLevelFunction);
+        for body in &bodies.bodies[1..] {
+            assert_eq!(body.owner, BodyOwner::Closure);
         }
-        walk_expr(self, node);
+        let span = |text: &str| {
+            let start = source.find(text).unwrap();
+            Span::new(start, start + text.len())
+        };
+        assert_eq!(bodies.bodies[1].span, span("{ return () => 11; }"));
+        assert_eq!(bodies.bodies[2].arrow_expression, Some(span("11")));
+        assert_eq!(bodies.bodies[3].arrow_expression, Some(span("22")));
+        for (text, index) in [("a + a", 0), ("return", 1), ("11", 2), ("22", 3)] {
+            assert!(std::ptr::eq(
+                bodies.enclosing(&span(text)).unwrap(),
+                &bodies.bodies[index]
+            ));
+        }
     }
 }

@@ -582,37 +582,31 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 self.visit_expr(else_expr);
                 FlowContext::join_branches(&mut self.environment, then_environment, false, false);
             }
-            Expr::Binary(binary)
-                if matches!(
-                    binary.op(),
-                    BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
-                ) =>
-            {
-                let left = binary.left();
-                let right = binary.right();
-                self.visit_expr(left);
-                let before = self.environment.clone();
-                self.visit_expr(right);
-                self.environment = before.join(&self.environment);
-            }
             Expr::Binary(binary) => {
+                // Unwind in evaluation order, joining each optional right operand
+                // against the state after its own left operand.
                 let mut pending = Vec::new();
-                let mut operand = binary.left();
+                let mut operand = Expr::Binary(binary);
                 while let Expr::Binary(next) = operand {
-                    if matches!(
-                        next.op(),
-                        BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
-                    ) {
-                        break;
-                    }
-                    pending.push(next.right());
+                    pending.push((
+                        next.right(),
+                        matches!(
+                            next.op(),
+                            BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
+                        ),
+                    ));
                     operand = next.left();
                 }
                 self.visit_expr(operand);
-                for right in pending.into_iter().rev() {
-                    self.visit_expr(right);
+                for (right, optional) in pending.into_iter().rev() {
+                    if optional {
+                        let before = self.environment.clone();
+                        self.visit_expr(right);
+                        self.environment = before.join(&self.environment);
+                    } else {
+                        self.visit_expr(right);
+                    }
                 }
-                self.visit_expr(binary.right());
             }
             _ => walk_expr(self, expression),
         }

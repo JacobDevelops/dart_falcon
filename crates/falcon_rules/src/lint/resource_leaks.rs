@@ -19,7 +19,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    self as visitor, Visitor, walk_expr, walk_formal_param, walk_program, walk_stmt,
+    self as visitor, Visitor, walk_expr_chain, walk_formal_param, walk_program, walk_stmt,
 };
 use falcon_syntax::cst::*;
 
@@ -584,17 +584,19 @@ impl ValidUses<'_> {
 
 impl<'a> Visitor<'a> for ValidUses<'a> {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        let references = &self.references;
-        let excluded_calls = &self.excluded_calls;
-        for candidate in &mut self.candidates {
-            if !candidate.valid
-                && candidate.container.contains(node.span())
-                && candidate.is_valid_use(node, references, excluded_calls)
-            {
-                candidate.valid = true;
+        walk_expr_chain(self, node, |visitor, node| {
+            let references = &visitor.references;
+            let excluded_calls = &visitor.excluded_calls;
+            for candidate in &mut visitor.candidates {
+                if !candidate.valid
+                    && candidate.container.contains(node.span())
+                    && candidate.is_valid_use(node, references, excluded_calls)
+                {
+                    candidate.valid = true;
+                }
             }
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 
     fn visit_stmt(&mut self, node: Stmt<'a>) {
@@ -993,9 +995,11 @@ impl<'a> Visitor<'a> for References<'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if matches!(node, Expr::FuncExpr(_)) {
-            self.callable(node.span());
-        }
-        walk_expr(self, node);
+        walk_expr_chain(self, node, |visitor, node| {
+            if matches!(node, Expr::FuncExpr(_)) {
+                visitor.callable(node.span());
+            }
+            true
+        });
     }
 }

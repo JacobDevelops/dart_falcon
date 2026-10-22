@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_syntax::cst::visit::{
-    Visitor, bound_names, walk_class_member, walk_element, walk_expr, walk_function_body,
+    Visitor, bound_names, walk_class_member, walk_element, walk_expr_chain, walk_function_body,
     walk_pattern,
 };
 use falcon_syntax::cst::*;
@@ -587,61 +587,70 @@ impl<'a> Visitor<'a> for UsageCollector {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        match node {
-            Expr::Ident(identifier) => self.use_identifier(identifier),
-            Expr::FuncExpr(function) => {
-                self.visit_nested_function(function.params(), function.body())
-            }
-            Expr::List(list) => {
-                for element in list.elements() {
-                    self.visit_element(element);
+        walk_expr_chain(self, node, |collector, node| {
+            match node {
+                Expr::Ident(identifier) => collector.use_identifier(identifier),
+                Expr::FuncExpr(function) => {
+                    collector.visit_nested_function(function.params(), function.body())
                 }
-            }
-            Expr::Set(set) => {
-                for element in set.elements() {
-                    self.visit_element(element);
-                }
-            }
-            Expr::Map(map) => {
-                for element in map.elements() {
-                    self.visit_element(element);
-                }
-            }
-            Expr::Switch(switch) => {
-                self.visit_expr(switch.subject());
-                for arm in switch.arms() {
-                    self.scopes.push_scope();
-                    self.visit_pattern(arm.pattern());
-                    self.bind_pattern(arm.pattern());
-                    if let Some(guard) = arm.guard() {
-                        self.visit_expr(guard);
+                Expr::List(list) => {
+                    for element in list.elements() {
+                        collector.visit_element(element);
                     }
-                    self.visit_expr(arm.body());
-                    self.scopes.pop_scope();
                 }
+                Expr::Set(set) => {
+                    for element in set.elements() {
+                        collector.visit_element(element);
+                    }
+                }
+                Expr::Map(map) => {
+                    for element in map.elements() {
+                        collector.visit_element(element);
+                    }
+                }
+                Expr::Switch(switch) => {
+                    collector.visit_expr(switch.subject());
+                    for arm in switch.arms() {
+                        collector.scopes.push_scope();
+                        collector.visit_pattern(arm.pattern());
+                        collector.bind_pattern(arm.pattern());
+                        if let Some(guard) = arm.guard() {
+                            collector.visit_expr(guard);
+                        }
+                        collector.visit_expr(arm.body());
+                        collector.scopes.pop_scope();
+                    }
+                }
+                Expr::Assign(assignment) => {
+                    collector.record_target_write(
+                        assignment.target(),
+                        LocalWriteKind::Assign(assignment.op()),
+                        assignment.span(),
+                    );
+                    return true;
+                }
+                Expr::PostfixIncDec(increment) => {
+                    collector.record_target_write(
+                        increment.operand(),
+                        LocalWriteKind::IncDec,
+                        increment.span(),
+                    );
+                    return true;
+                }
+                Expr::Unary(unary)
+                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+                {
+                    collector.record_target_write(
+                        unary.operand(),
+                        LocalWriteKind::IncDec,
+                        unary.span(),
+                    );
+                    return true;
+                }
+                _ => return true,
             }
-            Expr::Assign(assignment) => {
-                self.record_target_write(
-                    assignment.target(),
-                    LocalWriteKind::Assign(assignment.op()),
-                    assignment.span(),
-                );
-                walk_expr(self, node);
-            }
-            Expr::PostfixIncDec(increment) => {
-                self.record_target_write(
-                    increment.operand(),
-                    LocalWriteKind::IncDec,
-                    increment.span(),
-                );
-                walk_expr(self, node);
-            }
-            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
-                self.record_target_write(unary.operand(), LocalWriteKind::IncDec, unary.span());
-                walk_expr(self, node);
-            }
-            _ => walk_expr(self, node),
-        }
+            false
+        });
     }
 }
 
@@ -680,6 +689,48 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+
+    #[test]
+    fn long_binary_chain_preserves_lexical_uses_and_writes() {
+        let mut source = String::from("void f(int value) { value = value");
+        source.push_str(&" + value".repeat(99_999));
+        source.push_str("; value++; }");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(&source);
+        let TopLevelDecl::Function(function) = program.declarations().first().unwrap() else {
+            panic!()
+        };
+        let params = function.params().unwrap();
+        let parameter = params.params().first().unwrap().name();
+        assert_eq!(
+            used_parameters(params, function.body().unwrap()),
+            HashSet::from([parameter.span().start])
+        );
+        let expected_uses: HashSet<_> = source
+            .match_indices("value")
+            .skip(1)
+            .map(|(offset, _)| offset)
+            .collect();
+        assert_eq!(expected_uses.len(), 100_002);
+        assert_eq!(locally_bound_identifiers(program), expected_uses);
+        let declarations = local_declarations(program);
+        assert_eq!(declarations.len(), expected_uses.len());
+        for offset in expected_uses {
+            assert_eq!(declarations[&offset], parameter.syntax().id());
+        }
+        let writes = local_writes(program);
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0].kind, LocalWriteKind::Assign(AssignOp::Eq));
+        assert_eq!(writes[0].span.start, source.find("value =").unwrap());
+        assert_eq!(writes[1].kind, LocalWriteKind::IncDec);
+        assert_eq!(writes[1].span.start, source.rfind("value++").unwrap());
+        assert!(
+            writes
+                .iter()
+                .all(|write| write.declaration == parameter.syntax().id())
+        );
+    }
 
     #[test]
     fn context_shares_exact_writes_and_mutated_declarations() {

@@ -9,9 +9,11 @@
 //! code units; type-test conditions use the same source-proven types as casts.
 //! Constructor type tests and casts resolve instantiated owner type parameters.
 //! Indexed initializers and constructors retain parsed sources through the signature index.
+//! Binary left spines use a worklist while preserving eager dependencies and value charges.
 
 use crate::resolve::ResolvedTypeKind;
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -141,7 +143,7 @@ pub fn constant_operands_all<'a>(
     expression: Expr<'a>,
     allowed: impl FnMut(Expr<'a>) -> bool,
 ) -> bool {
-    use falcon_syntax::cst::visit::{Visitor, walk_expr};
+    use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
 
     struct Operands<F> {
         allowed: F,
@@ -149,12 +151,12 @@ pub fn constant_operands_all<'a>(
     }
     impl<'a, F: FnMut(Expr<'a>) -> bool> Visitor<'a> for Operands<F> {
         fn visit_expr(&mut self, expression: Expr<'a>) {
-            if self.accepted {
-                self.accepted = (self.allowed)(expression);
-                if self.accepted {
-                    walk_expr(self, expression);
+            walk_expr_chain(self, expression, |visitor, expression| {
+                if visitor.accepted {
+                    visitor.accepted = (visitor.allowed)(expression);
                 }
-            }
+                visitor.accepted
+            });
         }
     }
     let mut operands = Operands {
@@ -698,10 +700,45 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     }
 
     fn evaluate_binary(&mut self, binary: BinaryExpr<'_>) -> Option<ConstantValue> {
+        // Keep the recursive evaluation order without using a call frame for
+        // each left-associated operation. Parentheses do not add a value charge.
+        let mut pending = vec![binary];
+        let mut expression = binary.left();
+        loop {
+            match expression {
+                Expr::Paren(paren) => expression = paren.expr(),
+                Expr::Binary(binary) => {
+                    pending.push(binary);
+                    expression = binary.left();
+                }
+                _ => break,
+            }
+        }
+        let left = self.evaluate_shared(expression, None);
+        let mut value = left.as_deref().map(Cow::Borrowed);
+        while let Some(binary) = pending.pop() {
+            let mut result = self.evaluate_binary_right(binary, value);
+            // evaluate_shared used to charge every nested binary result. The
+            // outermost result is still charged by evaluate_with_context.
+            if !pending.is_empty()
+                && let Some(value) = &result
+                && Self::charge_value(value, &mut self.remaining_bytes).is_none()
+            {
+                result = None;
+            }
+            value = result.map(Cow::Owned);
+        }
+        value.map(Cow::into_owned)
+    }
+
+    fn evaluate_binary_right(
+        &mut self,
+        binary: BinaryExpr<'_>,
+        left: Option<Cow<'_, ConstantValue>>,
+    ) -> Option<ConstantValue> {
         let op = binary.op();
-        let left = binary.left();
         let right = binary.right();
-        let Some(left) = self.evaluate_shared(left, None) else {
+        let Some(left) = left else {
             if !self.pending_constants.is_empty()
                 && !matches!(op, BinaryOp::NullCoalesce | BinaryOp::And | BinaryOp::Or)
             {
@@ -713,14 +750,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             return if *left == ConstantValue::Null {
                 self.evaluate(right)
             } else {
-                Some(Arc::unwrap_or_clone(left))
+                Some(left.into_owned())
             };
         }
         if matches!(
             (op, left.as_ref()),
             (BinaryOp::And, ConstantValue::Bool(false)) | (BinaryOp::Or, ConstantValue::Bool(true))
         ) {
-            return Some(Arc::unwrap_or_clone(left));
+            return Some(left.into_owned());
         }
         let right = self.evaluate_shared(right, None)?;
         if matches!(op, BinaryOp::Add)
@@ -756,7 +793,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         ) {
             return None;
         }
-        eval_binary(&op, Arc::unwrap_or_clone(left), Arc::unwrap_or_clone(right))
+        eval_binary(&op, left.into_owned(), Arc::unwrap_or_clone(right))
     }
 
     fn cast_accepts(&self, value: &ConstantValue, target: &ResolvedType) -> Option<bool> {
@@ -2742,6 +2779,30 @@ mod tests {
     }
 
     #[test]
+    fn constant_operand_chains_use_the_normal_test_stack() {
+        let source = format!("const value = 1{};", " + 1".repeat(99_999));
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Variable(declaration) =
+            tree.program(&source).declarations().next().unwrap()
+        else {
+            panic!("expected a constant declaration");
+        };
+        let expression = declaration
+            .declarators()
+            .next()
+            .unwrap()
+            .initializer()
+            .unwrap();
+        let mut operands = 0;
+        assert!(constant_operands_all(expression, |_| {
+            operands += 1;
+            true
+        }));
+        assert_eq!(operands, 199_999);
+    }
+
+    #[test]
     fn primitive_equality_rejects_custom_and_unknown_classes() {
         with_constants(|_, model, signatures| {
             assert!(class_has_primitive_equality(
@@ -3084,6 +3145,116 @@ const futureOrCast = null as FutureOr<int?>;
             assert_eq!(values.len(), 1_000);
             assert_eq!(values[999], ConstantValue::Number(Number::Int(999)));
         });
+    }
+
+    #[test]
+    fn hundred_thousand_binary_operations_use_a_worklist() {
+        for (operand, op, expected) in [
+            ("0", "+", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", "-", Some(ConstantValue::Number(Number::Int(0)))),
+            ("1", "*", Some(ConstantValue::Number(Number::Int(1)))),
+            (
+                "1",
+                "/",
+                Some(ConstantValue::Number(Number::Float(1.0_f64.to_bits()))),
+            ),
+            ("1", "~/", Some(ConstantValue::Number(Number::Int(1)))),
+            ("1", "%", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", "&", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", "|", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", "^", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", "<<", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", ">>", Some(ConstantValue::Number(Number::Int(0)))),
+            ("0", ">>>", Some(ConstantValue::Number(Number::Int(0)))),
+            ("(0 == 0)", "&&", Some(ConstantValue::Bool(true))),
+            ("(0 != 0)", "||", Some(ConstantValue::Bool(false))),
+            ("(0 < 1)", "&&", Some(ConstantValue::Bool(true))),
+            ("(0 <= 1)", "&&", Some(ConstantValue::Bool(true))),
+            ("(1 > 0)", "&&", Some(ConstantValue::Bool(true))),
+            ("(1 >= 0)", "&&", Some(ConstantValue::Bool(true))),
+            ("true", "&&", Some(ConstantValue::Bool(true))),
+            ("false", "||", Some(ConstantValue::Bool(false))),
+            ("null", "??", Some(ConstantValue::Null)),
+            ("''", "+", Some(ConstantValue::String(String::new()))),
+        ] {
+            let source = format!(
+                "const value = {operand}{};",
+                format!(" {op} {operand}").repeat(100_000)
+            );
+            let parsed = parse(&source);
+            assert!(parsed.errors.is_empty(), "{op}: {:?}", parsed.errors);
+            let TopLevelDecl::Variable(variable) =
+                parsed.tree.program(&source).declarations().next().unwrap()
+            else {
+                panic!("expected a variable declaration");
+            };
+            let expression = variable
+                .declarators()
+                .next()
+                .unwrap()
+                .initializer()
+                .unwrap();
+            with_source("", |_, model, signatures| {
+                let fields = HashMap::new();
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                // Isolate stack depth from the independently enforced value budget.
+                evaluator.remaining_bytes = usize::MAX;
+                assert_eq!(evaluator.evaluate(expression), expected, "{op}");
+                let mut limited = ConstEvaluator::new(None, &fields, model, signatures);
+                assert_eq!(limited.evaluate(expression), None, "{op}");
+            });
+        }
+    }
+
+    #[test]
+    fn binary_worklist_preserves_short_circuit_and_deferred_dependencies() {
+        for (first, op, expected, visits_right) in [
+            ("false", "&&", Some(ConstantValue::Bool(false)), false),
+            ("true", "||", Some(ConstantValue::Bool(true)), false),
+            (
+                "1",
+                "??",
+                Some(ConstantValue::Number(Number::Int(1))),
+                false,
+            ),
+            ("left", "&&", None, false),
+            ("left", "||", None, false),
+            ("left", "??", None, false),
+            ("left", "+", None, true),
+            ("missing", "+", None, false),
+        ] {
+            let source = format!(
+                "const left = missing; const right = 1; const value = {first}{};",
+                format!(" {op} right").repeat(100_000)
+            );
+            let parsed = parse(&source);
+            assert!(parsed.errors.is_empty(), "{op}: {:?}", parsed.errors);
+            let fields: HashMap<_, _> = parsed
+                .tree
+                .program(&source)
+                .declarations()
+                .filter_map(|declaration| match declaration {
+                    TopLevelDecl::Variable(variable) => Some(variable),
+                    _ => None,
+                })
+                .flat_map(|variable| variable.declarators())
+                .map(|declarator| (declarator.name().name(), declarator.initializer().unwrap()))
+                .collect();
+            with_source("", |_, model, signatures| {
+                let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                evaluator.remaining_bytes = usize::MAX;
+                assert_eq!(evaluator.resolve_name(&["value"]), expected, "{first} {op}");
+                assert_eq!(
+                    evaluator
+                        .constants
+                        .contains_key(&ConstantKey::Field("right")),
+                    visits_right,
+                    "{first} {op}"
+                );
+                assert!(evaluator.pending_constants.is_empty());
+                assert!(!evaluator.failed);
+            });
+        }
     }
 
     #[test]

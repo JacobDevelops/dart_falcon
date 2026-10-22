@@ -1,7 +1,7 @@
 //! Dart constant-context roots shared by all rules analyzing a file.
 
 use falcon_syntax::cst::visit::{
-    Visitor, walk_annotation, walk_enum_decl, walk_expr, walk_field_decl, walk_local_var,
+    Visitor, walk_annotation, walk_enum_decl, walk_expr_chain, walk_field_decl, walk_local_var,
     walk_program, walk_switch_case,
 };
 use falcon_syntax::cst::*;
@@ -153,23 +153,25 @@ impl<'a> Visitor<'a> for ConstContexts {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        let explicit = match node {
-            Expr::New(node) => node.is_const(),
-            Expr::List(node) => node.is_const(),
-            Expr::Map(node) => node.is_const(),
-            Expr::Set(node) => node.is_const(),
-            Expr::Record(node) => node.is_const(),
-            Expr::Paren(node) => node.syntax().child_token(TokenKind::Const).is_some(),
-            Expr::DotShorthand(node) => node.is_const(),
-            Expr::Call(call) => {
-                matches!(call.callee().unparenthesized(), Expr::DotShorthand(shorthand) if shorthand.is_const())
+        walk_expr_chain(self, node, |visitor, node| {
+            let explicit = match node {
+                Expr::New(node) => node.is_const(),
+                Expr::List(node) => node.is_const(),
+                Expr::Map(node) => node.is_const(),
+                Expr::Set(node) => node.is_const(),
+                Expr::Record(node) => node.is_const(),
+                Expr::Paren(node) => node.syntax().child_token(TokenKind::Const).is_some(),
+                Expr::DotShorthand(node) => node.is_const(),
+                Expr::Call(call) => {
+                    matches!(call.callee().unparenthesized(), Expr::DotShorthand(shorthand) if shorthand.is_const())
+                }
+                _ => false,
+            };
+            if explicit {
+                visitor.explicit.spans.push(node.span());
             }
-            _ => false,
-        };
-        if explicit {
-            self.explicit.spans.push(node.span());
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 }
 
@@ -183,6 +185,21 @@ mod tests {
     fn span(source: &str, text: &str) -> Span {
         let start = source.find(text).unwrap();
         Span::new(start, start + text.len())
+    }
+
+    #[test]
+    fn long_initializer_chains_keep_nested_constant_contexts_on_the_normal_stack() {
+        let source = format!(
+            "void f(int a) {{ final value = a{} + const [Object()].length; }}",
+            " + a".repeat(99_998)
+        );
+        let parsed = falcon_dart_parser::parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let contexts = ConstContexts::new(parsed.tree.program(&source));
+        assert!(!contexts.contains(&span(&source, "a + a")));
+        assert!(!contexts.contains(&span(&source, "const [Object()]")));
+        assert!(contexts.contains_including_explicit(&span(&source, "const [Object()]")));
+        assert!(contexts.contains(&span(&source, "Object()")));
     }
 
     #[test]

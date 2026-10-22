@@ -45,6 +45,9 @@ impl TypeEnvironment {
                     | BinaryOp::NullCoalesce
             )
         };
+        if binary.op() == BinaryOp::NullCoalesce {
+            return Some(self.infer_null_coalesce(binary, context, None, cached, publish));
+        }
         if !ordinary(binary) {
             return None;
         }
@@ -90,6 +93,72 @@ impl TypeEnvironment {
             publish(Expr::Binary(binary), &left);
         }
         Some(left)
+    }
+
+    fn infer_null_coalesce<'a>(
+        &self,
+        binary: BinaryExpr<'a>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        expected: Option<&ResolvedType>,
+        cached: impl Fn(Expr<'a>) -> Option<ResolvedType>,
+        mut publish: impl FnMut(Expr<'a>, &ResolvedType),
+    ) -> ResolvedType {
+        let nullable = expected.map(|context| context.with_nullable(true));
+        // Nested operands inherit the nullable context without the outer argument fallback.
+        let nested = InferenceContext {
+            argument_fallback: None,
+            ..queries::context_copy(context)
+        };
+        let mut spine = vec![binary];
+        let mut operand = binary.left();
+        let mut prefix = None;
+        loop {
+            if let Some(ty) = cached(operand) {
+                prefix = Some(ty);
+                break;
+            }
+            match operand {
+                Expr::Binary(next) if next.op() == BinaryOp::NullCoalesce => {
+                    spine.push(next);
+                    operand = next.left();
+                }
+                _ => break,
+            }
+        }
+        let mut ty = prefix.unwrap_or_else(|| {
+            self.infer_with_context(
+                operand,
+                context.model,
+                context.signatures,
+                context.type_parameters,
+                nullable.as_ref(),
+                context.lookup,
+            )
+        });
+        for (depth, binary) in spine.into_iter().enumerate().rev() {
+            let (context, expected) = if depth == 0 {
+                (context, expected)
+            } else {
+                (&nested, nullable.as_ref())
+            };
+            let left = self.contextual_callable_type(ty.non_null(), context, expected);
+            let right = self.infer_with_context(
+                binary.right(),
+                context.model,
+                context.signatures,
+                context.type_parameters,
+                expected
+                    .filter(|ty| !has_inference_holes(ty))
+                    .or(Some(&left).filter(|ty| **ty != ResolvedType::UNKNOWN)),
+                context.lookup,
+            );
+            ty = contextual_join(&[left, right], expected, context.signatures, context.model);
+            if depth != 0 {
+                ty = self.contextual_callable_type(ty, context, expected);
+            }
+            publish(Expr::Binary(binary), &ty);
+        }
+        ty
     }
 
     pub fn infer_constant_name(
@@ -1035,8 +1104,6 @@ impl TypeEnvironment {
             }
             Expr::Binary(binary) => {
                 let op = binary.op();
-                let left = binary.left();
-                let right = binary.right();
                 match op {
                     BinaryOp::EqEq
                     | BinaryOp::NotEq
@@ -1049,29 +1116,7 @@ impl TypeEnvironment {
                     // `NonNull(T1) ⊔ T2`: `e1` takes the context `K?`, `e2` the
                     // context `K`, or `NonNull(T1)` without one.
                     BinaryOp::NullCoalesce => {
-                        let left_context = expected.map(|context| context.with_nullable(true));
-                        let left = self
-                            .infer_with_context(
-                                left,
-                                model,
-                                signatures,
-                                type_parameters,
-                                left_context.as_ref(),
-                                lookup,
-                            )
-                            .non_null();
-                        let left = self.contextual_callable_type(left, &context, expected);
-                        let right = self.infer_with_context(
-                            right,
-                            model,
-                            signatures,
-                            type_parameters,
-                            expected
-                                .filter(|ty| !has_inference_holes(ty))
-                                .or(Some(&left).filter(|ty| **ty != ResolvedType::UNKNOWN)),
-                            lookup,
-                        );
-                        contextual_join(&[left, right], expected, signatures, model)
+                        self.infer_null_coalesce(binary, &context, expected, |_| None, |_, _| {})
                     }
                     _ => self
                         .infer_binary_chain(binary, &context, |_| None, |_, _| {})

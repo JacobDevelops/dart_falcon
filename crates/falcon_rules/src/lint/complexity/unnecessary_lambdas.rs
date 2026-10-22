@@ -54,7 +54,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_expr, walk_formal_param, walk_local_var, walk_program, walk_stmt,
+    Visitor, walk_expr_chain, walk_formal_param, walk_local_var, walk_program, walk_stmt,
 };
 use falcon_syntax::cst::*;
 
@@ -174,10 +174,12 @@ impl<'a> Visitor<'a> for StableLocals {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        for init in collection_for_inits(node) {
-            self.record_for_init(init);
-        }
-        walk_expr(self, node);
+        walk_expr_chain(self, node, |visitor, expr| {
+            for init in collection_for_inits(expr) {
+                visitor.record_for_init(init);
+            }
+            true
+        });
     }
 
     fn visit_program(&mut self, node: Program<'a>) {
@@ -831,5 +833,25 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if self.is_unnecessary(node, state) {
             self.diags.push(self.ctx.diagnostic("Closure should be a tearoff.", node.span()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_dart_parser::parse;
+
+    #[test]
+    fn stable_locals_walks_long_initializer_chains() {
+        let source = format!(
+            "void f() {{ final result = {}[for (final item in items) item].length; }}",
+            "0 + ".repeat(20_000),
+        );
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let mut stable = StableLocals::default();
+        stable.visit_program(parsed.tree.program(&source));
+        assert_eq!(stable.0.len(), 2);
+        assert!(stable.0.values().all(|callee| *callee == Callee::Variable));
     }
 }

@@ -15,8 +15,8 @@ use crate::{
 use falcon_diagnostics::Diagnostic;
 
 use falcon_syntax::cst::visit::{
-    Visitor, walk_annotation, walk_expr, walk_formal_param_annotations, walk_function_body,
-    walk_pattern, walk_top_level_decl, walk_type_params,
+    Visitor, walk_annotation, walk_expr, walk_expr_chain, walk_formal_param_annotations,
+    walk_function_body, walk_pattern, walk_top_level_decl, walk_type_params,
 };
 use falcon_syntax::cst::*;
 
@@ -1384,43 +1384,129 @@ enum CallableParams<'a> {
 
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     fn visit_binary_chain(&mut self, root: BinaryExpr<'a>) {
-        let mut parents = Vec::new();
-        let mut expression = Expr::Binary(root);
-        while let Expr::Binary(binary) = expression {
-            if binary.op().operator_name().is_none() {
-                break;
-            }
-            self.visitor.visit_expr(expression, &self.state);
-            parents.push(binary);
-            self.state.expected.push(None);
-            expression = binary.left();
+        enum Pending<'a> {
+            Left(BinaryExpr<'a>),
+            Right {
+                binary: BinaryExpr<'a>,
+                before: Option<TypeEnvironment>,
+                left_effects: bool,
+            },
         }
-        self.visit_expr(expression);
-        while let Some(binary) = parents.pop() {
-            self.state.expected.pop();
-            let expected = self
-                .state
-                .signatures
-                .resolved_member(
-                    &self.state.infer(binary.left()),
-                    binary.op().operator_name().expect("operator chain"),
-                    &self.state.model,
-                )
-                .and_then(|(signature, owner)| {
-                    signature
-                        .positional
-                        .first()
-                        .map(|ty| self.state.model.substitute(ty, &owner))
-                })
-                .unwrap_or(ResolvedType::UNKNOWN);
-            self.with_expected(expected, |walker| walker.visit_expr(binary.right()));
-            FlowContext {
-                model: &self.state.model,
-                signatures: &self.state.signatures,
-                type_parameters: &self.state.type_parameters,
-                field_promotions: self.state.private_field_promotion,
+
+        let finish = |walker: &mut Self, pending, right_effects| {
+            let Pending::Right {
+                binary,
+                before,
+                left_effects,
+            } = pending
+            else {
+                unreachable!("binary right operand was not visited");
+            };
+            walker.state.expected.pop();
+            if let Some(before) = before {
+                walker.state.environment = before.join(&walker.state.environment);
             }
-            .finish_expression(&mut self.state.environment, Expr::Binary(binary), None);
+            FlowContext {
+                model: &walker.state.model,
+                signatures: &walker.state.signatures,
+                type_parameters: &walker.state.type_parameters,
+                field_promotions: walker.state.private_field_promotion,
+            }
+            .finish_expression(
+                &mut walker.state.environment,
+                Expr::Binary(binary),
+                None,
+            );
+            left_effects || right_effects || matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)
+        };
+        let mut pending = Vec::new();
+        let mut effects = false;
+        walk_expr_chain(self, Expr::Binary(root), |walker, expression| {
+            // Finish completed parents before preparing the next sibling's context.
+            while matches!(pending.last(), Some(Pending::Right { .. })) {
+                effects = finish(walker, pending.pop().unwrap(), effects);
+            }
+            if let Some(Pending::Left(binary)) = pending.last()
+                && binary.right().syntax().id() == expression.syntax().id()
+            {
+                let binary = *binary;
+                pending.pop();
+                walker.state.expected.pop();
+                let before = binary
+                    .op()
+                    .operator_name()
+                    .is_none()
+                    .then(|| walker.state.environment.clone());
+                let expected = match binary.op() {
+                    BinaryOp::And | BinaryOp::Or => {
+                        // Only effectful prefixes need their promotions and invalidating writes replayed.
+                        if effects {
+                            walker.assume_condition(binary.left(), binary.op() == BinaryOp::And);
+                        }
+                        ResolvedType::UNKNOWN
+                    }
+                    BinaryOp::NullCoalesce => walker
+                        .state
+                        .expected()
+                        .filter(|ty| {
+                            !matches!(
+                                ty,
+                                ResolvedType {
+                                    kind: ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
+                                }
+                            )
+                        })
+                        .cloned()
+                        .unwrap_or_else(|| walker.state.infer(binary.left())),
+                    _ => walker
+                        .state
+                        .signatures
+                        .resolved_member(
+                            &walker.state.infer(binary.left()),
+                            binary.op().operator_name().expect("operator chain"),
+                            &walker.state.model,
+                        )
+                        .and_then(|(signature, owner)| {
+                            signature
+                                .positional
+                                .first()
+                                .map(|ty| walker.state.model.substitute(ty, &owner))
+                        })
+                        .unwrap_or(ResolvedType::UNKNOWN),
+                };
+                walker.state.expected.push(Some(expected));
+                pending.push(Pending::Right {
+                    binary,
+                    before,
+                    left_effects: effects,
+                });
+            }
+            if let Expr::Binary(binary) = expression {
+                walker.visitor.visit_expr(expression, &walker.state);
+                pending.push(Pending::Left(binary));
+                walker.state.expected.push(
+                    binary
+                        .op()
+                        .operator_name()
+                        .is_none()
+                        .then_some(ResolvedType::UNKNOWN),
+                );
+                true
+            } else {
+                walker.visit_expr(expression);
+                effects = !matches!(
+                    expression,
+                    Expr::Ident(_)
+                        | Expr::IntLit(_)
+                        | Expr::DoubleLit(_)
+                        | Expr::BoolLit(_)
+                        | Expr::NullLit(_)
+                );
+                false
+            }
+        });
+        while let Some(parent) = pending.pop() {
+            effects = finish(self, parent, effects);
         }
     }
 
@@ -3644,9 +3730,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::Binary(binary) = node
-            && binary.op().operator_name().is_some()
-        {
+        if let Expr::Binary(binary) = node {
             let depth = self.state.inference_depth.get();
             self.state.inference_depth.set(depth + 1);
             self.visit_binary_chain(binary);
@@ -3819,38 +3903,6 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     matches!(then_expr, Expr::Throw(_)),
                     matches!(else_expr, Expr::Throw(_)),
                 );
-            }
-            Expr::Binary(n) if matches!(n.op(), BinaryOp::And | BinaryOp::Or) => {
-                let left = n.left();
-                let right = n.right();
-                self.with_expected(ResolvedType::UNKNOWN, |walker| walker.visit_expr(left));
-                let before = self.state.environment.clone();
-                self.assume_condition(left, matches!(n.op(), BinaryOp::And));
-                self.with_expected(ResolvedType::UNKNOWN, |walker| walker.visit_expr(right));
-                self.state.environment = before.join(&self.state.environment);
-            }
-            Expr::Binary(n) if matches!(n.op(), BinaryOp::NullCoalesce) => {
-                let left = n.left();
-                let right = n.right();
-                self.with_expected(ResolvedType::UNKNOWN, |walker| walker.visit_expr(left));
-                let before = self.state.environment.clone();
-                let expected = self
-                    .state
-                    .expected()
-                    .filter(|ty| {
-                        !matches!(
-                            ty,
-                            ResolvedType {
-                                kind: ResolvedTypeKind::Unknown
-                            } | ResolvedType {
-                                kind: ResolvedTypeKind::Dynamic
-                            }
-                        )
-                    })
-                    .cloned()
-                    .unwrap_or_else(|| self.state.infer(left));
-                self.with_expected(expected, |walker| walker.visit_expr(right));
-                self.state.environment = before.join(&self.state.environment);
             }
             Expr::Assign(n) if matches!(n.op(), AssignOp::NullCoalesceEq) => {
                 let target = n.target();
