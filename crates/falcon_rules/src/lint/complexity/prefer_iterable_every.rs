@@ -1,9 +1,9 @@
-//! Flags `!iterable.where(...).isEmpty` and `iterable.where(...).length == other.length`.
+//! Flags `iterable.where(predicate).isEmpty` and filtered-length comparisons.
 //!
-//! Both patterns ask whether every element satisfies a predicate;
-//! `iterable.every(...)` says so directly and short-circuits on the first
-//! failure. The rule matches a negated `.where(...).isEmpty` and a
-//! `.where(...).length` compared for equality against a `.length`.
+//! An empty filtered iterable means every element fails the predicate. Prefer
+//! `iterable.every((element) => !predicate(element))` to express that condition
+//! directly. When a filtered length equals the original iterable's length, use
+//! `iterable.every(predicate)` instead. Both forms can stop at the first failure.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -28,16 +28,25 @@ impl Rule for PreferIterableEvery {
     }
 }
 
-fn is_negated_where_is_empty(expr: Expr<'_>) -> Option<Span> {
-    if let Expr::Unary(unary) = expr.unparenthesized()
-        && unary.op() == UnaryOp::Bang
-        && let Expr::Field(field) = unary.operand().unparenthesized()
+fn is_where_is_empty(expr: Expr<'_>) -> Option<Span> {
+    if let Expr::Field(field) = expr.unparenthesized()
         && field.field().name() == "isEmpty"
         && let Expr::Call(call) = field.object().unparenthesized()
         && let Expr::Field(where_field) = call.callee().unparenthesized()
         && where_field.field().name() == "where"
     {
-        return Some(unary.span());
+        let mut parent = expr.syntax().parent();
+        while parent
+            .and_then(Expr::cast)
+            .is_some_and(|node| matches!(node, Expr::Paren(_)))
+        {
+            parent = parent.and_then(|node| node.parent());
+        }
+        if matches!(parent.and_then(Expr::cast), Some(Expr::Unary(unary)) if unary.op() == UnaryOp::Bang)
+        {
+            return None;
+        }
+        return Some(field.span());
     }
     None
 }
@@ -75,11 +84,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if matches!(node, Expr::Paren(_)) {
             return StructuralTraversal::Continue;
         }
-        if let Some(span) =
-            is_negated_where_is_empty(node).or_else(|| is_where_length_eq_length(node))
-        {
+        let matched = is_where_is_empty(node)
+            .map(|span| (span, "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`."))
+            .or_else(|| is_where_length_eq_length(node)
+                .map(|span| (span, "Use `every(predicate)` instead of comparing the filtered and original iterable lengths.")));
+        if let Some((span, message)) = matched {
             self.diags.push(self.ctx.diagnostic(
-                "Use .every() instead of .where().isEmpty or .where().length comparison.",
+                message,
                 span,
             ));
         }

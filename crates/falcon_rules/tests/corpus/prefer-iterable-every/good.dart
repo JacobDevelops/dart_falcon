@@ -1,4 +1,4 @@
-// Good: using .every() instead of !.where().isEmpty
+// Good: using .every() for a universal predicate.
 void validateItems(List<int> items) {
   if (items.every((x) => x > 0)) {
     print('All items are positive');
@@ -30,4 +30,14 @@ void checkMatrix(List<List<int>> matrix) {
 void useOtherMethods(List<int> numbers) {
   final filtered = numbers.where((n) => n > 0).toList();
   final hasAny = numbers.any((n) => n > 10);
+}
+
+// Negated filtered emptiness is any(predicate), not every(predicate).
+void existentialChecks(List<int> items) {
+  final hasPositive = !items.where((x) => x > 0).isEmpty;
+  final parenthesized = !(items.where((x) => x > 0).isEmpty);
+  final nested = !((items.where((x) => x > 0).isEmpty));
+  final allNonPositive = items.every((x) => !(x > 0));
+  final empty = <int>[].every((x) => !(x > 0));
+  print([hasPositive, parenthesized, nested, allNonPositive, empty]);
 }
