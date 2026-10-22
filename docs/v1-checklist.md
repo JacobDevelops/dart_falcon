@@ -8,19 +8,11 @@ Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every i
 
 ### Stage 5: start now
 
-Batches 16 and 17 work in separate modules.
-
 #### 16. Type model
 
 Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that construct or match it. After batch 15.
 
 - [ ] **Hide `ResolvedType` internals.** 7 rule sites build `Interface { occurrence: Default::default(), … }` and 328 match its variants. Add constructors and views, make metadata fields crate-private.
-
-#### 17. Scoping and flow
-
-Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow handling, the inference environment module, and the element trait in `falcon_syntax`. After batch 15.
-
-- [ ] **Terminating fixpoint.** `converge`/`infer_programs` (`semantic.rs:4641-4695`) rescan every program, SDK included, each round, and only end if every pass makes monotone progress, which nothing enforces. Add a worklist that requeues only declarations whose inputs changed. Enforce at the type-map writes that a step only fills an unknown type or tightens a partial one, never replaces a concrete type. Keep a round cap as a backstop; hitting it is an internal error naming the declarations still changing, not silently half-inferred types.
 
 #### 18. Analyze infrastructure
 

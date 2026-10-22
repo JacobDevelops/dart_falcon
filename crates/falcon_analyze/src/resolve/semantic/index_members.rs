@@ -157,6 +157,7 @@ impl SignatureIndex {
 
     /// The static read type of a top-level variable or getter.
     pub fn value_type(&self, identity: &DeclarationIdentity) -> Option<&ResolvedType> {
+        index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Value(identity));
         self.value_types.get(identity)
     }
 
@@ -195,6 +196,9 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&ResolvedSignature> {
+        index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Constructor(
+            identity, name,
+        ));
         self.type_facts.get(identity)?.constructors.get(name)
     }
 
@@ -207,9 +211,12 @@ impl SignatureIndex {
                     self.type_kind(identity),
                     Some(TypeKind::Class | TypeKind::MixinClass | TypeKind::Enum)
                 )
-                && self
-                    .declaration(identity)
-                    .is_some_and(|facts| facts.constructors.is_empty()))
+                && self.declaration(identity).is_some_and(|facts| {
+                    index_fixpoint::record_inference_read(
+                        index_fixpoint::InferenceInputRef::Constructors(identity),
+                    );
+                    facts.constructors.is_empty()
+                }))
     }
 
     /// Whether a constructor can be referenced as a callable tear-off.
@@ -325,6 +332,9 @@ impl SignatureIndex {
 
     /// Whether the declaration explicitly records the named constructor as const.
     pub fn is_const_constructor(&self, identity: &DeclarationIdentity, name: &str) -> bool {
+        index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Constructors(
+            identity,
+        ));
         self.declaration(identity).is_some_and(|facts| {
             facts
                 .constructors

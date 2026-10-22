@@ -8,7 +8,7 @@
 
 use super::*;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct OverrideShape {
     required_positional: usize,
     required_named: FxHashSet<String>,
@@ -42,7 +42,7 @@ impl OverrideShape {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct InheritedMember {
     declaring_type: DeclarationIdentity,
     kind: MemberKind,
@@ -889,9 +889,19 @@ impl SignatureIndex {
 
     fn combine_inherited(
         &self,
-        candidates: Vec<InheritedMember>,
+        mut candidates: Vec<InheritedMember>,
         model: &SemanticModel<'_>,
     ) -> Vec<InheritedMember> {
+        // A diamond can reach the same instantiated declaration repeatedly.
+        // Keep distinct substitutions of a generic owner as distinct evidence.
+        let mut index = 0;
+        while index < candidates.len() {
+            if candidates[..index].contains(&candidates[index]) {
+                candidates.remove(index);
+            } else {
+                index += 1;
+            }
+        }
         if candidates.len() < 2 {
             return candidates;
         }
@@ -901,6 +911,19 @@ impl SignatureIndex {
             .any(|member| method(member.kind) != method(candidates[0].kind))
         {
             return Vec::new();
+        }
+        // Comparing a pending signature as compatible can select a concrete
+        // winner that later evidence invalidates. Preserve known individual
+        // slots for a lone candidate, but wait before combining candidates.
+        if let Some(index) = candidates.iter().position(|candidate| {
+            candidate.positional.iter().any(has_inference_holes)
+                || candidate.named.values().any(has_inference_holes)
+                || has_inference_holes(&candidate.return_type)
+        }) && index_fixpoint::defer_inherited_combination()
+        {
+            let mut pending = candidates.into_iter().nth(index).unwrap();
+            pending.known = false;
+            return vec![pending];
         }
         // An interface exposes one combined signature, not every equivalent
         // path to it. Keeping all equivalent candidates grows exponentially
@@ -1293,7 +1316,7 @@ mod tests {
             &[],
         );
         let types = TypeIndex::from_program(parsed.program());
-        let mut index = SignatureIndex::from_project_files(
+        let index = SignatureIndex::from_project_files(
             &[(path.clone(), Arc::clone(&parsed))],
             &identities,
             &types,
@@ -1425,7 +1448,12 @@ mod tests {
             model.core_type("String", false)
         );
         let sdk_child = model.resolve_name("SdkChild").unwrap();
-        index
+        // Install the unavailable SDK edge before any inference publishes the
+        // omitted parameter, rather than trying to replace a settled Dynamic.
+        let mut pending = SignatureIndex::default();
+        pending.add_declarations(parsed.program(), &model, true);
+        pending.finish();
+        pending
             .type_facts
             .entry(sdk_child.clone())
             .or_default()
@@ -1439,9 +1467,9 @@ mod tests {
                 extension_type: false,
             }],
         ));
-        index.infer_override_types(parsed.program(), &model);
+        pending.infer_programs(&[(parsed.program(), model)]);
         assert_eq!(
-            index.member(&sdk_child, "helper").unwrap().positional[0],
+            pending.member(&sdk_child, "helper").unwrap().positional[0],
             ResolvedType::Unknown
         );
     }

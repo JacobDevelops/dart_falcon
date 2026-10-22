@@ -1,5 +1,294 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum InferenceInput {
+    Value(DeclarationIdentity),
+    Member(DeclarationIdentity, String),
+    Constructor(DeclarationIdentity, String),
+    Constructors(DeclarationIdentity),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum InferenceInputRef<'a> {
+    Value(&'a DeclarationIdentity),
+    Member(&'a DeclarationIdentity, &'a str),
+    Constructor(&'a DeclarationIdentity, &'a str),
+    Constructors(&'a DeclarationIdentity),
+}
+
+trait InferenceInputQuery {
+    fn as_input(&self) -> InferenceInputRef<'_>;
+}
+
+impl InferenceInputQuery for InferenceInput {
+    fn as_input(&self) -> InferenceInputRef<'_> {
+        match self {
+            Self::Value(identity) => InferenceInputRef::Value(identity),
+            Self::Member(identity, name) => InferenceInputRef::Member(identity, name),
+            Self::Constructor(identity, name) => InferenceInputRef::Constructor(identity, name),
+            Self::Constructors(identity) => InferenceInputRef::Constructors(identity),
+        }
+    }
+}
+
+impl InferenceInputQuery for InferenceInputRef<'_> {
+    fn as_input(&self) -> InferenceInputRef<'_> {
+        *self
+    }
+}
+
+impl Hash for InferenceInput {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_input().hash(state);
+    }
+}
+
+impl Hash for dyn InferenceInputQuery + '_ {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_input().hash(state);
+    }
+}
+
+impl PartialEq for dyn InferenceInputQuery + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_input() == other.as_input()
+    }
+}
+
+impl Eq for dyn InferenceInputQuery + '_ {}
+
+impl<'a> Borrow<dyn InferenceInputQuery + 'a> for InferenceInput {
+    fn borrow(&self) -> &(dyn InferenceInputQuery + 'a) {
+        self
+    }
+}
+
+impl InferenceInputRef<'_> {
+    fn into_owned(self) -> InferenceInput {
+        match self {
+            Self::Value(identity) => InferenceInput::Value(identity.clone()),
+            Self::Member(identity, name) => {
+                InferenceInput::Member(identity.clone(), name.to_owned())
+            }
+            Self::Constructor(identity, name) => {
+                InferenceInput::Constructor(identity.clone(), name.to_owned())
+            }
+            Self::Constructors(identity) => InferenceInput::Constructors(identity.clone()),
+        }
+    }
+}
+
+#[derive(Default)]
+struct InferenceRecording {
+    reads: FxHashSet<InferenceInput>,
+    writes: FxHashSet<InferenceInput>,
+    blocked: bool,
+    settlement: Option<std::rc::Rc<std::cell::RefCell<InferenceSettlement>>>,
+    output: Option<InferenceInput>,
+}
+
+thread_local! {
+    static INFERENCE_RECORDINGS: std::cell::RefCell<Vec<InferenceRecording>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub(super) fn inference_deferred() -> bool {
+    INFERENCE_RECORDINGS.with(|recordings| {
+        recordings
+            .borrow()
+            .last()
+            .is_some_and(|recording| recording.blocked)
+    })
+}
+
+pub(super) fn defer_inherited_combination() -> bool {
+    INFERENCE_RECORDINGS.with(|recordings| {
+        let mut recordings = recordings.borrow_mut();
+        let Some(recording) = recordings.last_mut() else {
+            return false;
+        };
+        if recording.settlement.is_some() && !recording.blocked {
+            return false;
+        }
+        recording.blocked = true;
+        true
+    })
+}
+
+struct InferenceSettlement {
+    producers: Arc<FxHashMap<InferenceInput, Vec<usize>>>,
+    pending: FxHashSet<usize>,
+    order: std::collections::VecDeque<usize>,
+}
+
+impl InferenceSettlement {
+    fn sources<'a>(
+        producers: &'a FxHashMap<InferenceInput, Vec<usize>>,
+        input: InferenceInputRef<'_>,
+    ) -> Option<&'a Vec<usize>> {
+        let query: &dyn InferenceInputQuery = &input;
+        producers.get(query).or_else(|| match input {
+            InferenceInputRef::Constructor(identity, _) => {
+                let aggregate = InferenceInputRef::Constructors(identity);
+                let query: &dyn InferenceInputQuery = &aggregate;
+                producers.get(query)
+            }
+            _ => None,
+        })
+    }
+
+    fn new(
+        producers: Arc<FxHashMap<InferenceInput, Vec<usize>>>,
+        outputs: &[InferenceInput],
+        reads: &[FxHashSet<InferenceInput>],
+        blocked: &std::collections::BTreeSet<usize>,
+    ) -> Self {
+        let mut dependencies = vec![FxHashSet::default(); reads.len()];
+        let mut dependents = vec![Vec::new(); reads.len()];
+        for (consumer, inputs) in reads.iter().enumerate() {
+            for input in inputs {
+                // Getter and setter work can share an output. The publication
+                // guard is not a dependency on any producer of that same key.
+                if *input == outputs[consumer] {
+                    continue;
+                }
+                for &source in Self::sources(&producers, input.as_input())
+                    .into_iter()
+                    .flatten()
+                {
+                    if dependencies[consumer].insert(source) {
+                        dependents[source].push(consumer);
+                    }
+                }
+            }
+        }
+        let mut pending: FxHashSet<_> = blocked.iter().copied().collect();
+        let mut discovery: Vec<_> = blocked.iter().copied().collect();
+        while let Some(source) = discovery.pop() {
+            for &consumer in &dependents[source] {
+                if pending.insert(consumer) {
+                    discovery.push(consumer);
+                }
+            }
+        }
+        let mut remaining = vec![0; reads.len()];
+        let mut ready = std::collections::VecDeque::new();
+        for (id, sources) in dependencies.iter().enumerate() {
+            if pending.contains(&id) {
+                remaining[id] = sources
+                    .iter()
+                    .filter(|source| pending.contains(source))
+                    .count();
+                if remaining[id] == 0 {
+                    ready.push_back(id);
+                }
+            }
+        }
+        let mut order = std::collections::VecDeque::new();
+        while let Some(source) = ready.pop_front() {
+            order.push_back(source);
+            for &consumer in &dependents[source] {
+                if pending.contains(&consumer) {
+                    remaining[consumer] -= 1;
+                    if remaining[consumer] == 0 {
+                        ready.push_back(consumer);
+                    }
+                }
+            }
+        }
+        Self {
+            producers,
+            pending,
+            order,
+        }
+    }
+
+    fn input_stable(&self, input: InferenceInputRef<'_>) -> bool {
+        Self::sources(&self.producers, input)
+            .is_none_or(|sources| sources.iter().all(|source| !self.pending.contains(source)))
+    }
+}
+
+pub(super) fn record_inference_read(input: InferenceInputRef<'_>) {
+    INFERENCE_RECORDINGS.with(|recordings| {
+        if let Some(recording) = recordings.borrow_mut().last_mut() {
+            let query: &dyn InferenceInputQuery = &input;
+            if let Some(settlement) = &recording.settlement
+                && recording
+                    .output
+                    .as_ref()
+                    .is_none_or(|output| output.as_input() != input)
+                && !settlement.as_ref().borrow().input_stable(input)
+            {
+                recording.blocked = true;
+            }
+            if !recording.reads.contains(query) {
+                recording.reads.insert(input.into_owned());
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static INFERENCE_VISITS: std::cell::RefCell<Vec<FxHashMap<InferenceInput, usize>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+pub(super) fn with_inference_visits(run: impl FnOnce()) -> FxHashMap<InferenceInput, usize> {
+    struct Visits;
+    impl Drop for Visits {
+        fn drop(&mut self) {
+            INFERENCE_VISITS.with(|visits| {
+                visits.borrow_mut().pop();
+            });
+        }
+    }
+    INFERENCE_VISITS.with(|visits| visits.borrow_mut().push(FxHashMap::default()));
+    let guard = Visits;
+    run();
+    let counts =
+        INFERENCE_VISITS.with(|visits| std::mem::take(visits.borrow_mut().last_mut().unwrap()));
+    drop(guard);
+    counts
+}
+
+pub(super) fn record_inference_write(input: impl FnOnce() -> InferenceInput) {
+    INFERENCE_RECORDINGS.with(|recordings| {
+        if let Some(recording) = recordings.borrow_mut().last_mut() {
+            recording.writes.insert(input());
+        }
+    });
+}
+
+/// The stack restores an enclosing recorder even if inference unwinds.
+struct InferenceRecorder;
+
+impl InferenceRecorder {
+    fn start(recording: InferenceRecording) -> Self {
+        INFERENCE_RECORDINGS.with(|recordings| {
+            recordings.borrow_mut().push(recording);
+        });
+        Self
+    }
+
+    fn finish(self) -> InferenceRecording {
+        let recording = INFERENCE_RECORDINGS
+            .with(|recordings| std::mem::take(recordings.borrow_mut().last_mut().unwrap()));
+        drop(self);
+        recording
+    }
+}
+
+impl Drop for InferenceRecorder {
+    fn drop(&mut self) {
+        INFERENCE_RECORDINGS.with(|recordings| {
+            recordings.borrow_mut().pop();
+        });
+    }
+}
+
 /// A value declaration is either unqualified or import-prefixed. Longer
 /// instance chains are handled one receiver at a time, never rescanned.
 pub(super) fn initializer_value_name(expression: Expr<'_>) -> Option<QualifiedName<'_>> {
@@ -319,90 +608,78 @@ impl SignatureIndex {
         cyclic
     }
 
-    fn resolve_value_initializers(
+    fn resolve_value_initializer(
         &mut self,
-        program: Program<'_>,
+        identity: &DeclarationIdentity,
+        initializer: Expr<'_>,
         model: &SemanticModel<'_>,
         pending: &mut FxHashMap<DeclarationIdentity, ResolvedType>,
         retry_partial: bool,
-    ) -> bool {
-        let mut changed = false;
-        for declaration in program.declarations() {
-            let TopLevelDecl::Variable(variable) = declaration else {
-                continue;
-            };
-            if variable.var_type().is_some() {
-                continue;
-            }
-            for declarator in variable.declarators() {
-                if !model.owns_declaration(declarator.name().name()) {
-                    continue;
-                }
-                let Some(identity) = model.resolve_value(declarator.name().name()) else {
-                    continue;
-                };
-                if self.is_cyclic_value(&identity) {
-                    continue;
-                }
-                if self
-                    .value_types
-                    .get(&identity)
-                    .is_some_and(|ty| !has_inference_holes(ty))
-                {
-                    continue;
-                }
-                let Some(initializer) = declarator.initializer() else {
-                    continue;
-                };
-                let ty = TypeEnvironment::new().infer_with_signatures(
-                    initializer,
-                    model,
-                    self,
-                    &TypeParameterScope::default(),
-                );
-                let ty = if ty == ResolvedType::Null {
-                    ResolvedType::Dynamic
-                } else {
-                    ty
-                };
-                if has_inference_holes(&ty) {
-                    // Retain partial evidence until concrete progress stops.
-                    // Once published, only accept a hole-free replacement:
-                    // feeding partial refinements back would grow recursive
-                    // containers indefinitely.
-                    if ty != ResolvedType::Unknown
-                        && (retry_partial
-                            || self
-                                .value_types
-                                .get(&identity)
-                                .is_none_or(|published| *published == ResolvedType::Unknown))
-                    {
-                        pending.insert(identity, ty);
-                    } else {
-                        pending.remove(&identity);
-                    }
-                } else {
-                    if retry_partial
-                        && !self.declaration_dependencies_known(
-                            initializer,
-                            model,
-                            None,
-                            &TypeEnvironment::new(),
-                            &TypeParameterScope::default(),
-                        )
-                    {
-                        // Replace stale partial evidence even when this
-                        // concrete candidate must wait for a dependency.
-                        pending.insert(identity, ty);
-                        continue;
-                    }
-                    pending.remove(&identity);
-                    self.value_types.insert(identity, ty);
-                    changed = true;
-                }
-            }
+    ) {
+        if self.is_cyclic_value(identity)
+            || self
+                .value_type(identity)
+                .is_some_and(|ty| !has_inference_holes(ty))
+        {
+            return;
         }
-        changed
+        let ty = TypeEnvironment::new().infer_with_signatures(
+            initializer,
+            model,
+            self,
+            &TypeParameterScope::default(),
+        );
+        let ty = if ty == ResolvedType::Null {
+            ResolvedType::Dynamic
+        } else {
+            ty
+        };
+        let dependencies_known = has_inference_holes(&ty)
+            || !retry_partial
+            || self.declaration_dependencies_known(
+                initializer,
+                model,
+                None,
+                &TypeEnvironment::new(),
+                &TypeParameterScope::default(),
+            );
+        if inference_deferred() {
+            pending.remove(identity);
+            return;
+        }
+        if has_inference_holes(&ty) {
+            // Delay partial evidence until concrete progress stops. Published
+            // partials may become concrete, but must never recursively expand.
+            if ty != ResolvedType::Unknown
+                && (retry_partial
+                    || self
+                        .value_types
+                        .get(identity)
+                        .is_none_or(|ty| *ty == ResolvedType::Unknown))
+            {
+                pending.insert(identity.clone(), ty);
+            } else {
+                pending.remove(identity);
+            }
+        } else if !dependencies_known {
+            pending.insert(identity.clone(), ty);
+        } else {
+            pending.remove(identity);
+            self.publish_value_type(identity, ty);
+        }
+    }
+
+    fn publish_value_type(&mut self, identity: &DeclarationIdentity, ty: ResolvedType) {
+        if inference_deferred() {
+            return;
+        }
+        let slot = self
+            .value_types
+            .entry(identity.clone())
+            .or_insert(ResolvedType::Unknown);
+        if refine_inferred_type(slot, ty) {
+            record_inference_write(|| InferenceInput::Value(identity.clone()));
+        }
     }
 
     pub(super) fn add_program(&mut self, program: Program<'_>, model: &SemanticModel<'_>) {
@@ -412,184 +689,375 @@ impl SignatureIndex {
         self.mark_field_forwarders(model.identities, model.types);
     }
 
-    fn converge(
-        &mut self,
-        programs: &[(Program<'_>, SemanticModel<'_>)],
-        mut step: impl FnMut(&mut Self, Program<'_>, &SemanticModel<'_>) -> bool,
-    ) {
-        loop {
-            let mut changed = false;
-            for (program, model) in programs {
-                changed |= step(self, *program, model);
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
     pub(super) fn infer_programs(&mut self, programs: &[(Program<'_>, SemanticModel<'_>)]) {
+        enum Work<'a> {
+            Constructor(index_build::ConstructorInferenceEntry<'a>),
+            Override(DeclarationIdentity, ClassMember<'a>),
+            Member {
+                identity: DeclarationIdentity,
+                name: &'a str,
+                expression: Option<Expr<'a>>,
+                context: Arc<(TypeEnvironment, TypeParameterScope)>,
+            },
+            Value(DeclarationIdentity, Expr<'a>),
+        }
+        impl Work<'_> {
+            fn header(&self) -> bool {
+                matches!(
+                    self,
+                    Self::Constructor(_)
+                        | Self::Override(..)
+                        | Self::Member {
+                            expression: None,
+                            ..
+                        }
+                )
+            }
+
+            fn output_ref(&self) -> InferenceInputRef<'_> {
+                match self {
+                    Self::Value(identity, _) => InferenceInputRef::Value(identity),
+                    Self::Constructor(index_build::ConstructorInferenceEntry::Alias {
+                        identity,
+                        ..
+                    }) => InferenceInputRef::Constructors(identity),
+                    Self::Constructor(_) => {
+                        InferenceInputRef::Constructor(self.identity(), self.name())
+                    }
+                    _ => InferenceInputRef::Member(self.identity(), self.name()),
+                }
+            }
+
+            fn output(&self) -> InferenceInput {
+                self.output_ref().into_owned()
+            }
+
+            fn identity(&self) -> &DeclarationIdentity {
+                match self {
+                    Self::Constructor(
+                        index_build::ConstructorInferenceEntry::Alias { identity, .. }
+                        | index_build::ConstructorInferenceEntry::Declaration { identity, .. },
+                    )
+                    | Self::Override(identity, _)
+                    | Self::Member { identity, .. }
+                    | Self::Value(identity, _) => identity,
+                }
+            }
+
+            fn name(&self) -> &str {
+                match self {
+                    Self::Constructor(index_build::ConstructorInferenceEntry::Alias {
+                        name,
+                        ..
+                    }) => name,
+                    Self::Constructor(index_build::ConstructorInferenceEntry::Declaration {
+                        constructor_name,
+                        ..
+                    }) => constructor_name,
+                    Self::Override(_, member) => match member {
+                        ClassMember::Method(method) => method.name().name(),
+                        ClassMember::Operator(operator) => operator.lookup_name(),
+                        ClassMember::Setter(setter) => setter.name().name(),
+                        _ => unreachable!("non-callable override inference entry"),
+                    },
+                    Self::Member { name, .. } => name,
+                    Self::Value(..) => "initializer",
+                }
+            }
+        }
+
         let mut dependencies = FxHashMap::default();
-        for (program, model) in programs {
+        let mut entries = Vec::new();
+        for (file, (program, model)) in programs.iter().enumerate() {
             Self::collect_value_dependencies(*program, model, &mut dependencies);
-        }
-        self.cyclic_values = Self::cyclic_value_identities(&dependencies);
-        // Settle forwarded and inherited headers before initializers can freeze implicit types.
-        self.converge(programs, Self::resolve_constructor_formals);
-        self.converge(programs, Self::infer_override_types);
-        let mut pending_values = FxHashMap::default();
-        let mut retry_partial = true;
-        loop {
-            loop {
-                let mut declarations_changed = false;
-                let mut values_changed = false;
-                for (program, model) in programs {
-                    declarations_changed |= self.infer_declaration_types(*program, model);
-                    values_changed |= self.resolve_value_initializers(
-                        *program,
-                        model,
-                        &mut pending_values,
-                        retry_partial,
-                    );
-                }
-                if declarations_changed {
-                    self.converge(programs, Self::resolve_constructor_formals);
-                }
-                if !declarations_changed && !values_changed {
-                    break;
-                }
-            }
-            if pending_values.is_empty() {
-                break;
-            }
-            // Published partials may become concrete, but never expand to another partial.
-            self.value_types.extend(pending_values.drain());
-            retry_partial = false;
-        }
-    }
-
-    /// Propagate callable headers before initializers and revisit dependencies
-    /// whose inherited getter or field types were previously unresolved.
-    pub(super) fn infer_override_types(
-        &mut self,
-        program: Program<'_>,
-        model: &SemanticModel<'_>,
-    ) -> bool {
-        let mut changed = false;
-        let mut lookup = inherited::OverrideInferenceLookup::default();
-        for declaration in program.declarations() {
-            if !model.owns_top_level_declaration(declaration) {
-                continue;
-            }
-            let (name, members) = match declaration {
-                TopLevelDecl::Class(class) => (class.name(), class.members()),
-                TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
-                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
-                TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
-                // Extension type members do not override implemented members.
-                _ => continue,
-            };
-            let Some(identity) = model.resolve_name(name.name()) else {
-                continue;
-            };
-            for member in members.filter(|member| inherits_method_types(*member)) {
-                changed |= self.inherit_method_types(&identity, member, model, &mut lookup);
-            }
-        }
-        changed
-    }
-
-    /// Advance callable, field, and getter inference to a fixed point.
-    /// Unresolved initializer dependencies remain holes for later passes.
-    fn infer_declaration_types(&mut self, program: Program<'_>, model: &SemanticModel<'_>) -> bool {
-        let mut changed = self.infer_override_types(program, model);
-        for declaration in program.declarations() {
-            if !model.owns_top_level_declaration(declaration) {
-                continue;
-            }
-            let parameters = declaration.type_params();
-            let (name, members) = match declaration {
-                TopLevelDecl::Class(class) => (class.name(), class.members()),
-                TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
-                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
-                TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
-                TopLevelDecl::ExtensionType(extension) => (extension.name(), extension.members()),
-                _ => continue,
-            };
-            let Some(identity) = model.resolve_name(name.name()) else {
-                continue;
-            };
-            if !members.clone().any(|member| match member {
-                ClassMember::Field(field) if field.field_type().is_none() => {
-                    field.declarators().any(|declarator| {
-                        self.member_entry(&identity, declarator.name().name())
-                            .and_then(|entry| entry.field.as_ref())
-                            .is_some_and(|(_, ty)| {
-                                matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic)
-                            })
-                    })
-                }
-                ClassMember::Getter(getter) if getter.return_type().is_none() => self
-                    .member_type_pending(
-                        &identity,
-                        getter.name().name(),
-                        model,
-                        &mut FxHashSet::default(),
-                    ),
-                _ => false,
-            }) {
-                continue;
-            }
-            let mut scope = TypeParameterScope::default();
-            scope.push(parameters.clone(), model);
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: identity.clone(),
-                arguments: parameters
-                    .filter_map(|parameter| scope.lookup(parameter.name().name()))
-                    .collect(),
-                nullable: false,
-                extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
-            };
-            let mut environment = TypeEnvironment::new();
-            environment.declare_receiver(receiver);
-            for member in members {
-                match member {
-                    ClassMember::Field(field) if field.field_type().is_none() => {
-                        for declarator in field.declarators() {
-                            changed |= self.infer_member_type(
-                                &identity,
-                                declarator.name().name(),
-                                declarator.initializer(),
-                                model,
-                                &environment,
-                                &scope,
-                            );
+            entries.extend(
+                Self::constructor_inference_entries(*program, model)
+                    .into_iter()
+                    .map(|entry| (file, Work::Constructor(entry))),
+            );
+            for declaration in program.declarations() {
+                if let TopLevelDecl::Variable(variable) = declaration {
+                    if variable.var_type().is_none() {
+                        for declarator in variable.declarators() {
+                            if model.owns_declaration(declarator.name().name())
+                                && let Some(identity) =
+                                    model.resolve_value(declarator.name().name())
+                                && let Some(expression) = declarator.initializer()
+                            {
+                                entries.push((file, Work::Value(identity, expression)));
+                            }
                         }
                     }
-                    ClassMember::Getter(getter)
-                        if getter.return_type().is_none()
-                            && self.member_type_pending(
-                                &identity,
-                                getter.name().name(),
-                                model,
-                                &mut FxHashSet::default(),
-                            ) =>
-                    {
-                        changed |= self.infer_member_type(
-                            &identity,
-                            getter.name().name(),
-                            None,
-                            model,
-                            &environment,
-                            &scope,
-                        );
+                    continue;
+                }
+                if !model.owns_top_level_declaration(declaration) {
+                    continue;
+                }
+                let (name, members) = match declaration {
+                    TopLevelDecl::Class(class) => (class.name(), class.members()),
+                    TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
+                    TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
+                    TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
+                    TopLevelDecl::ExtensionType(extension) => {
+                        (extension.name(), extension.members())
                     }
-                    _ => {}
+                    _ => continue,
+                };
+                let Some(identity) = model.resolve_name(name.name()) else {
+                    continue;
+                };
+                let mut context = None;
+                let mut member_context = || {
+                    Arc::clone(context.get_or_insert_with(|| {
+                        let mut scope = TypeParameterScope::default();
+                        let parameters = declaration.type_params();
+                        scope.push(parameters.clone(), model);
+                        let receiver = ResolvedType::Interface {
+                            occurrence: Default::default(),
+                            identity: identity.clone(),
+                            arguments: parameters
+                                .filter_map(|parameter| scope.lookup(parameter.name().name()))
+                                .collect(),
+                            nullable: false,
+                            extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
+                        };
+                        let mut environment = TypeEnvironment::new();
+                        environment.declare_receiver(receiver);
+                        Arc::new((environment, scope))
+                    }))
+                };
+                for member in members {
+                    if !matches!(declaration, TopLevelDecl::ExtensionType(_))
+                        && inherits_method_types(member)
+                    {
+                        entries.push((file, Work::Override(identity.clone(), member)));
+                    }
+                    match member {
+                        ClassMember::Field(field) if field.field_type().is_none() => {
+                            for declarator in field.declarators() {
+                                entries.push((
+                                    file,
+                                    Work::Member {
+                                        identity: identity.clone(),
+                                        name: declarator.name().name(),
+                                        expression: declarator.initializer(),
+                                        context: member_context(),
+                                    },
+                                ));
+                            }
+                        }
+                        ClassMember::Getter(getter) if getter.return_type().is_none() => {
+                            entries.push((
+                                file,
+                                Work::Member {
+                                    identity: identity.clone(),
+                                    name: getter.name().name(),
+                                    expression: None,
+                                    context: member_context(),
+                                },
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
-        changed
+        self.cyclic_values = Self::cyclic_value_identities(&dependencies);
+        let mut headers = std::collections::VecDeque::with_capacity(entries.len());
+        let mut bodies = std::collections::VecDeque::with_capacity(entries.len());
+        let mut queued = vec![true; entries.len()];
+        let mut visits = vec![0usize; entries.len()];
+        let mut reads = vec![FxHashSet::default(); entries.len()];
+        let mut subscribers: FxHashMap<InferenceInput, FxHashSet<usize>> = FxHashMap::default();
+        for (id, (_, work)) in entries.iter().enumerate() {
+            if work.header() {
+                headers.push_back(id);
+            } else {
+                bodies.push_back(id);
+            }
+        }
+        let mut pending = FxHashMap::default();
+        let mut retry_partial = true;
+        let mut recording = InferenceRecording::default();
+        let mut blocked = std::collections::BTreeSet::new();
+        let mut settling = None;
+        let mut producer_data = None;
+        let mut settlement: Option<std::rc::Rc<std::cell::RefCell<InferenceSettlement>>> = None;
+        // A backstop proportional to possible producer/consumer pairs must not
+        // reject long chains or wide fan-in. Queue exhaustion and monotone
+        // writes establish convergence independently of this generous budget.
+        let work_count = entries.len().max(1);
+        let visit_limit = work_count.saturating_mul(work_count).saturating_mul(8);
+        'worklist: loop {
+            let processed = headers.pop_front().or_else(|| bodies.pop_front());
+            if let Some(id) = processed {
+                queued[id] = false;
+                visits[id] += 1;
+                assert!(
+                    visits[id] <= visit_limit,
+                    "declaration inference did not converge for {:?}.{}; previously read inputs: {:?}",
+                    entries[id].1.identity(),
+                    entries[id].1.name(),
+                    reads[id]
+                );
+                let (file, work) = &entries[id];
+                #[cfg(test)]
+                INFERENCE_VISITS.with(|visits| {
+                    if let Some(counts) = visits.borrow_mut().last_mut() {
+                        let input = work.output();
+                        *counts.entry(input).or_default() += 1;
+                    }
+                });
+                let model = &programs[*file].1;
+                recording.blocked = false;
+                recording.settlement = if settling.take() == Some(id) {
+                    settlement.clone()
+                } else {
+                    None
+                };
+                recording.output = recording.settlement.as_ref().map(|_| work.output());
+                let recorder = InferenceRecorder::start(std::mem::take(&mut recording));
+                match work {
+                    Work::Constructor(entry) => {
+                        self.resolve_constructor_entry(entry, model);
+                    }
+                    Work::Override(identity, member) => {
+                        self.inherit_method_types(
+                            identity,
+                            *member,
+                            model,
+                            &mut inherited::OverrideInferenceLookup::default(),
+                        );
+                    }
+                    Work::Member {
+                        identity,
+                        name,
+                        expression,
+                        context,
+                    } => {
+                        self.infer_member_type(
+                            identity,
+                            name,
+                            *expression,
+                            model,
+                            &context.0,
+                            &context.1,
+                        );
+                    }
+                    Work::Value(identity, expression) => {
+                        self.resolve_value_initializer(
+                            identity,
+                            *expression,
+                            model,
+                            &mut pending,
+                            retry_partial,
+                        );
+                    }
+                }
+                recording = recorder.finish();
+                if let Some(state) = &settlement {
+                    let state_ref = state.as_ref().borrow();
+                    let expanded = recording.reads.difference(&reads[id]).any(|input| {
+                        input.as_input() != work.output_ref()
+                            && !state_ref.input_stable(input.as_input())
+                    });
+                    let invalidate = expanded
+                        || (recording.blocked
+                            && (recording.settlement.is_some() || !blocked.contains(&id)));
+                    drop(state_ref);
+                    if invalidate {
+                        settlement = None;
+                    } else if recording.settlement.is_some() {
+                        state.borrow_mut().pending.remove(&id);
+                    }
+                }
+                if recording.blocked {
+                    blocked.insert(id);
+                } else {
+                    blocked.remove(&id);
+                }
+                for input in reads[id].difference(&recording.reads) {
+                    subscribers.get_mut(input).unwrap().remove(&id);
+                }
+                for input in recording.reads.difference(&reads[id]) {
+                    subscribers.entry(input.clone()).or_default().insert(id);
+                }
+                std::mem::swap(&mut reads[id], &mut recording.reads);
+                recording.reads.clear();
+            } else if !pending.is_empty() {
+                recording.blocked = false;
+                recording.settlement = None;
+                recording.output = None;
+                let recorder = InferenceRecorder::start(std::mem::take(&mut recording));
+                for (identity, ty) in pending.drain() {
+                    self.publish_value_type(&identity, ty);
+                }
+                retry_partial = false;
+                recording = recorder.finish();
+            } else {
+                if blocked.is_empty() {
+                    break;
+                }
+                let (outputs, producers) = producer_data.get_or_insert_with(|| {
+                    let outputs: Vec<_> = entries.iter().map(|(_, work)| work.output()).collect();
+                    let mut producers: FxHashMap<InferenceInput, Vec<usize>> = FxHashMap::default();
+                    for (id, (_, work)) in entries.iter().enumerate() {
+                        producers.entry(outputs[id].clone()).or_default().push(id);
+                        if matches!(
+                            work,
+                            Work::Constructor(
+                                index_build::ConstructorInferenceEntry::Declaration { .. }
+                            )
+                        ) {
+                            producers
+                                .entry(InferenceInput::Constructors(work.identity().clone()))
+                                .or_default()
+                                .push(id);
+                        }
+                    }
+                    (outputs, Arc::new(producers))
+                });
+                let state = settlement.get_or_insert_with(|| {
+                    std::rc::Rc::new(std::cell::RefCell::new(InferenceSettlement::new(
+                        Arc::clone(producers),
+                        outputs,
+                        &reads,
+                        &blocked,
+                    )))
+                });
+                let id = loop {
+                    let Some(id) = state.borrow_mut().order.pop_front() else {
+                        break 'worklist;
+                    };
+                    if blocked.contains(&id) {
+                        break id;
+                    }
+                    state.borrow_mut().pending.remove(&id);
+                };
+                settling = Some(id);
+                queued[id] = true;
+                if entries[id].1.header() {
+                    headers.push_back(id);
+                } else {
+                    bodies.push_back(id);
+                }
+                continue;
+            }
+            for input in recording.writes.drain() {
+                if let Some(dependents) = subscribers.get(&input) {
+                    for &id in dependents {
+                        if Some(id) != processed && !queued[id] {
+                            queued[id] = true;
+                            if entries[id].1.header() {
+                                headers.push_back(id);
+                            } else {
+                                bodies.push_back(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Fill omitted instance callable types from the native combined inherited
@@ -600,7 +1068,7 @@ impl SignatureIndex {
         member: ClassMember<'_>,
         model: &SemanticModel<'_>,
         lookup: &mut inherited::OverrideInferenceLookup,
-    ) -> bool {
+    ) {
         let (name, params, infer_return, setter) = match member {
             ClassMember::Method(method) => (
                 method.name().name(),
@@ -615,7 +1083,7 @@ impl SignatureIndex {
                 false,
             ),
             ClassMember::Setter(setter) => (setter.name().name(), None, false, true),
-            _ => return false,
+            _ => return,
         };
         let unresolved = self.override_inference_unresolved(identity, name, setter, model, lookup);
         let inherited = if unresolved {
@@ -628,18 +1096,21 @@ impl SignatureIndex {
         } else {
             ResolvedType::Dynamic
         };
+        if inference_deferred() {
+            return;
+        }
         let Some(entry) = self
             .member_entries
             .get_mut(identity)
             .and_then(|entries| entries.get_mut(name))
         else {
-            return false;
+            return;
         };
-        let mut changed = false;
-        let mut update = |slot: &mut ResolvedType, ty: ResolvedType| {
-            if *slot != ty {
-                *slot = ty;
-                changed = true;
+        let update = |slot: &mut ResolvedType, ty: ResolvedType| {
+            if refine_inferred_type(slot, ty) {
+                record_inference_write(|| {
+                    InferenceInput::Member(identity.clone(), name.to_owned())
+                });
             }
         };
         if setter {
@@ -651,10 +1122,10 @@ impl SignatureIndex {
                     .clone();
                 update(slot, ty);
             }
-            return changed;
+            return;
         }
         let Some(signature) = entry.signature.as_mut() else {
-            return false;
+            return;
         };
         let untyped = |param: FormalParam<'_>| {
             param.param_type().is_none()
@@ -692,7 +1163,6 @@ impl SignatureIndex {
                 .unwrap_or(fallback);
             update(&mut signature.return_type, ty);
         }
-        changed
     }
 
     fn infer_member_type(
@@ -703,15 +1173,15 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
         environment: &TypeEnvironment,
         scope: &TypeParameterScope,
-    ) -> bool {
+    ) {
         let Some(entry) = self.member_entry(identity, name) else {
-            return false;
+            return;
         };
         let Some((_, current)) = &entry.field else {
-            return false;
+            return;
         };
-        if !has_inference_holes(current) && !matches!(current, ResolvedType::Dynamic) {
-            return false;
+        if !has_inference_holes(current) {
+            return;
         }
         let mut inherited = None;
         if entry.facts.iter().any(|fact| !fact.is_static)
@@ -729,7 +1199,7 @@ impl SignatureIndex {
                 // A super member may itself still need an inference pass.
                 // Do not freeze an initializer/body type ahead of that pass.
                 if has_inference_holes(&ty) {
-                    return false;
+                    return;
                 }
                 if inherited.as_ref().is_some_and(|previous| *previous != ty) {
                     inherited = Some(ResolvedType::Unknown);
@@ -740,11 +1210,7 @@ impl SignatureIndex {
         }
         let ty = if let Some(ty) = inherited {
             ty
-        } else {
-            let Some(expression) = expression else {
-                // Getter bodies do not participate in declaration inference.
-                return false;
-            };
+        } else if let Some(expression) = expression {
             if !self.declaration_dependencies_known(
                 expression,
                 model,
@@ -752,7 +1218,7 @@ impl SignatureIndex {
                 environment,
                 scope,
             ) {
-                return false;
+                return;
             }
             let lookup = |name: &str| {
                 self.member_entry(identity, name)
@@ -761,12 +1227,18 @@ impl SignatureIndex {
             let ty = environment
                 .infer_with_signatures_using_lookup(expression, model, self, scope, &lookup);
             if has_inference_holes(&ty) {
-                return false;
+                return;
             }
             ty
+        } else if entry.implicit_getter {
+            // Getter bodies do not participate in declaration inference. An
+            // omitted getter with no inherited evidence retains its default.
+            ResolvedType::Dynamic
+        } else {
+            return;
         };
-        if *current == ty {
-            return false;
+        if inference_deferred() || *current == ty {
+            return;
         }
         let entry = self
             .member_entries
@@ -774,67 +1246,24 @@ impl SignatureIndex {
             .unwrap()
             .get_mut(name)
             .unwrap();
-        entry.field.as_mut().unwrap().1 = ty.clone();
-        if entry
-            .read
-            .as_ref()
-            .is_some_and(|ty| matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic))
-        {
-            entry.read = Some(ty.clone());
-        }
-        if entry
-            .write
-            .as_ref()
-            .is_some_and(|ty| matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic))
-        {
-            entry.write = Some(ty);
-        }
-        true
-    }
-
-    /// An implicit dynamic getter may still inherit its type in a later
-    /// pass. Explicit dynamic getters and dynamic fields are already complete.
-    fn member_type_pending(
-        &self,
-        identity: &DeclarationIdentity,
-        name: &str,
-        model: &SemanticModel<'_>,
-        visited: &mut FxHashSet<DeclarationIdentity>,
-    ) -> bool {
-        if !visited.insert(identity.clone()) {
-            return false;
-        }
-        let Some(entry) = self.member_entry(identity, name) else {
-            return false;
-        };
-        let Some((_, ty)) = &entry.field else {
-            return false;
-        };
-        if has_inference_holes(ty) {
-            return true;
+        let mut changed = refine_inferred_type(&mut entry.field.as_mut().unwrap().1, ty.clone());
+        if let Some(read) = entry.read.as_mut() {
+            changed |= refine_inferred_type(read, ty.clone());
         }
         if !entry.implicit_getter
-            || !matches!(ty, ResolvedType::Dynamic)
-            || entry.facts.iter().all(|fact| fact.is_static)
+            && let Some(write) = entry.write.as_mut()
         {
-            return false;
+            changed |= refine_inferred_type(write, ty);
         }
-        self.type_facts
-            .get(identity)
-            .and_then(|facts| facts.supertypes.as_ref())
-            .is_some_and(|(_, supertypes)| {
-                supertypes.iter().any(|supertype| {
-                    let Some(ResolvedType::Interface { identity, .. }) =
-                        self.resolved_instance_owner(supertype, name, InstanceAccess::Read, model)
-                    else {
-                        return false;
-                    };
-                    self.member_entry(&identity, name)
-                        .and_then(|entry| entry.field.as_ref())
-                        .is_some_and(|(_, ty)| !matches!(ty, ResolvedType::Dynamic))
-                        || self.member_type_pending(&identity, name, model, visited)
-                })
-            })
+        if changed {
+            record_inference_write(|| InferenceInput::Member(identity.clone(), name.to_owned()));
+        }
+    }
+
+    fn member_type_pending(&self, identity: &DeclarationIdentity, name: &str) -> bool {
+        self.member_entry(identity, name)
+            .and_then(|entry| entry.field.as_ref())
+            .is_some_and(|(_, ty)| has_inference_holes(ty))
     }
 
     fn declaration_dependencies_known(
@@ -868,13 +1297,9 @@ impl SignatureIndex {
         // Each field result is retained once, so a.b.c does not infer a.b again for c.
         let mut receivers: FxHashMap<NodeId, ResolvedType> = FxHashMap::default();
         let mut member_receivers: FxHashMap<NodeId, ResolvedType> = FxHashMap::default();
-        let mut visited = FxHashSet::default();
         InitializerDependencies {
             environment: environment.clone(),
             inspect: |expression: Expr<'_>, environment: &TypeEnvironment| {
-                if unresolved {
-                    return;
-                }
                 if let Some(name) = initializer_value_name(expression)
                     && !environment.is_bound(name.prefix.unwrap_or(name.name))
                 {
@@ -899,9 +1324,7 @@ impl SignatureIndex {
                         })
                         .is_some_and(has_inference_holes);
                     if let Some(owner) = member_owner {
-                        visited.clear();
-                        unresolved |=
-                            self.member_type_pending(&owner, name.name, model, &mut visited);
+                        unresolved |= self.member_type_pending(&owner, name.name);
                     }
                 }
                 if let Expr::Field(access) = expression {
@@ -911,9 +1334,7 @@ impl SignatureIndex {
                         .filter(|name| !environment.is_bound(name.prefix.unwrap_or(name.name)))
                         .and_then(|name| model.resolve_name(name));
                     if let Some(identity) = &static_owner {
-                        visited.clear();
-                        unresolved |=
-                            self.member_type_pending(identity, field.name(), model, &mut visited);
+                        unresolved |= self.member_type_pending(identity, field.name());
                     }
                     let receiver = receivers.remove(&object.syntax().id()).unwrap_or_else(|| {
                         environment.receiver_type(
@@ -944,9 +1365,7 @@ impl SignatureIndex {
                             model,
                         )
                     {
-                        visited.clear();
-                        unresolved |=
-                            self.member_type_pending(&identity, field.name(), model, &mut visited);
+                        unresolved |= self.member_type_pending(&identity, field.name());
                     }
                     let ty = static_owner
                         .as_ref()
@@ -1131,5 +1550,50 @@ impl SignatureIndex {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod recording_tests {
+    use super::*;
+
+    #[test]
+    fn inference_recordings_are_exact_nested_and_unwind_safe() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<SignatureIndex>();
+        let index = SignatureIndex::default();
+        let owner = DeclarationIdentity::sdk("test", "Owner");
+        let unrelated = DeclarationIdentity::sdk("test", "Unrelated");
+        let outer = InferenceRecorder::start(InferenceRecording::default());
+        index.member_entry(&owner, "first");
+        index.member_entry(&owner, "first");
+        index.is_const_constructor(&owner, "new");
+        {
+            let inner = InferenceRecorder::start(InferenceRecording::default());
+            index.member_entry(&unrelated, "first");
+            let recording = inner.finish();
+            assert_eq!(
+                recording.reads,
+                FxHashSet::from_iter([InferenceInput::Member(unrelated.clone(), "first".into())])
+            );
+        }
+        let unwind = std::panic::catch_unwind(|| {
+            let _inner = InferenceRecorder::start(InferenceRecording::default());
+            record_inference_read(InferenceInputRef::Value(&unrelated));
+            panic!("exercise recorder cleanup");
+        });
+        assert!(unwind.is_err());
+        index.member_entry(&owner, "second");
+        let recording = outer.finish();
+        assert_eq!(
+            recording.reads,
+            FxHashSet::from_iter([
+                InferenceInput::Member(owner.clone(), "first".into()),
+                InferenceInput::Member(owner.clone(), "second".into()),
+                InferenceInput::Constructors(owner),
+            ])
+        );
+        assert!(recording.writes.is_empty());
+        INFERENCE_RECORDINGS.with(|recordings| assert!(recordings.borrow().is_empty()));
     }
 }

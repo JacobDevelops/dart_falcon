@@ -8186,3 +8186,443 @@ fn interface_getter_implementations_do_not_hide_no_such_method_forwarders() {
 fn contains_parameter(ty: &ResolvedType) -> bool {
     matches!(ty, ResolvedType::TypeParameter { .. })
 }
+
+#[test]
+fn inference_worklist_discovers_receivers_after_reverse_dependencies_settle() {
+    use std::fmt::Write as _;
+    let mut source = String::with_capacity(16_384);
+    source.push_str("final result = receiver.item0; final receiver = Holder(); class Holder {");
+    for index in 0..128 {
+        write!(source, "final item{index} = item{};", index + 1).unwrap();
+    }
+    source.push_str("final item128 = seed0; }");
+    for index in 0..128 {
+        write!(source, "final seed{index} = seed{};", index + 1).unwrap();
+    }
+    source.push_str("final seed128 = 7;");
+    for index in 0..256 {
+        write!(source, "final independent{index} = 'unchanged';").unwrap();
+    }
+    with_model(&source, |program, model| {
+        let signatures = SignatureIndex::from_program(program, model);
+        let result = signatures
+            .value_type(&model.resolve_value("result").unwrap())
+            .unwrap();
+        assert!(result.interface("dart:core", "int"), "{result:?}");
+        let holder = model.resolve_name("Holder").unwrap();
+        for index in [0, 64, 128] {
+            let ty = &signatures
+                .field(&holder, &format!("item{index}"))
+                .unwrap()
+                .1;
+            assert!(ty.interface("dart:core", "int"), "{index}: {ty:?}");
+        }
+        assert!(
+            signatures
+                .value_type(&model.resolve_value("independent255").unwrap())
+                .unwrap()
+                .interface("dart:core", "String")
+        );
+    });
+}
+
+#[test]
+fn inference_worklist_preserves_explicit_types_while_forwarding_headers() {
+    with_model(
+        "class Child extends Base { Child(super.value); \
+             echo(dynamic argument) => argument; dynamic get selected => 1; } \
+         class Base { final value = seed; Base(this.value); \
+             dynamic echo(dynamic argument) => argument; dynamic get selected => 0; } \
+         final seed = 7; dynamic pinned = seed; num annotated = seed; \
+         final result = Child(1).value; \
+         final noEvidence = Plain().selected; \
+         class Plain { get selected => 1; echo(argument) => argument; }",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let child = model.resolve_name("Child").unwrap();
+            let constructor = signatures.constructor(&child, "new").unwrap();
+            assert!(constructor.positional[0].interface("dart:core", "int"));
+            let method = signatures.member(&child, "echo").unwrap();
+            assert_eq!(method.positional, [ResolvedType::Dynamic]);
+            assert_eq!(method.return_type, ResolvedType::Dynamic);
+            assert_eq!(
+                &signatures.field(&child, "selected").unwrap().1,
+                &ResolvedType::Dynamic
+            );
+            assert_eq!(
+                signatures.value_type(&model.resolve_value("pinned").unwrap()),
+                Some(&ResolvedType::Dynamic)
+            );
+            assert!(
+                signatures
+                    .value_type(&model.resolve_value("annotated").unwrap())
+                    .unwrap()
+                    .interface("dart:core", "num")
+            );
+            assert!(
+                signatures
+                    .value_type(&model.resolve_value("result").unwrap())
+                    .unwrap()
+                    .interface("dart:core", "int")
+            );
+            let plain = model.resolve_name("Plain").unwrap();
+            assert_eq!(
+                &signatures.field(&plain, "selected").unwrap().1,
+                &ResolvedType::Dynamic
+            );
+            assert_eq!(
+                signatures.value_type(&model.resolve_value("noEvidence").unwrap()),
+                Some(&ResolvedType::Dynamic)
+            );
+            let method = signatures.member(&plain, "echo").unwrap();
+            assert_eq!(method.positional, [ResolvedType::Dynamic]);
+            assert_eq!(method.return_type, ResolvedType::Dynamic);
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_publishes_recursive_partial_evidence_only_once() {
+    with_model(
+        "final result = [receiver.value]; final receiver = Holder(); \
+         class Holder { final value = result; }",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let result = signatures
+                .value_type(&model.resolve_value("result").unwrap())
+                .unwrap();
+            assert!(result.interface("dart:core", "List"));
+            assert_eq!(result.arguments(), &[ResolvedType::Unknown]);
+            let holder = model.resolve_name("Holder").unwrap();
+            assert_eq!(
+                &signatures.field(&holder, "value").unwrap().1,
+                &ResolvedType::Unknown
+            );
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_forwards_alias_headers_and_defaults_after_field_inference() {
+    with_model(
+        "class Alias = Base with Marker; mixin Marker {} \
+         class Base { final value = seed; Base(this.value, [int count = 7]); } \
+         final result = Alias(1).value; final seed = 1;",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let base = model.resolve_name("Base").unwrap();
+            let alias = model.resolve_name("Alias").unwrap();
+            let constructor = signatures.constructor(&alias, "new").unwrap();
+            assert!(constructor.positional[0].interface("dart:core", "int"));
+            assert!(constructor.positional[1].interface("dart:core", "int"));
+            let ParameterDefault::Inherited { owner, default } = &constructor.defaults["count"]
+            else {
+                panic!("alias constructor lost its inherited default");
+            };
+            assert_eq!(owner, &base);
+            let ParameterDefault::Declared(forwarded) = default.as_ref() else {
+                panic!("alias constructor changed its declared default");
+            };
+            let ParameterDefault::Declared(original) =
+                &signatures.constructor(&base, "new").unwrap().defaults["count"]
+            else {
+                panic!("base constructor lost its declared default");
+            };
+            assert_eq!(forwarded.id, original.id);
+            assert!(
+                signatures
+                    .value_type(&model.resolve_value("result").unwrap())
+                    .unwrap()
+                    .interface("dart:core", "int")
+            );
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_waits_for_every_inherited_candidate_before_combining() {
+    let left = "class Left implements IntBase { conflict() => 1; apply(value) {} }";
+    let right = "class Right implements NumBase { conflict() => ''; apply(value) {} }";
+    for interfaces in ["Left, Right", "Right, Left"] {
+        for (first, last) in [(left, right), (right, left)] {
+            let source = format!(
+                "abstract class IntBase {{ int conflict(); void apply(int value); }} \
+                 abstract class NumBase {{ String conflict(); void apply(num value); }} \
+                 {first} \
+                 abstract class Combined implements {interfaces} {{ conflict(); apply(value); }} \
+                 {last}"
+            );
+            with_model(&source, |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let combined = model.resolve_name("Combined").unwrap();
+                assert_eq!(
+                    signatures
+                        .member(&combined, "conflict")
+                        .unwrap()
+                        .return_type,
+                    ResolvedType::Dynamic,
+                    "{source}"
+                );
+                assert!(
+                    signatures.member(&combined, "apply").unwrap().positional[0]
+                        .interface("dart:core", "num"),
+                    "{source}"
+                );
+            });
+        }
+    }
+}
+
+#[test]
+fn inference_worklist_preserves_extension_getters_and_setter_read_placeholders() {
+    with_model(
+        "extension E on int { static get answer => 42; } \
+         final alias = E.answer; \
+         class C { set value(next) {} set typed(int next) {} \
+             int get paired => 1; set paired(next) {} final answer = value; }",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            assert_eq!(
+                signatures.value_type(&model.resolve_value("alias").unwrap()),
+                Some(&ResolvedType::Dynamic)
+            );
+            let owner = model.resolve_name("C").unwrap();
+            for name in ["value", "answer"] {
+                assert_eq!(
+                    &signatures.field(&owner, name).unwrap().1,
+                    &ResolvedType::Dynamic,
+                    "{name}"
+                );
+            }
+            for name in ["typed", "paired"] {
+                assert!(
+                    signatures
+                        .field(&owner, name)
+                        .unwrap()
+                        .1
+                        .interface("dart:core", "int"),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_visits_independent_entries_once() {
+    use std::fmt::Write as _;
+    let mut source = String::from(
+        "final head = middle; final middle = tail; final tail = 1; \
+         class Stable { final field = 'unchanged'; }",
+    );
+    for index in 0..128 {
+        write!(source, "final independent{index} = 'unchanged';").unwrap();
+    }
+    let mut independent = Vec::new();
+    let mut head = None;
+    let counts = index_fixpoint::with_inference_visits(|| {
+        with_model(&source, |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            head = model.resolve_value("head");
+            assert!(
+                signatures
+                    .value_type(head.as_ref().unwrap())
+                    .unwrap()
+                    .interface("dart:core", "int")
+            );
+            for index in 0..128 {
+                independent.push(index_fixpoint::InferenceInput::Value(
+                    model.resolve_value(&format!("independent{index}")).unwrap(),
+                ));
+            }
+            independent.push(index_fixpoint::InferenceInput::Member(
+                model.resolve_name("Stable").unwrap(),
+                "field".into(),
+            ));
+        });
+    });
+    for input in independent {
+        assert_eq!(counts.get(&input), Some(&1), "{input:?}");
+    }
+    assert_eq!(
+        counts.get(&index_fixpoint::InferenceInput::Value(head.unwrap())),
+        Some(&2)
+    );
+}
+
+#[test]
+fn inference_worklist_preserves_permanent_partial_diamond_evidence() {
+    with_model(
+        "abstract class A { void g(int a, Missing b); } \
+         abstract class B implements A {} \
+         abstract class C implements A {} \
+         class D implements B, C { g(a, b) {} } \
+         abstract class E implements B, C {}",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let method = signatures
+                .member(&model.resolve_name("D").unwrap(), "g")
+                .unwrap();
+            assert!(method.positional[0].interface("dart:core", "int"));
+            assert_eq!(method.positional[1], ResolvedType::Unknown);
+            let receiver = ResolvedType::interface_identity(model.resolve_name("E").unwrap());
+            assert_eq!(
+                signatures.resolved_member_owner(&receiver, "g", model),
+                model.resolve_name("A")
+            );
+            let (method, _) = signatures.resolved_member(&receiver, "g", model).unwrap();
+            assert!(method.positional[0].interface("dart:core", "int"));
+            assert_eq!(method.positional[1], ResolvedType::Unknown);
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_settles_distinct_permanent_partials_in_dependency_order() {
+    for interfaces in ["Narrow, Wide", "Wide, Narrow"] {
+        let source = format!(
+            "class Through implements Combined, Wide {{ g(a, b) {{}} }} \
+             class Combined implements {interfaces} {{ g(a, b) {{}} }} \
+             abstract class Narrow {{ void g(int a, Missing b); }} \
+             abstract class Wide {{ void g(num a, Missing b); }} \
+             abstract class Lookup implements Narrow, Wide {{}}"
+        );
+        with_model(&source, |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            for owner in ["Through", "Combined"] {
+                let method = signatures
+                    .member(&model.resolve_name(owner).unwrap(), "g")
+                    .unwrap();
+                assert!(
+                    method.positional[0].interface("dart:core", "num"),
+                    "{owner}: {method:?}"
+                );
+                assert_eq!(method.positional[1], ResolvedType::Unknown);
+            }
+            let receiver = ResolvedType::interface_identity(model.resolve_name("Lookup").unwrap());
+            assert_eq!(
+                signatures.resolved_member_owner(&receiver, "g", model),
+                model.resolve_name("Wide")
+            );
+        });
+    }
+}
+
+#[test]
+fn inherited_diamond_keeps_distinct_instantiations_of_the_same_owner() {
+    with_model(
+        "abstract class A<T> { void g(T a, Missing b); } \
+         abstract class B implements A<int> {} \
+         abstract class C implements A<String> {} \
+         abstract class D implements B, C {}",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let receiver = ResolvedType::interface_identity(model.resolve_name("D").unwrap());
+            assert!(
+                signatures
+                    .resolved_member_owner(&receiver, "g", model)
+                    .is_none()
+            );
+            assert!(signatures.resolved_member(&receiver, "g", model).is_none());
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_does_not_publish_fallbacks_for_deferred_members() {
+    with_model(
+        "abstract class I1 { num get v; } \
+         abstract class S implements I1, I2 {} \
+         class C extends S { get v => 2; } \
+         late S receiver; \
+         final answer = receiver.v; \
+         extension Fallback on S { String get v => 'fallback'; } \
+         abstract class I2 { final v = 1; }",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let owner = model.resolve_name("C").unwrap();
+            assert!(
+                signatures
+                    .field(&owner, "v")
+                    .unwrap()
+                    .1
+                    .interface("dart:core", "int")
+            );
+            assert!(
+                signatures
+                    .value_type(&model.resolve_value("answer").unwrap())
+                    .unwrap()
+                    .interface("dart:core", "int")
+            );
+        },
+    );
+    with_model(
+        "abstract class I1 { Object get v; } \
+         abstract class S implements I1, I2 {} \
+         class C extends S { final v = 1; } \
+         num number = 1; \
+         abstract class I2 { final v = number; }",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let owner = model.resolve_name("C").unwrap();
+            assert!(
+                signatures
+                    .field(&owner, "v")
+                    .unwrap()
+                    .1
+                    .interface("dart:core", "num")
+            );
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_settles_shared_getter_setter_output_without_a_false_cycle() {
+    with_model(
+        "abstract class A { set value(Missing v); } \
+         abstract class B { set value(int v); } \
+         class C implements B, A { get value => 0; set value(v) {} }",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let owner = model.resolve_name("C").unwrap();
+            assert_eq!(
+                &signatures.field(&owner, "value").unwrap().1,
+                &ResolvedType::Dynamic,
+            );
+            assert!(
+                signatures
+                    .member_entry(&owner, "value")
+                    .unwrap()
+                    .write
+                    .as_ref()
+                    .unwrap()
+                    .interface("dart:core", "int")
+            );
+        },
+    );
+}
+
+#[test]
+fn inference_worklist_checks_late_receiver_reads_during_partial_settlement() {
+    with_model(
+        "late Source source; \
+         final answer = source.g(null).h(null); \
+         abstract class G1 { Result g(Missing value); } \
+         abstract class G2 { Result g(Missing value); } \
+         abstract class Source implements G1, G2 {} \
+         abstract class NumContract { num h(Missing value); } \
+         abstract class H1 { int h(Missing value); } \
+         abstract class H2 { int h(Missing value); } \
+         class Pending implements H1, H2 { h(value) {} } \
+         abstract class Result implements NumContract, Pending {}",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            assert!(
+                signatures
+                    .value_type(&model.resolve_value("answer").unwrap())
+                    .unwrap()
+                    .interface("dart:core", "int")
+            );
+        },
+    );
+}

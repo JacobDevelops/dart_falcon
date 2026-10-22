@@ -2,6 +2,20 @@ use super::*;
 
 type IndexedProgram<'a> = (Option<FileId>, &'a Arc<crate::ParsedFile>, bool);
 
+pub(super) enum ConstructorInferenceEntry<'a> {
+    Alias {
+        identity: DeclarationIdentity,
+        name: &'a str,
+    },
+    Declaration {
+        identity: DeclarationIdentity,
+        superclass: Option<ResolvedType>,
+        constructor_name: &'a str,
+        params: FormalParamList<'a>,
+        super_constructor: &'a str,
+    },
+}
+
 impl SignatureIndex {
     pub(crate) fn flow_writes(&self, file: FileId) -> Option<&Arc<super::flow_writes::FlowWrites>> {
         self.flow_writes.get(&Some(file))
@@ -12,6 +26,9 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&MemberEntry> {
+        index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Member(
+            identity, name,
+        ));
         self.member_entries.get(identity)?.get(name)
     }
 
@@ -729,32 +746,22 @@ impl SignatureIndex {
         }
     }
 
-    pub(super) fn resolve_constructor_formals(
-        &mut self,
-        program: Program<'_>,
+    pub(super) fn constructor_inference_entries<'a>(
+        program: Program<'a>,
         model: &SemanticModel<'_>,
-    ) -> bool {
-        enum Work<'a> {
-            Alias(&'a str),
-            Declaration {
-                identity: DeclarationIdentity,
-                superclass: Option<ResolvedType>,
-                constructors: Vec<falcon_syntax::cst::ConstructorRef<'a>>,
-            },
-        }
-
-        // Syntax and model ownership do not change during refinement. Cache the
-        // participating constructors, but retain the full declaration-count bound
-        // and source order for aliases and super-formal dependency chains.
-        let mut declaration_count = 0;
+    ) -> Vec<ConstructorInferenceEntry<'a>> {
         let mut work = Vec::new();
         for declaration in program.declarations() {
-            declaration_count += 1;
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
             if let TopLevelDecl::ClassTypeAlias(alias) = declaration {
-                work.push(Work::Alias(alias.name().name()));
+                if let Some(identity) = model.resolve_name(alias.name().name()) {
+                    work.push(ConstructorInferenceEntry::Alias {
+                        identity,
+                        name: alias.name().name(),
+                    });
+                }
                 continue;
             }
             let (name, type_parameters, superclass, members) = match declaration {
@@ -784,7 +791,7 @@ impl SignatureIndex {
                 ),
                 _ => continue,
             };
-            let constructors: Vec<_> = members
+            let mut constructors = members
                 .constructors()
                 .filter(|constructor| {
                     constructor
@@ -792,8 +799,8 @@ impl SignatureIndex {
                         .params()
                         .any(|parameter| parameter.initializing().is_some())
                 })
-                .collect();
-            if constructors.is_empty() {
+                .peekable();
+            if constructors.peek().is_none() {
                 continue;
             }
             let Some(identity) = model.resolve_name(name) else {
@@ -802,126 +809,150 @@ impl SignatureIndex {
             let mut scope = TypeParameterScope::default();
             scope.push(type_parameters, model);
             let superclass = superclass.map(|ty| model.resolve_type_in(ty, &scope));
-            work.push(Work::Declaration {
-                identity,
-                superclass,
-                constructors,
-            });
-        }
-
-        let mut resolved = false;
-        for _ in 0..declaration_count {
-            let mut changed = false;
-            for item in &work {
-                let (identity, superclass, constructors) = match item {
-                    Work::Alias(name) => {
-                        changed |= self.forward_alias_constructors(name, model);
-                        continue;
-                    }
-                    Work::Declaration {
-                        identity,
-                        superclass,
-                        constructors,
-                    } => (identity, superclass, constructors),
-                };
-                for constructor in constructors {
-                    let constructor_name = constructor
+            for mut constructor in constructors {
+                work.push(ConstructorInferenceEntry::Declaration {
+                    identity: identity.clone(),
+                    superclass: superclass.clone(),
+                    constructor_name: constructor
                         .constructor_name
-                        .map(|name| name.name())
-                        .unwrap_or("new");
-                    for parameter in constructor.params.params() {
-                        if parameter.initializing() != Some(InitializingFormal::This)
-                            || parameter.param_type().is_some()
-                        {
-                            continue;
-                        }
-                        let Some(ty) = self
-                            .member_entry(identity, parameter.name().name())
-                            .filter(|entry| {
-                                entry.facts.iter().any(|fact| {
-                                    matches!(fact.kind, MemberKind::Field { .. }) && !fact.is_static
-                                })
-                            })
-                            .and_then(|entry| entry.field.as_ref())
-                            .map(|(_, ty)| ty.clone())
-                        else {
-                            continue;
-                        };
-                        changed |= self.update_constructor_parameter_type(
-                            identity,
-                            constructor_name,
-                            constructor.params,
-                            parameter,
-                            ty,
-                        );
-                    }
-                    let Some(superclass) = superclass else {
-                        continue;
-                    };
-                    let super_constructor = constructor
+                        .map_or("new", |name| name.name()),
+                    params: constructor.params,
+                    super_constructor: constructor
                         .initializers
-                        .clone()
                         .find_map(|initializer| match initializer {
                             falcon_syntax::cst::ConstructorInitializer::SuperCall(call) => {
                                 Some(call.call_name().map_or("new", |name| name.name()))
                             }
                             _ => None,
                         })
-                        .unwrap_or("new");
-                    let positional_super = constructor.params.positional().filter(|parameter| {
-                        parameter.initializing() == Some(InitializingFormal::Super)
-                    });
-                    let named_super = constructor.params.named().filter(|parameter| {
-                        parameter.initializing() == Some(InitializingFormal::Super)
-                    });
-                    let super_formals = positional_super
-                        .enumerate()
-                        .map(|(ordinal, parameter)| (SuperFormal::Positional(ordinal), parameter))
-                        .chain(named_super.map(|parameter| {
-                            (SuperFormal::Named(parameter.name().name()), parameter)
-                        }));
-                    for (formal, parameter) in super_formals {
-                        if parameter.default_value().is_none()
-                            && matches!(
-                                parameter.kind(),
-                                ParamKind::OptionalPositional
-                                    | ParamKind::Named { required: false }
-                            )
-                        {
-                            changed |= self.inherit_super_default(
-                                (identity, constructor_name),
-                                parameter.name().name(),
-                                (superclass, super_constructor),
-                                formal,
-                            );
-                        }
-                        if parameter.param_type().is_some() {
-                            continue;
-                        }
-                        let Some(ty) = self.resolved_constructor_parameter_type(
-                            superclass,
-                            super_constructor,
-                            formal,
-                            model,
-                        ) else {
-                            continue;
-                        };
-                        changed |= self.update_constructor_parameter_type(
-                            identity,
-                            constructor_name,
-                            constructor.params,
-                            parameter,
-                            ty,
-                        );
-                    }
-                }
-            }
-            resolved |= changed;
-            if !changed {
-                break;
+                        .unwrap_or("new"),
+                });
             }
         }
-        resolved
+
+        work
+    }
+
+    pub(super) fn resolve_constructor_entry(
+        &mut self,
+        entry: &ConstructorInferenceEntry<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let (identity, superclass, constructor_name, params, super_constructor) = match entry {
+            ConstructorInferenceEntry::Alias { name, .. } => {
+                self.forward_alias_constructors(name, model);
+                return;
+            }
+            ConstructorInferenceEntry::Declaration {
+                identity,
+                superclass,
+                constructor_name,
+                params,
+                super_constructor,
+            } => (
+                identity,
+                superclass,
+                *constructor_name,
+                params,
+                *super_constructor,
+            ),
+        };
+        let mut updates = Vec::new();
+        for parameter in params.params() {
+            if parameter.initializing() != Some(InitializingFormal::This)
+                || parameter.param_type().is_some()
+            {
+                continue;
+            }
+            let Some(ty) = self
+                .member_entry(identity, parameter.name().name())
+                .filter(|entry| {
+                    entry.facts.iter().any(|fact| {
+                        matches!(fact.kind, MemberKind::Field { .. }) && !fact.is_static
+                    })
+                })
+                .and_then(|entry| entry.field.as_ref())
+                .map(|(_, ty)| ty.clone())
+            else {
+                continue;
+            };
+            updates.push((parameter, Some(ty), None));
+        }
+        if let Some(superclass) = superclass {
+            let positional_super = params
+                .positional()
+                .filter(|parameter| parameter.initializing() == Some(InitializingFormal::Super));
+            let named_super = params
+                .named()
+                .filter(|parameter| parameter.initializing() == Some(InitializingFormal::Super));
+            let super_formals = positional_super
+                .enumerate()
+                .map(|(ordinal, parameter)| (SuperFormal::Positional(ordinal), parameter))
+                .chain(
+                    named_super
+                        .map(|parameter| (SuperFormal::Named(parameter.name().name()), parameter)),
+                );
+            for (formal, parameter) in super_formals {
+                let default = if parameter.default_value().is_none()
+                    && matches!(
+                        parameter.kind(),
+                        ParamKind::OptionalPositional | ParamKind::Named { required: false }
+                    ) {
+                    self.super_parameter_default(superclass, super_constructor, formal)
+                } else {
+                    None
+                };
+                let ty = if parameter.param_type().is_none() {
+                    self.resolved_constructor_parameter_type(
+                        superclass,
+                        super_constructor,
+                        formal,
+                        model,
+                    )
+                } else {
+                    None
+                };
+                updates.push((parameter, ty, default));
+            }
+        }
+        if index_fixpoint::inference_deferred() {
+            return;
+        }
+        let mut defaults_changed = false;
+        for (parameter, ty, default) in updates {
+            if let Some(ty) = ty {
+                self.update_constructor_parameter_type(
+                    identity,
+                    constructor_name,
+                    *params,
+                    parameter,
+                    ty,
+                );
+            }
+            if let Some(default) = default
+                && let Some(signature) = self
+                    .type_facts
+                    .get_mut(identity)
+                    .and_then(|facts| facts.constructors.get_mut(constructor_name))
+                && !signature.defaults.contains_key(parameter.name().name())
+            {
+                signature
+                    .defaults
+                    .insert(parameter.name().name().to_owned(), default);
+                defaults_changed = true;
+            }
+        }
+        if defaults_changed {
+            index_fixpoint::record_inference_write(|| {
+                index_fixpoint::InferenceInput::Constructor(
+                    identity.clone(),
+                    constructor_name.to_owned(),
+                )
+            });
+            index_fixpoint::record_inference_write(|| {
+                index_fixpoint::InferenceInput::Constructors(identity.clone())
+            });
+        }
     }
 
     /// Materialize mixin-application constructors in the alias's parameter
@@ -942,6 +973,9 @@ impl SignatureIndex {
         else {
             return false;
         };
+        index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Constructors(
+            superclass,
+        ));
         let Some(source_facts) = self
             .type_facts
             .get(superclass)
@@ -1028,13 +1062,40 @@ impl SignatureIndex {
             }
             forwarded.push((facts, signature));
         }
-        let changed = !forwarded.is_empty();
+        if index_fixpoint::inference_deferred() {
+            return false;
+        }
+        let mut changed = false;
         for (facts, signature) in forwarded {
-            self.type_facts
+            let name = facts.name.clone();
+            let mut entry_changed = false;
+            let constructors = &mut self
+                .type_facts
                 .entry(identity.clone())
                 .or_default()
-                .constructors
-                .insert(facts.name.clone(), signature);
+                .constructors;
+            if let Some(existing) = constructors.get_mut(&name) {
+                for (current, candidate) in existing.positional.iter_mut().zip(signature.positional)
+                {
+                    entry_changed |= refine_inferred_type(current, candidate);
+                }
+                for (name, candidate) in signature.named {
+                    if let Some(current) = existing.named.get_mut(&name) {
+                        entry_changed |= refine_inferred_type(current, candidate);
+                    }
+                }
+                for (name, default) in signature.defaults {
+                    if let std::collections::hash_map::Entry::Vacant(entry) =
+                        existing.defaults.entry(name)
+                    {
+                        entry.insert(default);
+                        entry_changed = true;
+                    }
+                }
+            } else {
+                constructors.insert(name.clone(), signature);
+                entry_changed = true;
+            }
             if let Some(declaration) = self
                 .type_facts
                 .get_mut(&identity)
@@ -1045,34 +1106,43 @@ impl SignatureIndex {
                     .iter_mut()
                     .find(|existing| existing.name == facts.name)
                 {
-                    *existing = facts;
+                    for (current, candidate) in existing.parameters.iter_mut().zip(facts.parameters)
+                    {
+                        entry_changed |= refine_inferred_type(&mut current.ty, candidate.ty);
+                    }
                 } else {
                     declaration.constructors.push(facts);
+                    entry_changed = true;
                 }
+            }
+            if entry_changed {
+                index_fixpoint::record_inference_write(|| {
+                    index_fixpoint::InferenceInput::Constructor(identity.clone(), name)
+                });
+                index_fixpoint::record_inference_write(|| {
+                    index_fixpoint::InferenceInput::Constructors(identity.clone())
+                });
+                changed = true;
             }
         }
         changed
     }
 
-    /// Give a super formal without a declared default the default of the
-    /// super-constructor parameter it forwards to, if that is known.
-    fn inherit_super_default(
-        &mut self,
-        (identity, constructor_name): (&DeclarationIdentity, &str),
-        name: &str,
-        (superclass, super_constructor): (&ResolvedType, &str),
+    /// Resolve the default of the super-constructor parameter before publishing.
+    fn super_parameter_default(
+        &self,
+        superclass: &ResolvedType,
+        super_constructor: &str,
         parameter: SuperFormal<'_>,
-    ) -> bool {
+    ) -> Option<ParameterDefault> {
         let ResolvedType::Interface {
             identity: super_identity,
             ..
         } = superclass
         else {
-            return false;
+            return None;
         };
-        let Some(super_signature) = self.constructor(super_identity, super_constructor) else {
-            return false;
-        };
+        let super_signature = self.constructor(super_identity, super_constructor)?;
         let super_name = match parameter {
             SuperFormal::Named(name) => Some(name),
             SuperFormal::Positional(ordinal) => super_signature
@@ -1080,29 +1150,14 @@ impl SignatureIndex {
                 .get(ordinal)
                 .map(String::as_str),
         };
-        let Some(default) = super_name.and_then(|name| super_signature.defaults.get(name)) else {
-            return false;
-        };
-        let inherited = match default {
+        let default = super_name.and_then(|name| super_signature.defaults.get(name))?;
+        Some(match default {
             ParameterDefault::Inherited { .. } => default.clone(),
             _ => ParameterDefault::Inherited {
                 owner: super_identity.clone(),
                 default: Box::new(default.clone()),
             },
-        };
-        let Some(signature) = self
-            .type_facts
-            .get_mut(identity)
-            .map(|facts| &mut facts.constructors)
-            .and_then(|constructors| constructors.get_mut(constructor_name))
-        else {
-            return false;
-        };
-        if signature.defaults.contains_key(name) {
-            return false;
-        }
-        signature.defaults.insert(name.to_string(), inherited);
-        true
+        })
     }
 
     /// The type of the super-constructor parameter a super formal forwards
@@ -1156,19 +1211,15 @@ impl SignatureIndex {
                 parameter.kind(),
                 falcon_syntax::cst::ParamKind::Named { .. }
             ) {
-                if signature.named.get(parameter_name.name()) != Some(&ty) {
-                    signature
-                        .named
-                        .insert(parameter_name.name().to_owned(), ty.clone());
-                    changed = true;
+                if let Some(current) = signature.named.get_mut(parameter_name.name()) {
+                    changed |= refine_inferred_type(current, ty.clone());
                 }
             } else if let Some(index) = params
                 .positional()
                 .position(|candidate| candidate.name().span() == parameter_name.span())
-                && signature.positional.get(index) != Some(&ty)
+                && let Some(current) = signature.positional.get_mut(index)
             {
-                signature.positional[index] = ty.clone();
-                changed = true;
+                changed |= refine_inferred_type(current, ty.clone());
             }
         }
         if let Some(facts) = self
@@ -1183,10 +1234,19 @@ impl SignatureIndex {
                 .parameters
                 .iter_mut()
                 .find(|candidate| candidate.name == parameter_name.name())
-            && parameter.ty != ty
         {
-            parameter.ty = ty;
-            changed = true;
+            changed |= refine_inferred_type(&mut parameter.ty, ty);
+        }
+        if changed {
+            index_fixpoint::record_inference_write(|| {
+                index_fixpoint::InferenceInput::Constructor(
+                    identity.clone(),
+                    constructor_name.to_owned(),
+                )
+            });
+            index_fixpoint::record_inference_write(|| {
+                index_fixpoint::InferenceInput::Constructors(identity.clone())
+            });
         }
         changed
     }
@@ -1552,6 +1612,8 @@ impl SignatureIndex {
             .entry(identity.clone())
             .or_default()
             .member_supertypes = Some(resolved_member_supertypes);
+        let infer_override =
+            !is_extension && !matches!(declaration, TopLevelDecl::ExtensionType(_));
         let entries = self.member_entries.entry(identity.clone()).or_default();
         for member in members.declared.clone() {
             match member {
@@ -1585,7 +1647,7 @@ impl SignatureIndex {
                         method.type_params(),
                         Some(method.params()),
                         method.return_type(),
-                        SignatureContext::Member(&mut facts),
+                        SignatureContext::Member(&mut facts, infer_override),
                         model,
                     ));
                     entry.facts.push(facts);
@@ -1672,7 +1734,11 @@ impl SignatureIndex {
                     let return_type = getter
                         .return_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
-                        .unwrap_or(ResolvedType::Dynamic);
+                        .unwrap_or(if infer_override && !getter.is_static() {
+                            ResolvedType::Unknown
+                        } else {
+                            ResolvedType::Dynamic
+                        });
                     entry.field = Some((owner_parameters.clone(), return_type.clone()));
                     entry.implicit_getter = getter.return_type().is_none();
                     if !getter.is_static() {
@@ -1696,10 +1762,19 @@ impl SignatureIndex {
                     let parameter_type = setter
                         .param_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
-                        .unwrap_or(ResolvedType::Dynamic);
-                    entry
-                        .field
-                        .get_or_insert_with(|| (owner_parameters.clone(), parameter_type.clone()));
+                        .unwrap_or(if setter.is_static() || !infer_override {
+                            ResolvedType::Dynamic
+                        } else {
+                            ResolvedType::Unknown
+                        });
+                    entry.field.get_or_insert_with(|| {
+                        let read_type = if setter.param_type().is_none() {
+                            ResolvedType::Dynamic
+                        } else {
+                            parameter_type.clone()
+                        };
+                        (owner_parameters.clone(), read_type)
+                    });
                     if !setter.is_static() {
                         entry.write = Some(parameter_type);
                     }
@@ -1729,7 +1804,7 @@ impl SignatureIndex {
                         AstChildren::empty(),
                         Some(operator.params()),
                         operator.return_type(),
-                        SignatureContext::Member(&mut facts),
+                        SignatureContext::Member(&mut facts, infer_override),
                         model,
                     ));
                     entry.facts.push(facts);
@@ -1980,7 +2055,7 @@ pub(super) fn inherits_method_types(member: ClassMember<'_>) -> bool {
 pub(super) enum SignatureContext<'a> {
     Function,
     Constructor(&'a HashMap<String, ResolvedType>),
-    Member(&'a mut MemberFacts),
+    Member(&'a mut MemberFacts, bool),
 }
 
 /// Resolves a callable, collecting declaration facts only when requested.
@@ -1993,11 +2068,12 @@ pub(super) fn signature<'a>(
     context: SignatureContext<'_>,
     model: &SemanticModel<'_>,
 ) -> ResolvedSignature {
-    let (field_types, mut facts) = match context {
-        SignatureContext::Function => (None, None),
-        SignatureContext::Constructor(fields) => (Some(fields), None),
-        SignatureContext::Member(facts) => (None, Some(facts)),
+    let (field_types, mut facts, infer_override) = match context {
+        SignatureContext::Function => (None, None, false),
+        SignatureContext::Constructor(fields) => (Some(fields), None, false),
+        SignatureContext::Member(facts, infer_override) => (None, Some(facts), infer_override),
     };
+    let infer_override = infer_override && facts.as_ref().is_some_and(|facts| !facts.is_static);
     let parameter_type = |param: FormalParam<'_>, initializing, name: &str| {
         if param.param_type().is_some() || param.function_params().is_some() {
             model.resolve_formal_parameter_in(param, scope)
@@ -2006,7 +2082,7 @@ pub(super) fn signature<'a>(
                 .and_then(|fields| fields.get(name))
                 .cloned()
                 .unwrap_or(ResolvedType::Unknown)
-        } else if initializing == Some(InitializingFormal::Super) {
+        } else if initializing == Some(InitializingFormal::Super) || infer_override {
             ResolvedType::Unknown
         } else {
             ResolvedType::Dynamic
@@ -2070,7 +2146,7 @@ pub(super) fn signature<'a>(
             result.non_optional_defaults.insert(name.to_string());
         }
         // Super formals without a declared default inherit theirs once the super
-        // constructor resolves (`resolve_constructor_formals`).
+        // constructor resolves (`resolve_constructor_entry`).
         let default = match default_value {
             Some(value) => Some(ParameterDefault::Declared(model.node_ref(value.syntax()))),
             None if optional && initializing != Some(InitializingFormal::Super) => {
@@ -2095,7 +2171,11 @@ pub(super) fn signature<'a>(
     result.shape = FunctionTypeShape::from_scope(required_named, call_parameters, scope);
     result.return_type = return_type
         .map(|ty| model.resolve_type_in(ty, scope))
-        .unwrap_or(ResolvedType::Dynamic);
+        .unwrap_or(if infer_override {
+            ResolvedType::Unknown
+        } else {
+            ResolvedType::Dynamic
+        });
     result
 }
 

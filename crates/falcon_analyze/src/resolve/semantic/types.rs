@@ -985,6 +985,172 @@ pub(crate) fn has_inference_holes(ty: &ResolvedType) -> bool {
     .is_some()
 }
 
+/// Publish an unknown once, or finish an existing partial without changing any
+/// known slot or occurrence metadata. Partial-to-partial growth is forbidden:
+/// recursive declarations must not build an unbounded tower of type arguments.
+pub(super) fn refine_inferred_type(current: &mut ResolvedType, candidate: ResolvedType) -> bool {
+    if index_fixpoint::inference_deferred() {
+        return false;
+    }
+    if matches!(current, ResolvedType::Unknown) {
+        if matches!(candidate, ResolvedType::Unknown) {
+            return false;
+        }
+    } else if !has_inference_holes(current)
+        || has_inference_holes(&candidate)
+        || !inference_refinement_compatible(current, &candidate, &mut FxHashSet::default())
+    {
+        return false;
+    }
+    *current = candidate;
+    true
+}
+
+fn inference_refinement_compatible<'a>(
+    current: &'a ResolvedType,
+    candidate: &'a ResolvedType,
+    seen: &mut FxHashSet<(
+        BorrowedIdentity<'a, ResolvedType>,
+        BorrowedIdentity<'a, ResolvedType>,
+    )>,
+) -> bool {
+    if !seen.insert((
+        BorrowedIdentity::new(current),
+        BorrowedIdentity::new(candidate),
+    )) {
+        return true;
+    }
+    let positional =
+        |left: &'a [ResolvedType], right: &'a [ResolvedType], seen: &mut FxHashSet<_>| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| inference_refinement_compatible(left, right, seen))
+        };
+    let named = |left: &'a [(String, ResolvedType)],
+                 right: &'a [(String, ResolvedType)],
+                 seen: &mut FxHashSet<_>| {
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right)
+                .all(|((left_name, left), (right_name, right))| {
+                    left_name == right_name && inference_refinement_compatible(left, right, seen)
+                })
+    };
+    match (current, candidate) {
+        (ResolvedType::Unknown, _) => true,
+        (
+            ResolvedType::Interface {
+                identity: left,
+                arguments: left_arguments,
+                nullable: left_nullable,
+                extension_type: left_extension,
+                occurrence: left_occurrence,
+            },
+            ResolvedType::Interface {
+                identity: right,
+                arguments: right_arguments,
+                nullable: right_nullable,
+                extension_type: right_extension,
+                occurrence: right_occurrence,
+            },
+        ) => {
+            left == right
+                && left_nullable == right_nullable
+                && left_extension == right_extension
+                && left_occurrence.same_origin(right_occurrence)
+                && positional(left_arguments, right_arguments, seen)
+        }
+        (
+            ResolvedType::Function {
+                shape: left_shape,
+                alias: left_alias,
+                optional_positional: left_optional,
+                return_type: left_return,
+                positional: left_positional,
+                named: left_named,
+                nullable: left_nullable,
+            },
+            ResolvedType::Function {
+                shape: right_shape,
+                alias: right_alias,
+                optional_positional: right_optional,
+                return_type: right_return,
+                positional: right_positional,
+                named: right_named,
+                nullable: right_nullable,
+            },
+        ) => {
+            left_nullable == right_nullable
+                && left_optional == right_optional
+                && left_alias.same_origin(right_alias)
+                && match (left_shape, right_shape) {
+                    (None, None) => true,
+                    (Some(left), Some(right)) => {
+                        left.required_named == right.required_named
+                            && positional(&left.type_parameters, &right.type_parameters, seen)
+                    }
+                    _ => false,
+                }
+                && inference_refinement_compatible(left_return, right_return, seen)
+                && positional(left_positional, right_positional, seen)
+                && named(left_named, right_named, seen)
+        }
+        (
+            ResolvedType::Record {
+                occurrence: left_occurrence,
+                positional: left_positional,
+                named: left_named,
+                nullable: left_nullable,
+            },
+            ResolvedType::Record {
+                occurrence: right_occurrence,
+                positional: right_positional,
+                named: right_named,
+                nullable: right_nullable,
+            },
+        ) => {
+            left_nullable == right_nullable
+                && left_occurrence.same_origin(right_occurrence)
+                && positional(left_positional, right_positional, seen)
+                && named(left_named, right_named, seen)
+        }
+        (
+            ResolvedType::TypeParameter {
+                id: left,
+                bound: left_bound,
+                nullable: left_nullable,
+            },
+            ResolvedType::TypeParameter {
+                id: right,
+                bound: right_bound,
+                nullable: right_nullable,
+            },
+        ) => {
+            left == right
+                && left_nullable == right_nullable
+                && inference_refinement_compatible(left_bound, right_bound, seen)
+        }
+        (
+            ResolvedType::NonNullTypeParameter {
+                id: left,
+                bound: left_bound,
+            },
+            ResolvedType::NonNullTypeParameter {
+                id: right,
+                bound: right_bound,
+            },
+        ) => left == right && inference_refinement_compatible(left_bound, right_bound, seen),
+        _ => current.eq_memoized_with_aliases(
+            candidate,
+            &mut FxHashSet::default(),
+            AliasComparison::Origin,
+        ),
+    }
+}
+
 pub(super) fn collect_parameter_ids(ty: &ResolvedType, ids: &mut Vec<TypeParameterId>) {
     find_type(
         ty,
@@ -1376,5 +1542,127 @@ impl ResolvedType {
             Self::Interface { arguments, .. } => arguments,
             _ => &[],
         }
+    }
+}
+
+#[cfg(test)]
+mod refinement_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_fills_once_including_explicit_dynamic() {
+        let mut current = ResolvedType::Unknown;
+        assert!(!refine_inferred_type(&mut current, ResolvedType::Unknown));
+        assert!(refine_inferred_type(&mut current, ResolvedType::Dynamic));
+        assert!(!refine_inferred_type(&mut current, ResolvedType::Void));
+        assert_eq!(current, ResolvedType::Dynamic);
+    }
+
+    #[test]
+    fn partials_only_accept_hole_free_structurally_compatible_candidates() {
+        let record = |positional: Vec<ResolvedType>| ResolvedType::Record {
+            occurrence: FunctionTypeAlias::default(),
+            positional: positional.into(),
+            named: empty_named_types(),
+            nullable: false,
+        };
+        let partial = record(vec![ResolvedType::Dynamic, ResolvedType::Unknown]);
+        let mut current = partial.clone();
+        assert!(!refine_inferred_type(
+            &mut current,
+            record(vec![ResolvedType::Dynamic, partial.clone()]),
+        ));
+        assert!(!refine_inferred_type(
+            &mut current,
+            record(vec![ResolvedType::Void, ResolvedType::Never]),
+        ));
+        assert!(!refine_inferred_type(
+            &mut current,
+            record(vec![ResolvedType::Dynamic]),
+        ));
+        assert_eq!(current, partial);
+        let complete = record(vec![ResolvedType::Dynamic, ResolvedType::Never]);
+        assert!(refine_inferred_type(&mut current, complete.clone()));
+        assert_eq!(current, complete);
+        assert!(!refine_inferred_type(&mut current, ResolvedType::Dynamic));
+    }
+
+    #[test]
+    fn function_refinement_freezes_known_slots_shape_and_provenance() {
+        let function = |return_type, positional: Vec<ResolvedType>| ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: FunctionTypeAlias::default(),
+            optional_positional: 0,
+            return_type: Arc::new(return_type),
+            positional: positional.into(),
+            named: empty_named_types(),
+            nullable: false,
+        };
+        let partial = function(
+            ResolvedType::Unknown,
+            vec![ResolvedType::Dynamic, ResolvedType::Void],
+        );
+        let complete = function(
+            ResolvedType::Never,
+            vec![ResolvedType::Dynamic, ResolvedType::Void],
+        );
+        let mut current = partial.clone();
+        assert!(!refine_inferred_type(
+            &mut current,
+            function(
+                ResolvedType::Never,
+                vec![ResolvedType::Never, ResolvedType::Void]
+            ),
+        ));
+        let mut changed_shape = complete.clone();
+        if let ResolvedType::Function {
+            optional_positional,
+            ..
+        } = &mut changed_shape
+        {
+            *optional_positional = 1;
+        }
+        assert!(!refine_inferred_type(&mut current, changed_shape));
+        let mut changed_alias = complete.clone();
+        if let ResolvedType::Function { alias, .. } = &mut changed_alias {
+            *alias = FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+                identity: DeclarationIdentity::OBJECT,
+                origin: None,
+            })));
+        }
+        assert!(!refine_inferred_type(&mut current, changed_alias));
+        assert_eq!(current, partial);
+        assert!(refine_inferred_type(&mut current, complete.clone()));
+        assert_eq!(current, complete);
+    }
+
+    #[test]
+    fn function_parameters_refine_nested_holes_without_changing_known_returns() {
+        let parameter = |ty| ResolvedType::Record {
+            occurrence: FunctionTypeAlias::default(),
+            positional: Arc::from([ty]),
+            named: empty_named_types(),
+            nullable: false,
+        };
+        let mut current = ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: FunctionTypeAlias::default(),
+            optional_positional: 0,
+            return_type: Arc::new(ResolvedType::Void),
+            positional: Arc::from([parameter(ResolvedType::Unknown)]),
+            named: Arc::from([("named".to_owned(), ResolvedType::Unknown)]),
+            nullable: false,
+        };
+        let mut candidate = current.clone();
+        if let ResolvedType::Function {
+            positional, named, ..
+        } = &mut candidate
+        {
+            *positional = Arc::from([parameter(ResolvedType::Dynamic)]);
+            *named = Arc::from([("named".to_owned(), ResolvedType::Never)]);
+        }
+        assert!(refine_inferred_type(&mut current, candidate.clone()));
+        assert_eq!(current, candidate);
+        assert!(!refine_inferred_type(&mut current, ResolvedType::Dynamic));
     }
 }
