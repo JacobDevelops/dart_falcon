@@ -91,6 +91,6 @@ mod fixpoint_bench;
 #[cfg(test)]
 mod relation_tests;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 #[cfg(test)]
 mod type_graph_tests;

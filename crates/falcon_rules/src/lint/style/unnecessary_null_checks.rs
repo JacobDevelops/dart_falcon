@@ -39,6 +39,8 @@ use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::locally_bound_identifiers;
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
+use crate::lint::semantic_type_operations::is_nullable_or_dynamic_or_void;
+
 #[derive(Default)]
 pub struct UnnecessaryNullChecks;
 
@@ -82,20 +84,6 @@ struct Collector<'a> {
     pattern_assignments: Vec<Span>,
     /// Start offsets of identifiers that resolve to a local or parameter.
     locals: HashSet<usize>,
-}
-
-/// Analyzer nullability includes `dynamic` and `void`, but not unresolved types.
-fn explicitly_nullable(ty: &ResolvedType) -> bool {
-    match ty.view() {
-        ResolvedTypeView::Null | ResolvedTypeView::Dynamic | ResolvedTypeView::Void => true,
-        ResolvedTypeView::Interface { nullable, .. }
-        | ResolvedTypeView::TypeParameter { nullable, .. }
-        | ResolvedTypeView::Function { nullable, .. }
-        | ResolvedTypeView::Record { nullable, .. } => nullable,
-        ResolvedTypeView::Unknown | ResolvedTypeView::Never | ResolvedTypeView::NonNullTypeParameter { .. } => {
-            false
-        }
-    }
 }
 
 fn key(span: &Span) -> (usize, usize) {
@@ -330,7 +318,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 } else {
                     None
                 };
-                if context.as_ref().is_some_and(explicitly_nullable) {
+                if context.as_ref().is_some_and(is_nullable_or_dynamic_or_void) {
                     self.report(&span);
                 }
             }
@@ -453,7 +441,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && self.pattern_assignments.iter().any(|assignment| {
                 assignment.contains(assertion.span())
             })
-            && matched.is_some_and(explicitly_nullable)
+            && matched.is_some_and(is_nullable_or_dynamic_or_void)
         {
             self.report(&assertion.span());
         }

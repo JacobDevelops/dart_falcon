@@ -23,6 +23,43 @@ fn fixture_sdk(config: Option<&falcon_analyze::PackageConfig>) -> Option<falcon_
     falcon_analyze::DartSdk::load(&config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"))
 }
 
+fn external_indexes(
+    app: &Path,
+    parsed: &Arc<ParsedFile>,
+) -> (ExternalLibraries, IdentityIndex, TypeIndex) {
+    let source = parsed.source.as_ref();
+    let program = parsed.program();
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app], fixture_sdk);
+    let externals =
+        ExternalLibraries::load(&environment, &[(app, program, source)], |path| path == app);
+    let identities = IdentityIndex::build(
+        &[IdentitySource {
+            path: app,
+            parsed,
+            has_parse_errors: false,
+        }],
+        &[source],
+        &[],
+        Some(ExternalSources {
+            libraries: &externals,
+            environment: &environment,
+        }),
+    );
+    let mut types = TypeIndex::from_resolved_files(
+        [(
+            app,
+            LibrarySource {
+                program,
+                has_parse_errors: false,
+                has_unresolved_parts: false,
+            },
+        )],
+        &identities,
+    );
+    types.add_external(&externals, &identities);
+    (externals, identities, types)
+}
+
 /// A fake Flutter checkout (`flutterRoot`) with its Dart SDK, a dependency
 /// package, and an app whose `package_config.json` ties them together.
 fn workspace() -> (tempfile::TempDir, PathBuf) {
@@ -827,38 +864,8 @@ fn compact_external_types_do_not_collide_with_project_names() {
         source: source.to_string().into_boxed_str(),
         tree: parsed_tree,
     });
-    let program = parsed.program();
     assert!(errors.is_empty());
-    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
-            path == app
-        });
-    let identities = IdentityIndex::build(
-        &[IdentitySource {
-            path: &app,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[source],
-        &[],
-        Some(ExternalSources {
-            libraries: &externals,
-            environment: &environment,
-        }),
-    );
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let (_externals, identities, types) = external_indexes(&app, &parsed);
     let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
     let local = model.resolve_name("Base").unwrap();
     let external = model
@@ -1255,35 +1262,7 @@ fn compact_external_const_constructors_preserve_instance_values() {
     });
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
-    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let roots = [(app.as_path(), program, source)];
-    let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
-    let sources = [IdentitySource {
-        path: &app,
-        parsed: &parsed,
-        has_parse_errors: false,
-    }];
-    let identities = IdentityIndex::build(
-        &sources,
-        &[source],
-        &[],
-        Some(ExternalSources {
-            libraries: &externals,
-            environment: &environment,
-        }),
-    );
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let (externals, identities, types) = external_indexes(&app, &parsed);
     let signatures = SignatureIndex::build(
         &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
@@ -1425,35 +1404,7 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
     });
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
-    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let roots = [(app.as_path(), program, source)];
-    let externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
-    let sources = [IdentitySource {
-        path: &app,
-        parsed: &parsed,
-        has_parse_errors: false,
-    }];
-    let identities = IdentityIndex::build(
-        &sources,
-        &[source],
-        &[],
-        Some(ExternalSources {
-            libraries: &externals,
-            environment: &environment,
-        }),
-    );
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let (externals, identities, types) = external_indexes(&app, &parsed);
     let signatures = SignatureIndex::build(
         &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
@@ -1584,38 +1535,8 @@ abstract class EquivalentDiamond implements SameLeft, SameRight {}
         source: source.to_string().into_boxed_str(),
         tree: parsed_tree,
     });
-    let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
-    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
-    let externals =
-        ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
-            path == app
-        });
-    let identities = IdentityIndex::build(
-        &[IdentitySource {
-            path: &app,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[source],
-        &[],
-        Some(ExternalSources {
-            libraries: &externals,
-            environment: &environment,
-        }),
-    );
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let (externals, identities, types) = external_indexes(&app, &parsed);
     let signatures = SignatureIndex::build(
         &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),

@@ -3,25 +3,14 @@ use crate::resolve::IdentitySource;
 use falcon_dart_parser::parse;
 
 fn with_relations(source: &str, test: impl FnOnce(&mut SignatureIndex, &SemanticModel<'_>)) {
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
-    let path = Path::new("/project/relations.dart");
-    let identities = IdentityIndex::from_project_files(
-        &[IdentitySource {
-            path,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[],
+    super::tests::with_model_at(
+        Path::new("/project/relations.dart"),
+        source,
+        |program, model| {
+            let mut signatures = SignatureIndex::from_program(program, model);
+            test(&mut signatures, model);
+        },
     );
-    let types = TypeIndex::from_program(parsed.program());
-    let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
-    let mut signatures = SignatureIndex::from_program(parsed.program(), &model);
-    test(&mut signatures, &model);
 }
 
 #[test]

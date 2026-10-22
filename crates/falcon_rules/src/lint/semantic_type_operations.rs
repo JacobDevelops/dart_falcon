@@ -64,6 +64,21 @@ where
     }
 }
 
+/// Whether a type is `Null`, written nullable, `dynamic`, or `void`.
+/// Unresolved types and unmarked type parameters are not proof of nullability.
+pub(crate) fn is_nullable_or_dynamic_or_void(ty: &ResolvedType) -> bool {
+    match ty.view() {
+        ResolvedTypeView::Null | ResolvedTypeView::Dynamic | ResolvedTypeView::Void => true,
+        ResolvedTypeView::Interface { nullable, .. }
+        | ResolvedTypeView::TypeParameter { nullable, .. }
+        | ResolvedTypeView::Function { nullable, .. }
+        | ResolvedTypeView::Record { nullable, .. } => nullable,
+        ResolvedTypeView::Unknown
+        | ResolvedTypeView::Never
+        | ResolvedTypeView::NonNullTypeParameter { .. } => false,
+    }
+}
+
 /// Three-valued nullability of a resolved type, mirroring the analyzer's
 /// `TypeSystem.isNullable` (`Yes`) and `isNonNullable` (`No`).
 ///

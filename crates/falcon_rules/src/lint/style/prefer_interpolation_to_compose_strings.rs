@@ -137,27 +137,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::{ParsedFile, RuleAnalysis};
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
-    use std::{path::Path, sync::Arc};
+    use std::path::Path;
 
     fn diagnostics(source: &str) -> Vec<Diagnostic> {
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        PreferInterpolationToComposeStrings.analyze(
+        crate::lint::test_support::diagnostics(
             PreferInterpolationToComposeStrings::NAME,
-            program,
-            &ctx,
+            &PreferInterpolationToComposeStrings,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
         )
     }
 

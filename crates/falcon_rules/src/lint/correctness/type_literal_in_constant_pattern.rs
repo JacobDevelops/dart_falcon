@@ -97,28 +97,21 @@ fn is_type_subtype(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::RuleAnalysis;
+    use crate::lint::test_support::diagnostics;
     use super::*;
 
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     #[test]
     fn qualified_constant_patterns_report_the_complete_pattern_span() {
         let source = "class A { static const ty = String; }\nvoid f(Object o, Type type) {\n  if (o case A.ty) {}\n  if (o case const (String)) {}\n  if (type case A.ty) {}\n  if (o case int?) {}\n}";
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        assert!(errors.is_empty(), "{errors:?}");
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = TypeLiteralInConstantPattern.analyze(TypeLiteralInConstantPattern::NAME, program, &ctx);
+        let diagnostics = diagnostics(
+            TypeLiteralInConstantPattern::NAME,
+            &TypeLiteralInConstantPattern,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
         let start = source.find("A.ty").unwrap();
         let nullable_start = source.find("int?").unwrap();
         assert_eq!(

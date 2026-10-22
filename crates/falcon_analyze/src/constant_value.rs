@@ -3019,24 +3019,10 @@ const futureOrCast = null as FutureOr<int?>;
         source: &str,
         test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
     ) {
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "parse errors: {errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
+        crate::resolve::with_model(source, |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            test(program, model, &signatures);
         });
-        let program = parsed.tree.program(&parsed.source);
-        let sources = [IdentitySource {
-            path: &path,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }];
-        let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let types = TypeIndex::from_program(program);
-        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(program, &model);
-        test(program, &model, &signatures);
     }
 
     fn evaluate_named(

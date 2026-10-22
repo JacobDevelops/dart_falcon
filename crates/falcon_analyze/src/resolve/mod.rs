@@ -11,6 +11,9 @@ mod sdk_hierarchy;
 mod semantic;
 mod type_index;
 
+#[cfg(test)]
+pub(crate) use semantic::tests::with_model;
+
 pub use identity::{
     DeclarationIdentity, DocName, ExternalSources, FileId, IdentityIndex, IdentitySource,
     LibraryId, MemberSelector, MemberSelectorKind, NameIdentity, PackageIdentity, QualifiedName,

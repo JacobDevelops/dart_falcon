@@ -1,4 +1,4 @@
-//! Shared identity contexts and SDK staging for rule unit tests.
+//! Shared identity contexts, diagnostics fixtures and SDK staging for rule unit tests.
 
 use falcon_analyze::{
     AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ParsedFile, Rule, RuleAnalysis,
@@ -93,6 +93,26 @@ impl TestIndexes {
         }
         context
     }
+}
+
+/// Analyze a valid single-file fixture at its specified path.
+pub fn diagnostics(
+    name: &'static str,
+    rule: &dyn Rule,
+    path: &Path,
+    source: &str,
+    with_types: bool,
+) -> Vec<falcon_diagnostics::Diagnostic> {
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let indexes = TestIndexes::single(path, &parsed, with_types);
+    let config = FalconConfig::default();
+    let context = indexes.context(path, &config, &parsed);
+    rule.analyze(name, parsed.program(), &context)
 }
 
 pub fn count(name: &'static str, rule: &dyn Rule, source: &str, with_types: bool) -> usize {

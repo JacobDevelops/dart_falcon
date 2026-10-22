@@ -32,6 +32,8 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
+use crate::lint::semantic_type_operations::is_nullable_or_dynamic_or_void;
+
 #[derive(Default)]
 pub struct UnnecessaryNullAwareOperatorOnExtensionOnNullable;
 
@@ -73,12 +75,6 @@ fn explicitly_nullable(ty: &ResolvedType) -> bool {
     }
 }
 
-/// Whether an extension's `on` type is nullable to the type system:
-/// `dynamic` and `void` are, besides written-nullable types.
-fn extended_type_nullable(ty: &ResolvedType) -> bool {
-    explicitly_nullable(ty) || matches!(ty.view(), ResolvedTypeView::Dynamic | ResolvedTypeView::Void)
-}
-
 impl<'a> Collector<'a> {
     /// Whether the extension supplying `member` to `target` is on a nullable type.
     fn extension_on_nullable(
@@ -93,7 +89,7 @@ impl<'a> Collector<'a> {
             && let Some(identity) = state.named_extension(call.callee())
             && let Some(on_type) = state.signatures.extension_on_type(&identity)
         {
-            return extended_type_nullable(on_type);
+            return is_nullable_or_dynamic_or_void(on_type);
         }
         let receiver = state.infer(target);
         if !explicitly_nullable(&receiver) || matches!(receiver.view(), ResolvedTypeView::Null) {
@@ -126,7 +122,7 @@ impl<'a> Collector<'a> {
             .signatures
             .applicable_extension_on_types(&non_null, member, &state.model)
             .is_some_and(|on_types| {
-                !on_types.is_empty() && on_types.into_iter().all(extended_type_nullable)
+                !on_types.is_empty() && on_types.into_iter().all(is_nullable_or_dynamic_or_void)
             })
     }
 

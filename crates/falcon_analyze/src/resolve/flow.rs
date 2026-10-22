@@ -427,15 +427,12 @@ impl FlowContext<'_, '_> {
                 let Some(argument) = value.type_argument(0) else {
                     return value.clone();
                 };
-                let future = ResolvedType {
-                    kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:async", "Future"),
-                        arguments: vec![argument.clone()].into(),
-                        nullable: false,
-                        extension_type: false,
-                    },
-                };
+                let future = ResolvedType::new_interface(
+                    DeclarationIdentity::sdk("dart:async", "Future"),
+                    vec![argument.clone()].into(),
+                    false,
+                    false,
+                );
                 if self.subtype(&future, excluded) {
                     self.factor(&argument, excluded)
                 } else if self.subtype(&argument, excluded) {
@@ -1347,49 +1344,25 @@ mod tests {
     use super::{ResolvedTypeKind, completes_normally};
 
     fn with_flow_context(test: impl FnOnce(&super::FlowContext<'_, '_>)) {
-        use std::path::PathBuf;
-
-        use crate::resolve::{IdentityIndex, IdentitySource, TypeIndex};
-
-        let path = PathBuf::from("/project/lib/main.dart");
-        let source = "import 'dart:async';";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
-        let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_program(program);
-        let model = super::SemanticModel::new(&path, &parsed, &identities, Some(&types));
-        let signatures = super::SignatureIndex::from_program(program, &model);
-        let type_parameters = super::TypeParameterScope::default();
-        test(&super::FlowContext {
-            model: &model,
-            signatures: &signatures,
-            type_parameters: &type_parameters,
-            field_promotions: false,
+        crate::resolve::with_model("import 'dart:async';", |program, model| {
+            let signatures = super::SignatureIndex::from_program(program, model);
+            let type_parameters = super::TypeParameterScope::default();
+            test(&super::FlowContext {
+                model,
+                signatures: &signatures,
+                type_parameters: &type_parameters,
+                field_promotions: false,
+            });
         });
     }
 
     fn async_type(name: &'static str, argument: super::ResolvedType) -> super::ResolvedType {
-        super::ResolvedType {
-            kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
-                identity: super::DeclarationIdentity::sdk("dart:async", name),
-                arguments: vec![argument].into(),
-                nullable: false,
-                extension_type: false,
-            },
-        }
+        super::ResolvedType::new_interface(
+            super::DeclarationIdentity::sdk("dart:async", name),
+            vec![argument].into(),
+            false,
+            false,
+        )
     }
 
     #[test]
@@ -1548,14 +1521,9 @@ mod tests {
 
     #[test]
     fn negative_type_tests_factor_nullable_and_future_or_unions() {
-        use std::path::PathBuf;
-
         use falcon_syntax::cst::{IfCondition, Stmt};
 
-        use crate::resolve::{
-            IdentityIndex, IdentitySource, ResolvedType, SemanticModel, SignatureIndex,
-            TypeEnvironment, TypeIndex, TypeParameterScope,
-        };
+        use crate::resolve::{ResolvedType, SignatureIndex, TypeEnvironment, TypeParameterScope};
 
         let source = concat!(
             "import 'dart:async'; class C {} ",
@@ -1573,103 +1541,87 @@ mod tests {
             "String assignment(Object? value) { if (value is String?) throw 0; value = 'a'; return value; } ",
             "int exhausted(int value) { if (value is int) throw 0; return value; } ",
         );
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
-        let program = parsed.program();
-        let path = PathBuf::from("/project/lib/main.dart");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_program(program);
-        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(program, &model);
-        for declaration in program.declarations() {
-            let TopLevelDecl::Function(function) = declaration else {
-                continue;
-            };
-            let mut scope = TypeParameterScope::default();
-            scope.push(function.type_params(), &model);
-            let mut environment = TypeEnvironment::new();
-            environment.bind_params(function.params().unwrap(), &model, &scope);
-            let Some(FunctionBody::Block(block)) = function.body() else {
-                panic!("expected block");
-            };
-            let Stmt::If(statement) = block.stmts().next().unwrap() else {
-                panic!("expected guard");
-            };
-            let IfCondition::Expr(condition) = statement.condition() else {
-                panic!("expected expression condition");
-            };
-            let context = super::FlowContext {
-                model: &model,
-                signatures: &signatures,
-                type_parameters: &scope,
-                field_promotions: false,
-            };
-            context.assume_condition(
-                &mut environment,
-                condition,
-                function.name().name() == "negated",
-            );
-            let super::Expr::Is(test) = condition else {
-                panic!("expected type test");
-            };
-            let tested = model.resolve_type_in(test.dart_type(), &scope);
-            assert_eq!(
-                environment.tested_types("value"),
-                std::slice::from_ref(&tested)
-            );
-            if function.name().name() == "assignment" {
-                context.assign_variable(
+        crate::resolve::with_model(source, |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            for declaration in program.declarations() {
+                let TopLevelDecl::Function(function) = declaration else {
+                    continue;
+                };
+                let mut scope = TypeParameterScope::default();
+                scope.push(function.type_params(), model);
+                let mut environment = TypeEnvironment::new();
+                environment.bind_params(function.params().unwrap(), model, &scope);
+                let Some(FunctionBody::Block(block)) = function.body() else {
+                    panic!("expected block");
+                };
+                let Stmt::If(statement) = block.stmts().next().unwrap() else {
+                    panic!("expected guard");
+                };
+                let IfCondition::Expr(condition) = statement.condition() else {
+                    panic!("expected expression condition");
+                };
+                let context = super::FlowContext {
+                    model,
+                    signatures: &signatures,
+                    type_parameters: &scope,
+                    field_promotions: false,
+                };
+                context.assume_condition(
                     &mut environment,
-                    "value",
-                    &model.core_type("String", false),
+                    condition,
+                    function.name().name() == "negated",
                 );
+                let super::Expr::Is(test) = condition else {
+                    panic!("expected type test");
+                };
+                let tested = model.resolve_type_in(test.dart_type(), &scope);
+                assert_eq!(
+                    environment.tested_types("value"),
+                    std::slice::from_ref(&tested)
+                );
+                if function.name().name() == "assignment" {
+                    context.assign_variable(
+                        &mut environment,
+                        "value",
+                        &model.core_type("String", false),
+                    );
+                }
+                let expected = model.resolve_type_in(function.return_type().unwrap(), &scope);
+                assert_eq!(
+                    environment.lookup("value"),
+                    expected,
+                    "{}",
+                    function.name().name()
+                );
+                assert_eq!(context.factor(&expected, &expected), ResolvedType::NEVER);
+                assert_eq!(
+                    context.factor(&ResolvedType::UNKNOWN, &expected),
+                    ResolvedType::UNKNOWN,
+                );
+                assert_eq!(context.factor(&expected, &ResolvedType::UNKNOWN), expected);
+                let mut unresolved = environment.declared_type("value");
+                match &mut unresolved {
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { arguments, .. },
+                    } if !arguments.is_empty() => {
+                        std::sync::Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
+                    }
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } => {
+                        *std::sync::Arc::make_mut(return_type) = ResolvedType::UNKNOWN;
+                    }
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Record { positional, .. },
+                    } if !positional.is_empty() => {
+                        std::sync::Arc::make_mut(positional)[0] = ResolvedType::UNKNOWN;
+                    }
+                    _ => continue,
+                }
+                assert_eq!(context.factor(&unresolved, &unresolved), unresolved);
+                assert_eq!(context.factor(&expected, &unresolved), expected);
             }
-            let expected = model.resolve_type_in(function.return_type().unwrap(), &scope);
-            assert_eq!(
-                environment.lookup("value"),
-                expected,
-                "{}",
-                function.name().name()
-            );
-            assert_eq!(context.factor(&expected, &expected), ResolvedType::NEVER);
-            assert_eq!(
-                context.factor(&ResolvedType::UNKNOWN, &expected),
-                ResolvedType::UNKNOWN,
-            );
-            assert_eq!(context.factor(&expected, &ResolvedType::UNKNOWN), expected);
-            let mut unresolved = environment.declared_type("value");
-            match &mut unresolved {
-                ResolvedType {
-                    kind: ResolvedTypeKind::Interface { arguments, .. },
-                } if !arguments.is_empty() => {
-                    std::sync::Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
-                }
-                ResolvedType {
-                    kind: ResolvedTypeKind::Function { return_type, .. },
-                } => {
-                    *std::sync::Arc::make_mut(return_type) = ResolvedType::UNKNOWN;
-                }
-                ResolvedType {
-                    kind: ResolvedTypeKind::Record { positional, .. },
-                } if !positional.is_empty() => {
-                    std::sync::Arc::make_mut(positional)[0] = ResolvedType::UNKNOWN;
-                }
-                _ => continue,
-            }
-            assert_eq!(context.factor(&unresolved, &unresolved), unresolved);
-            assert_eq!(context.factor(&expected, &unresolved), expected);
-        }
+        });
     }
 
     #[test]

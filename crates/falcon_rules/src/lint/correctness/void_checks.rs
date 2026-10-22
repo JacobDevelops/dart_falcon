@@ -521,18 +521,13 @@ void use(Value value) {
   ((accept<void>))(value);
 }
 ";
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = VoidChecks.analyze(VoidChecks::NAME, program, &ctx);
+        let diagnostics = crate::lint::test_support::diagnostics(
+            VoidChecks::NAME,
+            &VoidChecks,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
 

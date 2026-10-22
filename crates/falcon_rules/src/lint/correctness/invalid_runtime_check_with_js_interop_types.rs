@@ -530,30 +530,21 @@ fn js_subtype(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::RuleAnalysis;
+    use crate::lint::test_support::diagnostics;
     use std::path::Path;
-
-    use falcon_analyze::{ParsedFile};
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
 
     use super::*;
 
     #[test]
     fn catch_diagnostic_covers_only_the_exception_type() {
         let source = "import 'dart:js_interop'; void f() { try {} on JSAny catch (error) {} }";
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
-        let parsed = std::sync::Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        assert!(errors.is_empty(), "{errors:?}");
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = InvalidRuntimeCheckWithJsInteropTypes.analyze(InvalidRuntimeCheckWithJsInteropTypes::NAME, program, &ctx);
+        let diagnostics = diagnostics(
+            InvalidRuntimeCheckWithJsInteropTypes::NAME,
+            &InvalidRuntimeCheckWithJsInteropTypes,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

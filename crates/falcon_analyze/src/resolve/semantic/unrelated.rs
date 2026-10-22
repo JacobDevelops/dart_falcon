@@ -1205,13 +1205,12 @@ fn future_or_argument(ty: &ResolvedType) -> Option<&ResolvedType> {
 }
 
 fn future_of(argument: &ResolvedType) -> ResolvedType {
-    ResolvedType::from_kind(ResolvedTypeKind::Interface {
-        occurrence: Default::default(),
-        identity: DeclarationIdentity::sdk("dart:async", "Future"),
-        arguments: vec![argument.clone()].into(),
-        nullable: false,
-        extension_type: false,
-    })
+    ResolvedType::new_interface(
+        DeclarationIdentity::sdk("dart:async", "Future"),
+        vec![argument.clone()].into(),
+        false,
+        false,
+    )
 }
 
 fn any(results: impl IntoIterator<Item = Truth>) -> Truth {

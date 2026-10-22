@@ -430,30 +430,21 @@ fn needs_instance(
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
-
-    use falcon_analyze::{ParsedFile};
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
+    use std::path::Path;
 
     use super::*;
-    use falcon_analyze::RuleAnalysis;
+    use crate::lint::test_support::diagnostics;
 
     #[test]
     fn reports_only_the_assert_keyword() {
         let source = "class Box { Box(int value) { assert /* gap */ (value > 0); assert(value < 10, 'limit'); } }";
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = PreferAssertsInInitializerLists.analyze(PreferAssertsInInitializerLists::NAME, program, &ctx);
+        let diagnostics = diagnostics(
+            PreferAssertsInInitializerLists::NAME,
+            &PreferAssertsInInitializerLists,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
         let slices: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

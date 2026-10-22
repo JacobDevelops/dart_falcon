@@ -1497,26 +1497,17 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::RuleAnalysis;
     use super::*;
-    use falcon_analyze::{ParsedFile};
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
-    use std::sync::Arc;
 
     fn analyze(source: &str, path: &Path) -> Vec<Diagnostic> {
-        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, true);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        DeprecatedMemberUseFromSamePackage.analyze(DeprecatedMemberUseFromSamePackage::NAME, program, &ctx)
+        crate::lint::test_support::diagnostics(
+            DeprecatedMemberUseFromSamePackage::NAME,
+            &DeprecatedMemberUseFromSamePackage,
+            path,
+            source,
+            true,
+        )
     }
 
     #[test]

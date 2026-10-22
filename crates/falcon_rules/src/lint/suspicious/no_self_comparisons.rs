@@ -119,10 +119,7 @@ use crate::lint::expressions::equivalent;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::RuleAnalysis;
-
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
+    use crate::lint::test_support::diagnostics;
     use std::path::Path;
 
     #[test]
@@ -148,18 +145,13 @@ class Child extends Values {
   bool inheritedFieldEqual() => value == value;
 }
 "#;
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let path = Path::new("self_comparisons.dart");
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, true);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = NoSelfComparisons.analyze(NoSelfComparisons::NAME, program, &ctx);
+        let diagnostics = diagnostics(
+            NoSelfComparisons::NAME,
+            &NoSelfComparisons,
+            Path::new("self_comparisons.dart"),
+            source,
+            true,
+        );
         let lines: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| source[..diagnostic.span.start].matches('\n').count() + 1)

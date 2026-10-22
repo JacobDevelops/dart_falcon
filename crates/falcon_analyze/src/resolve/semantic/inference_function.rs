@@ -180,15 +180,12 @@ impl TypeEnvironment {
                 };
                 if function.async_marker == AsyncMarker::Async {
                     let argument = flatten_async_return(return_type, signatures, model);
-                    ResolvedType {
-                        kind: ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
-                            identity: DeclarationIdentity::sdk("dart:async", "Future"),
-                            arguments: vec![argument].into(),
-                            nullable: false,
-                            extension_type: false,
-                        },
-                    }
+                    ResolvedType::new_interface(
+                        DeclarationIdentity::sdk("dart:async", "Future"),
+                        vec![argument].into(),
+                        false,
+                        false,
+                    )
                 } else {
                     return_type
                 }

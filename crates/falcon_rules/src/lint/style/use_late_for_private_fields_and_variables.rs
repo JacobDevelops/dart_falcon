@@ -681,28 +681,17 @@ impl<'a> Visitor<'a> for Mentions<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::UseLateForPrivateFieldsAndVariables;
-    use crate::lint::test_support::TestIndexes;
-    use falcon_analyze::{ParsedFile, RuleAnalysis};
-    use falcon_config::FalconConfig;
+    use crate::lint::test_support::diagnostics;
     use falcon_diagnostics::Span;
     use std::path::Path;
-    use std::sync::Arc;
 
     fn assert_only_field(source: &str, owner: &str) {
-        let falcon_dart_parser::ParseResult { errors, tree } = falcon_dart_parser::parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let path = Path::new("main.dart");
-        let config = FalconConfig::default();
-        let indexes = TestIndexes::single(path, &parsed, true);
-        let context = indexes.context(path, &config, &parsed);
-        let diagnostics = UseLateForPrivateFieldsAndVariables.analyze(
+        let diagnostics = diagnostics(
             "use-late-for-private-fields-and-variables",
-            parsed.program(),
-            &context,
+            &UseLateForPrivateFieldsAndVariables,
+            Path::new("main.dart"),
+            source,
+            true,
         );
         let owner_start = source.find(owner).unwrap();
         let field_start = owner_start + source[owner_start..].find("_value").unwrap();

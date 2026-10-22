@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use falcon_dart_parser::parse;
 
@@ -2266,8 +2266,15 @@ class SetterChild extends SetterApplication {
     );
 }
 
-fn with_model(source: &str, test: impl FnOnce(Program<'_>, &SemanticModel<'_>)) {
-    let path = PathBuf::from("/project/lib/main.dart");
+pub(crate) fn with_model(source: &str, test: impl FnOnce(Program<'_>, &SemanticModel<'_>)) {
+    with_model_at(Path::new("/project/lib/main.dart"), source, test);
+}
+
+pub(crate) fn with_model_at(
+    path: &Path,
+    source: &str,
+    test: impl FnOnce(Program<'_>, &SemanticModel<'_>),
+) {
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let parsed = Arc::new(crate::ParsedFile {
         source: source.into(),
@@ -2276,13 +2283,13 @@ fn with_model(source: &str, test: impl FnOnce(Program<'_>, &SemanticModel<'_>)) 
     let program = parsed.program();
     assert!(errors.is_empty(), "parse errors: {errors:?}");
     let sources = [IdentitySource {
-        path: &path,
+        path,
         parsed: &parsed,
         has_parse_errors: false,
     }];
     let identities = IdentityIndex::from_project_files(&sources, &[]);
     let types = TypeIndex::from_program(program);
-    let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
+    let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
     test(program, &model);
 }
 

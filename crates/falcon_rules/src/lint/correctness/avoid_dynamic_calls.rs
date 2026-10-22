@@ -376,18 +376,13 @@ mod tests {
     #[test]
     fn long_binary_receiver_chains_do_not_revisit_prefixes() {
         let source = format!("void f(int a) {{ {}; }}", vec!["a"; 100_000].join(" + "));
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(&source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
+        let diagnostics = crate::lint::test_support::diagnostics(
+            AvoidDynamicCalls::NAME,
+            &AvoidDynamicCalls,
+            Path::new("/project/lib/test.dart"),
+            &source,
+            false,
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
@@ -417,18 +412,13 @@ void use(C c, I1 i) {
 }
 ",
         ] {
-            let path = Path::new("/project/lib/test.dart");
-            let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-            assert!(errors.is_empty(), "{errors:?}");
-            let parsed = Arc::new(ParsedFile {
-                source: source.into(),
-                tree,
-            });
-            let program = parsed.program();
-            let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-            let config = FalconConfig::default();
-            let ctx = indexes.context(path, &config, &parsed);
-            let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
+            let diagnostics = crate::lint::test_support::diagnostics(
+                AvoidDynamicCalls::NAME,
+                &AvoidDynamicCalls,
+                Path::new("/project/lib/test.dart"),
+                source,
+                false,
+            );
             assert!(diagnostics.is_empty(), "{source}\n{diagnostics:?}");
         }
     }
@@ -496,18 +486,13 @@ void use(dynamic value) {
     #[test]
     fn reports_dynamic_operations_at_their_ast_receivers() {
         let source = "class Callbacks { final Function callback; Callbacks(this.callback); }\nvoid f(dynamic d, Function fn, Callbacks callbacks) {\n  d\n    ..x += 1;\n  d\n    ..a.b();\n  fn.call();\n  --d.z;\n  (d)();\n  d.toString();\n  (d as dynamic).foo();\n  callbacks\n      .callback();\n}";
-        let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
-        let config = FalconConfig::default();
-        let ctx = indexes.context(path, &config, &parsed);
-        let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
+        let diagnostics = crate::lint::test_support::diagnostics(
+            AvoidDynamicCalls::NAME,
+            &AvoidDynamicCalls,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
         let mut starts: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.span.start)

@@ -1,26 +1,6 @@
+use super::super::tests::with_model;
 use super::*;
-use crate::resolve::IdentitySource;
-use falcon_dart_parser::parse;
 use std::cell::Cell;
-
-fn with_model(source: &str, test: impl FnOnce(Program<'_>, &SemanticModel<'_>)) {
-    let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    assert!(errors.is_empty(), "parse errors: {errors:?}");
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree,
-    });
-    let sources = [IdentitySource {
-        path: &path,
-        parsed: &parsed,
-        has_parse_errors: false,
-    }];
-    let identities = IdentityIndex::from_project_files(&sources, &[]);
-    let types = TypeIndex::from_program(parsed.program());
-    let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
-    test(parsed.program(), &model);
-}
 
 fn assert_nested_assignment_closures_inferred_once(conditional: bool) {
     let depth = 12;
