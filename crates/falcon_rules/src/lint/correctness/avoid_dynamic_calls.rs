@@ -56,6 +56,7 @@ impl Rule for AvoidDynamicCalls {
             ctx,
             callees: HashSet::new(),
             cascade_sections: HashMap::new(),
+            dynamic_receivers: HashMap::new(),
         };
         RulePreparation::Semantic(Box::new(collector))
     }
@@ -68,6 +69,7 @@ struct Collector<'a> {
     callees: HashSet<(usize, usize)>,
     /// Complete selector receiver before the next operation in each section.
     cascade_sections: HashMap<usize, Span>,
+    dynamic_receivers: HashMap<NodeId, bool>,
 }
 
 impl<'a> Collector<'a> {
@@ -84,9 +86,26 @@ impl<'a> Collector<'a> {
         true
     }
 
-    fn is_dynamic(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
-        matches!(state.infer(expr), ResolvedType::Dynamic)
-            || dynamic_receiver(expr).is_some_and(|receiver| self.is_dynamic(receiver, state))
+    fn is_dynamic(&mut self, mut expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
+        let mut receivers = Vec::new();
+        let dynamic = loop {
+            if let Some(&dynamic) = self.dynamic_receivers.get(&expr.syntax().id()) {
+                break dynamic;
+            }
+            receivers.push(expr.syntax().id());
+            if matches!(state.infer(expr), ResolvedType::Dynamic) {
+                break true;
+            }
+            let Some(receiver) = dynamic_receiver(expr) else {
+                break false;
+            };
+            expr = receiver;
+        };
+        // Receiver paths run before surrounding operations, so each cached use shares its flow.
+        for receiver in receivers {
+            self.dynamic_receivers.insert(receiver, dynamic);
+        }
+        dynamic
     }
 
     fn is_function_typed(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
@@ -354,6 +373,24 @@ mod tests {
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::{path::Path, sync::Arc};
+
+    #[test]
+    fn long_binary_receiver_chains_do_not_revisit_prefixes() {
+        let source = format!("void f(int a) {{ {}; }}", vec!["a"; 100_000].join(" + "));
+        let path = Path::new("/project/lib/test.dart");
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
+        let config = FalconConfig::default();
+        let ctx = indexes.context(path, &config, &parsed);
+        let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
 
     #[test]
     fn dynamic_result_context_preserves_inferred_accumulator_type() {

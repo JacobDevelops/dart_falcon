@@ -29,7 +29,6 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 - [ ] **Shared flow joins.** `ScopedWalker` and `ClosureReturns` both hand-roll if/switch/try/loop joins. Move them into `FlowContext`, and move `switch_is_exhaustive` back to `flow.rs`.
 - [ ] **Shared collection/map element visiting.** Eleven visitors duplicate `visit_collection_element`/`visit_map_element`. Add an element trait in `falcon_syntax`.
 - [ ] **Terminating fixpoint.** `converge`/`infer_programs` (`semantic.rs:4641-4695`) rescan every program, SDK included, each round, and only end if every pass makes monotone progress, which nothing enforces. Add a worklist that requeues only declarations whose inputs changed. Enforce at the type-map writes that a step only fills an unknown type or tightens a partial one, never replaces a concrete type. Keep a round cap as a backstop; hitting it is an internal error naming the declarations still changing, not silently half-inferred types.
-- [ ] **Super-quadratic inference on binary chains.** Cost grows about 8× per doubling of `a + a + … + a`: `falcon check` takes 1.2 s at 250 operands, 10.4 s at 500, 79 s at 1,000 and over 120 s at 2,000 (same on 0.4.3). The profile is dominated by `TypeEnvironment::infer_non_call` and `SignatureIndex::interface_candidates`. Find the repeated work and make it linear.
 
 #### 18. Analyze infrastructure
 

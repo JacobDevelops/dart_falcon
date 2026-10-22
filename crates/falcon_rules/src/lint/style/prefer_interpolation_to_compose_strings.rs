@@ -8,6 +8,9 @@
 //! `String`. The pair after a reported one is skipped. A non-`+` binary
 //! expression as a chain's left operand ends the chain (`a - b + 'x'` checks
 //! only `'x'`), and a parenthesized operand is an ordinary operand.
+//! Each left spine is collected iteratively once; preorder visits its prefixes
+//! before any operand changes semantic flow, so the root already covers every
+//! greedy pair a prefix would report.
 //!
 //! falcon stays silent when it cannot infer the left operand's type.
 //!
@@ -33,7 +36,7 @@ impl Rule for PreferInterpolationToComposeStrings {
         RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-            reported: HashSet::new(),
+            visited: HashSet::new(),
         }))
     }
 }
@@ -41,8 +44,8 @@ impl Rule for PreferInterpolationToComposeStrings {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    /// Reported ranges: every `+` in a chain rescans its own prefix.
-    reported: HashSet<(usize, usize)>,
+    /// Addition prefixes already scanned by their outermost left-spine root.
+    visited: HashSet<NodeId>,
 }
 
 /// One operand of a `+` chain.
@@ -73,24 +76,24 @@ impl<'a> Operand<'a> {
 
 /// The operands of the `+` chain `node` (flattened through unparenthesized
 /// left operands); a non-`+` binary left operand contributes none.
-fn chained_additions<'a>(node: Expr<'a>) -> Vec<Operand<'a>> {
+fn collect_chain<'a>(mut node: Expr<'a>, visited: &mut HashSet<NodeId>) -> Vec<Operand<'a>> {
     let mut operands = Vec::new();
-    collect_chain(node, &mut operands);
-    operands
-}
-
-fn collect_chain<'a>(node: Expr<'a>, operands: &mut Vec<Operand<'a>>) {
-    let Expr::Binary(binary) = node else {
-        operands.push(Operand { expr: node });
-        return;
-    };
-    if binary.op() != BinaryOp::Add {
-        return;
+    loop {
+        let Expr::Binary(binary) = node else {
+            operands.push(Operand { expr: node });
+            break;
+        };
+        if binary.op() != BinaryOp::Add {
+            break;
+        }
+        visited.insert(binary.syntax().id());
+        operands.push(Operand {
+            expr: binary.right(),
+        });
+        node = binary.left();
     }
-    collect_chain(binary.left(), operands);
-    operands.push(Operand {
-        expr: binary.right(),
-    });
+    operands.reverse();
+    operands
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -99,10 +102,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
-        if !matches!(node, Expr::Binary(binary) if binary.op() == BinaryOp::Add) {
+        let Expr::Binary(binary) = node else {
+            return;
+        };
+        if binary.op() != BinaryOp::Add || self.visited.contains(&binary.syntax().id()) {
             return;
         }
-        let operands = chained_additions(node);
+        let operands = collect_chain(node, &mut self.visited);
         let mut index = 0;
         while index + 1 < operands.len() {
             let (left, right) = (operands[index], operands[index + 1]);
@@ -121,11 +127,86 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 continue;
             }
             let span = Span::new(left.expr.span().start, right.expr.span().end);
-            if self.reported.insert((span.start, span.end)) {
-                self.diags.push(self.ctx.diagnostic("Use string interpolation to compose strings and values.", span));
-            }
+            self.diags.push(self.ctx.diagnostic("Use string interpolation to compose strings and values.", span));
             // The right operand was just reported; skip over it.
             index += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{ParsedFile, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::{path::Path, sync::Arc};
+
+    fn diagnostics(source: &str) -> Vec<Diagnostic> {
+        let path = Path::new("/project/lib/test.dart");
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
+        let config = FalconConfig::default();
+        let ctx = indexes.context(path, &config, &parsed);
+        PreferInterpolationToComposeStrings.analyze(
+            PreferInterpolationToComposeStrings::NAME,
+            program,
+            &ctx,
+        )
+    }
+
+    #[test]
+    fn numeric_chain_collects_each_prefix_once_on_normal_stack() {
+        let source = format!("void f(int a) {{ {}; }}", vec!["a"; 100_000].join(" + "));
+        assert!(diagnostics(&source).is_empty());
+    }
+
+    #[test]
+    fn mixed_chains_preserve_greedy_pairs_filters_and_diagnostic_order() {
+        let source = r#"
+void f(String a, String b, String c) {
+  'a' + a + 'b' + b + 'c' + c;
+  a + b + 'd' + c + 'e';
+  r'raw' + a + 'f' + b.toString(1) + 'g' + c;
+  ('h' + a) + b + 'i';
+  'a' - a + 'j' + c;
+  'hello $a' + b + 'adj' 'acent' + c;
+  r'raw' 'adjacent' + a;
+  'x' + a.toString();
+}
+"#;
+        let actual: Vec<_> = diagnostics(source)
+            .iter()
+            .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
+            .collect();
+        let expected: Vec<_> = [
+            "'a' + a",
+            "'b' + b",
+            "'c' + c",
+            "b + 'd'",
+            "c + 'e'",
+            "a + 'f'",
+            "'g' + c",
+            "b + 'i'",
+            "'h' + a",
+            "'j' + c",
+            "'hello $a' + b",
+            "'adj' 'acent' + c",
+            "r'raw' 'adjacent' + a",
+            "'x' + a.toString()",
+        ]
+        .into_iter()
+        .map(|pair| {
+            let start = source.find(pair).unwrap();
+            (start, start + pair.len())
+        })
+        .collect();
+        assert_eq!(actual, expected);
     }
 }
