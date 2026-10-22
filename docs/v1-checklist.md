@@ -8,13 +8,7 @@ Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every i
 
 ### Stage 5: start now
 
-Batch 15 goes first; 16 and 17 then work in separate modules.
-
-#### 15. Split `resolve/semantic.rs`
-
-Owns `crates/falcon_analyze/src/resolve/semantic.rs` and its new submodules. Pure moves.
-
-- [ ] **Split `resolve/semantic.rs`.** 22k lines, 37% inline tests. Move tests out first, then split along the existing seams (types, substitution, model, index build/fixpoint/SDK/hierarchy/members, inference env/call/expr/function/collections, join).
+Batches 16 and 17 work in separate modules.
 
 #### 16. Type model
 
