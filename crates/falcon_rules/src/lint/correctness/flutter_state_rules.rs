@@ -149,20 +149,20 @@ fn contains(outer: Span, inner: Span) -> bool {
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
         let message = match self.rule {
-            "require-super-dispose" => "Call super.dispose() in this State dispose override.",
+            "require-super-dispose" => "Call `super.dispose()` in this `State.dispose` override.",
             "avoid-empty-setstate" => {
-                "Avoid an empty setState callback; update state inside the callback."
+                "Avoid an empty `setState` callback; update state inside the callback."
             }
             "avoid-unnecessary-setstate" => {
-                "Update state directly instead of calling setState during this lifecycle method."
+                "Update state directly instead of calling `setState` during this lifecycle method."
             }
             "use-closest-build-context" => {
-                "Use the closest BuildContext parameter instead of an outer context."
+                "Use the closest `BuildContext` parameter instead of an outer context."
             }
             "avoid-late-context" => {
-                "Avoid storing or accessing BuildContext in a late field initializer."
+                "Avoid storing or accessing `BuildContext` in a `late` field initializer."
             }
-            _ => "Move inherited-widget subscriptions from initState to didChangeDependencies.",
+            _ => "Move inherited-widget subscriptions from `initState` to `didChangeDependencies`.",
         };
         self.diags.push(self.ctx.diagnostic(message, span));
     }

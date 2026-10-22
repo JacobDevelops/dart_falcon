@@ -50,7 +50,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
         self.calls.finish();
         self.candidates.iter().filter(|&&expr| self.calls.contains(expr)).map(|expr| {
-            self.ctx.diagnostic("Hooks require a HookWidget, HookConsumerWidget, or HookBuilder; replace this non-hook widget.", expr.span())
+            self.ctx.diagnostic("Hooks require a `HookWidget`, `HookConsumerWidget`, or `HookBuilder`; replace this non-hook widget.", expr.span())
         }).collect()
     }
 }

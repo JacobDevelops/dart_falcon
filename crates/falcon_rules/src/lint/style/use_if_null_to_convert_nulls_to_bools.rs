@@ -61,7 +61,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && !is_parenthesized(binary.right())
             && is_nullable_bool(&state.infer(binary.left()))
         {
-            self.diags.push(self.ctx.diagnostic("Use an if-null operator to convert a 'null' to a 'bool'.", binary.span()));
+            self.diags.push(self.ctx.diagnostic("Use an if-null operator to convert a `null` to a `bool`.", binary.span()));
         }
     }
 }

@@ -100,7 +100,7 @@ impl CrossFileRule for UnusedFiles {
                 "",
                 Severity::Warning,
                 "File is not reachable from any entrypoint (main, a non-lib file, or the public \
-                 library surface); it may be dead code",
+                 library surface); it may be dead code.",
                 f.path.to_string_lossy().into_owned(),
                 DiagSpan { start: 0, end: 0 },
             ));

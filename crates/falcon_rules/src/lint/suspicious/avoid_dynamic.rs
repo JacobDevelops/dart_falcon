@@ -49,7 +49,7 @@ impl<'a> StructuralRuleVisitor<'a> for DynamicVisitor<'_, 'a> {
     fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Dynamic(dynamic) = node {
             self.diagnostics.push(self.ctx.diagnostic(
-                "Avoid using the 'dynamic' type",
+                "Avoid using the `dynamic` type.",
                 dynamic.span(),
             ));
         }

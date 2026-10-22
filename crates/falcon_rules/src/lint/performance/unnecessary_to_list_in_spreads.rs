@@ -71,7 +71,7 @@ impl Collector<'_> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic("Unnecessary 'toList()' in a spread.", span));
+        self.diags.push(self.ctx.diagnostic("Remove the unnecessary `toList()` call from this spread.", span));
     }
 }
 

@@ -62,7 +62,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Some(replacement) = replacement(args)
         {
             self.diags.push(self.ctx.diagnostic(format!(
-                "Use 'SizedBox.{replacement}' to avoid needing to specify the 'height' and 'width'."
+                "Use `SizedBox.{replacement}` to avoid needing to specify the `height` and `width`."
             ), crate::lint::flutter::constructor_span(node)));
         }
     }

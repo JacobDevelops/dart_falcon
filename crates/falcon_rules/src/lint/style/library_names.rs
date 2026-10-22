@@ -52,7 +52,7 @@ impl Rule for LibraryNames {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Diagnostics(vec![ctx.diagnostic(
-            format!("The library name '{name}' isn't a lower_case_with_underscores identifier."),
+            format!("The library name `{name}` isn't a `lower_case_with_underscores` identifier."),
             span,
         )])
     }

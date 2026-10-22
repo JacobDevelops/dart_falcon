@@ -68,7 +68,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     }).unwrap_or(false)
                 {
                     self.diags.push(self.ctx.diagnostic(
-                        "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target",
+                        "This cascade assigns to the same target more than once — remove the overwritten assignment or correct its target.",
                         section.span(),
                     ));
                 }

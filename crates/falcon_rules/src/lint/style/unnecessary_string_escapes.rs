@@ -43,7 +43,7 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, start: usize) {
-        self.diags.push(self.ctx.diagnostic("Unnecessary escape; the backslash can be removed.", DiagSpan {
+        self.diags.push(self.ctx.diagnostic("Remove the unnecessary escape backslash.", DiagSpan {
             start,
             end: start + 1,
         }));

@@ -63,7 +63,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     };
                     if reads_environment(ty, name.name()) {
                         self.diags
-                            .push(self.ctx.diagnostic("Invalid use of an environment declaration.", name.span()));
+                            .push(self.ctx.diagnostic("Avoid using environment declarations.", name.span()));
                     }
                     return;
                 }
@@ -116,7 +116,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => return,
         };
         if reads_environment(&ty, constructor) {
-            self.diags.push(self.ctx.diagnostic("Invalid use of an environment declaration.", span));
+            self.diags.push(self.ctx.diagnostic("Avoid using environment declarations.", span));
         }
     }
 }

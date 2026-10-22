@@ -79,7 +79,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .chain(args.named().map(|argument| argument.value()));
         for literal in arguments.flat_map(collection_literals) {
             if constant_in_context(literal, &self.deferred, state) {
-                self.diags.push(self.ctx.diagnostic("Use 'const' literals as arguments to constructors of '@immutable' classes.", literal.unparenthesized().span()));
+                self.diags.push(self.ctx.diagnostic("Use `const` literals as arguments to constructors of `@immutable` classes.", literal.unparenthesized().span()));
             }
         }
     }

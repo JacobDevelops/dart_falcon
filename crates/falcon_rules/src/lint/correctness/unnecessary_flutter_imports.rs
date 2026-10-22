@@ -70,7 +70,7 @@ impl<'a> SemanticRuleVisitor<'a> for Usage<'a> {
             .filter(|import| import_targets_framework(*import))
             .filter(|import| !import_is_used(*import, &self))
             .map(|import| {
-                ctx.diagnostic("Unnecessary Flutter import. Remove unused imports.", import.span())
+                ctx.diagnostic("Remove this unnecessary Flutter import.", import.span())
             })
             .collect()
     }

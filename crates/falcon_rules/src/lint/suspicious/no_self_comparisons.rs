@@ -123,7 +123,7 @@ use crate::lint::expressions::equivalent;
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex, TypeIndex};
+
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
@@ -159,32 +159,9 @@ class Child extends Values {
         });
         let program = parsed.program();
         let path = Path::new("self_comparisons.dart");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path,
-                falcon_analyze::LibrarySource {
-                    program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, true);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let diagnostics = NoSelfComparisons.analyze(NoSelfComparisons::NAME, program, &ctx);
         let lines: Vec<_> = diagnostics
             .iter()

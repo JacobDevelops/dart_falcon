@@ -196,7 +196,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && let Some(span) = self.pending.remove(&argument.span().start)
             && !state.implicit_call_tearoff(node)
         {
-            self.diags.push(self.ctx.diagnostic("Use 'forEach' and a tear-off rather than a 'for' loop to apply a function to every element.", span));
+            self.diags.push(self.ctx.diagnostic("Use `forEach` and a tear-off rather than a `for` loop to apply a function to every element.", span));
         }
     }
 }

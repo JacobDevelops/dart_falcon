@@ -48,7 +48,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
         {
             let span = else_branch.span();
             self.diags.push(self.ctx.diagnostic(
-                "Empty `else` clause — remove the `else` or give it a body",
+                "Remove the empty `else` clause or give it a body.",
                 span,
             ));
         }

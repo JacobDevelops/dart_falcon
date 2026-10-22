@@ -51,7 +51,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .all(|n| matches!(n.name().name(), "width" | "height" | "child" | "key"))
         {
             self.diags.push(self.ctx.diagnostic(
-                "Use a SizedBox to add whitespace to a layout instead of a Container.",
+                "Use a `SizedBox` to add whitespace to a layout instead of a `Container`.",
                 crate::lint::flutter::constructor_span(node),
             ));
         }

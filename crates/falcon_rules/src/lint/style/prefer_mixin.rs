@@ -95,7 +95,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource, TypeIndex};
+
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;
@@ -117,45 +117,9 @@ mod tests {
             tree,
         });
         assert!(errors.is_empty(), "{errors:?}");
-        let sources = [
-            IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            },
-            IdentitySource {
-                path: &imported_path,
-                parsed: &dependency,
-                has_parse_errors: false,
-            },
-        ];
-        let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let types = TypeIndex::from_resolved_files(
-            sources.iter().map(|source| {
-                (
-                    source.path,
-                    LibrarySource {
-                        program: source.parsed.program(),
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                )
-            }),
-            &identities,
-        );
-        let signatures = falcon_analyze::SignatureIndex::from_project_files(
-            &[
-                (path.clone(), std::sync::Arc::clone(&parsed)),
-                (imported_path.clone(), std::sync::Arc::clone(&dependency)),
-            ],
-            &identities,
-            &types,
-        );
+        let indexes = crate::lint::test_support::TestIndexes::new(&[(&path, &parsed), (&imported_path, &dependency)]);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, &config, &parsed)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
+        let context = indexes.context(&path, &config, &parsed);
         PreferMixin.analyze(PreferMixin::NAME, program, &context)
             .into_iter()
             .map(|diagnostic| {

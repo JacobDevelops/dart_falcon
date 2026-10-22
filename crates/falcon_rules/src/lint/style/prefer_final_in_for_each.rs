@@ -72,7 +72,7 @@ impl Collector<'_, '_> {
                     && for_in.declares_variable()
                     && !self.mutated.contains(&for_in.name().syntax().id()) =>
             {
-                self.diagnostics.push(self.ctx.diagnostic(format!("The variable '{}' should be final.", for_in.name().name()), for_in.name().span()));
+                self.diagnostics.push(self.ctx.diagnostic(format!("The variable `{}` should be final.", for_in.name().name()), for_in.name().span()));
             }
             ForInit::PatternForIn(for_in) if for_in.keyword() == VarKeyword::Var => {
                 let pattern = for_in.pattern();

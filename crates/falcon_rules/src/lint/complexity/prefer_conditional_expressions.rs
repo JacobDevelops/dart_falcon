@@ -83,7 +83,7 @@ impl<'a> StructuralRuleVisitor<'a> for ConditionalExpressions<'a, 'a> {
             );
             if both_return || both_assign {
                 self.diags.push(self.ctx.diagnostic(
-                    "Prefer a conditional expression over an if/else with a single statement in each branch",
+                    "Prefer a conditional expression over an if/else with a single statement in each branch.",
                     n.span(),
                 ));
             }

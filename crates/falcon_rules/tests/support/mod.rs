@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 pub fn files(root: &Path, max_depth: usize, extension: Option<&str>) -> Vec<PathBuf> {
     let mut files: Vec<_> = walkdir::WalkDir::new(root)
+        .follow_links(true)
         .max_depth(max_depth)
         .into_iter()
         .map(|entry| {

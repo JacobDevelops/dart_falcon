@@ -47,7 +47,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 for field in obj.fields() {
                     if field.source_name().is_some() && is_redundant_field(self.ctx, field.span()) {
                         self.diags.push(self.ctx.diagnostic(
-                            "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
+                            "Remove the redundant field name from this pattern and use shorthand such as `:x`.",
                             field.span(),
                         ));
                     }
@@ -57,7 +57,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 for field in rec.fields() {
                     if field.source_name().is_some() && is_redundant_field(self.ctx, field.span()) {
                         self.diags.push(self.ctx.diagnostic(
-                            "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
+                            "Remove the redundant field name from this pattern and use shorthand such as `:x`.",
                             field.span(),
                         ));
                     }

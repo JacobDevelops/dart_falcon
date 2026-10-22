@@ -64,11 +64,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
             let message = if matches!(&ty, ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:core", "Error"))
             {
-                "The type 'Error' should not be caught.".to_string()
+                "The type `Error` should not be caught.".to_string()
             } else {
                 let name = expressions::normalized(self.ctx, &caught.span()).unwrap_or_default();
                 format!(
-                    "The type '{name}' should not be caught because it is a subclass of 'Error'."
+                    "The type `{name}` should not be caught because it is a subclass of `Error`."
                 )
             };
             self.diagnostics.push(self.ctx.diagnostic(message, catch.span()));

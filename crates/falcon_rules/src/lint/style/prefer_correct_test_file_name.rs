@@ -59,7 +59,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let TopLevelDecl::Function(function) = declaration
             && function.name().name() == "main"
         {
-            self.diags.push(self.ctx.diagnostic("Use the _test.dart suffix for a test entry-point file.", function.name().span()));
+            self.diags.push(self.ctx.diagnostic("Use the `_test.dart` suffix for a test entry-point file.", function.name().span()));
         }
         StructuralTraversal::SkipChildren
     }

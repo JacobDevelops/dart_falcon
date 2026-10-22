@@ -707,16 +707,14 @@ fn check_statements(
 }
 
 fn report(start: usize, end: usize, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    diags.push(ctx.diagnostic("Unnecessary duplication of receiver.", DiagSpan { start, end }));
+    diags.push(ctx.diagnostic("Avoid repeating the receiver.", DiagSpan { start, end }));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{
-        IdentityIndex, IdentitySource, LibrarySource, ParsedFile, SignatureIndex, TypeIndex,
-    };
+    use falcon_analyze::{ParsedFile};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
@@ -743,38 +741,9 @@ mod tests {
             tree: parsed_output.tree,
         });
         let files = [(path, &parsed), (imported_path, &parsed_output)];
-        let identities = IdentityIndex::from_project_files(
-            &files.map(|(path, parsed)| IdentitySource {
-                path,
-                parsed,
-                has_parse_errors: false,
-            }),
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            files.map(|(path, parsed)| {
-                (
-                    path,
-                    LibrarySource {
-                        program: parsed.program(),
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                )
-            }),
-            &identities,
-        );
-        let signatures = SignatureIndex::build(
-            &files.map(|(path, parsed)| (path.to_path_buf(), Arc::clone(parsed))),
-            None,
-            &identities,
-            &types,
-        );
+        let indexes = crate::lint::test_support::TestIndexes::new(&files);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         CascadeInvocations.analyze(CascadeInvocations::NAME, program, &ctx)
     }
 

@@ -1,18 +1,8 @@
-//! Report nullable parameters of private declarations that never receive null.
+//! Flags private function or method parameters whose nullable type is unnecessary.
 //!
-//! Flags a nullable parameter (`T?`) of a private (`_`-prefixed) function or
-//! method when every call site passes a proven non-null value, and its body
-//! only assigns proven non-null values to it. Because the declaration is private, every
-//! one of its call sites is visible in the analyzed set, which is what makes the
-//! conclusion sound; the `?` then widens the type for a value that is always
-//! non-null, so callers and the body carry null handling that can never trigger.
-//! An argument or write counts as non-null only when proven so, including type
-//! parameter bounds and the element types of for-in writes. Calls use the
-//! declared return types resolved by the cross-file index. Anything uncertain
-//! (an ambiguous name, a tear-off reference, an argument that might be
-//! null) suppresses the report. This is a cross-file rule: it runs in the
-//! cross-file pass over the whole analyzed file set and is configured under the
-//! top-level `cross-file` section rather than `linter`.
+//! A parameter is reported when every known call argument and assignment is
+//! proven non-null. Uncertain references or values that may be null are not
+//! reported. This cross-file rule is configured under `cross-file`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -123,8 +113,8 @@ impl CrossFileRule for UnnecessaryNullable {
                         "",
                         Severity::Warning,
                         format!(
-                            "Parameter '{}' is never null at any call site; \
-                             the '?' is unnecessary",
+                            "Parameter `{}` is never null at any call site; \
+                             remove the unnecessary `?`.",
                             param.name
                         ),
                         f.path.to_string_lossy().into_owned(),

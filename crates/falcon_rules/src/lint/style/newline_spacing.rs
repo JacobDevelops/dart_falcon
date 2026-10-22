@@ -55,12 +55,12 @@ impl Collector<'_> {
             return;
         }
         let message = match self.target {
-            Target::Method => "Add a blank line before method declaration",
-            Target::Case => "Add a blank line before case clause",
-            Target::Throw => "Add a blank line before throw statement",
-            Target::Continue => "Add a blank line before continue statement",
-            Target::Break => "Add a blank line before break statement",
-            Target::Constructor => "Add a blank line before constructor declaration",
+            Target::Method => "Add a blank line before method declaration.",
+            Target::Case => "Add a blank line before this `case` clause.",
+            Target::Throw => "Add a blank line before this `throw` statement.",
+            Target::Continue => "Add a blank line before this `continue` statement.",
+            Target::Break => "Add a blank line before this `break` statement.",
+            Target::Constructor => "Add a blank line before constructor declaration.",
         };
         self.diags.push(self.ctx.diagnostic(message, node.span()));
     }

@@ -82,7 +82,7 @@ fn check_stmts_for_return(
         if let Stmt::Return(ret) = stmt
             && !has_blank_line_before(ret.syntax())
         {
-            diags.push(ctx.diagnostic("Add a blank line before return statement", ret.span()));
+            diags.push(ctx.diagnostic("Add a blank line before return statement.", ret.span()));
         }
     }
 }

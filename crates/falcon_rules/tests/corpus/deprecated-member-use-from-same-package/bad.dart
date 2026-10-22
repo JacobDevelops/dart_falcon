@@ -1,8 +1,8 @@
 @deprecated
 void oldFunction() {}
-@Deprecated('Use newValue')
+@Deprecated('Use `newValue`.')
 int oldValue = 1;
-@Deprecated('Use NewType!')
+@Deprecated('Use `NewType`.')
 class Legacy {}
 class Api {
   Api();

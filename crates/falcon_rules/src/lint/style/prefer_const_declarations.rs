@@ -174,7 +174,7 @@ impl<'a> SemanticRuleVisitor<'a> for Checker<'a> {
                     }
                     start
                 };
-                Some(ctx.diagnostic("Use 'const' for final variables initialized to a constant value.", Span {
+                Some(ctx.diagnostic("Use `const` for final variables initialized to a constant value.", Span {
                     start,
                     end: group.span.end,
                 }))
@@ -220,7 +220,7 @@ impl<'a> SemanticRuleVisitor<'a> for Checker<'a> {
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex, TypeIndex};
+
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;
@@ -251,34 +251,9 @@ void f() {
             source: source.into(),
         });
         let program = parsed.tree.program(source);
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let files = [(path.clone(), std::sync::Arc::clone(&parsed))];
-        let types = TypeIndex::from_resolved_files(
-            files.iter().map(|(path, parsed)| {
-                (
-                    path.as_path(),
-                    falcon_analyze::LibrarySource {
-                        program: parsed.program(),
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                )
-            }),
-            &identities,
-        );
-        let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
+        let indexes = crate::lint::test_support::TestIndexes::new(&[(&path, &parsed)]);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(&path, &config, &parsed)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(&path, &config, &parsed);
         let diagnostics = PreferConstDeclarations.analyze(PreferConstDeclarations::NAME, program, &ctx);
         let spans: Vec<_> = diagnostics
             .iter()

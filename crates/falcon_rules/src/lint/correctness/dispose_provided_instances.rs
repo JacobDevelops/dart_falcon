@@ -339,9 +339,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 return None;
             }
             let message = if self.provided_instances {
-                "Register this instance's dispose method with ref.onDispose; autoDispose does not dispose the instance."
+                "Register this instance's `dispose` method with `ref.onDispose`; `autoDispose` does not dispose the instance."
             } else {
-                "Give this provider-created resource a lifecycle: use autoDispose or register its cleanup with ref.onDispose."
+                "Give this provider-created resource a lifecycle: use `autoDispose` or register its cleanup with `ref.onDispose`."
             };
             Some(self.ctx.diagnostic(message, resource.span))
         }).collect()

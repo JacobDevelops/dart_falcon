@@ -75,7 +75,7 @@ impl<'a> Collector<'a> {
                 .iter()
                 .any(|previous| equivalent(*previous, expression, self.ctx))
             {
-                self.diagnostics.push(self.ctx.diagnostic("Duplicate collection element. Remove or replace the repeated element.", expression.span()));
+                self.diagnostics.push(self.ctx.diagnostic("Remove or replace this duplicate collection element.", expression.span()));
             } else {
                 seen.push(expression);
             }

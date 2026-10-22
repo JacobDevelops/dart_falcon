@@ -60,7 +60,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         SwitchCaseKind::Expr(label) => {
                             let expression = label.expr();
                             if invalid_expression(expression, state) {
-                                self.diags.push(self.ctx.diagnostic("This expression is not valid in a 'case' clause in Dart 3.0.", expression.span()));
+                                self.diags.push(self.ctx.diagnostic("This expression is not valid in a `case` clause in Dart 3.0.", expression.span()));
                             }
                         }
                     }

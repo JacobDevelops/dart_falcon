@@ -32,7 +32,7 @@ use crate::lint::resource_leaks::{LeakRule, Release};
 pub struct CancelSubscriptions;
 
 const RULE: LeakRule = LeakRule {
-    message: "Uncancelled instance of 'StreamSubscription'.",
+    message: "Cancel this `StreamSubscription` instance.",
     releases: &[Release {
         library: "dart:async",
         type_name: "StreamSubscription",

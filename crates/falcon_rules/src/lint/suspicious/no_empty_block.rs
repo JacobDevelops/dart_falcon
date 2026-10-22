@@ -112,7 +112,7 @@ fn flag_if_empty(block: Block<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCon
     let Some(span) = empty_block_end(block) else {
         return;
     };
-    diags.push(ctx.diagnostic("Avoid empty blocks — add a comment explaining the intent or remove the block", span));
+    diags.push(ctx.diagnostic("Avoid empty blocks — add a comment explaining the intent or remove the block.", span));
 }
 
 /// Closing brace of an empty block without an explanatory comment.

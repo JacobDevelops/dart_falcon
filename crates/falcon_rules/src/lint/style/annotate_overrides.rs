@@ -67,7 +67,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let overrides = signatures.has_combined_inherited_member(owner, name, kind, model);
             if overrides {
                 diags.push(ctx.diagnostic(
-                    "Annotate overridden members with '@override'.",
+                    "Annotate overridden members with `@override`.",
                     span,
                 ));
             }

@@ -99,7 +99,7 @@ impl<'a> DeclaredContexts<'a, '_> {
     fn check(&mut self, expr: Expr<'a>) {
         if let Some(span) = replaceable_literal(expr) {
             self.diagnostics
-                .push(self.ctx.diagnostic("Unnecessary use of a 'double' literal.", span));
+                .push(self.ctx.diagnostic("Use an integer literal instead of this unnecessary `double` literal.", span));
         }
     }
 
@@ -234,7 +234,7 @@ impl<'a> ArgumentContexts<'a> {
         }
         if let Some(span) = replaceable_literal(argument) {
             self.diagnostics
-                .push(self.ctx.diagnostic("Unnecessary use of a 'double' literal.", span));
+                .push(self.ctx.diagnostic("Use an integer literal instead of this unnecessary `double` literal.", span));
         }
     }
 
@@ -267,5 +267,44 @@ impl<'a> SemanticRuleVisitor<'a> for ArgumentContexts<'a> {
         _state: &SemanticState<'a>,
     ) {
         self.check_arguments(args, positional, named);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::RuleAnalysis;
+    use falcon_dart_parser::parse;
+
+    #[test]
+    fn binary_operands_use_operator_parameters_not_the_result_context() {
+        let source = r#"
+T pick<T extends num>(T value) => value;
+class Numeric {
+  double operator +(num value) => 0;
+  double operator -(double value) => 0;
+}
+void run(Numeric number) {
+  double broad = number + pick(1.0);
+  double narrow = number - pick(2.0);
+  double direct = pick(3.0);
+}
+"#;
+        let path = std::path::Path::new("/project/lib/main.dart");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed)]);
+        let config = falcon_config::FalconConfig::default();
+        let context = indexes.context(path, &config, &parsed);
+        let diagnostics = PreferIntLiterals.analyze(PreferIntLiterals::NAME, parsed.program(), &context);
+        let reported: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(reported, ["2.0", "3.0"]);
     }
 }

@@ -63,34 +63,16 @@ pub fn staged_file(project: &Path, source: &Path, file: &Path) -> PathBuf {
 pub fn sdk_project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
-    fs::create_dir_all(sdk.join("core")).unwrap();
-    fs::create_dir_all(sdk.join("collection")).unwrap();
-    fs::create_dir_all(sdk.join("async")).unwrap();
-    fs::create_dir_all(sdk.join("math")).unwrap();
-    fs::create_dir_all(sdk.join("convert")).unwrap();
-    fs::write(
-        sdk.join("libraries.json"),
-        include_str!("sdk/lib/libraries.json"),
-    )
-    .unwrap();
-    fs::write(sdk.join("core/core.dart"), CORE).unwrap();
-    fs::write(sdk.join("collection/collection.dart"), COLLECTION).unwrap();
-    fs::write(
-        sdk.join("async/async.dart"),
-        include_str!("sdk/lib/async/async.dart"),
-    )
-    .unwrap();
-    fs::write(
-        sdk.join("math/math.dart"),
-        include_str!("sdk/lib/math/math.dart"),
-    )
-    .unwrap();
-    fs::write(
-        sdk.join("convert/convert.dart"),
-        include_str!("sdk/lib/convert/convert.dart"),
-    )
-    .unwrap();
+    write_sdk(
+        root,
+        &[
+            ("core", CORE),
+            ("collection", COLLECTION),
+            ("async", include_str!("sdk/lib/async/async.dart")),
+            ("math", include_str!("sdk/lib/math/math.dart")),
+            ("convert", include_str!("sdk/lib/convert/convert.dart")),
+        ],
+    );
     fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
     fs::create_dir_all(root.join("app/lib")).unwrap();
     fs::write(root.join("app/pubspec.yaml"), "name: app\n").unwrap();
@@ -305,6 +287,23 @@ fn configure_packages(app: &Path) {
         }
         fs::write(config_path, config.to_string()).unwrap();
     }
+}
+
+pub fn write_sdk(root: &Path, libraries: &[(&str, &str)]) {
+    let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
+    let mut entries = serde_json::Map::new();
+    for &(name, source) in libraries {
+        let relative = format!("{name}/{name}.dart");
+        let file = sdk.join(&relative);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, source).unwrap();
+        entries.insert(name.into(), serde_json::json!({ "uri": relative }));
+    }
+    std::fs::write(
+        sdk.join("libraries.json"),
+        serde_json::json!({ "vm": { "libraries": entries } }).to_string(),
+    )
+    .unwrap();
 }
 
 #[cfg(test)]

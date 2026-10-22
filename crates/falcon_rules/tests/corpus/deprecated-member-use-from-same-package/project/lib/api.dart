@@ -1,18 +1,18 @@
 @deprecated
 void oldFunction() { oldFunction(); }
-@Deprecated('  Use freshValue  ')
+@Deprecated('  Use `freshValue`.  ')
 int oldValue = 1;
 @Deprecated('.')
 class Legacy {}
 class Api {
   Api();
-  @Deprecated('Use Api()!')
+  @Deprecated('Use `Api()`.')
   Api.old();
   @deprecated
   void oldMethod() { oldMethod(); }
   @deprecated
   int oldField = 0;
-  @Deprecated('Use freshGetter?')
+  @Deprecated('Use `freshGetter`.')
   int get oldGetter => 1;
   @deprecated
   set oldSetter(int value) {}

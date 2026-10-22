@@ -83,7 +83,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 })
         };
         if matches {
-            self.diagnostics.push(self.ctx.diagnostic("Move this padding into the child Container instead of wrapping it in Padding.", crate::lint::flutter::constructor_span(node)));
+            self.diagnostics.push(self.ctx.diagnostic("Move this padding into the child `Container` instead of wrapping it in `Padding`.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

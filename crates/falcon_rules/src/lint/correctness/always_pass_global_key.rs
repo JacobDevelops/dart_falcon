@@ -144,7 +144,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .iter()
                 .filter(|field| !field.passed)
                 .map(|field| {
-                    self.ctx.diagnostic("Pass this GlobalKey field to a widget.", field.span)
+                    self.ctx.diagnostic("Pass this `GlobalKey` field to a widget.", field.span)
                 }),
         );
         self.diagnostics
@@ -181,7 +181,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     ) != Truth::Yes
             }
         {
-            self.diagnostics.push(self.ctx.diagnostic("Store this GlobalKey outside the widget's key argument.", key.value().span()));
+            self.diagnostics.push(self.ctx.diagnostic("Store this `GlobalKey` outside the widget's key argument.", key.value().span()));
         }
         if self.fields.is_empty() {
             return;

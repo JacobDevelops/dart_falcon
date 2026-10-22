@@ -39,7 +39,7 @@ fn check_pubspec(path: &Path) -> Option<Diagnostic> {
     let mut diagnostic = Diagnostic::new(
         "",
         Severity::Warning,
-        format!("The package name '{name}' isn't a lower_case_with_underscores identifier."),
+        format!("The package name `{name}` isn't a `lower_case_with_underscores` identifier."),
         path.to_string_lossy().into_owned(),
         span,
     );

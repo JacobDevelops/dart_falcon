@@ -68,6 +68,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if inside_coerced {
             return;
         }
-        self.diags.push(self.ctx.diagnostic("Explicitly tear off the 'call' method.", node.span()));
+        self.diags.push(self.ctx.diagnostic("Explicitly tear off the `call` method.", node.span()));
     }
 }

@@ -54,7 +54,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let Expr::Conditional(conditional) = node {
             if self.cond_ancestor {
                 self.diags.push(self.ctx.diagnostic(
-                    "Avoid nested conditional expressions",
+                    "Avoid nested conditional expressions.",
                     conditional.span(),
                 ));
             }

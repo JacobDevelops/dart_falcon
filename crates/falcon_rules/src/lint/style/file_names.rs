@@ -26,7 +26,7 @@ impl Rule for FileNames {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Diagnostics(vec![ctx.diagnostic(
-            "Name source files using lowercase_with_underscores.",
+            "Name source files using `lowercase_with_underscores`.",
             DiagSpan { start: 0, end: 0 },
         )])
     }

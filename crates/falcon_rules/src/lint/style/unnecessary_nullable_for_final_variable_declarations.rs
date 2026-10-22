@@ -64,7 +64,7 @@ impl<'a> Collector<'a> {
             return;
         }
         for d in declarators {
-            self.diags.push(self.ctx.diagnostic("Unnecessary nullable type for a final variable declaration.", d.span()));
+            self.diags.push(self.ctx.diagnostic("Remove the unnecessary nullable type from this final variable declaration.", d.span()));
         }
     }
 }

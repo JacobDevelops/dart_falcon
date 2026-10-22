@@ -173,7 +173,7 @@ fn check_group(
     // Doc blocks report once; regular blocks report each non-ignored token.
     if is_doc {
         let start = group[0].start;
-        diags.push(ctx.diagnostic("Prefer formatting comments like sentences", DiagSpan {
+        diags.push(ctx.diagnostic("Prefer formatting comments like sentences.", DiagSpan {
             start,
             end: start + group[0].marker.len(),
         }));
@@ -183,7 +183,7 @@ fn check_group(
             if is_ignore_comment(trimmed) || is_ignored_pattern(trimmed, cfg) {
                 continue;
             }
-            diags.push(ctx.diagnostic("Prefer formatting comments like sentences", DiagSpan {
+            diags.push(ctx.diagnostic("Prefer formatting comments like sentences.", DiagSpan {
                 start: tok.start,
                 end: tok.start + tok.marker.len(),
             }));

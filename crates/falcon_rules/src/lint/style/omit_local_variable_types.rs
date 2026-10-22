@@ -138,7 +138,7 @@ fn promoted_type_parameter(initializer: Expr<'_>, state: &SemanticState<'_>) -> 
 impl Collector<'_> {
     fn report(&mut self, ty: DartType<'_>) {
         // Parser type spans already end at the last consumed token.
-        self.diags.push(self.ctx.diagnostic("Unnecessary type annotation on a local variable.", ty.span()));
+        self.diags.push(self.ctx.diagnostic("Remove the unnecessary type annotation from this local variable.", ty.span()));
     }
 
     fn check_declaration(&mut self, declaration: LocalVarDecl<'_>, state: &SemanticState<'_>) {

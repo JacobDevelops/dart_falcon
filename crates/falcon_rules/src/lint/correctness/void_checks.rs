@@ -500,10 +500,9 @@ fn acceptable_for_future_or_void(actual: &ResolvedType) -> Truth {
 
 #[cfg(test)]
 mod tests {
+    use falcon_analyze::RuleAnalysis;
     use super::*;
-    use falcon_analyze::{
-        IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, SemanticModel, SignatureIndex,
-    };
+    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, SignatureIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
@@ -530,20 +529,9 @@ void use(Value value) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let diagnostics = VoidChecks.analyze(VoidChecks::NAME, program, &ctx);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
@@ -577,20 +565,9 @@ void use() {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         struct ContextProbe(usize);
         impl<'a> SemanticRuleVisitor<'a> for ContextProbe {
             fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
@@ -627,28 +604,14 @@ void use() {
         };
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
-        let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
-        std::fs::create_dir_all(sdk.join("core")).unwrap();
-        std::fs::create_dir_all(sdk.join("async")).unwrap();
-        std::fs::write(
-            sdk.join("libraries.json"),
-            r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"},"async":{"uri":"async/async.dart"}}}}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            sdk.join("core/core.dart"),
-            "library dart.core; class Object {} abstract class num {} \
+        crate::lint::test_support::write_sdk(root, &[
+            ("core", "library dart.core; class Object {} abstract class num {} \
              abstract class int extends num {} abstract class Null {} \
-             abstract class Function {} abstract class Type {}",
-        )
-        .unwrap();
-        std::fs::write(
-            sdk.join("async/async.dart"),
-            "library dart.async; abstract class FutureOr<T> {} \
+             abstract class Function {} abstract class Type {}"),
+            ("async", "library dart.async; abstract class FutureOr<T> {} \
              class Future<T> { Future(FutureOr<T> Function() computation); \
-             Future.value([FutureOr<T>? value]); }",
-        )
-        .unwrap();
+             Future.value([FutureOr<T>? value]); }"),
+        ]);
         std::fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
         std::fs::create_dir_all(root.join("app/lib")).unwrap();
         std::fs::write(
@@ -778,20 +741,9 @@ void cases(Factory owner, Object value) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("void-checks", Box::new(VoidChecks));
         let diagnostics = registry.run_all(program, &ctx);

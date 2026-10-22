@@ -78,7 +78,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             }
             let report = super_call.map_or(method.name().span(), |(_, statement)| statement.span());
             diags.push(ctx.diagnostic(
-                "super.initState() should be called first in initState().",
+                "Call `super.initState()` first in `initState()`.",
                 report,
             ));
         }

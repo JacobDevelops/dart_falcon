@@ -139,7 +139,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let (report, message) = match self.nesting {
                 Nesting::Futures => (
                     outer_future && inner_future,
-                    "Remove the nested future wrapper; return a single Future or FutureOr instead.",
+                    "Remove the nested future wrapper; return a single `Future` or `FutureOr` instead.",
                 ),
                 Nesting::Mixed => (
                     (ty.interface("dart:async", "Stream") && inner_future)

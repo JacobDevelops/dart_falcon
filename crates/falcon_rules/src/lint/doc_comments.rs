@@ -1219,7 +1219,7 @@ fn member_element<'s>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::{IdentityIndex, IdentitySource};
+
     use falcon_dart_parser::parse;
     use std::path::Path;
 
@@ -1232,14 +1232,7 @@ mod tests {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
+        let identities = crate::lint::test_support::identities(&[(path, &parsed)]);
         let model = SemanticModel::new(path, &parsed, &identities, None);
         let signatures = SignatureIndex::from_program(program, &model);
         let scopes = DocScopes::new(program, &model, source);

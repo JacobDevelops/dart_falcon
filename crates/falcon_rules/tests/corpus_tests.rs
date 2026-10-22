@@ -11,6 +11,9 @@
 //!   * every registered rule has real positive and negative corpus coverage;
 //!   * every corpus subdirectory maps to a registered rule (no orphan fixtures);
 //!   * every `/* expect: */` annotation is matched by a diagnostic on the same line;
+//!   * every `msg:` annotation exactly matches the produced diagnostic message;
+//!   * recursive ordinary fixtures and grouped project fixtures are covered;
+//!   * produced messages end in full stops and use backticks for code spellings;
 //!   * no diagnostic fires on a line without a matching annotation (no false positives);
 //!   * clean files (zero annotations) produce zero diagnostics;
 //!   * source and corpus fixtures contain no explicit stub/placeholder markers.
@@ -35,8 +38,7 @@ use falcon_analyze::{
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
-use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
-use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
+
 use falcon_rules::{all_cross_file_rules, all_rules, rule_requires_resolution};
 
 /// Rules registered as deliberate stubs, exempt from the registration coverage
@@ -54,14 +56,239 @@ fn byte_offset_to_line(source: &str, offset: usize) -> usize {
     source[..clamped].bytes().filter(|&b| b == b'\n').count() + 1
 }
 
-/// Run a single rule over `source`; return (rule-id, line) per diagnostic.
+#[derive(Debug)]
+struct CorpusDiagnostic {
+    rule: String,
+    line: usize,
+    message: String,
+}
+
+fn compare_diagnostics(
+    file: &Path,
+    expectations: &[Expectation],
+    diagnostics: Vec<CorpusDiagnostic>,
+    failures: &mut Vec<String>,
+) {
+    for diagnostic in &diagnostics {
+        for problem in message_style_errors(&diagnostic.message) {
+            failures.push(format!(
+                "STYLE {}:{} — `{}`: {problem}: {:?}",
+                file.display(),
+                diagnostic.line,
+                diagnostic.rule,
+                diagnostic.message
+            ));
+        }
+    }
+    let mut remaining: Vec<_> = diagnostics.iter().collect();
+    let mut unmatched = Vec::with_capacity(expectations.len());
+    // Match message-bearing expectations first, so an unconstrained annotation
+    // cannot consume the only diagnostic satisfying a constrained one.
+    for expectation in expectations
+        .iter()
+        .filter(|e| e.expected_msg.is_some())
+        .chain(expectations.iter().filter(|e| e.expected_msg.is_none()))
+    {
+        let same_location =
+            |d: &&CorpusDiagnostic| d.rule == expectation.rule && d.line == expectation.line;
+        let position = remaining.iter().position(|d| {
+            same_location(d)
+                && expectation
+                    .expected_msg
+                    .as_ref()
+                    .is_none_or(|message| message == &d.message)
+        });
+        if let Some(position) = position {
+            remaining.remove(position);
+        } else {
+            unmatched.push(expectation);
+        }
+    }
+    // Only diagnose mismatches after every successful match has claimed its
+    // diagnostic; an early stale message must not steal a later exact match.
+    for expectation in unmatched {
+        if let Some(position) = remaining.iter().position(|diagnostic| {
+            diagnostic.rule == expectation.rule && diagnostic.line == expectation.line
+        }) {
+            let diagnostic = remaining.remove(position);
+            failures.push(format!(
+                "MESSAGE {}:{} — `{}`\n  expected: {:?}\n    actual: {:?}",
+                file.display(),
+                expectation.line,
+                expectation.rule,
+                expectation.expected_msg.as_deref().unwrap(),
+                diagnostic.message
+            ));
+        } else {
+            failures.push(format!(
+                "MISS  {}:{} — `{}` expected but not emitted{}",
+                file.display(),
+                expectation.line,
+                expectation.rule,
+                expectation
+                    .expected_msg
+                    .as_ref()
+                    .map_or_else(String::new, |message| format!(": {message:?}"))
+            ));
+        }
+    }
+    for diagnostic in remaining {
+        failures.push(format!(
+            "EXTRA {}:{} — `{}` fired without a matching annotation: {:?}",
+            file.display(),
+            diagnostic.line,
+            diagnostic.rule,
+            diagnostic.message
+        ));
+    }
+}
+
+fn message_style_errors(message: &str) -> Vec<&'static str> {
+    let mut errors = Vec::new();
+    if !message.ends_with('.') {
+        errors.push("end the sentence with a full stop");
+    }
+    if message.bytes().filter(|&byte| byte == b'`').count() % 2 != 0 {
+        errors.push("balance code backticks");
+    }
+    // Check unambiguous code spellings, not apostrophes in contractions or
+    // possessives, nor ordinary quoted prose. Backticked strings may contain
+    // any Dart spelling, including quotes and punctuation.
+    static QUOTED_CODE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"['"](?:[A-Za-z_$][A-Za-z0-9_$]*[.(<][^'"]*|[A-Za-z_$]+_[A-Za-z0-9_$]+|[a-z_$]+[A-Z][A-Za-z0-9_$]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9_$]*|as|async|await|bool|break|case|catch|class|const|continue|covariant|default|deferred|do|double|dynamic|else|enum|extends|external|factory|false|final|finally|for|Function|get|if|implements|import|in|int|interface|is|late|mixin|new|null|on|operator|part|required|rethrow|return|set|static|String|super|switch|sync|this|throw|true|try|typedef|var|void|while|with|yield|==|!=|=>|\?\?|\?\.|&&|\|\|)['"]"#).unwrap()
+    });
+    static BARE_CODE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"\b(?:[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*)\b",
+        ).unwrap()
+    });
+    if message.split('`').step_by(2).any(|prose| {
+        BARE_CODE.find_iter(prose).any(|code| {
+            // Conventional prose abbreviations are not qualified Dart names.
+            !matches!(code.as_str(), "e.g" | "i.e" | "JavaScript" | "TypeScript")
+        })
+    }) {
+        errors.push("enclose code identifiers and qualified names in backticks");
+    }
+    if message.split('`').step_by(2).any(|prose| {
+        QUOTED_CODE.find_iter(prose).any(|code| {
+            !matches!(
+                code.as_str(),
+                "'JavaScript'" | "\"JavaScript\"" | "'TypeScript'" | "\"TypeScript\""
+            )
+        })
+    }) {
+        errors.push("enclose code in backticks, not quotes");
+    }
+    errors
+}
+
+#[test]
+fn message_style_preserves_natural_apostrophes_and_quoted_prose() {
+    for message in [
+        "Don't repeat the caller's work.",
+        "The callers' results must agree.",
+        "Prefer 'ordinary prose' here.",
+        "JavaScript differs from Flutter and Riverpod, e.g. in browser usage.",
+        "The 'Important' label is ordinary prose.",
+        "The 'JavaScript' language has different conventions.",
+        "Use `Foo('value')` instead.",
+    ] {
+        assert!(message_style_errors(message).is_empty(), "{message}");
+    }
+    for message in [
+        "Missing punctuation",
+        "Use `Foo instead.",
+        "Use 'var' instead.",
+        "Use 'foo.bar()' instead.",
+        "Use 'snake_case' instead.",
+    ] {
+        assert!(!message_style_errors(message).is_empty(), "{message}");
+    }
+}
+
+#[test]
+fn message_expectations_match_duplicates_and_report_actual_text() {
+    let expectations =
+        parse_expectations("x /* expect: sample */ /* expect: sample, msg: \"Use `Foo`.\" */");
+    let diagnostic = |message: &str| CorpusDiagnostic {
+        rule: "sample".to_string(),
+        line: 1,
+        message: message.to_string(),
+    };
+    let mut failures = Vec::new();
+    compare_diagnostics(
+        Path::new("nested/example.dart"),
+        &expectations,
+        vec![diagnostic("Use `Foo`."), diagnostic("Another message.")],
+        &mut failures,
+    );
+    assert!(failures.is_empty(), "{failures:?}");
+    compare_diagnostics(
+        Path::new("nested/example.dart"),
+        &expectations[1..],
+        vec![diagnostic("Use `Bar`.")],
+        &mut failures,
+    );
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].contains("MESSAGE nested/example.dart:1"));
+    assert!(failures[0].contains("expected: \"Use `Foo`.\""));
+    assert!(failures[0].contains("actual: \"Use `Bar`.\""));
+}
+
+#[test]
+fn stale_message_does_not_consume_a_later_exact_match() {
+    let expectations = parse_expectations(
+        "x /* expect: sample, msg: \"Stale message.\" */ /* expect: sample, msg: \"Actual message.\" */",
+    );
+    let mut failures = Vec::new();
+    compare_diagnostics(
+        Path::new("bad.dart"),
+        &expectations,
+        vec![CorpusDiagnostic {
+            rule: "sample".to_owned(),
+            line: 1,
+            message: "Actual message.".to_owned(),
+        }],
+        &mut failures,
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].starts_with("MISS "), "{failures:?}");
+    assert!(failures[0].contains("Stale message."));
+}
+
+#[test]
+fn produced_diagnostics_require_backticks_for_bare_code() {
+    for spelling in ["initState", "GestureDetector", "Future.wait", "onPressed"] {
+        let mut failures = Vec::new();
+        let message = format!("Use {spelling} instead.");
+        let expectations = parse_expectations("x /* expect: sample */");
+        compare_diagnostics(
+            Path::new("bad.dart"),
+            &expectations,
+            vec![CorpusDiagnostic {
+                rule: "sample".to_owned(),
+                line: 1,
+                message,
+            }],
+            &mut failures,
+        );
+        assert!(
+            failures.iter().any(|failure| failure.starts_with("STYLE ")),
+            "{spelling}: {failures:?}"
+        );
+        assert!(message_style_errors(&format!("Use `{spelling}` instead.")).is_empty());
+    }
+}
+
+/// Run a single rule over `source`, retaining messages for golden comparison.
 fn run_rule(
     rule_name: &'static str,
     rule: &dyn Rule,
     file: &Path,
     source: &str,
     config: &FalconConfig,
-) -> Vec<(String, usize)> {
+) -> Vec<CorpusDiagnostic> {
     let diagnostics = if inference::requires_sdk(file) {
         inference::analyze(rule_name, rule, file, source, config)
     } else {
@@ -117,11 +344,10 @@ fn run_rule(
     };
     diagnostics
         .into_iter()
-        .map(|d| {
-            (
-                d.rule.to_string(),
-                byte_offset_to_line(source, d.span.start),
-            )
+        .map(|d| CorpusDiagnostic {
+            rule: d.rule.to_string(),
+            line: byte_offset_to_line(source, d.span.start),
+            message: d.message.to_string(),
         })
         .collect()
 }
@@ -451,7 +677,7 @@ fn corpus_matches_expectations() {
     for dir in &rule_dirs {
         let rule_name = dir.file_name().unwrap().to_string_lossy().to_string();
 
-        // Cross-file rules keep their multi-file fixtures in a `cross_file/`
+        // Cross-file rules keep their multi-file fixtures in a `cross-file/`
         // subdirectory and are validated by the dedicated test below.
         if cross_file_rule_names.contains(rule_name.as_str()) {
             continue;
@@ -466,7 +692,7 @@ fn corpus_matches_expectations() {
         };
 
         let config = corpus_config(dir);
-        for file in support::files(dir, 1, Some("dart")) {
+        for file in corpus::ordinary_fixture_files(dir, rule_requires_resolution(&rule_name)) {
             total_files += 1;
             let source = fs::read_to_string(&file)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
@@ -477,34 +703,8 @@ fn corpus_matches_expectations() {
                 .collect();
             total_expectations += expectations.len();
 
-            let mut diag_lines: Vec<usize> =
-                run_rule(registered_name, *rule, &file, &source, &config)
-                    .into_iter()
-                    .map(|(_, line)| line)
-                    .collect();
-
-            // Greedily match each expectation to an as-yet-unused diagnostic on the same line.
-            for exp in &expectations {
-                if let Some(pos) = diag_lines.iter().position(|&l| l == exp.line) {
-                    diag_lines.remove(pos);
-                } else {
-                    failures.push(format!(
-                        "MISS  {}:{} — `{}` expected but not emitted",
-                        file.display(),
-                        exp.line,
-                        exp.rule
-                    ));
-                }
-            }
-            // Any diagnostics left over are unannotated false positives.
-            for line in diag_lines {
-                failures.push(format!(
-                    "EXTRA {}:{} — `{}` fired without a matching annotation",
-                    file.display(),
-                    line,
-                    rule_name
-                ));
-            }
+            let diagnostics = run_rule(registered_name, *rule, &file, &source, &config);
+            compare_diagnostics(&file, &expectations, diagnostics, &mut failures);
         }
     }
 
@@ -518,172 +718,6 @@ fn corpus_matches_expectations() {
         total_files,
         total_expectations,
         failures.join("\n")
-    );
-}
-
-#[test]
-fn nullable_extension_getter_is_not_an_instance_member() {
-    use falcon_rules::lint::style::unnecessary_null_aware_operator_on_extension_on_nullable::UnnecessaryNullAwareOperatorOnExtensionOnNullable;
-
-    let source = "class Target {}\n\
-                  extension NullableValues on Target? { int get value => 1; }\n\
-                  void read(Target? target) { target?.value; }\n";
-    let falcon_dart_parser::ParseResult { errors, .. } = parse(source);
-    assert!(errors.is_empty(), "parse errors: {errors:?}");
-    let rule_name = "unnecessary-null-aware-operator-on-extension-on-nullable";
-    let diagnostics = run_rule(
-        rule_name,
-        &UnnecessaryNullAwareOperatorOnExtensionOnNullable,
-        Path::new("/project/lib/main.dart"),
-        source,
-        &FalconConfig::default(),
-    );
-    assert_eq!(diagnostics, vec![(rule_name.to_owned(), 3)]);
-}
-
-#[test]
-fn use_design_system_item_fires_only_when_configured() {
-    let src = r#"
-import 'package:flutter/material.dart';
-
-Widget build(BuildContext context) {
-  return Container(child: Text('hi'));
-}
-"#;
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
-    let parsed = Arc::new(ParsedFile {
-        source: src.into(),
-        tree,
-    });
-    let program = parsed.program();
-    let rule = UseDesignSystemItem;
-
-    // Without configuration the rule is a no-op.
-    let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
-    assert!(
-        rule.analyze(UseDesignSystemItem::NAME, program, &ctx)
-            .is_empty(),
-        "rule must be a no-op without configuration"
-    );
-
-    // With a configured item it flags the disallowed construction and names the replacement.
-    let configured: FalconConfig = serde_json::from_value(serde_json::json!({
-        "linter": {
-            "rules": {
-                "style": {
-                    "use-design-system-item": {
-                        "level": "warn",
-                        "options": {
-                            "items": [
-                                { "class-name": "Container", "use-instead": "AppContainer" }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
-    }))
-    .expect("valid config");
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
-    let diags = rule.analyze(UseDesignSystemItem::NAME, program, &ctx);
-    assert_eq!(
-        diags.len(),
-        1,
-        "expected exactly one diagnostic, got {diags:?}"
-    );
-    assert_eq!(diags[0].rule, "use-design-system-item");
-    assert!(
-        diags[0].message.contains("AppContainer") && diags[0].message.contains("Container"),
-        "message should name the replacement: {}",
-        diags[0].message
-    );
-
-    // Static calls are not constructions.
-    let static_src = "Widget f(BuildContext c) => Container.of(c);";
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(static_src);
-    let parsed = Arc::new(ParsedFile {
-        source: static_src.into(),
-        tree,
-    });
-    let static_program = parsed.program();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
-    assert!(
-        rule.analyze(UseDesignSystemItem::NAME, static_program, &ctx)
-            .is_empty(),
-        "static access `Container.of(...)` must not be flagged"
-    );
-}
-
-#[test]
-fn class_members_ordering_respects_order_option() {
-    // `Foo` is in the *custom* order (methods -> constructors -> fields) and out
-    // of the *default* order; `Bar` is the reverse. This lets one source assert
-    // that the `order` option (parity with `member-ordering`) drives the check.
-    let src = r#"
-class Foo {
-  void run() {}
-  Foo();
-  int value = 0;
-}
-
-class Bar {
-  Bar();
-  void run() {}
-}
-"#;
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
-    let parsed = Arc::new(ParsedFile {
-        source: src.into(),
-        tree,
-    });
-    let program = parsed.program();
-    let rule = ClassMembersOrdering;
-
-    // Default config → built-in pyramid order (fields → constructors → methods).
-    // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
-    let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
-    let default_diags = rule.analyze(ClassMembersOrdering::NAME, program, &ctx);
-    assert!(
-        !default_diags.is_empty(),
-        "default order should flag Foo (method before field)"
-    );
-    assert!(
-        default_diags
-            .iter()
-            .all(|d| !d.message.contains("configured order")),
-        "default path must use the built-in message, got {default_diags:?}"
-    );
-
-    // Custom `order` → `Foo` is now correctly ordered (0 diagnostics for it) and
-    // `Bar` (constructor before method) is the out-of-order one.
-    let configured: FalconConfig = serde_json::from_value(serde_json::json!({
-        "linter": {
-            "rules": {
-                "style": {
-                    "class-members-ordering": {
-                        "level": "warn",
-                        "options": {
-                            "order": ["public-methods", "constructors", "public-fields", "private-methods"]
-                        }
-                    }
-                }
-            }
-        }
-    }))
-    .expect("valid config");
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
-    let diags = rule.analyze(ClassMembersOrdering::NAME, program, &ctx);
-    assert_eq!(
-        diags.len(),
-        1,
-        "custom order should flag exactly Bar.run, got {diags:?}"
-    );
-    assert!(
-        diags[0].message.contains("configured order"),
-        "order path should use the configured-order message: {}",
-        diags[0].message
     );
 }
 
@@ -751,52 +785,37 @@ fn cross_file_corpus_matches_expectations() {
                     }),
             );
 
-            // (file_path, line) expectations for this rule across this project.
-            let mut expectations: Vec<(String, usize)> = Vec::new();
-            for (path, source) in &fixture_sources {
-                for exp in parse_expectations(source) {
-                    if exp.rule == rule_name {
-                        total_expectations += 1;
-                        expectations.push((path.to_string_lossy().into_owned(), exp.line));
-                        rule_expectations += 1;
-                    }
-                }
-            }
-
-            let mut diag_keys: Vec<(String, usize)> = registry
+            let diagnostics = registry
                 .run_all(&files, &config, indexes.as_ref())
-                .expect("cross-file rules thread starts")
-                .into_iter()
-                .map(|d| {
-                    (
-                        d.file_path.clone(),
-                        byte_offset_to_line(
-                            fixture_sources
-                                .iter()
-                                .find(|(path, _)| path.to_string_lossy() == d.file_path)
-                                .map(|(_, source)| source.as_str())
-                                .unwrap_or(""),
-                            d.span.start,
-                        ),
-                    )
-                })
-                .collect();
-
-            for exp in &expectations {
-                if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
-                    diag_keys.remove(pos);
-                } else {
+                .expect("cross-file rules thread starts");
+            for (path, source) in &fixture_sources {
+                let expectations: Vec<_> = parse_expectations(source)
+                    .into_iter()
+                    .filter(|expectation| expectation.rule == rule_name)
+                    .collect();
+                total_expectations += expectations.len();
+                rule_expectations += expectations.len();
+                let found = diagnostics
+                    .iter()
+                    .filter(|diagnostic| Path::new(&diagnostic.file_path) == path)
+                    .map(|diagnostic| CorpusDiagnostic {
+                        rule: diagnostic.rule.to_string(),
+                        line: byte_offset_to_line(source, diagnostic.span.start),
+                        message: diagnostic.message.to_string(),
+                    })
+                    .collect();
+                compare_diagnostics(path, &expectations, found, &mut failures);
+            }
+            for diagnostic in &diagnostics {
+                if !fixture_sources
+                    .iter()
+                    .any(|(path, _)| Path::new(&diagnostic.file_path) == path)
+                {
                     failures.push(format!(
-                        "MISS  {}:{} — `{}` expected but not emitted",
-                        exp.0, exp.1, rule_name
+                        "EXTRA {} — diagnostic outside fixture: {:?}",
+                        diagnostic.file_path, diagnostic.message
                     ));
                 }
-            }
-            for key in diag_keys {
-                failures.push(format!(
-                    "EXTRA {}:{} — `{}` fired without a matching annotation",
-                    key.0, key.1, rule_name
-                ));
             }
         }
         assert!(
@@ -827,7 +846,6 @@ fn resolver_dependent_per_file_project_corpus() {
 
     let rules = all_rules();
     let corpus = corpus_dir();
-    let config = FalconConfig::default();
     let mut failures: Vec<String> = Vec::new();
     let mut total_expectations = 0usize;
 
@@ -839,6 +857,7 @@ fn resolver_dependent_per_file_project_corpus() {
         if !dir.is_dir() {
             continue;
         }
+        let config = corpus_config(&corpus.join(rule_name));
 
         let paths = support::files(&dir, usize::MAX, Some("dart"));
         let source_paths = paths.clone();
@@ -910,10 +929,11 @@ fn resolver_dependent_per_file_project_corpus() {
             falcon_analyze::ExternalLibraries::load(&environment, &external_inputs, |path| {
                 paths.iter().any(|local| local == path)
             });
+        let packages = falcon_rules::package_identities(paths.iter().map(PathBuf::as_path));
         let identities = IdentityIndex::build(
             &identity_sources,
             &source_refs,
-            &[],
+            &packages,
             Some(falcon_analyze::ExternalSources {
                 libraries: &externals,
                 environment: &environment,
@@ -948,38 +968,21 @@ fn resolver_dependent_per_file_project_corpus() {
                 .with_signatures(&signatures)
                 .with_library(&unit)
                 .with_environment(Some(&environment));
-            let mut diag_lines: Vec<usize> = rule
+            let diagnostics = rule
                 .analyze(rule_name, programs[i], &ctx)
                 .into_iter()
-                .map(|d| byte_offset_to_line(&sources[i], d.span.start))
+                .map(|diagnostic| CorpusDiagnostic {
+                    rule: diagnostic.rule.to_string(),
+                    line: byte_offset_to_line(&sources[i], diagnostic.span.start),
+                    message: diagnostic.message.to_string(),
+                })
                 .collect();
-
-            let expectations: Vec<usize> = parse_expectations(&sources[i])
+            let expectations: Vec<_> = parse_expectations(&sources[i])
                 .into_iter()
-                .filter(|e| e.rule == *rule_name)
-                .map(|e| e.line)
+                .filter(|expectation| expectation.rule == *rule_name)
                 .collect();
             total_expectations += expectations.len();
-            for line in &expectations {
-                if let Some(pos) = diag_lines.iter().position(|l| l == line) {
-                    diag_lines.remove(pos);
-                } else {
-                    failures.push(format!(
-                        "MISS  {}:{} — `{}`",
-                        source_paths[i].display(),
-                        line,
-                        rule_name
-                    ));
-                }
-            }
-            for line in diag_lines {
-                failures.push(format!(
-                    "EXTRA {}:{} — `{}`",
-                    source_paths[i].display(),
-                    line,
-                    rule_name
-                ));
-            }
+            compare_diagnostics(&source_paths[i], &expectations, diagnostics, &mut failures);
         }
     }
 

@@ -108,7 +108,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 let start = first_token_after_annotations(annotations, span, ctx.tree(), ctx.source());
                 self.diags.push(ctx.diagnostic(
             format!(
-                "The method '{member_name}' should not be overridden in classes not annotated with '@immutable'."
+                "The method `{member_name}` should not be overridden in classes not annotated with `@immutable`."
             ),
             Span::new(
                 start,

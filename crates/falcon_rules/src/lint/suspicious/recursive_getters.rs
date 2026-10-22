@@ -77,7 +77,7 @@ fn check(
     };
     let Some(expr) = expr else { return };
     if let Some(span) = self_reference(expr, name) {
-        diags.push(ctx.diagnostic("Recursive getter — this getter unconditionally returns itself", span));
+        diags.push(ctx.diagnostic("Avoid this recursive getter because it unconditionally returns itself.", span));
     }
 }
 

@@ -20,14 +20,16 @@ pub(crate) mod naming;
 pub(crate) mod options;
 pub(crate) mod package_layout;
 pub mod performance;
+#[cfg(test)]
+mod registry_tests;
 pub(crate) mod resource_leaks;
 pub(crate) mod riverpod;
 pub(crate) mod riverpod_async;
 pub mod security;
-#[cfg(test)]
-mod semantic_scope_tests;
 pub(crate) mod semantic_type_operations;
 pub(crate) mod string_lit;
 pub mod style;
 pub mod suspicious;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod tokens;

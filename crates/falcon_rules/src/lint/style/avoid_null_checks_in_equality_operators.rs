@@ -26,7 +26,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const MESSAGE: &str = "Unnecessary null comparison in implementation of '=='.";
+const MESSAGE: &str = "Remove the unnecessary null comparison from this `==` implementation.";
 
 #[derive(Default)]
 pub struct AvoidNullChecksInEqualityOperators;

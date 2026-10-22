@@ -57,7 +57,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 }
 
-const MESSAGE: &str = "Name types using UpperCamelCase.";
+const MESSAGE: &str = "Name types using `UpperCamelCase`.";
 
 fn check(name: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if !is_upper_camel_case(name.name()) {

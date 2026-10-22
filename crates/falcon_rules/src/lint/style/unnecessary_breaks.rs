@@ -62,7 +62,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             && body.next().is_some()
         {
             self.diags.push(self.ctx.diagnostic(
-                "Unnecessary 'break' statement.",
+                "Remove the unnecessary `break` statement.",
                 statement.span(),
             ));
         }

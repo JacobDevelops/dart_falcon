@@ -54,7 +54,7 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic("Add a trailing comma to the argument list", DiagSpan {
+        self.diags.push(self.ctx.diagnostic("Add a trailing comma to the argument list.", DiagSpan {
             start: close.offset(),
             end: close.offset() + close.len(),
         }));

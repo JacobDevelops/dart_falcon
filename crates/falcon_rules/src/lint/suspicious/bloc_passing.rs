@@ -128,7 +128,7 @@ impl<'a> Collector<'a> {
                         "Avoid coupling blocs by passing a Bloc or Cubit to another bloc."
                     }
                     Passing::ContextToBloc => {
-                        "Keep Flutter BuildContext out of Bloc and Cubit dependencies."
+                        "Keep Flutter `BuildContext` out of `Bloc` and `Cubit` dependencies."
                     }
                     Passing::BlocToWidget => {
                         "Obtain the Bloc or Cubit from the widget context instead of passing it directly."

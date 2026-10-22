@@ -21,7 +21,7 @@ impl Rule for AvoidDuplicateNamedImports {
                     && earlier.uri().value() == directive.uri().value()
                     && without_prefix(earlier).eq(without_prefix(directive))
             }) {
-                diags.push(ctx.diagnostic("This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate", directive.span()));
+                diags.push(ctx.diagnostic("This library is already imported with the same visibility — consolidate uses under one import and remove the duplicate.", directive.span()));
             }
         }
         RulePreparation::Diagnostics(diags)

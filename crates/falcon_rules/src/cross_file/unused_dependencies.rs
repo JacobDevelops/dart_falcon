@@ -104,7 +104,7 @@ impl CrossFileRule for UnusedDependencies {
                     "",
                     Severity::Warning,
                     format!(
-                        "No analyzed Dart source uses '{}'; remove the dependency if it is not used natively or by build tools.",
+                        "No analyzed Dart source uses `{}`; remove the dependency if it is not used natively or by build tools.",
                         name.as_str()
                     ),
                     pubspec.to_string_lossy().into_owned(),

@@ -99,7 +99,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             if self.const_depth > 0 {
                 self.diags.push(self.ctx.diagnostic(
-                    "Unnecessary `const` keyword inside an already-const context.",
+                    "Remove the unnecessary `const` keyword inside this constant context.",
                     span,
                 ));
             }

@@ -183,7 +183,7 @@ impl<'a> Collector<'a> {
             false
         };
         if unsafe_cast {
-            self.diagnostics.push(self.ctx.diagnostic("Cast JSON to List<Object?> or Map<String, Object?> first, then use cast() to check its contents.", target.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Cast JSON to `List<Object?>` or `Map<String, Object?>` first, then use `cast()` to check its contents.", target.span()));
         }
     }
 }

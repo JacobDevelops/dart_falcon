@@ -57,7 +57,7 @@ impl<'a> Collector<'a> {
                     .nth(1)
                     .is_some_and(|argument| matches!(argument.unparenthesized(), Expr::NullLit(_))))
         {
-            self.diagnostics.push(self.ctx.diagnostic("Pass a stack trace as the second argument to Completer.completeError.", span));
+            self.diagnostics.push(self.ctx.diagnostic("Pass a stack trace as the second argument to `Completer.completeError`.", span));
         }
     }
 }

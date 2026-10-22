@@ -68,7 +68,7 @@ impl CrossFileRule for UndeclaredDependencies {
                     "",
                     Severity::Warning,
                     format!(
-                        "Declare '{package}' in pubspec {} before importing it.",
+                        "Declare `{package}` in pubspec {} before importing it.",
                         if is_library {
                             "dependencies"
                         } else {

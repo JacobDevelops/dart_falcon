@@ -111,7 +111,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             && field.field().name() == "then"
         {
             self.diags.push(self.ctx.diagnostic(
-                "Prefer async/await over .then() chains",
+                "Prefer `async` and `await` over `.then()` chains.",
                 call.span(),
             ));
         }

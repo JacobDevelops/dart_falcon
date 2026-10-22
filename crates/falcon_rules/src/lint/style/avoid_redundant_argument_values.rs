@@ -804,42 +804,9 @@ mod tests {
             source: imported.into(),
             tree: dependency.tree,
         });
-        let sources = [
-            IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            },
-            IdentitySource {
-                path: &imported_path,
-                parsed: &dependency,
-                has_parse_errors: false,
-            },
-        ];
-        let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let files = [
-            (path.clone(), Arc::clone(&parsed)),
-            (imported_path, dependency),
-        ];
-        let types = TypeIndex::from_resolved_files(
-            files.iter().map(|(path, parsed)| {
-                (
-                    path.as_path(),
-                    falcon_analyze::LibrarySource {
-                        program: parsed.program(),
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                )
-            }),
-            &identities,
-        );
-        let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
+        let indexes = crate::lint::test_support::TestIndexes::new(&[(&path, &parsed), (&imported_path, &dependency)]);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, &config, &parsed)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
+        let context = indexes.context(&path, &config, &parsed);
         let mut diagnostics = AvoidRedundantArgumentValues.analyze(AvoidRedundantArgumentValues::NAME, parsed.program(), &context);
         diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
         diagnostics
@@ -861,18 +828,8 @@ mod tests {
         std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
         std::fs::create_dir_all(app.join("lib")).unwrap();
         std::fs::create_dir_all(dep.join("lib")).unwrap();
-        let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
-        std::fs::create_dir_all(sdk.join("core")).unwrap();
-        std::fs::write(
-            sdk.join("libraries.json"),
-            r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            sdk.join("core/core.dart"),
-            include_str!("../../../tests/support/sdk/lib/core/core.dart"),
-        )
-        .unwrap();
+
+        crate::lint::test_support::write_sdk(root, &[("core", include_str!("../../../tests/support/sdk/lib/core/core.dart"))]);
         std::fs::write(
             app.join(".dart_tool/package_config.json"),
             serde_json::json!({

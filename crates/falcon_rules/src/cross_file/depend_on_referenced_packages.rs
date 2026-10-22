@@ -86,7 +86,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                     "",
                     Severity::Warning,
                     format!(
-                        "The imported package '{package}' isn't a dependency of the importing package."
+                        "The imported package `{package}` isn't a dependency of the importing package."
                     ),
                     file.path.to_string_lossy().into_owned(),
                     uri.span(),

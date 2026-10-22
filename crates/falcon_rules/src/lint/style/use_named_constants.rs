@@ -213,7 +213,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         if let Some(constant) = self.matching_constant(node, &identity, state) {
             self.diags.push(self.ctx.diagnostic(format!(
-                "Use the constant '{constant}' rather than a constructor returning the same object."
+                "Use the constant `{constant}` rather than a constructor returning the same object."
             ), span));
         }
     }

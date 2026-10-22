@@ -45,7 +45,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && identities.is_package_declaration(&identity, "equatable", "Equatable")
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "Prefer mixing in 'EquatableMixin' instead of extending 'Equatable'.",
+                "Prefer mixing in `EquatableMixin` instead of extending `Equatable`.",
                 superclass.span(),
             ));
         }

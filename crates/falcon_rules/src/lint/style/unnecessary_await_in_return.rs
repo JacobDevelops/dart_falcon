@@ -106,7 +106,7 @@ impl<'a> Collector<'a> {
             None => false,
         };
         if unnecessary {
-            self.diagnostics.push(self.ctx.diagnostic("Unnecessary 'await'.", Span::new(await_span.start, await_span.start + "await".len())));
+            self.diagnostics.push(self.ctx.diagnostic("Remove the unnecessary `await`.", Span::new(await_span.start, await_span.start + "await".len())));
         }
     }
 }

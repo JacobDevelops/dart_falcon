@@ -53,7 +53,7 @@ pub(super) fn prepare<'a>(
         globals: HashMap::with_capacity(global_count),
     };
     collector.semantics.message =
-        "Do not use a BuildContext across an async gap without a matching mounted check.";
+        "Do not use a `BuildContext` across an `async` gap without a matching `mounted` check.";
     for declaration in program.declarations() {
         match declaration {
             TopLevelDecl::Variable(variable) => {
@@ -88,7 +88,7 @@ pub(super) fn prepare_setstate<'a>(
     let mut collector = prepare(program, ctx)?;
     collector.setstate = true;
     collector.semantics.message =
-        "Do not call setState across an async gap without checking mounted.";
+        "Do not call `setState` across an `async` gap without checking `mounted`.";
     Some(collector)
 }
 

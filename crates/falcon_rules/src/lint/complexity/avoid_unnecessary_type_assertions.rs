@@ -41,7 +41,7 @@ impl Rule for AvoidUnnecessaryTypeAssertions {
                 {
                     return None;
                 }
-                Some(ctx.diagnostic("Unnecessary type assertion — variable is already known to be this type", operation.span))
+                Some(ctx.diagnostic("Remove this type assertion because the variable is already known to have this type.", operation.span))
             },
         }))
     }

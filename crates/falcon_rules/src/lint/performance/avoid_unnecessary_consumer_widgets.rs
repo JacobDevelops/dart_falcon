@@ -151,9 +151,9 @@ impl Collector<'_> {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(if is_exact_type(self.ctx, &superclass, &["HookConsumerWidget"]) {
-            "This widget does not use its ref; convert it to a HookWidget."
+            "This widget does not use its `ref`; convert it to a `HookWidget`."
         } else {
-            "This widget does not use its ref; convert it to a StatelessWidget."
+            "This widget does not use its `ref`; convert it to a `StatelessWidget`."
         }, class.name().span()));
     }
 }

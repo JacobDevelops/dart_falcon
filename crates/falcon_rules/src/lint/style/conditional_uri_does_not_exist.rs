@@ -69,7 +69,7 @@ impl Rule for ConditionalUriDoesNotExist {
                     let uri = configuration.uri();
                     let value = uri_value(uri);
                     (resolver.exists(&value) == Some(false)).then(|| {
-                        ctx.diagnostic(format!("The target of the conditional URI '{value}' doesn't exist."), uri.span())
+                        ctx.diagnostic(format!("The target of the conditional URI `{value}` doesn't exist."), uri.span())
                     })
                 })
                 .collect(),

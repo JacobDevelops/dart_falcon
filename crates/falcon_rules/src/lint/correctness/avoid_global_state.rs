@@ -43,7 +43,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && is_mutable(var.keyword(), var.is_late())
         {
             self.diags.push(self.ctx.diagnostic(
-                "Avoid mutable global state — use const or final declarations instead",
+                "Avoid mutable global state. Use `const` or `final` declarations instead.",
                 var.span(),
             ));
         }
@@ -56,7 +56,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && is_mutable(field.keyword(), field.is_late())
         {
             self.diags.push(self.ctx.diagnostic(
-                "Avoid mutable global state — use const or final declarations instead",
+                "Avoid mutable global state. Use `const` or `final` declarations instead.",
                 field.span(),
             ));
         }

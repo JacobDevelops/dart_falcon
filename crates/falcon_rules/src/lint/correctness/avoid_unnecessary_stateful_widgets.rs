@@ -46,7 +46,7 @@ struct Collector<'a> {
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
-        self.widgets.iter().filter(|(identity, _)| self.states.contains(identity)).map(|(_, span)| self.ctx.diagnostic("This widget has no state or lifecycle behavior; use StatelessWidget.", *span)).collect()
+        self.widgets.iter().filter(|(identity, _)| self.states.contains(identity)).map(|(_, span)| self.ctx.diagnostic("This widget has no state or lifecycle behavior; use `StatelessWidget`.", *span)).collect()
     }
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.current = None;

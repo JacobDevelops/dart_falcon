@@ -120,7 +120,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ) == falcon_analyze::Truth::No
         {
             self.covered = starts;
-            self.diags.push(self.ctx.diagnostic("Replace this layout widget sequence with a single Container.", crate::lint::flutter::constructor_span(node)));
+            self.diags.push(self.ctx.diagnostic("Replace this layout widget sequence with a single `Container`.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

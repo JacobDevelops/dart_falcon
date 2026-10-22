@@ -298,14 +298,7 @@ mod tests {
             source: source.into(),
         });
         let program = parsed.program();
-        let identities = falcon_analyze::IdentityIndex::from_project_files(
-            &[falcon_analyze::IdentitySource {
-                path: std::path::Path::new("t.dart"),
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
+        let identities = crate::lint::test_support::identities(&[(std::path::Path::new("t.dart"), &parsed)]);
         let types = TypeIndex::from_resolved_files(
             [(
                 std::path::Path::new("t.dart"),
@@ -431,7 +424,7 @@ mod tests {
 
     #[test]
     fn incomplete_resolved_library_does_not_replace_shadowed_collections() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource};
+        use falcon_analyze::{LibrarySource};
         for source in [
             "part 'missing.dart'; class Map {} void f() { var value = Map(); }",
             "part 'missing.dart'; class Duration {} void f() { var value = Map(); }",
@@ -444,14 +437,7 @@ mod tests {
             });
             let program = parsed.program();
             let path = PathBuf::from("/project/t.dart");
-            let identities = IdentityIndex::from_project_files(
-                &[IdentitySource {
-                    path: &path,
-                    parsed: &parsed,
-                    has_parse_errors: false,
-                }],
-                &[],
-            );
+            let identities = crate::lint::test_support::identities(&[(&path, &parsed)]);
             let types = TypeIndex::from_resolved_files(
                 [(
                     path.as_path(),

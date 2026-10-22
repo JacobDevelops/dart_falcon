@@ -44,7 +44,7 @@ impl Rule for AlwaysUsePackageImports {
                     uri_scheme(&value) == Some("")
                 })
                 .map(|import| {
-                    ctx.diagnostic("Use 'package:' imports for files in the 'lib' directory.", import.uri().span())
+                    ctx.diagnostic("Use `package:` imports for files in the `lib` directory.", import.uri().span())
                 })
                 .collect(),
         )

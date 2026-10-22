@@ -82,7 +82,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .map_or(catch.span(), |token| {
                     Span::new(token.offset(), token.offset() + token.len())
                 });
-            self.diagnostics.push(self.ctx.diagnostic("Catch clause should use 'on' to specify the type of exception being caught.", span));
+            self.diagnostics.push(self.ctx.diagnostic("Catch clause should use `on` to specify the type of exception being caught.", span));
         }
     }
 }

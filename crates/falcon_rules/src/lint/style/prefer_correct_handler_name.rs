@@ -90,7 +90,7 @@ impl<'a> Collector<'a> {
                 return;
             }
             self.reported.push(span);
-            self.diags.push(self.ctx.diagnostic(format!("This callback handler does not match '{}'; rename it to match the configured pattern.", self.pattern.as_str()), span));
+            self.diags.push(self.ctx.diagnostic(format!("This callback handler does not match `{}`; rename it to match the configured pattern.", self.pattern.as_str()), span));
         }
     }
 }

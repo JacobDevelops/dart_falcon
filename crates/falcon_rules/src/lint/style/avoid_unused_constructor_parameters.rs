@@ -62,7 +62,7 @@ impl Collector<'_, '_> {
             if !is_candidate(param, primary) || used.contains(&param.name().span().start) {
                 continue;
             }
-            self.diagnostics.push(self.ctx.diagnostic(format!("The parameter '{name}' is not used in the constructor."), param.span()));
+            self.diagnostics.push(self.ctx.diagnostic(format!("The parameter `{name}` is not used in the constructor."), param.span()));
         }
     }
 }

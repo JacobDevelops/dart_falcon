@@ -114,12 +114,12 @@ fn emit_for_base(
         if base_name == class_name {
             let message = if let Some(replacement) = &item.use_instead {
                 format!(
-                    "Use '{}' from the design system instead of '{}'.",
+                    "Use `{}` from the design system instead of `{}`.",
                     replacement, class_name
                 )
             } else {
                 format!(
-                    "Use the design system equivalent instead of '{}'.",
+                    "Use the design system equivalent instead of `{}`.",
                     class_name
                 )
             };
@@ -127,5 +127,88 @@ fn emit_for_base(
             diags.push(ctx.diagnostic(message, span));
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::{path::Path, sync::Arc};
+
+    #[test]
+    fn use_design_system_item_fires_only_when_configured() {
+        let src = r#"
+    import 'package:flutter/material.dart';
+    
+    Widget build(BuildContext context) {
+      return Container(child: Text('hi'));
+    }
+    "#;
+        let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
+        let parsed = Arc::new(ParsedFile {
+            source: src.into(),
+            tree,
+        });
+        let program = parsed.program();
+        let rule = UseDesignSystemItem;
+    
+        // Without configuration the rule is a no-op.
+        let default_cfg = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
+        assert!(
+            rule.analyze(UseDesignSystemItem::NAME, program, &ctx)
+                .is_empty(),
+            "rule must be a no-op without configuration"
+        );
+    
+        // With a configured item it flags the disallowed construction and names the replacement.
+        let configured: FalconConfig = serde_json::from_value(serde_json::json!({
+            "linter": {
+                "rules": {
+                    "style": {
+                        "use-design-system-item": {
+                            "level": "warn",
+                            "options": {
+                                "items": [
+                                    { "class-name": "Container", "use-instead": "AppContainer" }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("valid config");
+        let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
+        let diags = rule.analyze(UseDesignSystemItem::NAME, program, &ctx);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic, got {diags:?}"
+        );
+        assert_eq!(diags[0].rule, "use-design-system-item");
+        assert!(
+            diags[0].message.contains("AppContainer") && diags[0].message.contains("Container"),
+            "message should name the replacement: {}",
+            diags[0].message
+        );
+    
+        // Static calls are not constructions.
+        let static_src = "Widget f(BuildContext c) => Container.of(c);";
+        let falcon_dart_parser::ParseResult { tree, .. } = parse(static_src);
+        let parsed = Arc::new(ParsedFile {
+            source: static_src.into(),
+            tree,
+        });
+        let static_program = parsed.program();
+        let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
+        assert!(
+            rule.analyze(UseDesignSystemItem::NAME, static_program, &ctx)
+                .is_empty(),
+            "static access `Container.of(...)` must not be flagged"
+        );
     }
 }

@@ -24,7 +24,7 @@ impl Rule for PreferCenterOverAlign {
         prepare(
             ctx,
             "Align",
-            "Prefer 'Center' over an Align with centered alignment.",
+            "Prefer `Center` over an `Align` with centered alignment.",
             matches,
         )
     }

@@ -69,7 +69,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .filter(|conditional| conditional.bool_branches == 2)
             .map(|conditional| conditional.span)
             .map(|span| {
-                ctx.diagnostic("Conditional expressions with a 'bool' literal can be simplified.", span)
+                ctx.diagnostic("Conditional expressions with a `bool` literal can be simplified.", span)
             })
             .collect()
     }

@@ -86,7 +86,7 @@ fn check_type_name(name_ident: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx:
 
     if !is_valid {
         diags.push(ctx.diagnostic(format!(
-            "Type name '{}' should be in UpperCamelCase and between 3 and 40 characters.",
+            "Type name `{}` should be in `UpperCamelCase` and between 3 and 40 characters.",
             name
         ), name_ident.span()));
     }

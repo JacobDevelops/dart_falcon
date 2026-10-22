@@ -207,9 +207,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         && !(if self.timers.contains(declarator.name().name()) { &self.cancelled } else { &self.disposed }).contains(declarator.name().name())
                     {
                         let message = if self.kind == DisposalKind::Controller {
-                            "This controller is never disposed; call its dispose() method in dispose()."
+                            "This controller is never disposed; call its `dispose()` method in `dispose()`."
                         } else {
-                            "This owned field is never released; call its dispose() or cancel() method in dispose()."
+                            "This owned field is never released; call its `dispose()` or `cancel()` method in `dispose()`."
                         };
                         self.diagnostics.push(self.ctx.diagnostic(message, declarator.name().span()));
                     }

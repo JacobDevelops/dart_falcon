@@ -27,7 +27,7 @@ use falcon_syntax::token::TokenKind;
 
 use crate::lint::tokens::significant_tokens_in;
 
-const MESSAGE: &str = "Parameters should not be marked as 'final'.";
+const MESSAGE: &str = "Parameters should not be marked as `final`.";
 
 #[derive(Default)]
 pub struct AvoidFinalParameters;

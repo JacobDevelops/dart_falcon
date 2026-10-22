@@ -68,7 +68,7 @@ impl Collector<'_, '_> {
                     start = marker.offset();
                 }
             }
-            self.diags.push(self.ctx.diagnostic("Unnecessary use of a block function body.", Span::new(start, block.span().end)));
+            self.diags.push(self.ctx.diagnostic("Replace this block function body with an expression body.", Span::new(start, block.span().end)));
         }
     }
 }

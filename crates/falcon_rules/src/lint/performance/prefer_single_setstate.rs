@@ -53,7 +53,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 _ => false,
             };
             if previous && current {
-                self.diagnostics.push(self.ctx.diagnostic("Merge this setState callback into the preceding setState call.", statement.span()));
+                self.diagnostics.push(self.ctx.diagnostic("Merge this `setState` callback into the preceding `setState` call.", statement.span()));
             }
             previous = current;
         }

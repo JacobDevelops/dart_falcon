@@ -147,10 +147,10 @@ impl CrossFileRule for NoImportCycles {
                 .unwrap();
             let root = enclosing_pubspec(&paths[start])
                 .and_then(|manifest| manifest.parent().map(Path::to_path_buf));
-            let mut message = String::from("Import/export cycle: ");
+            let mut message = String::from("Remove a dependency to break this import/export cycle: `");
             for (index, &node) in cycle.iter().enumerate() {
                 if index > 0 {
-                    message.push_str(" -> ");
+                    message.push_str("` -> `");
                 }
                 let path = paths[node].as_path();
                 let shown = root
@@ -159,7 +159,7 @@ impl CrossFileRule for NoImportCycles {
                     .unwrap_or(path);
                 message.push_str(&shown.to_string_lossy());
             }
-            message.push_str(". Break the cycle by removing a dependency.");
+            message.push_str("`.");
             diagnostics.push(Diagnostic::new(
                 "",
                 Severity::Warning,
@@ -277,7 +277,7 @@ mod tests {
         assert!(
             diagnostics[0]
                 .message
-                .contains("/cycle/a.dart -> /cycle/b.dart -> /cycle/a.dart")
+                .contains("`/cycle/a.dart` -> `/cycle/b.dart` -> `/cycle/a.dart`")
         );
     }
 
@@ -305,13 +305,13 @@ mod tests {
         assert!(
             diagnostics[0]
                 .message
-                .contains("/cycle/b.dart -> /cycle/c.dart -> /cycle/b.dart")
+                .contains("`/cycle/b.dart` -> `/cycle/c.dart` -> `/cycle/b.dart`")
         );
         assert_eq!(diagnostics[1].file_path, "/cycle/d.dart");
         assert!(
             diagnostics[1]
                 .message
-                .contains("/cycle/d.dart -> /cycle/e.dart -> /cycle/d.dart")
+                .contains("`/cycle/d.dart` -> `/cycle/e.dart` -> `/cycle/d.dart`")
         );
     }
 
@@ -379,7 +379,7 @@ mod tests {
         assert!(
             diagnostics[0]
                 .message
-                .contains("/cycle/a.dart -> /cycle/a.dart")
+                .contains("`/cycle/a.dart` -> `/cycle/a.dart`")
         );
     }
 }

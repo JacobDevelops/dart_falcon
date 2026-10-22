@@ -24,7 +24,7 @@ impl Rule for DanglingLibraryDocComments {
         RulePreparation::Diagnostics(starts
     .into_iter()
     .map(|start| {
-        ctx.diagnostic("Dangling library doc comment. Add a 'library' directive or attach it to a declaration.", DiagSpan {
+        ctx.diagnostic("Dangling library doc comment. Add a `library` directive or attach it to a declaration.", DiagSpan {
             start,
             end: start + 3,
         })

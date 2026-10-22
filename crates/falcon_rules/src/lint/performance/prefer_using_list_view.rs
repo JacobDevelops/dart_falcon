@@ -87,7 +87,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 })
         };
         if matches {
-            self.diagnostics.push(self.ctx.diagnostic("Consider ListView for this scrollable Column; preserve child alignment and padding explicitly, including ListView's default MediaQuery padding.", crate::lint::flutter::constructor_span(node)));
+            self.diagnostics.push(self.ctx.diagnostic("Consider `ListView` for this scrollable `Column`; preserve child alignment and padding explicitly, including `ListView`'s default `MediaQuery` padding.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

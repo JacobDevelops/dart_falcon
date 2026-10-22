@@ -60,7 +60,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }) {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic("Use context.read or context.watch instead of a provider's of method.", field.field().span()));
+        self.diagnostics.push(self.ctx.diagnostic("Use `context.read` or `context.watch` instead of a provider's `of` method.", field.field().span()));
     }
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diagnostics

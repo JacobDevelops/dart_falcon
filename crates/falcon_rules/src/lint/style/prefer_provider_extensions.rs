@@ -94,9 +94,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(if method == "read" {
-            "Use context.read instead of Provider.of."
+            "Use `context.read` instead of `Provider.of`."
         } else {
-            "Use context.watch instead of Provider.of."
+            "Use `context.watch` instead of `Provider.of`."
         }, call.callee().span()));
     }
 

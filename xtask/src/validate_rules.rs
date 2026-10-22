@@ -1,12 +1,11 @@
 use crate::{
-    corpus::{Expectation, cross_file_project_roots, parse_expectations},
+    corpus::{Expectation, cross_file_project_roots, ordinary_fixture_files, parse_expectations},
     support::{DiagnosticJson, FalconRunner, build_falcon, docgen_config_for, recursive_files},
     workspace_root,
 };
 use clap::Args;
 use rayon::prelude::*;
 use std::{
-    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -68,54 +67,79 @@ fn validate_file(
     rule_filter: Option<&str>,
     config: Option<&Path>,
 ) -> Result<FileResult, String> {
+    let raw_diags = falcon.run(file, config)?;
+    Ok(compare_file_diagnostics(
+        source,
+        &raw_diags,
+        threshold,
+        rule_filter,
+    ))
+}
+
+fn compare_file_diagnostics(
+    source: &str,
+    raw_diags: &[DiagnosticJson],
+    threshold: f64,
+    rule_filter: Option<&str>,
+) -> FileResult {
     let all_exps = parse_expectations(source);
     let exps: Vec<Expectation> = all_exps
         .into_iter()
         .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
         .collect();
 
-    let raw_diags = falcon.run(file, config)?;
     let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
         .iter()
         .enumerate()
         .filter(|(_, d)| rule_filter.map(|r| d.rule == r).unwrap_or(true))
         .collect();
 
-    let mut matched_diag_indices: HashSet<usize> = HashSet::new();
-    let mut missed: Vec<MissedExpectation> = Vec::new();
-    let mut matched = 0usize;
-
-    'exp_loop: for exp in &exps {
-        for &(idx, diag) in &diags {
-            if matched_diag_indices.contains(&idx) {
+    let mut matched_diag_indices = vec![false; raw_diags.len()];
+    let mut matched_expectations = vec![false; exps.len()];
+    // Claim exact message matches first, then fuzzy matches, then annotations
+    // without messages. A broad annotation cannot steal a constrained match.
+    for phase in 0..3 {
+        for (expectation_index, exp) in exps.iter().enumerate() {
+            if matched_expectations[expectation_index] || (phase < 2) != exp.expected_msg.is_some()
+            {
                 continue;
             }
-            if diag.rule != exp.rule || diag.line != Some(exp.line) {
-                continue;
-            }
-            // Rule + line match. If expected_msg set, do fuzzy check.
-            let msg_ok = exp
-                .expected_msg
-                .as_ref()
-                .map(|em| fuzzy_match(em, &diag.message) >= threshold)
-                .unwrap_or(true);
-            if msg_ok {
-                matched += 1;
-                matched_diag_indices.insert(idx);
-                continue 'exp_loop;
+            if let Some(&(diagnostic_index, _)) = diags.iter().find(|(index, diagnostic)| {
+                !matched_diag_indices[*index]
+                    && diagnostic.rule == exp.rule
+                    && diagnostic.line == Some(exp.line)
+                    && exp.expected_msg.as_ref().is_none_or(|message| {
+                        if phase == 0 {
+                            message == &diagnostic.message
+                        } else {
+                            fuzzy_match(message, &diagnostic.message) >= threshold
+                        }
+                    })
+            }) {
+                matched_diag_indices[diagnostic_index] = true;
+                matched_expectations[expectation_index] = true;
             }
         }
-        missed.push(MissedExpectation {
-            rule: exp.rule.clone(),
-            line: exp.line,
-        });
     }
+    let matched = matched_expectations
+        .iter()
+        .filter(|&&matched| matched)
+        .count();
+    let missed = exps
+        .iter()
+        .zip(&matched_expectations)
+        .filter(|(_, matched)| !**matched)
+        .map(|(expectation, _)| MissedExpectation {
+            rule: expectation.rule.clone(),
+            line: expectation.line,
+        })
+        .collect();
 
     let false_positives: Vec<UnexpectedDiagnostic> = raw_diags
         .iter()
         .enumerate()
         .filter(|(i, d)| {
-            !matched_diag_indices.contains(i) && rule_filter.map(|r| d.rule == r).unwrap_or(true)
+            !matched_diag_indices[*i] && rule_filter.map(|r| d.rule == r).unwrap_or(true)
         })
         .map(|(_, d)| UnexpectedDiagnostic {
             rule: d.rule.clone(),
@@ -124,25 +148,27 @@ fn validate_file(
         })
         .collect();
 
-    Ok(FileResult {
+    FileResult {
         expected: exps.len(),
         matched,
         missed,
         false_positives,
-    })
+    }
 }
 
-/// Validate each independent package under `corpus/<rule>/cross-file/` in its
-/// own falcon invocation. Expectations use full paths because package fixtures
-/// intentionally reuse basenames.
-fn validate_cross_file_dir(
-    cross_file_dir: &Path,
+/// Validate project fixtures together. Cross-file fixtures may contain
+/// independent bad/good package roots; resolver fixtures form one project.
+/// Expectations use full paths because packages intentionally reuse basenames.
+fn validate_project_dir(
+    project_dir: &Path,
     rule_name: &str,
     falcon: &FalconRunner,
     config: Option<&Path>,
+    threshold: f64,
+    split_projects: bool,
 ) -> (usize, usize, Vec<String>) {
-    let fixture_files = recursive_files(cross_file_dir);
-    let mut expectations: Vec<(String, usize)> = Vec::new();
+    let fixture_files = recursive_files(project_dir);
+    let mut expectations: Vec<(String, Expectation)> = Vec::new();
     for file in &fixture_files {
         let source = match fs::read_to_string(file) {
             Ok(source) => source,
@@ -151,21 +177,26 @@ fn validate_cross_file_dir(
         let key = file.to_string_lossy().into_owned();
         for exp in parse_expectations(&source) {
             if exp.rule == rule_name {
-                expectations.push((key.clone(), exp.line));
+                expectations.push((key.clone(), exp));
             }
         }
     }
 
     let mut failures = Vec::new();
-    if expectations.is_empty() {
+    if expectations.is_empty() && split_projects {
         failures.push(format!(
-            "ERROR {} — cross-file fixture for `{rule_name}` has no expectations",
-            cross_file_dir.display()
+            "ERROR {} — project fixture for `{rule_name}` has no expectations",
+            project_dir.display()
         ));
         return (0, 0, failures);
     }
     let mut diags = Vec::new();
-    for root in cross_file_project_roots(cross_file_dir) {
+    let roots = if split_projects {
+        cross_file_project_roots(project_dir)
+    } else {
+        vec![project_dir.to_path_buf()]
+    };
+    for root in roots {
         // A failed invocation must not read as "the rule fired nowhere".
         match falcon.run(&root, config) {
             Ok(found) => diags.extend(found),
@@ -175,35 +206,71 @@ fn validate_cross_file_dir(
             )),
         }
     }
-    let mut diag_keys: Vec<(String, Option<usize>)> = diags
+    let mut remaining: Vec<_> = diags
         .iter()
-        .filter(|d| d.rule == rule_name)
-        .map(|d| (d.file_path.clone(), d.line))
+        .filter(|diagnostic| diagnostic.rule == rule_name)
         .collect();
 
     let expected = expectations.len();
     let mut matched = 0usize;
-    for exp in &expectations {
-        if let Some(pos) = diag_keys
-            .iter()
-            .position(|(path, line)| path == &exp.0 && *line == Some(exp.1))
-        {
-            diag_keys.remove(pos);
-            matched += 1;
+    let mut matched_expectations = vec![false; expectations.len()];
+    for phase in 0..3 {
+        for (expectation_index, (path, exp)) in expectations.iter().enumerate() {
+            if matched_expectations[expectation_index] || (phase < 2) != exp.expected_msg.is_some()
+            {
+                continue;
+            }
+            if let Some(position) = remaining.iter().position(|diagnostic| {
+                diagnostic.file_path == *path
+                    && diagnostic.line == Some(exp.line)
+                    && exp.expected_msg.as_ref().is_none_or(|message| {
+                        if phase == 0 {
+                            message == &diagnostic.message
+                        } else {
+                            fuzzy_match(message, &diagnostic.message) >= threshold
+                        }
+                    })
+            }) {
+                remaining.remove(position);
+                matched_expectations[expectation_index] = true;
+                matched += 1;
+            }
+        }
+    }
+    let unmatched = expectations
+        .iter()
+        .zip(&matched_expectations)
+        .filter(|(_, matched)| !**matched)
+        .map(|(expectation, _)| expectation);
+    for (path, exp) in unmatched {
+        if let Some(position) = remaining.iter().position(|diagnostic| {
+            diagnostic.file_path == *path && diagnostic.line == Some(exp.line)
+        }) {
+            let diagnostic = remaining.remove(position);
+            failures.push(format!(
+                "MESSAGE {path}:{} — `{rule_name}`\n  expected: {:?}\n    actual: {:?}",
+                exp.line,
+                exp.expected_msg.as_deref().unwrap(),
+                diagnostic.message
+            ));
         } else {
             failures.push(format!(
-                "MISS  {}:{} — rule `{}` expected but not emitted",
-                exp.0, exp.1, rule_name
+                "MISS  {path}:{} — rule `{rule_name}` expected but not emitted{}",
+                exp.line,
+                exp.expected_msg
+                    .as_ref()
+                    .map_or_else(String::new, |message| format!(": {message:?}"))
             ));
         }
     }
-    for key in diag_keys {
+    for diagnostic in remaining {
         failures.push(format!(
-            "EXTRA {}:{} — rule `{}` fired unexpectedly",
-            key.0,
-            key.1
+            "EXTRA {}:{} — rule `{rule_name}` fired unexpectedly: {:?}",
+            diagnostic.file_path,
+            diagnostic
+                .line
                 .map_or_else(|| "unresolved".to_string(), |line| line.to_string()),
-            rule_name
+            diagnostic.message
         ));
     }
     (expected, matched, failures)
@@ -328,13 +395,8 @@ fn validate_rule_dir(
         .to_string_lossy()
         .to_string();
 
-    let mut dart_files: Vec<PathBuf> = fs::read_dir(rule_dir)
-        .unwrap_or_else(|_| panic!("Cannot read {}", rule_dir.display()))
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
-        .collect();
-    dart_files.sort();
+    let resolver_dependent = falcon_rules::rule_requires_resolution(&rule_name);
+    let dart_files = ordinary_fixture_files(rule_dir, resolver_dependent);
 
     // Config-gated rules reuse their corpus config. Every other rule gets a
     // generated config so validation also exercises non-recommended rules.
@@ -421,8 +483,29 @@ fn validate_rule_dir(
     // run as one invocation over the whole directory.
     let cross_file_dir = rule_dir.join("cross-file");
     if cross_file_dir.is_dir() {
-        let (expected, matched, failures) =
-            validate_cross_file_dir(&cross_file_dir, &rule_name, falcon, rule_config.as_deref());
+        let (expected, matched, failures) = validate_project_dir(
+            &cross_file_dir,
+            &rule_name,
+            falcon,
+            rule_config.as_deref(),
+            threshold,
+            true,
+        );
+        outcome.files += 1;
+        outcome.expected += expected;
+        outcome.matched += matched;
+        outcome.failures.extend(failures);
+    }
+    let project_dir = rule_dir.join("project");
+    if resolver_dependent && project_dir.is_dir() {
+        let (expected, matched, failures) = validate_project_dir(
+            &project_dir,
+            &rule_name,
+            falcon,
+            rule_config.as_deref(),
+            threshold,
+            false,
+        );
         outcome.files += 1;
         outcome.expected += expected;
         outcome.matched += matched;
@@ -434,6 +517,38 @@ fn validate_rule_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_messages_claim_exact_matches_before_fuzzy_and_unconstrained_matches() {
+        let diagnostics: Vec<_> = ["Use `Foo`.", "Use `Bar`."]
+            .into_iter()
+            .map(|message| DiagnosticJson {
+                rule: "sample".to_owned(),
+                message: message.to_owned(),
+                line: Some(1),
+                col: Some(1),
+                file_path: "bad.dart".to_owned(),
+            })
+            .collect();
+        let result = compare_file_diagnostics(
+            "x /* expect: sample */ /* expect: sample, msg: \"Use `Foo`.\" */",
+            &diagnostics,
+            1.0,
+            Some("sample"),
+        );
+        assert_eq!(result.matched, 2);
+        assert!(result.missed.is_empty());
+        assert!(result.false_positives.is_empty());
+        let result = compare_file_diagnostics(
+            "x /* expect: sample, msg: \"Use `Baz`.\" */ /* expect: sample, msg: \"Use `Foo`.\" */",
+            &diagnostics[..1],
+            0.85,
+            Some("sample"),
+        );
+        assert_eq!(result.matched, 1);
+        assert_eq!(result.missed.len(), 1);
+        assert!(result.false_positives.is_empty());
+    }
 
     #[test]
     fn cross_file_fixture_without_expectations_fails_before_running_falcon() {
@@ -448,10 +563,32 @@ mod tests {
             fallback_sdk: None,
         };
         let (expected, matched, failures) =
-            validate_cross_file_dir(directory.path(), "avoid-foo", &runner, None);
+            validate_project_dir(directory.path(), "avoid-foo", &runner, None, 0.85, true);
         assert_eq!((expected, matched), (0, 0));
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("has no expectations"), "{failures:?}");
+    }
+
+    #[test]
+    fn clean_resolver_project_still_runs_falcon() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
+        let runner = FalconRunner {
+            binary: directory
+                .path()
+                .join("missing-falcon")
+                .to_string_lossy()
+                .into_owned(),
+            fallback_sdk: None,
+        };
+        let (expected, matched, failures) =
+            validate_project_dir(directory.path(), "avoid-foo", &runner, None, 1.0, false);
+        assert_eq!((expected, matched), (0, 0));
+        assert_eq!(failures.len(), 1);
+        assert!(
+            failures[0].contains("falcon invocation failed"),
+            "{failures:?}"
+        );
     }
 
     #[test]

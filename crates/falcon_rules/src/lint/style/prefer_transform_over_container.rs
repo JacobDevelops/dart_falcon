@@ -25,7 +25,7 @@ impl Rule for PreferTransformOverContainer {
         prepare(
             ctx,
             "Container",
-            "Prefer 'Transform' over a Container used only for transform.",
+            "Prefer `Transform` over a `Container` used only for transform.",
             matches,
         )
     }

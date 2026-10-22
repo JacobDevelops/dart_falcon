@@ -138,7 +138,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if self.is_enum_or_enum_like(&identity, state) {
             let span = self.default_member_span(case, index);
-            self.diags.push(self.ctx.diagnostic("Invalid use of 'default' member in a switch.", span));
+            self.diags.push(self.ctx.diagnostic("Avoid using a `default` member in this switch.", span));
         }
     }
 }

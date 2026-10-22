@@ -113,7 +113,7 @@ impl Collector<'_> {
         });
         let mut constructors = primary.chain(constructors).peekable();
         if constructors.peek().is_none() {
-            self.diagnostics.push(self.ctx.diagnostic("Public widgets should have a constructor with a named 'key' parameter.", class.name().span()));
+            self.diagnostics.push(self.ctx.diagnostic("Public widgets should have a constructor with a named `key` parameter.", class.name().span()));
             return;
         }
 
@@ -186,7 +186,7 @@ impl Collector<'_> {
                 }
             }
             if known_target {
-                self.diagnostics.push(self.ctx.diagnostic("Public widget constructors should accept and forward a named 'key' parameter.", span));
+                self.diagnostics.push(self.ctx.diagnostic("Public widget constructors should accept and forward a named `key` parameter.", span));
             }
         }
     }
@@ -263,128 +263,18 @@ fn target_defines_key(
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::{
-        AnalysisEnvironment, ExternalLibraries, ExternalSources, IdentityIndex, IdentitySource,
-        LibrarySource, RuleAnalysis, TypeIndex, canonical_or_lexical,
-    };
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
+
 
     use super::*;
 
     fn diagnostics(source: &str) -> Vec<Diagnostic> {
-        analyze_rule("use-key-in-widget-constructors", source, &UseKeyInWidgetConstructors)
+        crate::lint::test_support::analyze_flutter_rule(
+            "use-key-in-widget-constructors",
+            source,
+            &UseKeyInWidgetConstructors,
+        )
     }
 
-    fn analyze_rule(name: &'static str, source: &str, rule: &dyn Rule) -> Vec<Diagnostic> {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path();
-        let app = root.join("app");
-        let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
-        for path in [
-            app.join(".dart_tool"),
-            app.join("lib"),
-            sdk.join("core"),
-            root.join("flutter/packages/flutter/lib"),
-            root.join("meta/lib"),
-        ] {
-            std::fs::create_dir_all(path).unwrap();
-        }
-        std::fs::write(
-            sdk.join("libraries.json"),
-            r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            sdk.join("core/core.dart"),
-            include_str!("../../../tests/support/sdk/lib/core/core.dart"),
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("flutter/packages/flutter/lib/widgets.dart"),
-            r"
-abstract class Key { const Key.empty(); }
-abstract class LocalKey extends Key { const LocalKey() : super.empty(); }
-abstract class GlobalKey<T> extends Key { const GlobalKey() : super.empty(); }
-abstract class Widget {
-  const Widget({this.key});
-  final Key? key;
-}
-abstract class StatelessWidget extends Widget { const StatelessWidget({super.key}); }
-",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("meta/lib/meta.dart"),
-            "class _Annotation { const _Annotation(); } const visibleForTesting = _Annotation(); const internal = _Annotation();",
-        )
-        .unwrap();
-        std::fs::write(
-            app.join(".dart_tool/package_config.json"),
-            r#"{"configVersion":2,"flutterRoot":"../../flutter","packages":[
-                {"name":"app","rootUri":"../","packageUri":"lib/"},
-                {"name":"flutter","rootUri":"../../flutter/packages/flutter","packageUri":"lib/"},
-                {"name":"meta","rootUri":"../../meta","packageUri":"lib/"}
-            ]}"#,
-        )
-        .unwrap();
-        let path = app.join("lib/main.dart");
-        std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
-        let program = parsed.program();
-        assert!(errors.is_empty(), "parse errors: {errors:?}");
-        let environment = AnalysisEnvironment::discover([path.as_path()]);
-        assert_eq!(
-            environment.sdk(&path).unwrap().root,
-            canonical_or_lexical(&root.join("flutter/bin/cache/dart-sdk")),
-        );
-        let external = ExternalLibraries::load(
-            &environment,
-            &[(path.as_path(), program, source)],
-            |candidate| candidate == path,
-        );
-        let identities = IdentityIndex::build(
-            &[IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[source],
-            &[],
-            Some(ExternalSources {
-                libraries: &external,
-                environment: &environment,
-            }),
-        );
-        let mut types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                LibrarySource {
-                    program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        types.add_external(&external, &identities);
-        let signatures = SignatureIndex::build(
-            &[(path.clone(), std::sync::Arc::clone(&parsed))],
-            Some(&external),
-            &identities,
-            &types,
-        );
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, &config, &parsed)
-            .with_types(&types)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
-        rule.analyze(name, program, &context)
-    }
 
     #[test]
     fn super_formal_uses_selected_named_constructor_and_owner_substitution() {
@@ -448,22 +338,5 @@ abstract class RealConstructor extends Widget {
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
 
-    #[test]
-    fn internal_constructor_exemption_requires_package_meta_identity() {
-        let source = r"
-import 'package:meta/meta.dart' as meta;
-const internal = 0;
-class _Private {}
-@internal
-class Fake { Fake(_Private value); }
-@meta.internal
-class Real { Real(_Private value); }
-";
-        let diagnostics = analyze_rule(
-            "library-private-types-in-public-api",
-            source,
-            &crate::lint::correctness::library_private_types_in_public_api::LibraryPrivateTypesInPublicApi,
-        );
-        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    }
+
 }

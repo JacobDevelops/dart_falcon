@@ -70,7 +70,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a, 'a> {
         }) && same_element(returned, false, assigned, write, state)
             && let Stmt::Expr(statement) = second_last
         {
-            self.diagnostics.push(self.ctx.diagnostic("Assignment could be inlined in 'return' statement.", statement.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Assignment could be inlined in `return` statement.", statement.span()));
         }
     }
 }

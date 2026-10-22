@@ -51,7 +51,7 @@ struct Collector<'a, 'ctx> {
 impl Collector<'_, '_> {
     fn function(&mut self, name: Identifier<'_>) {
         self.diags.push(self.ctx.diagnostic(format!(
-            "The function '{}' should have a return type but doesn't.",
+            "The function `{}` should have a return type but doesn't.",
             name.name()
         ), name.span()));
     }
@@ -60,7 +60,7 @@ impl Collector<'_, '_> {
         if self.in_test_directory && (name.starts_with("test_") || name.starts_with("solo_test_")) {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(format!("The method '{name}' should have a return type but doesn't."), span));
+        self.diags.push(self.ctx.diagnostic(format!("The method `{name}` should have a return type but doesn't."), span));
     }
 }
 
@@ -121,4 +121,51 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
         StructuralTraversal::Continue
     }
 }
+}
+
+#[cfg(test)]
+mod test_directories {
+    use super::AlwaysDeclareReturnTypes;
+    use crate::lint::declarations::in_test_directory as is_test_file;
+    use falcon_analyze::{AnalyzeContext, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+
+    #[test]
+    fn test_directory_exemptions_are_package_root_relative() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("pubspec.yaml"), "name: example\n").unwrap();
+        let source = "class Suite { test_example() {} solo_test_example() {} }";
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let program = parsed.program();
+        let config = FalconConfig::default();
+        for (relative, expected) in [
+            ("test/suite.dart", true),
+            ("integration_test/suite.dart", true),
+            ("test_driver/suite.dart", true),
+            ("testing/suite.dart", true),
+            ("lib/src/test/suite.dart", false),
+            ("lib/testing/suite.dart", false),
+            ("lib/suite.dart", false),
+        ] {
+            let path = directory.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, source).unwrap();
+            assert_eq!(is_test_file(&path), expected, "{relative}");
+            let ctx = AnalyzeContext::new(&path, &config, &parsed);
+            let diagnostics =
+                AlwaysDeclareReturnTypes
+                    .analyze(AlwaysDeclareReturnTypes::NAME, program, &ctx);
+            assert_eq!(
+                diagnostics.len(),
+                if expected { 0 } else { 2 },
+                "{relative}"
+            );
+        }
+    }
 }

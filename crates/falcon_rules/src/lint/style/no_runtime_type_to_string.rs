@@ -154,7 +154,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for (span, implicit) in self.pending.drain(..) {
             if !implicit || !self.shadowed {
                 self.diagnostics.push(self.ctx.diagnostic(
-                    "Using 'toString' on a 'Type' is not safe in production code.",
+                    "Using `toString` on a `Type` is not safe in production code.",
                     span,
                 ));
             }

@@ -167,7 +167,7 @@ impl Collector<'_> {
                 continue;
             }
             let preferred = &facts.static_consts[preferred];
-            self.diagnostics.push(self.ctx.diagnostic(format!("Add a case for '{}.{}'.", identity.name(), preferred.name), Span::new(node.span().start, end)));
+            self.diagnostics.push(self.ctx.diagnostic(format!("Add a case for `{}.{}`.", identity.name(), preferred.name), Span::new(node.span().start, end)));
         }
     }
 }
@@ -276,10 +276,11 @@ fn direct_case_constant(pattern: Pattern<'_>) -> Option<CaseConstant<'_>> {
 
 #[cfg(test)]
 mod tests {
+    use falcon_analyze::RuleAnalysis;
     use std::path::Path;
     use std::sync::Arc;
 
-    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, TypeIndex};
+    use falcon_analyze::{ParsedFile, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 
@@ -301,14 +302,7 @@ mod tests {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
+        let identities = crate::lint::test_support::identities(&[(path, &parsed)]);
         let types = TypeIndex::from_resolved_files(
             [(
                 path,
@@ -326,7 +320,7 @@ mod tests {
             .with_types(&types);
         let diagnostics = ExhaustiveCases.analyze(ExhaustiveCases::NAME, program, &ctx);
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "Add a case for 'Token.second'.");
+        assert_eq!(diagnostics[0].message, "Add a case for `Token.second`.");
         let span = &diagnostics[0].span;
         assert_eq!(
             &source[span.start..span.end],
@@ -346,14 +340,7 @@ mod tests {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
+        let identities = crate::lint::test_support::identities(&[(path, &parsed)]);
         let types = TypeIndex::from_program(program);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(path, &config, &parsed)
@@ -367,9 +354,9 @@ mod tests {
         assert_eq!(
             messages,
             [
-                "Add a case for 'Token.second'.",
-                "Add a case for 'Token.third'.",
-                "Add a case for 'Token.fourth'.",
+                "Add a case for `Token.second`.",
+                "Add a case for `Token.third`.",
+                "Add a case for `Token.fourth`.",
             ]
         );
     }

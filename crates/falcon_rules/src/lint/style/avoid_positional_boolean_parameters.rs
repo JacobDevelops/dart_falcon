@@ -32,7 +32,7 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
 
-const MESSAGE: &str = "'bool' parameters should be named parameters.";
+const MESSAGE: &str = "`bool` parameters should be named parameters.";
 
 #[derive(Default)]
 pub struct AvoidPositionalBooleanParameters;

@@ -121,7 +121,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && !has_null_aware_chain(field.object(), state)
             && is_iterable(field.object(), state)
         {
-            self.diags.push(self.ctx.diagnostic("Avoid using a function literal in a 'forEach' call; use a for-in loop instead.", field.field().span()));
+            self.diags.push(self.ctx.diagnostic("Avoid using a function literal in a `forEach` call; use a for-in loop instead.", field.field().span()));
         }
     }
 }

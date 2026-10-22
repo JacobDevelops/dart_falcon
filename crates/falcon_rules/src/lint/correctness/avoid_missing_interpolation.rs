@@ -80,7 +80,7 @@ impl<'a> Collector<'a> {
             if already_used {
                 continue;
             }
-            self.diags.push(self.ctx.diagnostic("This string is a visible String variable's name; use the variable or interpolate its value.", string.span()));
+            self.diags.push(self.ctx.diagnostic("This string is a visible `String` variable's name; use the variable or interpolate its value.", string.span()));
         }
     }
 }

@@ -48,11 +48,11 @@ impl Emptiness {
         match self {
             Self::Empty => (
                 "isEmpty",
-                "Use 'isEmpty' instead of comparing 'length' to 0.",
+                "Use `isEmpty` instead of comparing `length` to 0.",
             ),
             Self::NotEmpty => (
                 "isNotEmpty",
-                "Use 'isNotEmpty' instead of comparing 'length' to 0.",
+                "Use `isNotEmpty` instead of comparing `length` to 0.",
             ),
         }
     }

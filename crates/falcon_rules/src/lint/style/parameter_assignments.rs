@@ -136,7 +136,7 @@ impl<'a> Collector<'a> {
             };
             if report {
                 self.diagnostics.push(self.ctx.diagnostic(format!(
-                    "Invalid assignment to the parameter '{}'.",
+                    "Avoid assigning to the parameter `{}`.",
                     &self.ctx.source()[name.start..name.end]
                 ), write.span));
             }

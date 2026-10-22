@@ -432,7 +432,7 @@ fn needs_instance(
 mod tests {
     use std::{path::Path, sync::Arc};
 
-    use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile};
+    use falcon_analyze::{ParsedFile};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 
@@ -450,20 +450,9 @@ mod tests {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let diagnostics = PreferAssertsInInitializerLists.analyze(PreferAssertsInInitializerLists::NAME, program, &ctx);
         let slices: Vec<_> = diagnostics
             .iter()

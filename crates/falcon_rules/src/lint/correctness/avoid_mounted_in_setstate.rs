@@ -75,7 +75,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => false,
         };
         if mounted {
-            self.diagnostics.push(self.ctx.diagnostic("Check mounted before calling setState, not inside its callback.", expression.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Check `mounted` before calling `setState`, not inside its callback.", expression.span()));
         }
     }
 

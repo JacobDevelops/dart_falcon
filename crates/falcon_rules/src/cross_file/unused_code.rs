@@ -102,8 +102,8 @@ impl CrossFileRule for UnusedCode {
                     "",
                     Severity::Warning,
                     format!(
-                        "Public {} '{}' is never referenced anywhere in the project; \
-                         remove it",
+                        "Public {} `{}` is never referenced anywhere in the project; \
+                         remove it.",
                         cand.kind, cand.name
                     ),
                     f.path.to_string_lossy().into_owned(),
@@ -258,7 +258,7 @@ mod tests {
         );
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].file_path, dead.to_string_lossy());
-        assert!(diagnostics[0].message.contains("'Unused'"));
+        assert!(diagnostics[0].message.contains("`Unused`"));
     }
 
     #[test]

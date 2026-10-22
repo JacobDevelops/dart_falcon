@@ -67,7 +67,7 @@ fn check_dispose_method(block: Block<'_>, diags: &mut Vec<Diagnostic>, ctx: &Ana
             && is_super_dispose_call(stmt.expr())
             && idx != last_index
         {
-            diags.push(ctx.diagnostic("super.dispose() should be called last in the dispose method.", stmt.expr().span()));
+            diags.push(ctx.diagnostic("Call `super.dispose()` last in the `dispose` method.", stmt.expr().span()));
         }
     }
 }

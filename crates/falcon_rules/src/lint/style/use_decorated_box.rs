@@ -52,7 +52,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             })
             && only_decorates_child(args)
         {
-            self.diags.push(self.ctx.diagnostic("Use 'DecoratedBox' rather than a 'Container' with only a 'Decoration'.", crate::lint::flutter::constructor_span(node)));
+            self.diags.push(self.ctx.diagnostic("Use `DecoratedBox` rather than a `Container` with only a `Decoration`.", crate::lint::flutter::constructor_span(node)));
         }
     }
 }

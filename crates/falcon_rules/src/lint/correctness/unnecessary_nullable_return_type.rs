@@ -101,7 +101,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
             && let Some(span) = state.candidate
         {
             self.diags.push(self.ctx.diagnostic(
-                "Function return type is unnecessarily nullable",
+                "Function return type is unnecessarily nullable.",
                 span,
             ));
         }

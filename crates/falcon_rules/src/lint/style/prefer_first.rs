@@ -46,7 +46,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && is_zero(index.index())
         {
             self.diags.push(self.ctx.diagnostic(
-                "Prefer .first over [0] to access the first element",
+                "Prefer `.first` over `[0]` to access the first element.",
                 index.span(),
             ));
         }

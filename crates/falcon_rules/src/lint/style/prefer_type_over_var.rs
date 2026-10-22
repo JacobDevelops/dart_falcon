@@ -30,7 +30,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, declarations: AstChildren<'_, VarDeclarator<'_>>) {
         for declaration in declarations {
-            self.diags.push(self.ctx.diagnostic("This variable uses 'var'; replace it with an explicit type annotation.", declaration.name().span()));
+            self.diags.push(self.ctx.diagnostic("This variable uses `var`; replace it with an explicit type annotation.", declaration.name().span()));
         }
     }
 }

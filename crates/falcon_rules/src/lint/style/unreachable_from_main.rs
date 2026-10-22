@@ -168,7 +168,7 @@ impl<'a> Reachability<'a> {
             })
             .map(|(_, decl)| {
                 ctx.diagnostic(format!(
-                    "Unreachable member '{}' in an executable library.",
+                    "Unreachable member `{}` in an executable library.",
                     decl.label
                 ), decl.name_span)
             })
@@ -2238,7 +2238,7 @@ mod tests {
 
     #[test]
     fn sibling_semantics_use_their_own_parsed_file_without_shared_signatures() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, group_libraries, library_unit};
+        use falcon_analyze::{group_libraries, library_unit};
         use std::path::Path;
 
         let path = Path::new("/project/main.dart");
@@ -2249,21 +2249,7 @@ mod tests {
             "part of 'main.dart';\nvoid run() {\n\
              final receiver = _C();\nreceiver.used();\n}\n",
         );
-        let identities = IdentityIndex::from_project_files(
-            &[
-                IdentitySource {
-                    path,
-                    parsed: &parsed,
-                    has_parse_errors: false,
-                },
-                IdentitySource {
-                    path: part_path,
-                    parsed: &part,
-                    has_parse_errors: false,
-                },
-            ],
-            &[],
-        );
+        let identities = crate::lint::test_support::identities(&[(path, &parsed), (part_path, &part)]);
         let grouping = group_libraries(&[
             (path.to_path_buf(), parsed.program()),
             (part_path.to_path_buf(), part.program()),

@@ -109,9 +109,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         let message = match replacement {
             Some(replacement) => format!(
-                "This singleton collection is unnecessary. Use {replacement} with its single element instead."
+                "This singleton collection is unnecessary. Use `{replacement}` with its single element instead."
             ),
-            None => "Use the single Future directly instead of wrapping it in Future.wait/any."
+            None => "Use the single `Future` directly instead of wrapping it in `Future.wait` or `Future.any`."
                 .to_owned(),
         };
         self.diagnostics.push(self.ctx.diagnostic(message, argument.span()));

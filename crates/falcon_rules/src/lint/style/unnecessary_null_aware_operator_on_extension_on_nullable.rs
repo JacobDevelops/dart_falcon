@@ -157,7 +157,7 @@ impl<'a> Collector<'a> {
         else {
             return;
         };
-        self.diags.push(self.ctx.diagnostic("Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.", DiagSpan {
+        self.diags.push(self.ctx.diagnostic("Remove the unnecessary null-aware operator when invoking this extension method on a nullable type.", DiagSpan {
             start: token.offset(),
             end: token.offset() + len,
         }));
@@ -180,7 +180,7 @@ impl<'a> Collector<'a> {
         else {
             return;
         };
-        self.diags.push(self.ctx.diagnostic("Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.", DiagSpan {
+        self.diags.push(self.ctx.diagnostic("Remove the unnecessary null-aware operator when invoking this extension method on a nullable type.", DiagSpan {
             start: token.offset(),
             end: token.offset() + token.len(),
         }));
@@ -259,5 +259,38 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::RuleAnalysis;
+
+    #[test]
+    fn nullable_extension_getter_is_not_an_instance_member() {
+        let source = "class Target {}\n\
+                      extension NullableValues on Target? { int get value => 1; }\n\
+                      void read(Target? target) { target?.value; }\n";
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: source.into(),
+            tree: parsed.tree,
+        });
+        let path = std::path::Path::new("/project/lib/main.dart");
+        let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed)]);
+        let config = falcon_config::FalconConfig::default();
+        let context = indexes.context(path, &config, &parsed);
+        let diagnostics = UnnecessaryNullAwareOperatorOnExtensionOnNullable.analyze(
+            UnnecessaryNullAwareOperatorOnExtensionOnNullable::NAME,
+            parsed.program(),
+            &context,
+        );
+        let actual: Vec<_> = diagnostics.iter().map(|diagnostic| (
+            diagnostic.rule.to_string(),
+            source[..diagnostic.span.start].bytes().filter(|&byte| byte == b'\n').count() + 1,
+        )).collect();
+        assert_eq!(actual, [(UnnecessaryNullAwareOperatorOnExtensionOnNullable::NAME.to_owned(), 3)]);
     }
 }

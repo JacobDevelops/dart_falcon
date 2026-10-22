@@ -35,7 +35,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && node.params().next().is_none()
             && node.type_params().next().is_none()
         {
-            self.diagnostics.push(self.ctx.diagnostic("This type is void Function(); use Flutter's VoidCallback alias (or VoidCallback? when nullable).", node.span()));
+            self.diagnostics.push(self.ctx.diagnostic("This type is `void Function()`; use Flutter's `VoidCallback` alias (or `VoidCallback?` when nullable).", node.span()));
         }
         StructuralTraversal::Continue
     }

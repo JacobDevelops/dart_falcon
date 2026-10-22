@@ -31,7 +31,7 @@ impl Rule for ConstantIdentifierNames {
     }
 }
 
-const MESSAGE: &str = "Name constant identifiers using lowerCamelCase.";
+const MESSAGE: &str = "Name constant identifiers using `lowerCamelCase`.";
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,

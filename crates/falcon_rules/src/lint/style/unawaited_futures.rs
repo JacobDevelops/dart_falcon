@@ -39,7 +39,7 @@ impl Rule for UnawaitedFutures {
             ctx,
             &UnusedFuturesRule {
                 in_async_bodies: true,
-                future_message: "Missing an 'await' for the 'Future' computed by this expression.",
+                future_message: "Add an `await` for the `Future` computed by this expression.",
                 future_or_message: None,
             },
         ))

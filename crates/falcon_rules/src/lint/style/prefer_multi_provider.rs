@@ -91,7 +91,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if provider_args(child.value(), state).is_some() {
-            self.diagnostics.push(self.ctx.diagnostic("Replace directly nested providers with MultiProvider.", constructor_span(expression)));
+            self.diagnostics.push(self.ctx.diagnostic("Replace directly nested providers with `MultiProvider`.", constructor_span(expression)));
         }
     }
 

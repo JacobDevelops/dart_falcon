@@ -42,7 +42,7 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
             let mut diagnostic = Diagnostic::new(
                 "",
                 Severity::Warning,
-                format!("The '{protocol}' protocol shouldn't be used because it isn't secure."),
+                format!("The `{protocol}` protocol shouldn't be used because it isn't secure."),
                 path.to_string_lossy().into_owned(),
                 span,
             );

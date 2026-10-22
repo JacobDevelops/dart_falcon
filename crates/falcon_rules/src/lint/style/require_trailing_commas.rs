@@ -124,7 +124,7 @@ impl Collector<'_, '_> {
 
     fn report(&mut self, index: usize) {
         let token = self.tokens[index];
-        self.diags.push(self.ctx.diagnostic("Missing a required trailing comma.", DiagSpan {
+        self.diags.push(self.ctx.diagnostic("Add the required trailing comma.", DiagSpan {
             start: token.offset(),
             end: token.offset() + token.len(),
         }));

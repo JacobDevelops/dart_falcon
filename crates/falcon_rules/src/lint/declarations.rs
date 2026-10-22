@@ -288,7 +288,7 @@ mod tests {
     fn widened_container_dispatch_runs_each_rule() {
         use std::path::Path;
 
-        use falcon_analyze::AnalyzeContext;
+        use crate::lint::test_support::TestIndexes;
         use falcon_config::FalconConfig;
 
         use crate::meta::{RULE_METADATA, RuleKind};
@@ -447,14 +447,18 @@ mod tests {
                     _ => panic!("unexpected newly included kind: {kind}"),
                 };
                 let variants = if kind == "Enum" { "value;" } else { "" };
-                let source = format!("{header} {{ {variants} {member_source} }}");
+                let source = format!(
+                    "import 'package:flutter/widgets.dart';\n{header} {{ {variants} {member_source} }}"
+                );
                 let falcon_dart_parser::ParseResult { errors, tree } = parse(&source);
                 assert!(errors.is_empty(), "{name}/{kind}: {errors:?}");
                 let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
                     source: source.into_boxed_str(),
                     tree,
                 });
-                let ctx = AnalyzeContext::new(Path::new("containers.dart"), &config, &parsed);
+                let path = Path::new("containers.dart");
+                let indexes = TestIndexes::single(path, &parsed, false);
+                let ctx = indexes.context(path, &config, &parsed);
                 let diagnostics = rule.analyze(name, parsed.program(), &ctx);
                 assert_eq!(
                     diagnostics.iter().any(|diagnostic| diagnostic.rule == name),

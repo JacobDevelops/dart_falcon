@@ -37,7 +37,7 @@ fn check_media_query_size_field(
     ctx: &AnalyzeContext,
 ) {
     if (field.name() == "width" || field.name() == "height") && is_media_query_size(object) {
-        diags.push(ctx.diagnostic("Use MediaQuery.sizeOf(context) instead of MediaQuery.of(context).size.", *span));
+        diags.push(ctx.diagnostic("Use `MediaQuery.sizeOf(context)` instead of `MediaQuery.of(context).size`.", *span));
     }
 }
 

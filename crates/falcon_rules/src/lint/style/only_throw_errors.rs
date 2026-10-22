@@ -47,7 +47,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, thrown: Expr<'_>, state: &SemanticState<'_>) {
         if is_literal(thrown) || not_throwable(&state.infer(thrown), state) {
-            self.diagnostics.push(self.ctx.diagnostic("Don't create and throw instances of classes that don't extend 'Exception' or 'Error'.", thrown.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Don't create and throw instances of classes that don't extend `Exception` or `Error`.", thrown.span()));
         }
     }
 }

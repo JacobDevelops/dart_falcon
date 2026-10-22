@@ -154,7 +154,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .filter(|(body, _)| !self.unsafe_bodies.contains(body))
             .collect();
         candidates.sort_unstable_by_key(|(_, span)| span.start);
-        candidates.into_iter().map(|(_, span)| self.ctx.diagnostic("This async declaration only returns immediate values. Make it synchronous and return the value type instead of Future, updating its callers.", span)).collect()
+        candidates.into_iter().map(|(_, span)| self.ctx.diagnostic("This `async` declaration only returns immediate values. Make it synchronous and return the value type instead of `Future`, updating its callers.", span)).collect()
     }
 }
 

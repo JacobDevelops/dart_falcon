@@ -23,7 +23,7 @@ use falcon_syntax::cst::*;
 
 use crate::lint::core_imports::CoreImports;
 
-const MESSAGE: &str = "Unnecessary 'dynamic' type annotation.";
+const MESSAGE: &str = "Remove the unnecessary `dynamic` type annotation.";
 
 #[derive(Default)]
 pub struct AvoidAnnotatingWithDynamic;

@@ -63,7 +63,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     named_seen = true;
                 } else if named_seen {
                     self.diags.push(self.ctx.diagnostic(
-                        "Invalid location for the unnamed constructor.",
+                        "Place the unnamed constructor before named constructors.",
                         constructor_name_range(constructor),
                     ));
                 }

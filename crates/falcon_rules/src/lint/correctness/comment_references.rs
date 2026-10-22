@@ -49,7 +49,7 @@ impl Rule for CommentReferences {
         );
         let mut diagnostics = Vec::new();
         let mut report = |offset: usize, text: &str| {
-            diagnostics.push(ctx.diagnostic(format!("The referenced name '{text}' isn't visible in scope."), DiagSpan {
+            diagnostics.push(ctx.diagnostic(format!("The referenced name `{text}` isn't visible in scope."), DiagSpan {
                 start: offset,
                 end: offset + text.len(),
             }));

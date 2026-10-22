@@ -114,7 +114,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 scopes.iter().any(|scope| scope.start <= span.start && span.start < scope.end)
             }))
         }).map(|(span, _)| self.ctx.diagnostic(
-            "Avoid using non-const top-level members",
+            "Avoid using non-const top-level members.",
             *span,
         )).collect()
     }

@@ -24,7 +24,7 @@ impl Rule for PreferAlignOverContainer {
         prepare(
             ctx,
             "Container",
-            "Prefer 'Align' over a Container used only for alignment.",
+            "Prefer `Align` over a `Container` used only for alignment.",
             matches,
         )
     }

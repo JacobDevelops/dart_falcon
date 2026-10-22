@@ -1,7 +1,7 @@
 [
   {
     "path": "$schema",
-    "type": "string",
+    "type": "string | null",
     "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors."
   },
   {
@@ -87,7 +87,7 @@
   },
   {
     "path": "linter.rules.recommended",
-    "type": "boolean",
+    "type": "boolean | null",
     "default": true,
     "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true."
   },
@@ -111,7 +111,7 @@
   },
   {
     "path": "cross-file.rules.recommended",
-    "type": "boolean",
+    "type": "boolean | null",
     "default": true,
     "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true."
   },
@@ -134,7 +134,7 @@
   },
   {
     "path": "overrides[].linter.enabled",
-    "type": "boolean",
+    "type": "boolean | null",
     "description": "Master switch for the single-file linter within this override."
   },
   {
@@ -151,7 +151,7 @@
   },
   {
     "path": "overrides[].cross-file.enabled",
-    "type": "boolean",
+    "type": "boolean | null",
     "description": "Master switch for cross-file analysis within this override."
   },
   {

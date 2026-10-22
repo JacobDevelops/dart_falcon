@@ -35,7 +35,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-const MESSAGE: &str = "Fields in 'const' classes should not have initializers.";
+const MESSAGE: &str = "Fields in `const` classes should not have initializers.";
 
 #[derive(Default)]
 pub struct AvoidFieldInitializersInConstClasses;

@@ -254,7 +254,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && candidate.valid
         {
             self.diags.push(self.ctx.diagnostic(
-                "Use a 'for-in' loop; use '.indexed' when the index is needed.",
+                "Use a `for-in` loop; use `.indexed` when the index is needed.",
                 candidate.span,
             ));
         }

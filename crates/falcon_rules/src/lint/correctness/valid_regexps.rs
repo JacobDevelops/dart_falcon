@@ -66,7 +66,7 @@ impl Collector<'_> {
             .is_err()
         }) {
             let span = argument.span();
-            self.diagnostics.push(self.ctx.diagnostic("Invalid regular expression.", span));
+            self.diagnostics.push(self.ctx.diagnostic("Use a valid regular expression.", span));
         }
     }
 

@@ -49,11 +49,11 @@ fn check_double(value: &str, span: &Span, diags: &mut Vec<Diagnostic>, ctx: &Ana
     // Only literal *formatting* is checked; `24.0` → `24` (int-ification) is
     // explicitly out of scope.
     let message = if detect_leading_zero(value) {
-        "Double literal shouldn't have redundant leading '0'."
+        "Double literal shouldn't have redundant leading `0`."
     } else if value.starts_with('.') {
-        "Double literal shouldn't begin with '.'."
+        "Double literal shouldn't begin with `.`."
     } else if detect_trailing_zero(value) {
-        "Double literal shouldn't have a trailing '0'."
+        "Double literal shouldn't have a trailing `0`."
     } else {
         return;
     };

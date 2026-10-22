@@ -115,7 +115,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     if param.name().name() != expected {
                         self.diags.push(self.ctx.diagnostic(
                     format!(
-                        "The super parameter named '{}' does not share the same name as the corresponding parameter in the super constructor, '{expected}'.",
+                        "The super parameter named `{}` does not share the same name as the corresponding parameter in the super constructor, `{expected}`.",
                         param.name().name()
                     ),
                     param.span(),

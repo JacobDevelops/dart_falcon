@@ -52,4 +52,4 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 }
 
-const MESSAGE: &str = "Name extensions using UpperCamelCase.";
+const MESSAGE: &str = "Name extensions using `UpperCamelCase`.";

@@ -84,6 +84,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(format!("Use '{getter}' rather than '% 2'."), span));
+        self.diags.push(self.ctx.diagnostic(format!("Use `{getter}` rather than `% 2`."), span));
     }
 }

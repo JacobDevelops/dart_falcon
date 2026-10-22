@@ -54,9 +54,9 @@ impl Rule for DiscardedFutures {
             ctx,
             &UnusedFuturesRule {
                 in_async_bodies: false,
-                future_message: "Asynchronous function invoked in a non-'async' function.",
+                future_message: "Avoid invoking an asynchronous function in a non-`async` function.",
                 future_or_message: Some(
-                    "Function returning 'FutureOr' invoked in a non-'async' function.",
+                    "Avoid invoking a function returning `FutureOr` in a non-`async` function.",
                 ),
             },
         ))

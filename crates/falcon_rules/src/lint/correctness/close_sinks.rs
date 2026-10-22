@@ -33,7 +33,7 @@ use crate::lint::resource_leaks::{LeakRule, Release};
 pub struct CloseSinks;
 
 const RULE: LeakRule = LeakRule {
-    message: "Unclosed instance of 'Sink'.",
+    message: "Close this `Sink` instance.",
     releases: &[
         Release {
             library: "dart:core",

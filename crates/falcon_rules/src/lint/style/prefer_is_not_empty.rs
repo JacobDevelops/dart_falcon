@@ -39,19 +39,14 @@ impl Rule for PreferIsNotEmpty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    mod support {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/rule_context.rs"
-        ));
-    }
+    use crate::lint::test_support::count;
 
     fn count_no_types(source: &str) -> usize {
-        support::count("prefer-is-not-empty", &PreferIsNotEmpty, source, false)
+        count("prefer-is-not-empty", &PreferIsNotEmpty, source, false)
     }
 
     fn count_with_types(source: &str) -> usize {
-        support::count("prefer-is-not-empty", &PreferIsNotEmpty, source, true)
+        count("prefer-is-not-empty", &PreferIsNotEmpty, source, true)
     }
 
     #[test]

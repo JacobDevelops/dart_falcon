@@ -47,7 +47,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let fallthrough = if is_eq { conditional.else_expr() } else { conditional.then_expr() };
             if equivalent(operand, fallthrough, self.ctx) {
                 self.diags.push(self.ctx.diagnostic(
-                    "Prefer using the if-null operator '??'.",
+                    "Prefer using the if-null operator `??`.",
                     conditional.span(),
                 ));
             }

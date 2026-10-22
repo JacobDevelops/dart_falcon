@@ -9,16 +9,12 @@
 //! if (value is Widget) {} // GOOD: compare types, not their names
 //! ```
 //!
-//! Adopted from the official `avoid_type_to_string` lint, including its
-//! quirks. A `toString` invocation (cascade sections included) or a `toString`
-//! tear-off passed as an argument is reported when it resolves to
-//! `Object.toString` and its target type is a non-nullable subtype of
-//! `dart:core` `Type`. The target type is the receiver's static type when that
-//! is an interface type; otherwise (no receiver, `dynamic`, a type parameter)
-//! it is the type of the most recent class, mixin, or extension declaration
-//! in the file — the official visitor never resets it, so it carries over into
-//! later functions, enums, and extension types. A tear-off through a simple
-//! identifier prefix (`t.toString`) uses only an interface-typed prefix.
+//! Adopted from the official `avoid_type_to_string` lint. Reports calls to or
+//! tear-offs of `Object.toString` when the target has a non-nullable subtype of
+//! `dart:core` `Type`. The target is usually the receiver's static interface
+//! type; calls without an interface-typed receiver can be affected by the
+//! enclosing declaration. A tear-off through an identifier prefix is checked
+//! only when that prefix has an interface type.
 //! `Type` itself (and so every `runtimeType` read) is never reported, because
 //! `dart:core` `Type` redeclares `toString`.
 
@@ -129,7 +125,7 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic("Using 'toString' on a 'Type' is not safe in production code.", name.span()));
+        self.diagnostics.push(self.ctx.diagnostic("Using `toString` on a `Type` is not safe in production code.", name.span()));
     }
 
     /// `receiver.name`, invoked or (`prefixed_only`) torn off through a

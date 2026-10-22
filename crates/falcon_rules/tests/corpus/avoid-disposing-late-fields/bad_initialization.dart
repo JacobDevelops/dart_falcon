@@ -54,7 +54,7 @@ class CaughtFailure extends State<StatefulWidget> {
 class ConditionalLazyRead extends State<StatefulWidget> {
   late final AnimationController controller = AnimationController(vsync: this);
   void initState() { if (mounted) controller.forward(); }
-  void dispose() { controller.dispose(); super.dispose(); } /* expect: avoid-disposing-late-fields, msg: "Initialize this late field unconditionally in initState before releasing it in dispose, or make it nullable." */
+  void dispose() { controller.dispose(); super.dispose(); } /* expect: avoid-disposing-late-fields, msg: "Initialize this `late` field unconditionally in `initState` before releasing it in `dispose`, or make it nullable." */
 }
 class ShadowedLazyRead extends State<StatefulWidget> {
   late final AnimationController controller = AnimationController(vsync: this);

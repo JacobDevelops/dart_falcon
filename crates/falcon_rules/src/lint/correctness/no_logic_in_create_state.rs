@@ -92,7 +92,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 continue;
             }
             diags.push(ctx.diagnostic(
-                "Avoid logic in createState; it should only return a new State instance.",
+                "Avoid logic in `createState`; it should only return a new `State` instance.",
                 violation_span(body),
             ));
         }

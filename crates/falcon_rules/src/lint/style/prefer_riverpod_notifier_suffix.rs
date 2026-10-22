@@ -134,7 +134,7 @@ impl<'a> Collector<'a> {
             }
             self.file_reported = true;
             format!(
-                "Name files containing Riverpod {}s using snake_case ending in '{file_suffix}.dart'.",
+                "Name files containing Riverpod {}s using `snake_case` ending in `{file_suffix}.dart`.",
                 suffix.to_ascii_lowercase()
             )
         } else {
@@ -142,7 +142,7 @@ impl<'a> Collector<'a> {
                 return;
             }
             format!(
-                "Name Riverpod {}s with a '{suffix}' suffix.",
+                "Name Riverpod {}s with a `{suffix}` suffix.",
                 suffix.to_ascii_lowercase()
             )
         };

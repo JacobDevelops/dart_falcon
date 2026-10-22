@@ -123,7 +123,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
                 });
                 if inherited != Some(true) {
                     self.diags.push(self.ctx.diagnostic(
-                        "Start the name of the method with 'to' or 'as'.",
+                        "Start the name of the method with `to` or `as`.",
                         span,
                     ));
                 }

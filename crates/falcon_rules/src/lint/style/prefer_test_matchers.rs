@@ -48,7 +48,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let boolean = boolean_expectation(expected, state, self.ctx);
         if boolean.is_some() && matches!(actual.unparenthesized(), Expr::Is(_)) {
-            self.diags.push(self.ctx.diagnostic("Use isA or isNot(isA) instead of testing the type before expect.", actual.span()));
+            self.diags.push(self.ctx.diagnostic("Use `isA` or `isNot(isA)` instead of testing the type before `expect`.", actual.span()));
             return;
         }
         if boolean.is_some()
@@ -63,16 +63,16 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     | BinaryOp::GtEq
             )
         {
-            self.diags.push(self.ctx.diagnostic("Match the actual value directly with equals, isNot, or an ordering matcher instead of comparing it before expect.", actual.span()));
+            self.diags.push(self.ctx.diagnostic("Match the actual value directly with `equals`, `isNot`, or an ordering matcher instead of comparing it before `expect`.", actual.span()));
             return;
         }
         let message = match expected.unparenthesized() {
             Expr::BoolLit(value) => Some(if value.value() {
-                "Use isTrue instead of the literal true matcher."
+                "Use `isTrue` instead of the literal `true` matcher."
             } else {
-                "Use isFalse instead of the literal false matcher."
+                "Use `isFalse` instead of the literal `false` matcher."
             }),
-            Expr::NullLit(_) => Some("Use isNull instead of the literal null matcher."),
+            Expr::NullLit(_) => Some("Use `isNull` instead of the literal `null` matcher."),
             _ if known_non_matcher(&state.infer(expected), state, self.ctx) => {
                 Some("Wrap the expected value in a test matcher such as equals.")
             }

@@ -532,12 +532,12 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
                 continue;
             }
             let message = match (self.kind, self.requirement) {
-                (ModelKind::Event, ModelRequirement::Sealed) => "Declare this Bloc event sealed or final.",
-                (ModelKind::State, ModelRequirement::Sealed) => "Declare this Bloc state sealed or final.",
-                (ModelKind::Event, ModelRequirement::Immutable) => "Annotate this Bloc event with @immutable.",
-                (ModelKind::State, ModelRequirement::Immutable) => "Annotate this Bloc state with @immutable.",
-                (ModelKind::Event, ModelRequirement::Suffix) => "End Bloc event class names with 'Event'.",
-                (ModelKind::State, ModelRequirement::Suffix) => "End Bloc state class names with 'State'.",
+                (ModelKind::Event, ModelRequirement::Sealed) => "Declare this Bloc event `sealed` or `final`.",
+                (ModelKind::State, ModelRequirement::Sealed) => "Declare this Bloc state `sealed` or `final`.",
+                (ModelKind::Event, ModelRequirement::Immutable) => "Annotate this Bloc event with `@immutable`.",
+                (ModelKind::State, ModelRequirement::Immutable) => "Annotate this Bloc state with `@immutable`.",
+                (ModelKind::Event, ModelRequirement::Suffix) => "End Bloc event class names with `Event`.",
+                (ModelKind::State, ModelRequirement::Suffix) => "End Bloc state class names with `State`.",
             };
             diagnostics.push(self.ctx.diagnostic(message, class.name().span()));
         }

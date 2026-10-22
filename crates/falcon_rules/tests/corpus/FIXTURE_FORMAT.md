@@ -1,6 +1,6 @@
 # Corpus Fixture Format
 
-This document describes the standardized format for test fixtures in the falcon corpus, used by the `validate-rules` harness to verify diagnostic accuracy across all rule implementations.
+This document describes the standardized format for test fixtures in the falcon corpus, used by both the in-process `corpus_tests` integration tests and the CLI `validate-rules` harness to verify diagnostic accuracy.
 
 ## Directory Structure
 
@@ -13,6 +13,9 @@ corpus/
 │   ├── good.dart         # Dart code with no violations (no annotations)
 │   ├── bad_2.dart        # (Optional) Additional bad fixture variants
 │   ├── good_2.dart       # (Optional) Additional good fixture variants
+│   ├── nested/
+│   │   ├── bad_regression.dart  # Ordinary fixtures may be nested recursively
+│   │   └── good_regression.dart
 │   └── config.json       # (Optional) Per-rule config used when validating this dir
 ├── {another-rule-name}/
 │   ├── bad.dart
@@ -35,6 +38,17 @@ corpus/
   `support.dart`) and `cross-file/good/` (`main.dart`) as the scaffold layout;
   additional `bad*` and `good*` subproject directories are allowed. Negative
   projects remain annotation-free, and top-level Dart fixtures are not required.
+- Both harnesses retain every top-level Dart fixture. Nested ordinary fixtures
+  opt in with a `bad*`, `good*`, or `clean*` basename, or an `expect:` annotation
+  for their owning rule. Other nested files are dependency/support inputs, not
+  isolated clean tests; importing a package stub does not make it a fixture.
+- The `cross-file/` tree is excluded from ordinary-file discovery. Each
+  independent `bad*`/`good*` cross-file project is analyzed recursively as a
+  unit. If there are no such subprojects, the whole tree is one project.
+- Resolver-dependent file rules may add a `project/` tree. Both harnesses
+  analyze every Dart input there together, preserving imports, parts, and
+  library context, rather than running those files in isolation. This tree is
+  excluded from ordinary discovery only for resolver-dependent rules.
 
 ### Per-Rule Config (`config.json`)
 
@@ -88,11 +102,19 @@ To validate the diagnostic message content, include an optional message annotati
 
 ```dart
 void example() {
-  var a = 1, b = 2; /* expect: avoid-var-pattern, msg: "Avoid using 'var' for non-obvious types" */
+  var a = 1, b = 2; /* expect: avoid-var-pattern, msg: "Avoid using `var` for non-obvious types." */
 }
 ```
 
 The format is: `/* expect: {rule-name}, msg: "{expected-message-text}" */`
+
+The in-process harness requires exact message text, including punctuation.
+The CLI harness uses Jaro-Winkler similarity with `--threshold` (default `0.85`);
+use `--threshold 1` for exact CLI comparisons. Both honor `msg:` in ordinary,
+cross-file, and resolver-project fixtures. Messages end with a full stop and
+enclose code in backticks. The in-process style ratchet also checks produced
+diagnostics without `msg:` annotations; contractions, possessives, and ordinary
+quoted prose are not prohibited.
 
 ### Multiple Violations on Same Line
 
@@ -165,12 +187,13 @@ dynamic value = 42; // lint: avoid-dynamic, Expected message here
 
 **New:**
 ```dart
-dynamic value = 42; /* expect: avoid-dynamic, msg: "Expected message here" */
+dynamic value = 42; /* expect: avoid-dynamic, msg: "Avoid using `dynamic`." */
 ```
 
-## Validate-Rules Harness
+## Corpus Validation Harnesses
 
-The `cargo xtask validate-rules` harness processes corpus fixtures to verify that rule implementations produce correct diagnostics.
+The in-process `corpus_tests` integration tests and `cargo xtask validate-rules`
+process the same corpus fixtures to verify that rules produce correct diagnostics.
 
 For the bundled corpus, `validate-rules` and `docgen` pass the shared
 `tests/support/sdk` fixture SDK through subprocess `DART_SDK` for sources listed
@@ -187,15 +210,21 @@ SDK member signatures.
 
 ### How It Works
 
-1. **Parse Annotations**: Reads `/* expect: */` comments from all bad.dart files
-2. **Run Analysis**: Executes falcon on each fixture file, collecting actual diagnostics
-3. **Match Diagnostics**: For each expected violation, validates:
-   - **Rule ID**: Exact match with `expect:` rule name
-   - **Line Number**: Exact match (line of violation)
-   - **Message**: Fuzzy match against expected message (if provided) using Jaro-Winkler similarity
-   - **Severity**: Exact match (default: ERROR)
-4. **Report Results**: Outputs diagnostic accuracy per rule and overall corpus health
-5. **Validate Good Files**: Ensures `good.dart` files produce zero diagnostics for the rule
+1. **Discover Fixtures**: Both harnesses recursively discover ordinary fixtures
+   according to the naming/annotation policy above; dependency stubs are not
+   independent clean cases. Cross-file and resolver-project inputs run together.
+2. **Run Analysis**: The CLI harness executes falcon, while
+   `cargo test -p falcon_rules --test corpus_tests` runs rules in-process.
+3. **Match Diagnostics**: Each annotation consumes one diagnostic with the same
+   rule, file, and line. An optional `msg:` must match exactly in-process, or
+   meet the CLI fuzzy threshold. Constrained exact matches are claimed before
+   fallback matching so duplicate same-line annotations cannot steal them.
+4. **Report Results**: Missing expectations and unexpected diagnostics fail
+   validation; in-process message mismatches show expected and actual text.
+5. **Validate Clean Fixtures**: Fixtures without annotations must produce zero
+   diagnostics for their rule. In-process meta tests additionally enforce rule
+   registration coverage, reject orphan/placeholder fixtures, and ratchet the
+   style of produced diagnostic messages.
 
 ### Running Validation
 

@@ -75,20 +75,42 @@ Every rule is validated against fixtures under
   `/* expect: <rule-id>, msg: "..." */` to assert the message).
 - **`good.dart`**: code that must produce **zero** diagnostics for the rule (no
   annotations at all).
-- Additional `bad_2.dart` / `good_2.dart` variants are allowed; aim for ≥5
-  positive and ≥5 negative examples.
+- Additional `bad_2.dart` / `good_2.dart` variants and nested fixture directories
+  are allowed. Both harnesses retain all top-level Dart fixtures and recursively
+  include nested files with `bad*`, `good*`, or `clean*` basenames, or an `expect:`
+  annotation for their owning rule. Other nested files remain dependency/support
+  inputs, not isolated clean fixtures. Aim for ≥5 positive and ≥5 negative examples.
 - **`config.json`** (optional): a full-shaped `falcon.json` applied only when
   validating that directory; use it for threshold- or option-gated rules.
-- **`cross-file/`** subdir: cross-file rules put a small multi-file Dart
-  project here so the harness can exercise whole-module analysis.
+- **`cross-file/`** subdir: cross-file rules put independent multi-file Dart
+  projects in `bad*` and `good*` directories here. Both harnesses analyze each
+  project together, including recursively nested sources, rather than treating
+  its files as isolated fixtures.
+- **`project/`** subdir: resolver-dependent file rules put related sources here.
+  Both harnesses analyze these recursively as one project, preserving imports,
+  parts, and library context. `cross-file/` and resolver `project/` inputs are
+  excluded from ordinary isolated-file discovery.
 
 The full spec, including the annotation format and upstream-fixture migration
 notes, is in
 [`crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md`](./crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md).
 
-`cargo xtask validate-rules` runs the whole corpus; `cargo xtask validate-rules
---rule <rule-id>` runs one rule and fails if the filter matches nothing.
-Both corpus validation and documentation generation honor `CARGO_TARGET_DIR`.
+`cargo test -p falcon_rules --test corpus_tests` runs the corpus in-process
+without a pre-built CLI. It matches every annotation by rule, file, and line;
+when `msg:` is present, it also requires the exact produced message, including
+in cross-file and resolver projects. Mismatches show expected and actual text.
+Produced corpus diagnostics must end in a full stop and use balanced backticks
+for code; a style ratchet rejects quoted code and bare camelCase, multiword
+PascalCase, or qualified API spellings without banning natural apostrophes in
+contractions, possessives, or ordinary quoted prose.
+
+`cargo xtask validate-rules` runs the same fixture layouts through the CLI;
+`cargo xtask validate-rules --rule <rule-id>` runs one rule and fails if the
+filter matches nothing. Its optional message comparison uses the configured
+fuzzy threshold (`--threshold`, default `0.85`), including project fixtures.
+Run both harnesses: CLI validation also covers command-line execution, while
+in-process tests enforce exact messages and registration/coverage contracts.
+Both CLI corpus validation and documentation generation honor `CARGO_TARGET_DIR`.
 Run `cargo xtask docgen` to regenerate website data, or `cargo xtask docgen --check`
 to reject stale committed data without writing files. Generation also rejects
 empty rule descriptions and bad examples that produce no diagnostics.

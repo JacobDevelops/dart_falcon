@@ -89,7 +89,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         match self.check {
             Check::Props if !is_abstract && props.is_none() && !has_props_field => {
                 self.diags.push(self.ctx.diagnostic(
-                    "This Equatable subclass is missing a 'props' getter. Override it to define equality.",
+                    "This Equatable subclass is missing a `props` getter. Override it to define equality.",
                     name.span(),
                 ));
             }
@@ -114,7 +114,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 }
                 if missing {
                     self.diags.push(self.ctx.diagnostic(
-                        "The 'props' list omits declared instance fields. Add every field to the list.",
+                        "The `props` list omits declared instance fields. Add every field to the list.",
                         getter.name().span(),
                     ));
                 }

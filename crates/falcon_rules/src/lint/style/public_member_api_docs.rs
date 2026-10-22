@@ -453,7 +453,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     })
             })
             .map(|d| self.ctx.diagnostic(
-                "Missing documentation for a public member.",
+                "Add documentation for this public member.",
                 d.span,
             ))
             .collect();
@@ -570,8 +570,6 @@ mod tests {
 
     #[test]
     fn reports_paired_accessors_in_declaration_order() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex};
-
         let source = r"
 /// Documented class.
 class Accessors {
@@ -591,19 +589,8 @@ int get top => 0;
         let config = falcon_config::FalconConfig::default();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/accessor_order.dart");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(&path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
-        let ctx = AnalyzeContext::new(&path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let indexes = crate::lint::test_support::TestIndexes::single(&path, &parsed, false);
+        let ctx = indexes.context(&path, &config, &parsed);
         let diagnostics = PublicMemberApiDocs.analyze(PublicMemberApiDocs::NAME, program, &ctx);
         let spans: Vec<_> = diagnostics
             .iter()

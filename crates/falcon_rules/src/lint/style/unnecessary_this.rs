@@ -368,7 +368,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 || !library_contains_name(self.program, self.model.as_ref(), field.field().name()))
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "Unnecessary 'this.' qualifier.",
+                "Remove the unnecessary `this.` qualifier.",
                 field.object().span(),
             ));
         }

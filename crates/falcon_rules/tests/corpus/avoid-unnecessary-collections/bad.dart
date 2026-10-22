@@ -9,13 +9,13 @@ void append(List<int> list, Set<int> set) {
   set.containsAll({5}); /* expect: avoid-unnecessary-collections */
 }
 Future<void> futures(Future<int> value) async {
-  await Future.wait([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single Future directly instead of wrapping it in Future.wait/any." */
-  await async.Future.any([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single Future directly instead of wrapping it in Future.wait/any." */
+  await Future.wait([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single `Future` directly instead of wrapping it in `Future.wait` or `Future.any`." */
+  await async.Future.any([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single `Future` directly instead of wrapping it in `Future.wait` or `Future.any`." */
 }
 Stream<int> fromFuture(Future<int> value) => Stream.fromFutures([value]); /* expect: avoid-unnecessary-collections */
 Stream<int> fromValue(int value) => async.Stream.fromIterable([value]); /* expect: avoid-unnecessary-collections */
 Future<int> first(Future<int> value) {
-  return Future.any([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single Future directly instead of wrapping it in Future.wait/any." */
+  return Future.any([value]); /* expect: avoid-unnecessary-collections, msg: "Use the single `Future` directly instead of wrapping it in `Future.wait` or `Future.any`." */
 }
 Future<int> assigned(Future<int> value) {
   final result = Future.any([value]); /* expect: avoid-unnecessary-collections */

@@ -70,7 +70,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             for interface in implements {
                 if overrides_equals(interface, self.signatures, &self.model) {
                     self.diags.push(self.ctx.diagnostic(
-                        "Classes that override '==' should not be implemented.",
+                        "Classes that override `==` should not be implemented.",
                         interface.span(),
                     ));
                 }

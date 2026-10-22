@@ -60,7 +60,7 @@ impl Collector<'_> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Cast types are unrelated — use a compatible type instead", span));
+        self.diagnostics.push(self.ctx.diagnostic("Cast types are unrelated — use a compatible type instead.", span));
     }
 }
 

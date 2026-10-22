@@ -67,7 +67,7 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
             let mut diagnostic = Diagnostic::new(
                 "",
                 Severity::Warning,
-                format!("Dependencies not sorted alphabetically: '{name}' is out of order."),
+                format!("Dependencies not sorted alphabetically: `{name}` is out of order."),
                 path.to_string_lossy().into_owned(),
                 span,
             );

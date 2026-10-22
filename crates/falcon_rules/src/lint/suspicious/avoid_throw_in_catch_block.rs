@@ -63,7 +63,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             Stmt::Throw(throw_stmt) => {
                 if let Some(group) = self.active_group {
                     self.diags.push((group, self.ctx.diagnostic(
-                        "Avoid throwing exceptions within catch blocks",
+                        "Avoid throwing exceptions within catch blocks.",
                         throw_stmt.span(),
                     )));
                 }

@@ -56,7 +56,7 @@ struct Finder<'a, 'ctx> {
 impl Finder<'_, '_> {
     fn report(&mut self, span: Span) {
         if self.in_finally {
-            self.diagnostics.push(self.ctx.diagnostic("Use of 'throw' in a 'finally' block.", span));
+            self.diagnostics.push(self.ctx.diagnostic("Avoid using `throw` in a `finally` block.", span));
         }
     }
 }

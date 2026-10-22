@@ -46,7 +46,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if state.model.is_future_like(return_type) == Truth::No {
-            self.diagnostics.push(self.ctx.diagnostic("Avoid passing an async function where a synchronous callback is expected", function.span()));
+            self.diagnostics.push(self.ctx.diagnostic("Avoid passing an async function where a synchronous callback is expected.", function.span()));
         }
     }
 }

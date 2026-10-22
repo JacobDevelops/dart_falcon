@@ -89,7 +89,7 @@ impl Rule for DirectivesOrdering {
             {
                 report(
                     directive.span,
-                    format!("Place 'dart:' {kind} before other {kind}."),
+                    format!("Place `dart:` {kind} before other {kind}."),
                 );
             }
         }
@@ -104,7 +104,7 @@ impl Rule for DirectivesOrdering {
             {
                 report(
                     directive.span,
-                    format!("Place 'package:' {kind} before relative {kind}."),
+                    format!("Place `package:` {kind} before relative {kind}."),
                 );
             }
         }

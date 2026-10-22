@@ -88,10 +88,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let message = match finding {
             Some(Finding::UseContains) => {
-                "Use 'contains' instead of comparing the result of 'indexOf'."
+                "Use `contains` instead of comparing the result of `indexOf`."
             }
-            Some(Finding::AlwaysFalse) => "This comparison of 'indexOf' is always false.",
-            Some(Finding::AlwaysTrue) => "This comparison of 'indexOf' is always true.",
+            Some(Finding::AlwaysFalse) => "This comparison of `indexOf` is always false.",
+            Some(Finding::AlwaysTrue) => "This comparison of `indexOf` is always true.",
             None => return,
         };
         self.diags.push(self.ctx.diagnostic(message, span));

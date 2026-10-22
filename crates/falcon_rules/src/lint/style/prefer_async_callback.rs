@@ -43,7 +43,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if is_future_void_function(node) {
             let span = node.span();
             self.diags.push(self.ctx.diagnostic(
-                "Use AsyncCallback instead of Future<void> Function().",
+                "Use `AsyncCallback` instead of `Future<void> Function()`.",
                 span,
             ));
         }

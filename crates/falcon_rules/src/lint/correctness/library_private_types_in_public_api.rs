@@ -286,3 +286,27 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 fn is_public(identifier: Identifier<'_>) -> bool {
     !identifier.name().starts_with('_')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_constructor_exemption_requires_package_meta_identity() {
+        let source = r"
+import 'package:meta/meta.dart' as meta;
+const internal = 0;
+class _Private {}
+@internal
+class Fake { Fake(_Private value); }
+@meta.internal
+class Real { Real(_Private value); }
+";
+        let diagnostics = crate::lint::test_support::analyze_flutter_rule(
+            "library-private-types-in-public-api",
+            source,
+            &LibraryPrivateTypesInPublicApi,
+        );
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    }
+}

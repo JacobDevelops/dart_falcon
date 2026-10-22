@@ -72,7 +72,7 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Method invocation or property access on a 'dynamic' target.", span));
+        self.diagnostics.push(self.ctx.diagnostic("Avoid invoking methods or accessing properties on a `dynamic` target.", span));
     }
 
     /// Reports `target` when it is provably `dynamic`; explicit casts are allowed.
@@ -348,10 +348,9 @@ fn is_user_definable(op: BinaryOp) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use falcon_analyze::RuleAnalysis;
     use super::*;
-    use falcon_analyze::{
-        IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, SemanticModel, SignatureIndex,
-    };
+    use falcon_analyze::{ParsedFile};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::{path::Path, sync::Arc};
@@ -375,7 +374,7 @@ void use(dynamic value) {
             source: expect_source.into(),
             tree,
         });
-        let expect_program = expect_parsed.program();
+
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {
@@ -383,48 +382,11 @@ void use(dynamic value) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[
-                IdentitySource {
-                    path,
-                    parsed: &parsed,
-                    has_parse_errors: false,
-                },
-                IdentitySource {
-                    path: expect_path,
-                    parsed: &expect_parsed,
-                    has_parse_errors: false,
-                },
-            ],
-            &[],
-        );
-        let files = [(path, program), (expect_path, expect_program)];
-        let types = falcon_analyze::TypeIndex::from_resolved_files(
-            files.map(|(path, program)| {
-                (
-                    path,
-                    falcon_analyze::LibrarySource {
-                        program,
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                )
-            }),
-            &identities,
-        );
-        let signatures = SignatureIndex::build(
-            &[
-                (path.to_path_buf(), Arc::clone(&parsed)),
-                (expect_path.to_path_buf(), Arc::clone(&expect_parsed)),
-            ],
-            None,
-            &identities,
-            &types,
-        );
+        let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed), (expect_path, &expect_parsed)]);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+            .with_identities(&indexes.identities)
+            .with_signatures(&indexes.signatures);
         struct AccumulatorTypes(Vec<ResolvedType>);
         impl<'a> SemanticRuleVisitor<'a> for AccumulatorTypes {
             fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
@@ -464,20 +426,9 @@ void use(dynamic value) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
         let mut starts: Vec<_> = diagnostics
             .iter()
@@ -510,20 +461,9 @@ void use(dynamic value) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("avoid-dynamic-calls", Box::new(AvoidDynamicCalls));
         let diagnostics = registry.run_all(program, &ctx);
@@ -603,20 +543,9 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("avoid-dynamic-calls", Box::new(AvoidDynamicCalls));
         let diagnostics = registry.run_all(program, &ctx);
@@ -698,20 +627,9 @@ void cases(dynamic d, Function fn, Holder h) {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let mut registry = falcon_analyze::RuleRegistry::new();
         registry.register("avoid-dynamic-calls", Box::new(AvoidDynamicCalls));
         let diagnostics = registry.run_all(program, &ctx);

@@ -70,7 +70,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             self.diags.push(self.ctx.diagnostic(
                 format!(
-                    "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
+                    "Make `{method}` a top-level function and remove this unnecessary abstract class."
                 ),
                 name.span(),
             ));

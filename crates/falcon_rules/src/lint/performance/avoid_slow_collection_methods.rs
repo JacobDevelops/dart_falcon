@@ -80,11 +80,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         let message = match field.field().name() {
-            "first" => "Use 'firstWhere' instead of 'where(...).first'.",
+            "first" => "Use `firstWhere` instead of `where(...).first`.",
             "last" => {
-                "With a pure predicate, use 'lastWhere'; predicate evaluation order and count may change."
+                "With a pure predicate, use `lastWhere`; predicate evaluation order and count may change."
             }
-            "single" => "Use 'singleWhere' instead of 'where(...).single'.",
+            "single" => "Use `singleWhere` instead of `where(...).single`.",
             _ => return,
         };
         let Expr::Call(call) = field.object().unparenthesized() else {

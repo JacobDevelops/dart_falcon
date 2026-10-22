@@ -144,7 +144,7 @@ impl<'a> Collector<'a> {
                 self.signatures,
             ) && !seen.insert(value)
             {
-                self.diags.push(self.ctx.diagnostic("Duplicate case value in switch statement.", expression.span()));
+                self.diags.push(self.ctx.diagnostic("Remove or change this duplicate case value in the switch statement.", expression.span()));
             }
         }
     }
@@ -160,7 +160,7 @@ impl<'a> Collector<'a> {
                 self.signatures,
             ) {
                 if !seen.insert(value) {
-                    self.diags.push(self.ctx.diagnostic("Duplicate case value in switch statement.", span));
+                    self.diags.push(self.ctx.diagnostic("Remove or change this duplicate case value in the switch statement.", span));
                 }
             }
         }

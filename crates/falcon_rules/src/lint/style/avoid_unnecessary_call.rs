@@ -58,7 +58,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         ) || receiver.interface("dart:core", "Function") && !receiver.nullable()
             || callable_instance
         {
-            self.diagnostics.push(self.ctx.diagnostic("Invoke this function directly instead of using '.call()'.", field.field().span()));
+            self.diagnostics.push(self.ctx.diagnostic("Invoke this function directly instead of using `.call()`.", field.field().span()));
         }
     }
 

@@ -162,7 +162,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
         self.calls.finish();
         self.candidates.iter().filter(|&&expr| self.calls.contains(expr)).map(|expr| {
-            self.ctx.diagnostic("Call hooks directly in a hook widget build, custom hook, or HookBuilder/HookConsumer builder.", expr.span())
+            self.ctx.diagnostic("Call hooks directly in a hook widget `build`, custom hook, or `HookBuilder`/`HookConsumer` builder.", expr.span())
         }).collect()
     }
 }

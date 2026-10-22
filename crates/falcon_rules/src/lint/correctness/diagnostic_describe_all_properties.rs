@@ -365,7 +365,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for property in self.properties.drain(..) {
             if !self.described.0.contains(property.name()) {
                 self.diags.push(self.checker.ctx.diagnostic(
-                    "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'.",
+                    "The public property isn't described by either `debugFillProperties` or `debugDescribeChildren`.",
                     property.span(),
                 ));
             }

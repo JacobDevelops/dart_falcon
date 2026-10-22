@@ -113,7 +113,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             self.diags.extend(renamed.map(|(param, parent_name)| {
                 self.ctx.diagnostic(
                     format!(
-                        "Rename parameter '{}' to match the overridden declaration's '{}'.",
+                        "Rename parameter `{}` to match the overridden declaration's `{}`.",
                         param.name().name(), parent_name
                     ),
                     param.name().span(),

@@ -49,7 +49,7 @@ impl Rule for AvoidDuplicateExports {
                         && (other_index < index || !coverage.is_subset(visible))
                 })
             {
-                diags.push(ctx.diagnostic("This export adds no names beyond another export of the same library — remove the redundant directive", node.span()));
+                diags.push(ctx.diagnostic("This export adds no names beyond another export of the same library — remove the redundant directive.", node.span()));
             }
         }
         RulePreparation::Diagnostics(diags)

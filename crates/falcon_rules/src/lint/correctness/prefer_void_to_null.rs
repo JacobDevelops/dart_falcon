@@ -163,7 +163,7 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for NullTypes<'a> {
     fn finish(self: Box<Self>) -> Vec<falcon_diagnostics::Diagnostic> {
         self.spans.into_iter().map(|span| self.ctx.diagnostic(
-            "Unnecessary use of the type 'Null'.",
+            "Avoid using the type `Null`.",
             span,
         )).collect()
     }

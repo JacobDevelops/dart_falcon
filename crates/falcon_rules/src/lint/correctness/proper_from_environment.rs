@@ -69,7 +69,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && !is_const_ctor
             && !self.in_const
         {
-            self.diags.push(self.ctx.diagnostic("*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.", span));
+            self.diags.push(self.ctx.diagnostic("Use `*.fromEnvironment` in a `const` context; otherwise it returns the default at runtime.", span));
         }
 
         match node {

@@ -52,7 +52,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         && call.args().positional().len() == 1
                         && call.args().named().is_empty()
                     {
-                        self.diags.push(self.ctx.diagnostic("Inline the added element into the collection literal instead of using 'add'.", section.span()));
+                        self.diags.push(self.ctx.diagnostic("Inline the added element into the collection literal instead of using `add`.", section.span()));
                         break;
                     }
                 }

@@ -49,7 +49,7 @@ impl<'a> Checker<'_, 'a> {
                 .filter(|(name, _)| *name == tp.name().name())
             {
                 self.diags.push(self.ctx.diagnostic(format!(
-                    "The type parameter '{}' shadows a type parameter from the enclosing {}.",
+                    "The type parameter `{}` shadows a type parameter from the enclosing {}.",
                     tp.name().name(),
                     ancestor_kind
                 ), tp.name().span()));

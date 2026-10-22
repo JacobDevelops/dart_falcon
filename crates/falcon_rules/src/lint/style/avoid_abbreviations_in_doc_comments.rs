@@ -39,7 +39,7 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
             for &abbr in &abbreviations {
                 if let Some(index) = line.find(abbr) {
                     let start = byte_offset + index;
-                    diags.push(ctx.diagnostic(format!("Avoid abbreviation '{}' in doc comments", abbr), DiagSpan {
+                    diags.push(ctx.diagnostic(format!("Avoid abbreviation `{abbr}` in doc comments."), DiagSpan {
                         start,
                         end: start + abbr.len(),
                     }));

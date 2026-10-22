@@ -224,21 +224,14 @@ fn dependency_frontend_fail_uses_its_declaring_library() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     let app = root.join("app");
-    let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
+
     std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
     std::fs::create_dir_all(app.join("lib")).unwrap();
     std::fs::create_dir_all(root.join("test_api/lib/src/frontend")).unwrap();
-    std::fs::create_dir_all(sdk.join("core")).unwrap();
-    std::fs::write(
-        sdk.join("libraries.json"),
-        r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        sdk.join("core/core.dart"),
-        include_str!("support/sdk/lib/core/core.dart"),
-    )
-    .unwrap();
+    inference::sdk_fixture::write_sdk(
+        root,
+        &[("core", include_str!("support/sdk/lib/core/core.dart"))],
+    );
     std::fs::write(
         app.join(".dart_tool/package_config.json"),
         r#"{"configVersion":2,"flutterRoot":"../../flutter","packages":[

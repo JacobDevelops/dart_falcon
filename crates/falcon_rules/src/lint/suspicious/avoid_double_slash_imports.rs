@@ -22,7 +22,7 @@ impl Rule for AvoidDoubleSlashImports {
                         rest.find('/').map_or("", |start| &rest[start..])
                     });
                     path.contains("//").then(|| {
-                        ctx.diagnostic("Avoid repeated '/' separators in directive URIs (import, export or part).", uri.span())
+                        ctx.diagnostic("Avoid repeated `/` separators in directive URIs (import, export or part).", uri.span())
                     })
                 })
                 .collect(),

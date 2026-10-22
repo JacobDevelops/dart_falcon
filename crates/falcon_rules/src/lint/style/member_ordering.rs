@@ -168,11 +168,11 @@ fn widget_rank(member: ClassMember<'_>, seq: &[WidgetCategory]) -> Option<usize>
 use crate::member_order::is_override;
 
 fn order_message() -> &'static str {
-    "Class member is out of the configured order"
+    "Class member is out of the configured order."
 }
 
 fn widgets_message() -> &'static str {
-    "State lifecycle method is out of the configured widgets_order"
+    "`State` lifecycle method is out of the configured `widgets_order`."
 }
 
 // ── Default ordering (no `order` option configured) ──────────────────────────
@@ -217,7 +217,7 @@ fn check_default(
         }
         if cat < max_seen {
             let span = member.span();
-            diags.push(ctx.diagnostic("Class members are out of order: expected static const → static fields → instance fields → constructors → static methods → instance methods", span));
+            diags.push(ctx.diagnostic("Order class members as follows: static constants, static fields, instance fields, constructors, static methods, then instance methods.", span));
         } else {
             max_seen = cat;
         }

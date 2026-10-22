@@ -87,10 +87,10 @@ fn check_members<'a>(
     let eq = equals_span(members.clone());
     let hash = hashcode_span(members);
     let (span, message) = match (eq, hash) {
-        (Some(eq), None) => (eq, "Override 'hashCode' if you override the '==' operator."),
+        (Some(eq), None) => (eq, "Override `hashCode` if you override the `==` operator."),
         (None, Some(hash)) => (
             hash,
-            "Override the '==' operator if you override 'hashCode'.",
+            "Override the `==` operator if you override `hashCode`.",
         ),
         _ => return,
     };

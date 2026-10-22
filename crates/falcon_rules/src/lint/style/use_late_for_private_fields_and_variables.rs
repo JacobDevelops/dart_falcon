@@ -187,7 +187,7 @@ impl<'a> SemanticRuleVisitor<'a> for LateCandidates<'a> {
                         .contains(&NullableAccess::Resolved(candidate.name, candidate.owner))
             })
             .map(|candidate| {
-                self.ctx.diagnostic("Use 'late' for private members with a non-nullable type.", candidate.span)
+                self.ctx.diagnostic("Use `late` for private members with a non-nullable type.", candidate.span)
             })
             .collect()
     }

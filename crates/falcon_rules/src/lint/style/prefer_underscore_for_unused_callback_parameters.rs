@@ -45,7 +45,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                         || used.contains(&param.name().span().start))
                 }) {
                     self.diagnostics.push(self.ctx.diagnostic(
-                        "Unused callback parameter should be named '_'.",
+                        "Unused callback parameter should be named `_`.",
                         function.span(),
                     ));
                 }

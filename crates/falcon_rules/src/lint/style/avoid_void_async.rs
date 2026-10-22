@@ -52,7 +52,7 @@ impl Collector<'_> {
     ) {
         if async_marker == AsyncMarker::Async && matches!(return_type, Some(cst::DartType::Void(_)))
         {
-            self.diagnostics.push(self.ctx.diagnostic("An 'async' function should have a 'Future' return type when it doesn't return a value.", name));
+            self.diagnostics.push(self.ctx.diagnostic("An `async` function should have a `Future` return type when it doesn't return a value.", name));
         }
     }
 }

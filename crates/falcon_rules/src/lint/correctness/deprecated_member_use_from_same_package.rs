@@ -943,7 +943,7 @@ fn push_deprecation(
     {
         return;
     }
-    let base = format!("'{name}' is deprecated and shouldn't be used.");
+    let base = format!("`{name}` is deprecated and shouldn't be used.");
     let message = if detail.is_empty() {
         base
     } else {
@@ -1878,10 +1878,9 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
 
 #[cfg(test)]
 mod tests {
+    use falcon_analyze::RuleAnalysis;
     use super::*;
-    use falcon_analyze::{
-        IdentityIndex, IdentitySource, ParsedFile, RuleAnalysis, SignatureIndex, TypeIndex,
-    };
+    use falcon_analyze::{ParsedFile};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
@@ -1895,32 +1894,9 @@ mod tests {
             tree,
         });
         let program = parsed.program();
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path,
-                falcon_analyze::LibrarySource {
-                    program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, true);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         DeprecatedMemberUseFromSamePackage.analyze(DeprecatedMemberUseFromSamePackage::NAME, program, &ctx)
     }
 
@@ -2069,13 +2045,13 @@ void use(C c) {
         let mut messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
         messages.sort_unstable();
         let mut expected = [
-            "'readOnly' is deprecated and shouldn't be used. read.",
-            "'writeOnly' is deprecated and shouldn't be used. write.",
-            "'field' is deprecated and shouldn't be used. field.",
-            "'field' is deprecated and shouldn't be used. field.",
-            "'shared' is deprecated and shouldn't be used. static read.",
-            "'writeShared' is deprecated and shouldn't be used. static write.",
-            "'value' is deprecated and shouldn't be used. parameter.",
+            "`readOnly` is deprecated and shouldn't be used. read.",
+            "`writeOnly` is deprecated and shouldn't be used. write.",
+            "`field` is deprecated and shouldn't be used. field.",
+            "`field` is deprecated and shouldn't be used. field.",
+            "`shared` is deprecated and shouldn't be used. static read.",
+            "`writeShared` is deprecated and shouldn't be used. static write.",
+            "`value` is deprecated and shouldn't be used. parameter.",
         ];
         expected.sort_unstable();
         assert_eq!(messages, expected);
@@ -2102,11 +2078,11 @@ void use(C c) {
         let mut messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
         messages.sort_unstable();
         let mut expected = [
-            "'value' is deprecated and shouldn't be used. extension read.",
-            "'value' is deprecated and shouldn't be used. extension read.",
-            "'value' is deprecated and shouldn't be used. extension write.",
-            "'value' is deprecated and shouldn't be used. extension write.",
-            "'helper' is deprecated and shouldn't be used. extension static.",
+            "`value` is deprecated and shouldn't be used. extension read.",
+            "`value` is deprecated and shouldn't be used. extension read.",
+            "`value` is deprecated and shouldn't be used. extension write.",
+            "`value` is deprecated and shouldn't be used. extension write.",
+            "`helper` is deprecated and shouldn't be used. extension static.",
         ];
         expected.sort_unstable();
         assert_eq!(messages, expected);
@@ -2126,7 +2102,7 @@ void writeTopLevel() { x = 1; }
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
             diagnostics[0].message,
-            "'x' is deprecated and shouldn't be used. top-level."
+            "`x` is deprecated and shouldn't be used. top-level."
         );
         let start = source.rfind("x = 1").unwrap();
         assert_eq!(
@@ -2148,29 +2124,29 @@ void positiveControl(C c) { c + c; }
         let diagnostics = analyze(source, fixture_path());
         assert_eq!(diagnostics.len(), 2);
         assert!(diagnostics.iter().all(|diagnostic| {
-            diagnostic.message == "'+' is deprecated and shouldn't be used. operator."
+            diagnostic.message == "`+` is deprecated and shouldn't be used. operator."
         }));
     }
 
     #[test]
     fn normalizes_messages() {
         for (annotation, expected) in [
-            ("@deprecated", "'old' is deprecated and shouldn't be used."),
+            ("@deprecated", "`old` is deprecated and shouldn't be used."),
             (
                 "@Deprecated('  Use fresh  ')",
-                "'old' is deprecated and shouldn't be used. Use fresh.",
+                "`old` is deprecated and shouldn't be used. Use fresh.",
             ),
             (
                 "@Deprecated('Use fresh!')",
-                "'old' is deprecated and shouldn't be used. Use fresh!",
+                "`old` is deprecated and shouldn't be used. Use fresh!",
             ),
             (
                 "@Deprecated(' . ')",
-                "'old' is deprecated and shouldn't be used.",
+                "`old` is deprecated and shouldn't be used.",
             ),
             (
                 "@Deprecated('  ')",
-                "'old' is deprecated and shouldn't be used.",
+                "`old` is deprecated and shouldn't be used.",
             ),
         ] {
             let source = format!("{annotation}\nvoid old() {{}}\nvoid use() {{ old(); }}");
@@ -2215,7 +2191,7 @@ void use(Value value) {
         assert!(
             diagnostics
                 .iter()
-                .all(|diagnostic| !diagnostic.message.starts_with("'argument'")),
+                .all(|diagnostic| !diagnostic.message.starts_with("`argument`")),
             "{diagnostics:?}"
         );
     }
@@ -2291,7 +2267,7 @@ void use(Value value) { -value; }
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
             diagnostics[0].message,
-            "'unary-' is deprecated and shouldn't be used."
+            "`unary-` is deprecated and shouldn't be used."
         );
     }
 
@@ -2351,13 +2327,13 @@ void use(Collection? collection, Key key, Value value) {{
             assert!(
                 diagnostics
                     .iter()
-                    .any(|diagnostic| diagnostic.message.starts_with("'[]'")),
+                    .any(|diagnostic| diagnostic.message.starts_with("`[]`")),
                 "{diagnostics:?}"
             );
             assert!(
                 diagnostics
                     .iter()
-                    .any(|diagnostic| diagnostic.message.starts_with("'[]='")),
+                    .any(|diagnostic| diagnostic.message.starts_with("`[]=`")),
                 "{diagnostics:?}"
             );
         }
@@ -2398,7 +2374,7 @@ void use(Container? container, Key key) {
         assert!(
             diagnostics
                 .iter()
-                .all(|diagnostic| diagnostic.message.starts_with("'old'")),
+                .all(|diagnostic| diagnostic.message.starts_with("`old`")),
             "{diagnostics:?}"
         );
     }
@@ -2444,7 +2420,7 @@ void use(Holder? holder, Collection? collection,
         assert!(
             diagnostics
                 .iter()
-                .all(|diagnostic| diagnostic.message.starts_with("'+'")),
+                .all(|diagnostic| diagnostic.message.starts_with("`+`")),
             "{diagnostics:?}"
         );
     }

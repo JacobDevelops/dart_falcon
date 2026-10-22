@@ -81,7 +81,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             })
         {
             self.diags.push(self.ctx.diagnostic(
-                format!("Accessor '{}' uses '{field}' instead of the field matching its name.", name.name()),
+                format!("Accessor `{}` uses `{field}` instead of the field matching its name.", name.name()),
                 name.span(),
             ));
         }

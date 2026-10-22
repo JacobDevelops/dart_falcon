@@ -83,7 +83,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 || identities.is_package_declaration(identity, "equatable", "EquatableMixin")
         }) == Truth::No {
             self.diagnostics.push(self.ctx.diagnostic(
-                "This class matches the configured pattern and should extend 'Equatable' or mix in 'EquatableMixin'.",
+                "This class matches the configured pattern and should extend `Equatable` or mix in `EquatableMixin`.",
                 name.span(),
             ));
         }

@@ -377,7 +377,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     | None => continue,
                 }
             };
-            self.diags.push(self.ctx.diagnostic("Unnecessary type annotation on a function expression parameter.", span));
+            self.diags.push(self.ctx.diagnostic("Remove the unnecessary type annotation from this function expression parameter.", span));
         }
     }
 }

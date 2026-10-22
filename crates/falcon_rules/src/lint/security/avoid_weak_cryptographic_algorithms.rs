@@ -1,14 +1,11 @@
 //! Flags references to MD5, SHA-1, DES, triple DES, and RC4 package APIs.
 //!
 //! Weak hashes and ciphers cannot reliably protect sensitive data; use a modern
-//! algorithm instead. Matches `md5` and `sha1` from `crypto`, `DES` and `DES3`
-//! from `dart_des`, and `RC4` from `simple_rc4`. Resolved declaration provenance
-//! is required, including prefixed imports and re-exports. Local bindings,
-//! lexical members, type parameters, ambiguous imports, and unrelated APIs
-//! with the same spelling are not reported. Extension members shadow imports,
-//! but members of an extension's on-type do not. References include hash arguments,
-//! cipher constructor tear-offs, and implicit or explicit construction; type
-//! annotations alone are not checked.
+//! algorithm instead. The rule recognizes `md5` and `sha1` from `crypto`, `DES`
+//! and `DES3` from `dart_des`, and `RC4` from `simple_rc4`, including through
+//! prefixed imports and re-exports. Unrelated APIs with the same spelling are
+//! not reported. Algorithm uses and constructor references are checked, but
+//! type annotations alone are not.
 
 use std::collections::HashSet;
 

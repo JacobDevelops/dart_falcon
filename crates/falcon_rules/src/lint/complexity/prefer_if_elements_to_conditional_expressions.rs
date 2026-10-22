@@ -95,7 +95,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 if matches!(expr.unparenthesized(), Expr::Conditional(_)) =>
             {
                 diagnostics.push(self.ctx.diagnostic(
-                    "Use an 'if' element to conditionally add elements.",
+                    "Use an `if` element to conditionally add elements.",
                     expr.unparenthesized().span(),
                 ));
             }

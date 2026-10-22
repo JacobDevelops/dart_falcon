@@ -101,7 +101,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             .filter(|(name, _)| !self.written.names.contains(*name))
             .map(|(name, span)| {
                 self.ctx.diagnostic(
-                    format!("The private field '{name}' could be 'final'."),
+                    format!("The private field `{name}` could be `final`."),
                     span,
                 )
             })

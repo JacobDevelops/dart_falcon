@@ -68,7 +68,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ResolvedType::Interface { ref identity, .. }
                 if *identity == DeclarationIdentity::sdk("dart:core", "Type"))
         {
-            self.diags.push(self.ctx.diagnostic("Use a type pattern or wrap the type literal in 'const (...)'.", span));
+            self.diags.push(self.ctx.diagnostic("Use a type pattern or wrap the type literal in `const (...)`.", span));
         }
     }
 }
@@ -103,10 +103,9 @@ fn is_type_subtype(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use falcon_analyze::RuleAnalysis;
     use super::*;
-    use falcon_analyze::{
-        IdentityIndex, IdentitySource, RuleAnalysis, SemanticModel, SignatureIndex,
-    };
+
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;
@@ -122,20 +121,9 @@ mod tests {
         });
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path,
-                parsed: &parsed,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(path, &parsed, &identities, None);
-        let signatures = SignatureIndex::from_program(program, &model);
+        let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &config, &parsed)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
+        let ctx = indexes.context(path, &config, &parsed);
         let diagnostics = TypeLiteralInConstantPattern.analyze(TypeLiteralInConstantPattern::NAME, program, &ctx);
         let start = source.find("A.ty").unwrap();
         let nullable_start = source.find("int?").unwrap();

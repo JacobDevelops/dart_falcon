@@ -44,7 +44,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && !expression.is_const()
         {
             self.diags.push(self.ctx.diagnostic(
-                "Unnecessary `new` keyword; it is optional and can be removed.",
+                "Remove the optional `new` keyword.",
                 expression.span(),
             ));
         }

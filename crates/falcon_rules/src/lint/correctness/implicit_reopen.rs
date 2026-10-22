@@ -21,9 +21,6 @@
 //! the modifier its own supertypes induce (a sealed subclass of an `interface`
 //! class is an interface).
 //!
-//! ANALYZER-BUG: the analyzer can miss reopening when a sealed class is declared
-//! before its sealed superclass. Falcon computes the induced restriction
-//! independently of that declaration order.
 //!
 //! Adopted from the official `implicit_reopen` lint.
 
@@ -140,7 +137,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             };
             self.diags.push(ctx.diagnostic(
                 format!(
-                    "The class '{}' reopens '{}' because it is not marked '{reason}'.",
+                    "The class `{}` reopens `{}` because it is not marked `{reason}`.",
                     name.name(), super_name.name()
                 ),
                 name.span(),

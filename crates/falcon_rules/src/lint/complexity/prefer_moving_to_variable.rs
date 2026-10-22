@@ -283,7 +283,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     let occurrence = counts.entry(source).and_modify(|count| *count += 1).or_insert(1);
                     if *occurrence >= self.threshold {
                         diagnostics.push(self.ctx.diagnostic(
-                            "Duplicate expression — extract to a shared variable",
+                            "Extract this duplicate expression to a shared variable.",
                             *span,
                         ));
                     }

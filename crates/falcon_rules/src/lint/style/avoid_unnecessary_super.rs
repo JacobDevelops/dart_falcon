@@ -50,7 +50,7 @@ impl Rule for AvoidUnnecessarySuper {
                         && call.args().positional().is_empty()
                         && call.args().named().is_empty()
                     {
-                        diagnostics.push(ctx.diagnostic("This empty super() call is implicit; remove the explicit initializer.", call.span()));
+                        diagnostics.push(ctx.diagnostic("This empty `super()` call is implicit; remove the explicit initializer.", call.span()));
                     }
                 }
             }
@@ -169,7 +169,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     .signatures
                     .resolved_writable_member_owner(receiver, name, &state.model)
         {
-            self.diagnostics.push(self.ctx.diagnostic("This inherited member does not need an explicit 'super' prefix.", field.span()));
+            self.diagnostics.push(self.ctx.diagnostic("This inherited member does not need an explicit `super` prefix.", field.span()));
         }
     }
 

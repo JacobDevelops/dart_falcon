@@ -147,10 +147,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         let message = match self.target {
             Target::WidgetRead => {
-                "Check that the widget is mounted before calling ref.read after an async gap."
+                "Check that the widget is mounted before calling `ref.read` after an asynchronous gap."
             }
             Target::Notifier => {
-                "Check ref.mounted before using notifier ref or state after an async gap."
+                "Check `ref.mounted` before using notifier `ref` or `state` after an async gap."
             }
         };
         async_gap_spans(self.program, self.facts)

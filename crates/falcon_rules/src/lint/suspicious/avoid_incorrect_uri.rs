@@ -107,12 +107,12 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     (
                         "path",
                         "pathSegments",
-                        "Do not provide both path and pathSegments to Uri.",
+                        "Do not provide both `path` and `pathSegments` to `Uri`.",
                     ),
                     (
                         "query",
                         "queryParameters",
-                        "Do not provide both query and queryParameters to Uri.",
+                        "Do not provide both `query` and `queryParameters` to `Uri`.",
                     ),
                 ] {
                     let first = args.named().find(|arg| arg.name().name() == first);

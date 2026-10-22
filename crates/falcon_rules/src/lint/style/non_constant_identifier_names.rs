@@ -36,7 +36,7 @@ impl Rule for NonConstantIdentifierNames {
     }
 }
 
-const MESSAGE: &str = "Name non-constant identifiers using lowerCamelCase.";
+const MESSAGE: &str = "Name non-constant identifiers using `lowerCamelCase`.";
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,

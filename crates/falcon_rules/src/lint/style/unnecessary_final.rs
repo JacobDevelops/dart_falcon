@@ -32,7 +32,7 @@ use falcon_syntax::Feature;
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
-const MESSAGE: &str = "Local variables should not be marked as 'final'.";
+const MESSAGE: &str = "Local variables should not be marked as `final`.";
 
 #[derive(Default)]
 pub struct UnnecessaryFinal;

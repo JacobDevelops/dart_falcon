@@ -202,7 +202,7 @@ impl<'a> BuildCollector<'a> {
             && matches!(state.infer(expression), ResolvedType::Function { .. })
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "Use 'ref.read' rather than 'ref.watch' when invoking notifier methods.",
+                "Use `ref.read` rather than `ref.watch` when invoking notifier methods.",
                 member.field().span(),
             ));
         }
@@ -271,11 +271,11 @@ impl<'a> SemanticRuleVisitor<'a> for BuildCollector<'a> {
         let inside_build = self.inside_build(expression, state);
         let (message, report) = match self.rule {
             BuildRule::WatchOutside => (
-                "Use 'ref.read' outside build instead of subscribing with 'ref.watch'.",
+                "Use `ref.read` outside build instead of subscribing with `ref.watch`.",
                 !inside_build && is_type(self.ctx, state, &state.infer(member.object()), &["WidgetRef"])
             ),
             BuildRule::ReadInside => (
-                "Use 'ref.watch' in build so provider changes rebuild the widget.",
+                "Use `ref.watch` in build so provider changes rebuild the widget.",
                 inside_build
                     && is_type(self.ctx, state, &state.infer(member.object()), &["Ref", "WidgetRef"])
                     && !call.args().positional().any(|arg| matches!(arg.unparenthesized(), Expr::Field(field) if field.field().name() == "notifier"))
