@@ -13,7 +13,9 @@
 use std::collections::HashMap;
 
 use falcon_analyze::MemberKind;
-use falcon_analyze::{AnalyzeContext, Feature, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, Feature, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -107,7 +109,7 @@ impl<'a> Collector<'a> {
         let parameter_type = state.environment.declared_type(parameter.name().name());
         if state
             .signatures
-            .subtype(&parameter_type, &field_type, &state.model)
+            .relation(&parameter_type, TypeRelation::SubtypeOf(&field_type), &state.model)
             != Truth::Yes
         {
             return;

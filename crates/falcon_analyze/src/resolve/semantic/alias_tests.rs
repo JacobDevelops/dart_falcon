@@ -37,31 +37,59 @@ fn exact_function_shapes_support_alpha_binders_and_named_variance() {
             let signatures = SignatureIndex::default();
             let resolve = |name| model.resolve_type_name(&[name]).unwrap();
             assert_eq!(
-                signatures.subtype(&resolve("F"), &resolve("G"), model),
+                signatures.relation(
+                    &resolve("F"),
+                    crate::TypeRelation::SubtypeOf(&resolve("G")),
+                    model
+                ),
                 Truth::Yes
             );
             assert_eq!(
-                signatures.subtype(&resolve("G"), &resolve("F"), model),
+                signatures.relation(
+                    &resolve("G"),
+                    crate::TypeRelation::SubtypeOf(&resolve("F")),
+                    model
+                ),
                 Truth::Yes
             );
             assert_eq!(
-                signatures.subtype(&resolve("F"), &resolve("H"), model),
+                signatures.relation(
+                    &resolve("F"),
+                    crate::TypeRelation::SubtypeOf(&resolve("H")),
+                    model
+                ),
                 Truth::No
             );
             assert_eq!(
-                signatures.subtype(&resolve("F"), &resolve("Two"), model),
+                signatures.relation(
+                    &resolve("F"),
+                    crate::TypeRelation::SubtypeOf(&resolve("Two")),
+                    model
+                ),
                 Truth::No
             );
             assert_eq!(
-                signatures.subtype(&resolve("Optional"), &resolve("Plain"), model),
+                signatures.relation(
+                    &resolve("Optional"),
+                    crate::TypeRelation::SubtypeOf(&resolve("Plain")),
+                    model
+                ),
                 Truth::Yes
             );
             assert_eq!(
-                signatures.subtype(&resolve("Required"), &resolve("Plain"), model),
+                signatures.relation(
+                    &resolve("Required"),
+                    crate::TypeRelation::SubtypeOf(&resolve("Plain")),
+                    model
+                ),
                 Truth::No
             );
             assert_eq!(
-                signatures.subtype(&resolve("Plain"), &resolve("Optional"), model),
+                signatures.relation(
+                    &resolve("Plain"),
+                    crate::TypeRelation::SubtypeOf(&resolve("Optional")),
+                    model
+                ),
                 Truth::No
             );
             let known = resolve("Plain");
@@ -81,7 +109,7 @@ fn exact_function_shapes_support_alpha_binders_and_named_variance() {
                 unknown.structural_hash(&mut FxHashMap::default())
             );
             assert_eq!(
-                signatures.subtype(&unknown, &unknown, model),
+                signatures.relation(&unknown, crate::TypeRelation::SubtypeOf(&unknown), model),
                 Truth::Unknown
             );
             let mut unknown_slot = resolve("Plain");
@@ -90,7 +118,11 @@ fn exact_function_shapes_support_alpha_binders_and_named_variance() {
             };
             *return_type = Arc::new(ResolvedType::Unknown);
             assert_eq!(
-                signatures.subtype(&unknown_slot, &unknown_slot, model),
+                signatures.relation(
+                    &unknown_slot,
+                    crate::TypeRelation::SubtypeOf(&unknown_slot),
+                    model
+                ),
                 Truth::Unknown
             );
         },

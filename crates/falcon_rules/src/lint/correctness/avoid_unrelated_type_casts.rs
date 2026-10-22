@@ -6,7 +6,7 @@
 //! of the incompatible type is read.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -52,7 +52,7 @@ impl Collector<'_> {
         }
         state
             .signatures
-            .types_are_unrelated(source, target, &state.model)
+            .relation(source, TypeRelation::RuntimeUnrelatedTo(target), &state.model)
             == Truth::Yes
     }
 

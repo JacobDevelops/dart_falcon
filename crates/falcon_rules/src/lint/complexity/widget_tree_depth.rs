@@ -12,7 +12,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{Expr, Program, Span};
@@ -103,11 +103,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         index.is_package_declaration(&identity, "flutter", "SizedBox")
                     });
                     let widget = !ignored
-                        && state.signatures.is_subtype_of(
-                            &ResolvedType::interface_identity(identity),
-                            &DeclarationIdentity::flutter("Widget"),
-                            &state.model,
-                        ) == Truth::Yes;
+                        && state.signatures.relation(&ResolvedType::interface_identity(identity), TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Widget")), &state.model) == Truth::Yes;
                     (widget, ignored)
                 },
             )

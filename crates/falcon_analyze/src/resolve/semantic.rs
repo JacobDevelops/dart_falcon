@@ -31,7 +31,9 @@ pub use default_syntax::DefaultSyntaxKey;
 mod inherited;
 mod queries;
 pub use queries::ResolvedInvocation;
+mod relation;
 mod unrelated;
+pub use relation::TypeRelation;
 
 #[cfg(test)]
 mod alias_tests;
@@ -82,6 +84,8 @@ pub use index::SignatureIndex;
 pub(super) use join::operator_result;
 use join::*;
 
+#[cfg(test)]
+mod relation_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

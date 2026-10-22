@@ -9,7 +9,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -80,7 +80,7 @@ fn is_type_subtype(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
             *identity == type_identity
                 || state
                     .signatures
-                    .is_subtype_of(ty, &type_identity, &state.model)
+                    .relation(ty, TypeRelation::SubtypeOfDeclaration(&type_identity), &state.model)
                     == Truth::Yes
         }
         ResolvedType::TypeParameter {

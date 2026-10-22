@@ -3,7 +3,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -54,7 +54,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(identity) = model.resolve_name(class.name().name()) else {
             return StructuralTraversal::SkipChildren;
         };
-        if signatures.is_subtype_of(&ResolvedType::interface_identity(identity), state, model)
+        if signatures.relation(&ResolvedType::interface_identity(identity), TypeRelation::SubtypeOfDeclaration(state), model)
             != Truth::Yes
         {
             return StructuralTraversal::SkipChildren;

@@ -18,7 +18,7 @@
 //!
 //! Adopted from the official `unnecessary_await_in_return` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -272,7 +272,7 @@ fn assignable(actual: &ResolvedType, expected: &ResolvedType, state: &SemanticSt
             (expected.nullable() || !actual.nullable())
                 && state
                     .signatures
-                    .is_subtype_of(actual, identity, &state.model)
+                    .relation(actual, TypeRelation::SubtypeOfDeclaration(identity), &state.model)
                     == Truth::Yes
         }
         _ => false,

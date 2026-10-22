@@ -2187,19 +2187,19 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         }
                     };
                     if matches!(element, ResolvedType::Unknown)
-                        || self
-                            .state
-                            .signatures
-                            .subtype(&ty, &element, &self.state.model)
-                            == crate::Truth::Yes
+                        || self.state.signatures.relation(
+                            &ty,
+                            crate::TypeRelation::SubtypeOf(&element),
+                            &self.state.model,
+                        ) == crate::Truth::Yes
                     {
                         element = ty;
                     } else if !matches!(ty, ResolvedType::Unknown)
-                        && self
-                            .state
-                            .signatures
-                            .subtype(&element, &ty, &self.state.model)
-                            != crate::Truth::Yes
+                        && self.state.signatures.relation(
+                            &element,
+                            crate::TypeRelation::SubtypeOf(&ty),
+                            &self.state.model,
+                        ) != crate::Truth::Yes
                     {
                         element = ResolvedType::Never;
                     }

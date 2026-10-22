@@ -2,13 +2,13 @@
 //! operand types are unrelated.
 //!
 //! Adopted from the official `unrelated_type_equality_checks` lint. Relatedness
-//! is the linter's `typesAreUnrelated` ([`SignatureIndex::types_are_unrelated`]),
+//! is the linter's `typesAreUnrelated` ([`TypeRelation::RuntimeUnrelatedTo`]),
 //! with one exemption: a `package:fixnum` `Int32`/`Int64` on the left of an `int`
 //! is comparable. Comparisons with a `null` literal operand are skipped.
 //!
-//! [`SignatureIndex::types_are_unrelated`]: falcon_analyze::SignatureIndex::types_are_unrelated
+//! [`TypeRelation::RuntimeUnrelatedTo`]: falcon_analyze::TypeRelation::RuntimeUnrelatedTo
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -42,7 +42,7 @@ impl Collector<'_> {
         if !fixnum_int
             && state
                 .signatures
-                .types_are_unrelated(left, right, &state.model)
+                .relation(left, TypeRelation::RuntimeUnrelatedTo(right), &state.model)
                 == Truth::Yes
         {
             self.diagnostics.push(self.ctx.diagnostic("Equality checks should compare related types.", span));

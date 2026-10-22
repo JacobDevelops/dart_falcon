@@ -6,7 +6,7 @@
 //! left alone, matching the SDK lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -94,11 +94,7 @@ fn is_iterable<'a>(receiver: Expr<'a>, state: &SemanticState<'a>) -> bool {
         erased = representation;
         ty = &erased;
     }
-    state.signatures.is_subtype_of(
-        ty,
-        &DeclarationIdentity::sdk("dart:core", "Iterable"),
-        &state.model,
-    ) == Truth::Yes
+    state.signatures.relation(ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::sdk("dart:core", "Iterable")), &state.model) == Truth::Yes
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {

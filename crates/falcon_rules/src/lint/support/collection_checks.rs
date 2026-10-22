@@ -1,4 +1,6 @@
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Truth, TypeRelation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -17,9 +19,9 @@ pub(crate) fn lacks_collection_member(
         .resolved_member_facts(&ty, member, &state.model)
         .is_some()
         || targets.iter().any(|name| {
-            state.signatures.is_subtype_of(
+            state.signatures.relation(
                 &ty,
-                &DeclarationIdentity::sdk("dart:core", name),
+                TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::sdk("dart:core", name)),
                 &state.model,
             ) == Truth::Yes
         })
@@ -32,8 +34,11 @@ pub(crate) fn lacks_collection_member(
     // The identity index proves positive facts; TypeIndex still supplies negative proofs.
     types.member_lookup_identity(&identity, member) == MemberResult::Absent
         && targets.iter().all(|target| {
-            types.is_subtype_identity(&identity, &DeclarationIdentity::sdk("dart:core", target))
-                == Truth::No
+            types.supertype_matches(
+                &identity,
+                |ancestor| ancestor.is_sdk("dart:core", target),
+                |name| name == *target,
+            ) == Truth::No
         })
 }
 

@@ -85,7 +85,7 @@ impl SignatureIndex {
     /// The linter's `typesAreUnrelated`: `Yes` when the types are proven
     /// unrelated, `No` when they might be related, `Unknown` when falcon cannot
     /// tell.
-    pub fn types_are_unrelated(
+    pub(super) fn runtime_unrelated(
         &self,
         left: &ResolvedType,
         right: &ResolvedType,
@@ -143,8 +143,8 @@ impl SignatureIndex {
         if left == right {
             return Truth::No;
         }
-        let forward = self.subtype(&left, &right, model);
-        let backward = self.subtype(&right, &left, model);
+        let forward = self.resolved_subtype(&left, &right, model);
+        let backward = self.resolved_subtype(&right, &left, model);
         if forward == Truth::Yes || backward == Truth::Yes {
             return Truth::No;
         }
@@ -225,10 +225,10 @@ impl SignatureIndex {
             // A project TypeIndex may be incomplete because of imports even
             // when this index has complete SDK edges. Use those identity
             // edges when the name-based fallback cannot prove either result.
-            return match self.unrelated(left, right, model) {
+            return match self.instantiated_unrelated(left, right, model) {
                 Truth::Unknown => match (
-                    self.subtype(left, right, model),
-                    self.subtype(right, left, model),
+                    self.resolved_subtype(left, right, model),
+                    self.resolved_subtype(right, left, model),
                 ) {
                     (Truth::No, Truth::No) => Truth::Yes,
                     (Truth::Yes, _) | (_, Truth::Yes) => Truth::No,
@@ -320,7 +320,7 @@ impl SignatureIndex {
     }
 
     /// Three-valued `sub <: sup` over erased types.
-    pub fn subtype(
+    pub(super) fn resolved_subtype(
         &self,
         sub: &ResolvedType,
         sup: &ResolvedType,
@@ -1021,7 +1021,7 @@ mod tests {
             (&string, &future_or_int, Truth::No),
         ] {
             assert_eq!(
-                signatures.subtype(sub, sup, &model),
+                signatures.relation(sub, super::super::TypeRelation::SubtypeOf(sup), &model),
                 expected,
                 "{sub:?} <: {sup:?}"
             );

@@ -1,7 +1,9 @@
 //! Resolved argument checks shared by the Bloc dependency rules.
 
 use crate::lint::bloc::BlocTypes;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth, TypeRelation,
+};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -144,9 +146,11 @@ impl<'a> Collector<'a> {
         let ty = state.infer(argument);
         match self.passing {
             Passing::ContextToBloc => {
-                state.signatures.is_subtype_of(
+                state.signatures.relation(
                     &ty,
-                    &DeclarationIdentity::flutter("BuildContext"),
+                    TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter(
+                        "BuildContext",
+                    )),
                     &state.model,
                 ) == Truth::Yes
             }
@@ -160,9 +164,9 @@ impl<'a> Collector<'a> {
     fn matches_target(&mut self, target: &ResolvedType, state: &SemanticState<'a>) -> bool {
         match self.passing {
             Passing::BlocToWidget => {
-                state.signatures.is_subtype_of(
+                state.signatures.relation(
                     target,
-                    &DeclarationIdentity::flutter("Widget"),
+                    TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Widget")),
                     &state.model,
                 ) == Truth::Yes
             }
@@ -178,8 +182,11 @@ impl<'a> Collector<'a> {
                         .get_or_insert_with(|| Self::event_types(state))
                         .iter()
                         .any(|event| {
-                            state.signatures.is_subtype_of(target, event, &state.model)
-                                == Truth::Yes
+                            state.signatures.relation(
+                                target,
+                                TypeRelation::SubtypeOfDeclaration(event),
+                                &state.model,
+                            ) == Truth::Yes
                         })
             }
         }

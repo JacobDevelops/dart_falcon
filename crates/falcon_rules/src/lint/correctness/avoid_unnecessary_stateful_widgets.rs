@@ -7,7 +7,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -54,7 +54,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let TopLevelDecl::Class(class) = node else { return StructuralTraversal::SkipChildren; };
         let Some(identity) = self.model.resolve_name(class.name().name()) else { return StructuralTraversal::SkipChildren; };
         let ty = ResolvedType::interface_identity(identity.clone());
-        if self.signatures.is_subtype_of(&ty, &DeclarationIdentity::flutter("StatefulWidget"), &self.model) == Truth::Yes {
+        if self.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("StatefulWidget")), &self.model) == Truth::Yes {
             self.widgets.push((identity, class.name().span()));
             return StructuralTraversal::SkipChildren;
         }

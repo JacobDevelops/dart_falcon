@@ -24,7 +24,7 @@ pub use semantic::{
     ConstConstructorBody, DeclarationFacts, FunctionTypeShape, InferenceContext, MemberFacts,
     ParameterContract, ParameterDefault, ParameterOwner, ResolvedInvocation, ResolvedSignature,
     ResolvedType, SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterId,
-    TypeParameterScope,
+    TypeParameterScope, TypeRelation,
 };
 pub use semantic::{
     expression_has_dot_shorthand_base, expression_segments, resolve_call_constructor,

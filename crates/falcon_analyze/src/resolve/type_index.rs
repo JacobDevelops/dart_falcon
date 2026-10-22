@@ -345,15 +345,19 @@ impl TypeIndex {
         }
     }
 
-    pub fn is_subtype_identity(
+    /// Match graph facts by declaration identity, or by syntactic name in
+    /// degraded single-file indexes. A negative result requires a complete graph.
+    pub fn supertype_matches(
         &self,
         sub: &DeclarationIdentity,
-        super_: &DeclarationIdentity,
+        identity_matches: impl FnMut(&DeclarationIdentity) -> bool,
+        name_matches: impl FnMut(&str) -> bool,
     ) -> Truth {
         if self.declarations.is_empty() && !self.types.is_empty() {
-            return self.is_subtype(sub.name(), super_.name());
+            self.supertype_matches_name(sub.name(), name_matches)
+        } else {
+            self.supertype_matches_identity(sub, identity_matches)
         }
-        self.supertype_matches_identity(sub, |identity| identity.matches(super_))
     }
 
     /// Whether `sub` or any of its supertypes satisfies `matches`; `No` only
@@ -562,20 +566,17 @@ impl TypeIndex {
         }
     }
 
-    /// Whether `sub` is a subtype of `super_`, walking `sub`'s ancestor chain.
-    ///
-    /// Returns [`Truth::Yes`] on a name match, [`Truth::No`]
-    /// only when `sub`'s entire chain is resolved and never names `super_`, and
-    /// [`Truth::Unknown`] whenever the chain has an unresolved edge.
-    pub fn is_subtype(&self, sub: &str, super_: &str) -> Truth {
-        if sub == super_ {
-            return Truth::Yes;
-        }
-        match self.walk_ancestors(sub, |name, _| (name == super_).then_some(())) {
+    fn supertype_matches_name(&self, sub: &str, mut matches: impl FnMut(&str) -> bool) -> Truth {
+        match self.walk_ancestors(sub, |name, _| matches(name).then_some(())) {
             ControlFlow::Break(()) => Truth::Yes,
             ControlFlow::Continue(true) => Truth::No,
             ControlFlow::Continue(false) => Truth::Unknown,
         }
+    }
+
+    #[cfg(test)]
+    fn ancestor_has_name(&self, sub: &str, super_: &str) -> Truth {
+        self.supertype_matches_name(sub, |name| name == super_)
     }
 
     /// Whether a type is directly or transitively immutable.
@@ -1282,11 +1283,15 @@ mod tests {
                 .find(|entry| entry.name == name)
                 .unwrap();
             assert_eq!(core.supertypes, shared.supertypes, "{name}");
-            assert_eq!(index.is_subtype(name, "Object"), Truth::Yes, "{name}");
             assert_eq!(
-                index.is_subtype_identity(
+                index.ancestor_has_name(name, "Object"),
+                Truth::Yes,
+                "{name}"
+            );
+            assert_eq!(
+                index.supertype_matches_identity(
                     &DeclarationIdentity::sdk(shared.library, name),
-                    &DeclarationIdentity::OBJECT,
+                    |identity| identity.matches(&DeclarationIdentity::OBJECT),
                 ),
                 Truth::Yes,
                 "{name}",
@@ -1528,9 +1533,18 @@ mod tests {
     #[test]
     fn subtype_reflexive_and_direct() {
         let idx = index("class A {} class B extends A {}");
-        assert_eq!(idx.is_subtype("A", "A"), Truth::Yes);
-        assert_eq!(idx.is_subtype("B", "A"), Truth::Yes);
-        assert_eq!(idx.is_subtype("B", "Object"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("A", "A"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("B", "A"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("B", "Object"), Truth::Yes);
+        let sub = DeclarationIdentity::sdk("dart:core", "B");
+        assert_eq!(
+            idx.supertype_matches(&sub, |_| false, |name| name == "A"),
+            Truth::Yes
+        );
+        assert_eq!(
+            idx.supertype_matches(&sub, |_| false, |name| name == "Missing"),
+            Truth::No
+        );
     }
 
     #[test]
@@ -1539,36 +1553,44 @@ mod tests {
             "class A {} class B extends A {} class C extends B {}
              mixin M {} class D with M implements A {}",
         );
-        assert_eq!(idx.is_subtype("C", "A"), Truth::Yes);
-        assert_eq!(idx.is_subtype("D", "M"), Truth::Yes);
-        assert_eq!(idx.is_subtype("D", "A"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("C", "A"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("D", "M"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("D", "A"), Truth::Yes);
     }
 
     #[test]
     fn subtype_proven_no_on_resolved_chains() {
         let idx = index("class A {} class B {}");
-        assert_eq!(idx.is_subtype("A", "B"), Truth::No);
+        assert_eq!(idx.ancestor_has_name("A", "B"), Truth::No);
         // Core chains too.
-        assert_eq!(idx.is_subtype("String", "int"), Truth::No);
-        assert_eq!(idx.is_subtype("List", "Iterable"), Truth::Yes);
-        assert_eq!(idx.is_subtype("int", "num"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("String", "int"), Truth::No);
+        assert_eq!(idx.ancestor_has_name("List", "Iterable"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("int", "num"), Truth::Yes);
     }
 
     #[test]
     fn subtype_unknown_on_unresolved_edge() {
         let idx = index("class B extends Widget {}");
         // Could be a subtype of anything Widget extends → cannot prove no.
-        assert_eq!(idx.is_subtype("B", "State"), Truth::Unknown);
+        assert_eq!(idx.ancestor_has_name("B", "State"), Truth::Unknown);
         // But the direct, named ancestor is still a proven Yes.
-        assert_eq!(idx.is_subtype("B", "Widget"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("B", "Widget"), Truth::Yes);
     }
 
     #[test]
     fn subtype_ambiguous_is_unknown() {
         let idx = index("class C {} class C {} class D extends C {}");
-        assert_eq!(idx.is_subtype("D", "Object"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("D", "Object"), Truth::Yes);
         // Passing through ambiguous C poisons the rest of the chain.
-        assert_eq!(idx.is_subtype("D", "Foo"), Truth::Unknown);
+        assert_eq!(idx.ancestor_has_name("D", "Foo"), Truth::Unknown);
+        assert_eq!(
+            idx.supertype_matches(
+                &DeclarationIdentity::sdk("dart:core", "D"),
+                |_| false,
+                |name| name == "Foo",
+            ),
+            Truth::Unknown
+        );
     }
 
     #[test]
@@ -1577,14 +1599,14 @@ mod tests {
         let idx = index("class A extends B {} class B extends A {}");
         // Never resolves to Q, and the chain is a self-referential cycle that the
         // visited-set breaks; both A and B are known so it terminates.
-        assert_eq!(idx.is_subtype("A", "B"), Truth::Yes);
-        assert_eq!(idx.is_subtype("A", "Q"), Truth::No);
+        assert_eq!(idx.ancestor_has_name("A", "B"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("A", "Q"), Truth::No);
     }
 
     #[test]
     fn enum_is_subtype_of_enum_with_index_member() {
         let idx = index("enum Color { red, green }");
-        assert_eq!(idx.is_subtype("Color", "Enum"), Truth::Yes);
+        assert_eq!(idx.ancestor_has_name("Color", "Enum"), Truth::Yes);
         assert_eq!(
             idx.member_lookup("Color", "index"),
             MemberResult::Found(MemberKind::Getter)
@@ -1636,7 +1658,9 @@ mod tests {
             MemberResult::Unknown
         );
         assert_eq!(
-            index.is_subtype_identity(&identity, &DeclarationIdentity::OBJECT),
+            index.supertype_matches_identity(&identity, |ancestor| {
+                ancestor.matches(&DeclarationIdentity::OBJECT)
+            }),
             Truth::Unknown
         );
         assert_eq!(index.is_immutable_type_identity(&identity), Truth::Unknown);
@@ -1661,7 +1685,7 @@ mod tests {
         assert!(!idx.is_known_type("List"));
         assert_eq!(idx.member_lookup("List", "mine"), MemberResult::Unknown);
         assert_eq!(idx.member_lookup("List", "add"), MemberResult::Unknown);
-        assert_eq!(idx.is_subtype("List", "Iterable"), Truth::Unknown);
+        assert_eq!(idx.ancestor_has_name("List", "Iterable"), Truth::Unknown);
         // A non-colliding user type still resolves as a user type.
         let idx2 = index("class Widgetish { void mine() {} }");
         assert_eq!(
@@ -1734,7 +1758,10 @@ mod tests {
             idx.member_lookup_identity(&dog, "breathe"),
             MemberResult::Found(MemberKind::Method)
         );
-        assert_eq!(idx.is_subtype_identity(&dog, &animal), Truth::Yes);
+        assert_eq!(
+            idx.supertype_matches_identity(&dog, |identity| identity.matches(&animal)),
+            Truth::Yes
+        );
         assert_eq!(idx.type_kind_identity(&animal), Some(TypeKind::Class));
         assert_eq!(
             idx.supertype_matches_identity(&dog, |identity| identity == &animal),
@@ -1807,8 +1834,14 @@ mod tests {
             index.member_lookup_identity(&r, "right"),
             MemberResult::Found(MemberKind::Method)
         );
-        assert_eq!(index.is_subtype_identity(&l, &left_base), Truth::Yes);
-        assert_eq!(index.is_subtype_identity(&l, &right_base), Truth::No);
+        assert_eq!(
+            index.supertype_matches_identity(&l, |identity| identity.matches(&left_base)),
+            Truth::Yes
+        );
+        assert_eq!(
+            index.supertype_matches_identity(&l, |identity| identity.matches(&right_base)),
+            Truth::No
+        );
         assert!(signatures.is_const_constructor(&left_base, "new"));
         assert!(!signatures.is_const_constructor(&right_base, "new"));
         let local_string = resolve(left_path, "String".into());
@@ -1817,10 +1850,8 @@ mod tests {
             MemberResult::Found(MemberKind::Method)
         );
         assert_eq!(
-            index.is_subtype_identity(
-                &local_string,
-                &DeclarationIdentity::sdk("dart:core", "String")
-            ),
+            index.supertype_matches_identity(&local_string, |identity| identity
+                .matches(&DeclarationIdentity::sdk("dart:core", "String")),),
             Truth::No
         );
     }
@@ -2053,7 +2084,9 @@ mod tests {
                 .resolve_declaration(app_library, "C".into())
                 .unwrap();
             assert_eq!(
-                index.is_subtype_identity(&c, &DeclarationIdentity::sdk("dart:core", "Duration")),
+                index.supertype_matches_identity(&c, |identity| {
+                    identity.matches(&DeclarationIdentity::sdk("dart:core", "Duration"))
+                }),
                 Truth::Unknown
             );
             assert_eq!(

@@ -436,15 +436,27 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
                 .value_type(&model.resolve_value("text").unwrap())
                 .unwrap();
             assert_eq!(
-                signatures.types_are_unrelated(number, &model.core_type("int", false), &model),
+                signatures.relation(
+                    number,
+                    crate::TypeRelation::RuntimeUnrelatedTo(&model.core_type("int", false)),
+                    &model
+                ),
                 Truth::No
             );
             assert_eq!(
-                signatures.types_are_unrelated(text, &model.core_type("String", false), &model),
+                signatures.relation(
+                    text,
+                    crate::TypeRelation::RuntimeUnrelatedTo(&model.core_type("String", false)),
+                    &model
+                ),
                 Truth::No
             );
             assert_eq!(
-                signatures.types_are_unrelated(number, text, &model),
+                signatures.relation(
+                    number,
+                    crate::TypeRelation::RuntimeUnrelatedTo(text),
+                    &model
+                ),
                 Truth::Yes
             );
             let done = signatures
@@ -703,7 +715,10 @@ fn external_overlays_share_facts_and_replace_project_snapshots() {
         let base = model.resolve_name("Base").unwrap();
         let child = model.resolve_name("Child").unwrap();
         assert_eq!(types.type_kind_identity(&base), Some(TypeKind::Class));
-        assert_eq!(types.is_subtype_identity(&child, &base), Truth::Yes);
+        assert_eq!(
+            types.supertype_matches_identity(&child, |identity| identity.matches(&base)),
+            Truth::Yes
+        );
         assert_eq!(
             types.member_lookup_identity(&child, "method"),
             crate::resolve::MemberResult::Found(MemberKind::Method),
@@ -5670,9 +5685,30 @@ fn unrelatedness_is_conservative_and_numeric_aware() {
                 .params()
                 .map(|param| model.resolve_type(param.param_type().unwrap()))
                 .collect();
-            assert_eq!(model.unrelated(&types[0], &types[1]), Truth::No);
-            assert_eq!(model.unrelated(&types[0], &types[2]), Truth::Yes);
-            assert_eq!(model.unrelated(&types[0], &types[3]), Truth::Unknown);
+            assert_eq!(
+                SignatureIndex::default().relation(
+                    &types[0],
+                    crate::TypeRelation::UnrelatedTo(&types[1]),
+                    model
+                ),
+                Truth::No
+            );
+            assert_eq!(
+                SignatureIndex::default().relation(
+                    &types[0],
+                    crate::TypeRelation::UnrelatedTo(&types[2]),
+                    model
+                ),
+                Truth::Yes
+            );
+            assert_eq!(
+                SignatureIndex::default().relation(
+                    &types[0],
+                    crate::TypeRelation::UnrelatedTo(&types[3]),
+                    model
+                ),
+                Truth::Unknown
+            );
         },
     );
 }
@@ -6275,7 +6311,11 @@ fn member_lookup_prefers_later_mixins_and_includes_interface_contracts() {
                 extension_type: false,
             };
             assert_eq!(
-                signatures.is_subtype_of(&interface_only, &contract, model),
+                signatures.relation(
+                    &interface_only,
+                    crate::TypeRelation::SubtypeOfDeclaration(&contract),
+                    model
+                ),
                 Truth::Yes
             );
             let (signature, substitutions) = signatures
@@ -7210,7 +7250,11 @@ fn extension_applicability_proves_only_universal_missing_arguments() {
                 model.resolve_extension("FunctionOwner"),
             );
             assert_eq!(
-                signatures.subtype(&ResolvedType::Unknown, &ResolvedType::Dynamic, model),
+                signatures.relation(
+                    &ResolvedType::Unknown,
+                    crate::TypeRelation::SubtypeOf(&ResolvedType::Dynamic),
+                    model
+                ),
                 Truth::Unknown,
             );
         },
@@ -7769,7 +7813,11 @@ fn cyclic_supertypes_are_unknown() {
             };
 
             assert_eq!(
-                signatures.is_subtype_of(&receiver, &b, model),
+                signatures.relation(
+                    &receiver,
+                    crate::TypeRelation::SubtypeOfDeclaration(&b),
+                    model
+                ),
                 Truth::Unknown
             );
             assert!(

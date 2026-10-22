@@ -64,7 +64,11 @@ impl FlowContext<'_, '_> {
                     return false;
                 }
                 matched == &target
-                    || self.signatures.subtype(matched, &target, self.model) == Truth::Yes
+                    || self.signatures.relation(
+                        matched,
+                        crate::TypeRelation::SubtypeOf(&target),
+                        self.model,
+                    ) == Truth::Yes
             })
         };
         if covers_type(matched) {
@@ -313,7 +317,11 @@ impl FlowContext<'_, '_> {
             }
             _ => {
                 self.compatible(value, target)
-                    || self.signatures.subtype(value, target, self.model) == super::Truth::Yes
+                    || self.signatures.relation(
+                        value,
+                        crate::TypeRelation::SubtypeOf(target),
+                        self.model,
+                    ) == super::Truth::Yes
             }
         }
     }

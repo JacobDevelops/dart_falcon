@@ -762,8 +762,14 @@ fn compact_external_types_do_not_collide_with_project_names() {
         types.member_lookup_identity(&local, "value"),
         MemberResult::Absent
     );
-    assert_eq!(types.is_subtype_identity(&child, &external), Truth::Yes);
-    assert_eq!(types.is_subtype_identity(&child, &local), Truth::No);
+    assert_eq!(
+        types.supertype_matches_identity(&child, |identity| identity.matches(&external)),
+        Truth::Yes
+    );
+    assert_eq!(
+        types.supertype_matches_identity(&child, |identity| identity.matches(&local)),
+        Truth::No
+    );
 }
 
 #[test]
@@ -2390,9 +2396,11 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
                     assert!(identity.matches(&DeclarationIdentity::package("foo", "Foo")));
                     let receiver = ResolvedType::interface_identity(identity.clone());
                     assert_eq!(
-                        signatures.is_subtype_of(
+                        signatures.relation(
                             &receiver,
-                            &DeclarationIdentity::package("foo", "Foo"),
+                            falcon_analyze::TypeRelation::SubtypeOfDeclaration(
+                                &DeclarationIdentity::package("foo", "Foo")
+                            ),
                             &model
                         ),
                         falcon_analyze::Truth::Yes

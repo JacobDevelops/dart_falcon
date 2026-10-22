@@ -6,7 +6,7 @@
 //! null comparisons, and custom collection classes that may override equality.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -64,7 +64,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && collection(&right)
             && state
                 .signatures
-                .types_are_unrelated(&left, &right, &state.model)
+                .relation(&left, TypeRelation::RuntimeUnrelatedTo(&right), &state.model)
                 != Truth::Yes
             && !(constant(binary.left(), state) && constant(binary.right(), state))
         {

@@ -93,15 +93,26 @@ fn sdk_free_unrelatedness_preserves_deep_shared_types() {
         let right = fanout(depth, ResolvedType::Dynamic);
         assert!(signatures.extension_type_erasure(&left, &model).is_some());
         assert_eq!(
-            signatures.types_are_unrelated(&left, &right, &model),
+            signatures.relation(
+                &left,
+                crate::TypeRelation::RuntimeUnrelatedTo(&right),
+                &model
+            ),
             Truth::No
         );
         let related = fanout(depth, ResolvedType::Void);
         assert_eq!(
-            signatures.types_are_unrelated(&left, &related, &model),
+            signatures.relation(
+                &left,
+                crate::TypeRelation::RuntimeUnrelatedTo(&related),
+                &model
+            ),
             Truth::No
         );
-        assert_eq!(signatures.subtype(&left, &related, &model), Truth::Yes);
+        assert_eq!(
+            signatures.relation(&left, crate::TypeRelation::SubtypeOf(&related), &model),
+            Truth::Yes
+        );
     }
     let first = model.core_type("int", false);
     let second = model.core_type("int", false);

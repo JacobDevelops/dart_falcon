@@ -1,7 +1,7 @@
 use falcon_analyze::SemanticState;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, DocName, QualifiedName, ResolvedType, RulePreparation,
-    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
+    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -513,7 +513,7 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
             };
             let ty = ResolvedType::interface_identity(identity);
             if !self.roots.iter().any(|root| {
-                self.signatures.is_subtype_of(&ty, root, &self.model) == Truth::Yes
+                self.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(root), &self.model) == Truth::Yes
             }) {
                 continue;
             }

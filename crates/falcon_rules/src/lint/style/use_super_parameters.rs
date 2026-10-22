@@ -11,7 +11,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, LanguageVersion, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, LanguageVersion, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -206,7 +208,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 || matches!(this_type, ResolvedType::Dynamic)
                 || state
                     .signatures
-                    .subtype(&super_type, &this_type, &state.model)
+                    .relation(&super_type, TypeRelation::SubtypeOf(&this_type), &state.model)
                     == Truth::Yes
             {
                 conversion.named.push(parameter.name().span());

@@ -10,7 +10,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal, Truth,
+    SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -95,8 +95,8 @@ impl<'a> StructuralRuleVisitor<'a> for CallbackCollector<'a> {
             return StructuralTraversal::SkipChildren;
         };
         let class_type = ResolvedType::interface_identity(identity);
-        if self.signatures.is_subtype_of(&class_type, &self.widget, &self.model) == Truth::Yes
-            || self.signatures.is_subtype_of(&class_type, &DeclarationIdentity::flutter("State"), &self.model) == Truth::Yes
+        if self.signatures.relation(&class_type, TypeRelation::SubtypeOfDeclaration(&self.widget), &self.model) == Truth::Yes
+            || self.signatures.relation(&class_type, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")), &self.model) == Truth::Yes
         {
             StructuralTraversal::Continue
         } else {
@@ -115,7 +115,7 @@ impl<'a> StructuralRuleVisitor<'a> for CallbackCollector<'a> {
         if let Some((constructed, args)) = crate::lint::flutter::construction(node, &self.model)
             && self
                 .signatures
-                .is_subtype_of(&constructed, &self.widget, &self.model)
+                .relation(&constructed, TypeRelation::SubtypeOfDeclaration(&self.widget), &self.model)
                 == Truth::Yes
         {
             for argument in args.positional() {
@@ -191,7 +191,7 @@ fn expression_is_widget(
     widget: &DeclarationIdentity,
 ) -> bool {
     crate::lint::flutter::construction(expression, model)
-        .is_some_and(|(ty, _)| signatures.is_subtype_of(&ty, widget, model) == Truth::Yes)
+        .is_some_and(|(ty, _)| signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(widget), model) == Truth::Yes)
 }
 
 fn is_long_enough(span: &Span, source: &str, cfg: &Options) -> bool {

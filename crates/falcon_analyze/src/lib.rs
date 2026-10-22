@@ -59,10 +59,10 @@ pub use resolve::{
     MemberKind, MemberResult, MemberSelector, MemberSelectorKind, NameIdentity, PackageIdentity,
     ParameterContract, ParameterDefault, QualifiedName, ResolvedInvocation, ResolvedSignature,
     ResolvedType, SemanticModel, SignatureIndex, SourceSelector, Truth, TypeIndex, TypeKind,
-    TypeParameterId, TypeParameterScope, canonical_or_lexical, doc_imports, expression_segments,
-    group_libraries, has_immutable_annotation, import_path, is_generated_dart_file,
-    lexical_normalize, library_doc_imports, library_unit, resolve_call_constructor,
-    resolve_new_constructor,
+    TypeParameterId, TypeParameterScope, TypeRelation, canonical_or_lexical, doc_imports,
+    expression_segments, group_libraries, has_immutable_annotation, import_path,
+    is_generated_dart_file, lexical_normalize, library_doc_imports, library_unit,
+    resolve_call_constructor, resolve_new_constructor,
 };
 pub(crate) use resolve::{
     InferenceContext, ParameterOwner, TypeEnvironment, expression_has_dot_shorthand_base,

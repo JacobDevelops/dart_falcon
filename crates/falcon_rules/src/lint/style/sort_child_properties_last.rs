@@ -1,7 +1,7 @@
 //! Sort Widget-valued child properties last, except before closure arguments.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -41,11 +41,7 @@ impl<'a> SemanticRuleVisitor<'a> for ChildOrdering<'_, 'a> {
             return;
         };
         if !state.signatures.has_constructor(&identity, constructor)
-            || state.signatures.is_subtype_of(
-                &ResolvedType::interface_identity(identity),
-                &DeclarationIdentity::flutter("Widget"),
-                &state.model,
-            ) != Truth::Yes
+            || state.signatures.relation(&ResolvedType::interface_identity(identity), TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Widget")), &state.model) != Truth::Yes
         {
             return;
         }
@@ -80,7 +76,7 @@ fn widget_property(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
     };
     if state
         .signatures
-        .is_subtype_of(ty, &DeclarationIdentity::flutter("Widget"), &state.model)
+        .relation(ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Widget")), &state.model)
         == Truth::Yes
     {
         return true;
@@ -98,7 +94,7 @@ fn widget_property(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
         .any(|(uri, name)| {
             state
                 .signatures
-                .is_subtype_of(ty, &DeclarationIdentity::sdk(uri, name), &state.model)
+                .relation(ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::sdk(uri, name)), &state.model)
                 == Truth::Yes
         })
     {

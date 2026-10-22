@@ -1,6 +1,7 @@
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ParameterContract, ResolvedType,
     RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
+    TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -49,11 +50,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             return StructuralTraversal::SkipChildren;
         };
         if self.state_only
-            && self.signatures.is_subtype_of(
-                &ResolvedType::interface_identity(identity.clone()),
-                &DeclarationIdentity::flutter("State"),
-                model,
-            ) != falcon_analyze::Truth::Yes
+            && self.signatures.relation(&ResolvedType::interface_identity(identity.clone()), TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")), model) != falcon_analyze::Truth::Yes
         {
             return StructuralTraversal::SkipChildren;
         }

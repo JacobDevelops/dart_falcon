@@ -4,7 +4,7 @@ use crate::lint::lexical_usage::NameScopes;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, RulePreparation,
     SemanticModel, SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
-    Truth,
+    Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
@@ -61,7 +61,7 @@ pub(crate) fn is_flutter_state(
     };
     let ty = ResolvedType::interface_identity(identity);
     let state = DeclarationIdentity::flutter("State");
-    signatures.is_subtype_of(&ty, &state, model) == Truth::Yes
+    signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&state), model) == Truth::Yes
 }
 
 struct Collector<'a> {
@@ -94,9 +94,9 @@ impl Collector<'_> {
             return false;
         };
         let ty = ResolvedType::interface_identity(identity);
-        let special = self.signatures.is_subtype_of(
+        let special = self.signatures.relation(
             &ty,
-            &DeclarationIdentity::flutter("FocusNode"),
+            TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("FocusNode")),
             &self.model,
         ) == Truth::Yes
             || ty.interface(TIMER_RELEASE.library, TIMER_RELEASE.type_name);

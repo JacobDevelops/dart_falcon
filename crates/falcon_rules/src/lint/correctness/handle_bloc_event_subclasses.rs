@@ -11,7 +11,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -79,7 +79,7 @@ impl<'a> Collector<'a> {
         }
         events
             .missing
-            .retain(|(_, ty)| state.signatures.subtype(ty, &handled, &state.model) == Truth::No);
+            .retain(|(_, ty)| state.signatures.relation(ty, TypeRelation::SubtypeOf(&handled), &state.model) == Truth::No);
     }
 }
 
@@ -146,7 +146,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 *arguments = vec![ResolvedType::Unknown; count].into();
             }
             if identity != root
-                && state.signatures.is_subtype_of(&ty, &root, &state.model) == Truth::Yes
+                && state.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&root), &state.model) == Truth::Yes
             {
                 missing.push((identity, ty));
             }

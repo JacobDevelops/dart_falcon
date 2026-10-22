@@ -1,15 +1,18 @@
 //! Shared lexical boundaries and resolved Flutter API checks for State rules.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth, TypeRelation,
+};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 pub(crate) fn is_state(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    state
-        .signatures
-        .is_subtype_of(ty, &DeclarationIdentity::flutter("State"), &state.model)
-        == Truth::Yes
+    state.signatures.relation(
+        ty,
+        TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")),
+        &state.model,
+    ) == Truth::Yes
 }
 
 pub(crate) fn is_context(ty: &ResolvedType) -> bool {

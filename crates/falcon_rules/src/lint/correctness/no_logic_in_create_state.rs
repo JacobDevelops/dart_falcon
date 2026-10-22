@@ -7,7 +7,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
+    SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -62,11 +62,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(identity) = model.resolve_name(class.name().name()) else {
             return StructuralTraversal::SkipChildren;
         };
-        if signatures.is_subtype_of(
-            &ResolvedType::interface_identity(identity),
-            stateful_widget,
-            model,
-        ) != Truth::Yes
+        if signatures.relation(&ResolvedType::interface_identity(identity), TypeRelation::SubtypeOfDeclaration(stateful_widget), model) != Truth::Yes
         {
             return StructuralTraversal::SkipChildren;
         }
@@ -80,7 +76,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let Some(return_type) = method.return_type() else {
                 continue;
             };
-            if signatures.is_subtype_of(&model.resolve_type(return_type), state, model)
+            if signatures.relation(&model.resolve_type(return_type), TypeRelation::SubtypeOfDeclaration(state), model)
                 != Truth::Yes
             {
                 continue;
@@ -155,7 +151,7 @@ fn body_result(
             BodyResult::Violation
         };
     };
-    match signatures.is_subtype_of(&constructed, state, model) {
+    match signatures.relation(&constructed, TypeRelation::SubtypeOfDeclaration(state), model) {
         Truth::Yes if args.positional().is_empty() && args.named().is_empty() => {
             BodyResult::Trivial
         }

@@ -111,19 +111,47 @@ impl SignatureIndex {
         self.instantiated_identity(ty, target, model)
     }
 
-    pub fn is_subtype_of(
+    pub(super) fn declaration_subtype(
         &self,
         ty: &ResolvedType,
         target: &DeclarationIdentity,
         model: &SemanticModel<'_>,
     ) -> Truth {
-        if matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic) {
-            return Truth::Unknown;
-        }
-        if self.instantiated_identity(ty, target, model).is_some() {
-            Truth::Yes
-        } else {
-            Truth::Unknown
+        match ty {
+            ResolvedType::TypeParameter { bound, .. }
+            | ResolvedType::NonNullTypeParameter { bound, .. } => {
+                self.declaration_subtype(bound, target, model)
+            }
+            ResolvedType::Interface { identity, .. } if !self.has_cyclic_supertypes(identity) => {
+                let result = self.ancestor_matches(
+                    identity,
+                    |identity| {
+                        self.type_facts
+                            .get(identity)
+                            .and_then(|facts| facts.supertypes.as_ref())
+                            .map(|(_, supertypes)| supertypes.as_slice())
+                    },
+                    &|identity| identity.matches(target),
+                    |identity, supertypes| {
+                        // Without SDK sources enum facts omit the implicit
+                        // Enum edge, so their recorded list is incomplete.
+                        self.type_kind(identity) != Some(TypeKind::Enum)
+                            || supertypes
+                                .iter()
+                                .any(|ty| ty.interface("dart:core", "Enum"))
+                    },
+                );
+                if result == Truth::Unknown
+                    && self.instantiated_identity(ty, target, model).is_some()
+                {
+                    // Malformed hierarchies can contain type-parameter edges
+                    // that require substitution rather than identity matching.
+                    Truth::Yes
+                } else {
+                    result
+                }
+            }
+            _ => Truth::Unknown,
         }
     }
 
@@ -1000,16 +1028,18 @@ impl SignatureIndex {
                 match (on_type.as_ref(), other_on_type.as_ref()) {
                     (_, ResolvedType::Dynamic) => on_type != other_on_type,
                     _ => match (
-                        self.subtype(on_type, other_on_type, model),
-                        self.subtype(other_on_type, on_type, model),
+                        self.resolved_subtype(on_type, other_on_type, model),
+                        self.resolved_subtype(other_on_type, on_type, model),
                     ) {
                         (Truth::Yes, Truth::No) => true,
                         (Truth::Yes, Truth::Yes) => {
                             let candidate_bound =
                                 self.extension_on_type_at_bounds(candidate, model);
                             let other_bound = self.extension_on_type_at_bounds(other, model);
-                            self.subtype(&candidate_bound, &other_bound, model) == Truth::Yes
-                                && self.subtype(&other_bound, &candidate_bound, model) == Truth::No
+                            self.resolved_subtype(&candidate_bound, &other_bound, model)
+                                == Truth::Yes
+                                && self.resolved_subtype(&other_bound, &candidate_bound, model)
+                                    == Truth::No
                         }
                         _ => false,
                     },

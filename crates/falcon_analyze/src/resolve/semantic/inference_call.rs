@@ -286,20 +286,25 @@ impl TypeEnvironment {
                         )
                     {
                         candidate = met;
-                    } else if context
-                        .signatures
-                        .subtype(&candidate, &bound, context.model)
-                        == Truth::No
+                    } else if context.signatures.relation(
+                        &candidate,
+                        crate::TypeRelation::SubtypeOf(&bound),
+                        context.model,
+                    ) == Truth::No
                     {
                         let non_null = candidate.non_null();
-                        if context.signatures.subtype(&non_null, &bound, context.model)
-                            == Truth::Yes
+                        if context.signatures.relation(
+                            &non_null,
+                            crate::TypeRelation::SubtypeOf(&bound),
+                            context.model,
+                        ) == Truth::Yes
                         {
                             candidate = non_null;
-                        } else if context
-                            .signatures
-                            .subtype(&bound, &candidate, context.model)
-                            == Truth::Yes
+                        } else if context.signatures.relation(
+                            &bound,
+                            crate::TypeRelation::SubtypeOf(&candidate),
+                            context.model,
+                        ) == Truth::Yes
                         {
                             candidate = bound;
                         } else {

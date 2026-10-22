@@ -945,7 +945,7 @@ impl SignatureIndex {
             return false;
         }
         let compatible = |left: &ResolvedType, right: &ResolvedType| {
-            self.subtype(left, right, model) != Truth::No
+            self.relation(left, crate::TypeRelation::SubtypeOf(right), model) != Truth::No
         };
         // In function subtyping, a void result accepts any result type.
         let return_compatible = |left: &ResolvedType, right: &ResolvedType| {

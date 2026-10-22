@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterId,
-    TypeParameterScope,
+    TypeParameterScope, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -256,8 +256,11 @@ fn target_defines_key(
         .get("key")
         .map(|ty| model.substitute(ty, substitutions))
         .is_some_and(|ty| {
-            signatures.is_subtype_of(&ty, &DeclarationIdentity::flutter("Key"), model)
-                == falcon_analyze::Truth::Yes
+            signatures.relation(
+                &ty,
+                TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Key")),
+                model,
+            ) == falcon_analyze::Truth::Yes
         })
 }
 

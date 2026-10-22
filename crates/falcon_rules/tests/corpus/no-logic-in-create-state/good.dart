@@ -37,3 +37,18 @@ class G5 extends StatefulWidget {
 class _G1State extends State<G1> {}
 class _G2State extends State<G2> {}
 class _G5State extends State<G5> {}
+
+// The constructor resolves, but its missing ancestor might be a State.
+class G6 extends StatefulWidget {
+  @override
+  State<G6> createState() => _UnresolvedState();
+}
+
+class G7 extends StatefulWidget {
+  @override
+  State<G7> createState() {
+    return new _UnresolvedState();
+  }
+}
+
+class _UnresolvedState extends MissingStateBase {}

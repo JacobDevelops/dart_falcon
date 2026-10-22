@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
-    TypeParameterScope,
+    TypeParameterScope, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -199,11 +199,7 @@ impl Checker<'_> {
                 arguments,
                 ..
             } => {
-                if self.signatures.is_subtype_of(
-                    ty,
-                    &DeclarationIdentity::flutter("Widget"),
-                    &self.model,
-                ) == Truth::Yes
+                if self.signatures.relation(ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Widget")), &self.model) == Truth::Yes
                 {
                     return Some(true);
                 }

@@ -7,12 +7,12 @@
 //! `Set<E>.lookup`/`remove`, and `Map<K, V>.[]` are checked on a receiver
 //! (explicit, or the implicit `this` of the enclosing type) that implements the
 //! declaring collection, whatever the receiver overrides. The argument must not
-//! be unrelated ([`SignatureIndex::types_are_unrelated`]) to the type argument.
+//! be unrelated ([`TypeRelation::RuntimeUnrelatedTo`]) to the type argument.
 //!
-//! [`SignatureIndex::types_are_unrelated`]: falcon_analyze::SignatureIndex::types_are_unrelated
+//! [`TypeRelation::RuntimeUnrelatedTo`]: falcon_analyze::TypeRelation::RuntimeUnrelatedTo
 
 use falcon_analyze::TypeKind;
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -57,7 +57,7 @@ impl<'a> Collector<'a> {
         let actual = state.infer_with_context(argument, context);
         if state
             .signatures
-            .types_are_unrelated(&actual, expected, &state.model)
+            .relation(&actual, TypeRelation::RuntimeUnrelatedTo(expected), &state.model)
             != Truth::Yes
         {
             return;

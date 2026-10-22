@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, Truth, TypeParameterId,
+    SignatureIndex, Truth, TypeParameterId, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -379,9 +379,11 @@ impl Collector<'_, '_> {
                 if js_subtype(left_identity, right_identity) {
                     return true;
                 }
-                self.signatures
-                    .is_subtype_of(left, right_identity, self.model)
-                    == Truth::Yes
+                self.signatures.relation(
+                    left,
+                    TypeRelation::SubtypeOfDeclaration(right_identity),
+                    self.model,
+                ) == Truth::Yes
             }
             (ResolvedType::Null, ResolvedType::Null) => true,
             (ResolvedType::Void, ResolvedType::Void) => true,
@@ -404,10 +406,11 @@ impl Collector<'_, '_> {
                 },
             ) => {
                 left_identity == right_identity
-                    || self
-                        .signatures
-                        .is_subtype_of(left, right_identity, self.model)
-                        == Truth::Yes
+                    || self.signatures.relation(
+                        left,
+                        TypeRelation::SubtypeOfDeclaration(right_identity),
+                        self.model,
+                    ) == Truth::Yes
             }
             (
                 ResolvedType::TypeParameter { bound, .. }

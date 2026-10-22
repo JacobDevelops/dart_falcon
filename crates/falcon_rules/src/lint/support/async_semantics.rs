@@ -13,7 +13,8 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, ConstantCache, ConstantContext, ConstantValue, DeclarationIdentity,
-    ResolvedType, Truth, evaluate_constant, expression_segments, resolve_call_constructor,
+    ResolvedType, Truth, TypeRelation, evaluate_constant, expression_segments,
+    resolve_call_constructor,
 };
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
@@ -133,9 +134,9 @@ pub(crate) fn mounted_kind(receiver: &ResolvedType, state: &SemanticState<'_>) -
     // member signatures are not indexed. Resolved overrides never use this.
     if is_context(receiver, false) {
         Some(false)
-    } else if state.signatures.is_subtype_of(
+    } else if state.signatures.relation(
         receiver,
-        &DeclarationIdentity::flutter("State"),
+        TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")),
         &state.model,
     ) == Truth::Yes
     {
@@ -246,9 +247,9 @@ fn context_member_kind(
         .resolved_member_owner(receiver, name, &state.model);
     if owner.is_none()
         && name == "context"
-        && state.signatures.is_subtype_of(
+        && state.signatures.relation(
             receiver,
-            &DeclarationIdentity::flutter("State"),
+            TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")),
             &state.model,
         ) == Truth::Yes
     {
@@ -269,9 +270,9 @@ fn context_member_kind(
     }
     if let Some(owner) = owner {
         let declaring_type = ResolvedType::interface_identity(owner);
-        if state.signatures.is_subtype_of(
+        if state.signatures.relation(
             &declaring_type,
-            &DeclarationIdentity::flutter("State"),
+            TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")),
             &state.model,
         ) == Truth::Yes
         {

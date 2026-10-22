@@ -14,7 +14,7 @@
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
-    SemanticModel, Truth,
+    SemanticModel, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -161,11 +161,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }) {
                     return true;
                 }
-                state.signatures.is_subtype_of(
-                    &ResolvedType::interface_identity(identity),
-                    &self.widget,
-                    &state.model,
-                ) != Truth::Yes
+                state.signatures.relation(&ResolvedType::interface_identity(identity), TypeRelation::SubtypeOfDeclaration(&self.widget), &state.model) != Truth::Yes
             }),
             Expr::Cascade(_) => true,
             _ => getter_read(expression, state),

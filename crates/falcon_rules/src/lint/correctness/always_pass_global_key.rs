@@ -12,6 +12,7 @@
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel, Truth,
+    TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -51,11 +52,7 @@ impl Rule for AlwaysPassGlobalKey {
             let Some(owner) = model.resolve_name(name) else {
                 continue;
             };
-            if signatures.is_subtype_of(
-                &ResolvedType::interface_identity(owner.clone()),
-                &DeclarationIdentity::flutter("State"),
-                &model,
-            ) != Truth::Yes
+            if signatures.relation(&ResolvedType::interface_identity(owner.clone()), TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("State")), &model) != Truth::Yes
             {
                 continue;
             }
@@ -84,11 +81,7 @@ impl Rule for AlwaysPassGlobalKey {
                             })
                         });
                     if ty.as_ref().is_some_and(|ty| {
-                        signatures.is_subtype_of(
-                            ty,
-                            &DeclarationIdentity::flutter("GlobalKey"),
-                            &model,
-                        ) == Truth::Yes
+                        signatures.relation(ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("GlobalKey")), &model) == Truth::Yes
                     }) {
                         fields.push(KeyField {
                             owner: owner.clone(),
@@ -154,11 +147,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if matches!(node, Expr::Call(_) | Expr::New(_))
             && let Some((widget, _, args)) =
                 crate::lint::flutter::scoped_constructor_invocation(node, state)
-            && state.signatures.is_subtype_of(
-                &ResolvedType::interface_identity(widget),
-                &DeclarationIdentity::flutter("Widget"),
-                &state.model,
-            ) == Truth::Yes
+            && state.signatures.relation(&ResolvedType::interface_identity(widget), TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Widget")), &state.model) == Truth::Yes
             && let Some(key) = args
                 .named()
                 .find(|argument| argument.name().name() == "key")
@@ -169,16 +158,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 crate::lint::flutter::scoped_constructor_invocation(key.value(), state)
             && {
                 let ty = ResolvedType::interface_identity(identity);
-                state.signatures.is_subtype_of(
-                    &ty,
-                    &DeclarationIdentity::flutter("GlobalKey"),
-                    &state.model,
-                ) == Truth::Yes
-                    && state.signatures.is_subtype_of(
-                        &ty,
-                        &DeclarationIdentity::flutter("GlobalObjectKey"),
-                        &state.model,
-                    ) != Truth::Yes
+                state.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("GlobalKey")), &state.model) == Truth::Yes
+                    && state.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("GlobalObjectKey")), &state.model) != Truth::Yes
             }
         {
             self.diagnostics.push(self.ctx.diagnostic("Store this `GlobalKey` outside the widget's key argument.", key.value().span()));

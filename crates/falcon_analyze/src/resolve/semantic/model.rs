@@ -882,9 +882,10 @@ impl<'a> SemanticModel<'a> {
             | ResolvedType::NonNullTypeParameter { bound, .. } => self.is_future_like(bound),
             ResolvedType::Interface { identity, .. } => {
                 self.types.map_or(Truth::Unknown, |types| {
-                    types.is_subtype_identity(
+                    types.supertype_matches(
                         identity,
-                        &DeclarationIdentity::sdk("dart:async", "Future"),
+                        |ancestor| ancestor.is_sdk("dart:async", "Future"),
+                        |name| name == "Future",
                     )
                 })
             }
@@ -1161,7 +1162,7 @@ impl<'a> SemanticModel<'a> {
         Truth::No
     }
 
-    pub fn unrelated(&self, left: &ResolvedType, right: &ResolvedType) -> Truth {
+    pub(super) fn structural_unrelated(&self, left: &ResolvedType, right: &ResolvedType) -> Truth {
         if matches!(
             left,
             ResolvedType::Unknown
@@ -1206,7 +1207,7 @@ impl<'a> SemanticModel<'a> {
                     return if left_arguments
                         .iter()
                         .zip(right_arguments.iter())
-                        .any(|(left, right)| self.unrelated(left, right) == Truth::Yes)
+                        .any(|(left, right)| self.structural_unrelated(left, right) == Truth::Yes)
                     {
                         Truth::Yes
                     } else {
@@ -1217,8 +1218,16 @@ impl<'a> SemanticModel<'a> {
                     return Truth::Unknown;
                 };
                 match (
-                    types.is_subtype_identity(left_id, right_id),
-                    types.is_subtype_identity(right_id, left_id),
+                    types.supertype_matches(
+                        left_id,
+                        |identity| identity.matches(right_id),
+                        |name| name == right_id.name(),
+                    ),
+                    types.supertype_matches(
+                        right_id,
+                        |identity| identity.matches(left_id),
+                        |name| name == left_id.name(),
+                    ),
                 ) {
                     (Truth::Yes, _) | (_, Truth::Yes) => Truth::No,
                     (Truth::No, Truth::No) => Truth::Yes,
@@ -1227,10 +1236,12 @@ impl<'a> SemanticModel<'a> {
             }
             (ResolvedType::NonNullTypeParameter { bound, .. }, other)
             | (other, ResolvedType::NonNullTypeParameter { bound, .. }) => {
-                self.unrelated(&bound.non_null(), other)
+                self.structural_unrelated(&bound.non_null(), other)
             }
             (ResolvedType::TypeParameter { bound, .. }, other)
-            | (other, ResolvedType::TypeParameter { bound, .. }) => self.unrelated(bound, other),
+            | (other, ResolvedType::TypeParameter { bound, .. }) => {
+                self.structural_unrelated(bound, other)
+            }
             (ResolvedType::Function { .. }, ResolvedType::Function { .. })
             | (ResolvedType::Record { .. }, ResolvedType::Record { .. }) => {
                 fn fields(ty: &ResolvedType) -> (&[ResolvedType], &[(String, ResolvedType)]) {
@@ -1264,7 +1275,7 @@ impl<'a> SemanticModel<'a> {
                         ..
                     },
                 ) = (left, right)
-                    && self.unrelated(left_return, right_return) == Truth::Yes
+                    && self.structural_unrelated(left_return, right_return) == Truth::Yes
                 {
                     return Truth::Yes;
                 }
@@ -1277,7 +1288,7 @@ impl<'a> SemanticModel<'a> {
                             .zip(right_named)
                             .map(|((_, left), (_, right))| (left, right)),
                     )
-                    .any(|(left, right)| self.unrelated(left, right) == Truth::Yes)
+                    .any(|(left, right)| self.structural_unrelated(left, right) == Truth::Yes)
                 {
                     Truth::Yes
                 } else {

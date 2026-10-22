@@ -317,8 +317,8 @@ fn inference_join_impl(
                     };
                     let right = model.substitute(right, &substitutions);
                     match (
-                        signatures.subtype(left, &right, model),
-                        signatures.subtype(&right, left, model),
+                        signatures.relation(left, crate::TypeRelation::SubtypeOf(&right), model),
+                        signatures.relation(&right, crate::TypeRelation::SubtypeOf(left), model),
                     ) {
                         (Truth::Yes, Truth::Yes) => {}
                         (Truth::No, _) | (_, Truth::No) => {
@@ -353,11 +353,12 @@ fn inference_join_impl(
                     left, right, signatures, model, memo,
                 ));
             }
-            let left_to_right = signatures.subtype(left, right, model);
+            let left_to_right =
+                signatures.relation(left, crate::TypeRelation::SubtypeOf(right), model);
             if left_to_right == Truth::Yes {
                 return Some(left.clone());
             }
-            match signatures.subtype(right, left, model) {
+            match signatures.relation(right, crate::TypeRelation::SubtypeOf(left), model) {
                 Truth::Yes => Some(right.clone()),
                 Truth::No if left_to_right == Truth::No => Some(ResolvedType::Never),
                 _ => None,
@@ -464,10 +465,20 @@ fn inference_join_impl(
         // Lifting one side to the other's class and joining arguments instead
         // recurses without end once supertypes nest their own subclasses
         // (`C extends Box<Box<C>>` joined with `Box<D>`, `D extends Box<Box<D>>`).
-        if signatures.subtype(&right_base, &left_base, model) == Truth::Yes {
+        if signatures.relation(
+            &right_base,
+            crate::TypeRelation::SubtypeOf(&left_base),
+            model,
+        ) == Truth::Yes
+        {
             return left.with_nullable(nullable);
         }
-        if signatures.subtype(&left_base, &right_base, model) == Truth::Yes {
+        if signatures.relation(
+            &left_base,
+            crate::TypeRelation::SubtypeOf(&right_base),
+            model,
+        ) == Truth::Yes
+        {
             return right.with_nullable(nullable);
         }
         let scalar = |identity: &DeclarationIdentity| {
@@ -482,10 +493,20 @@ fn inference_join_impl(
             .common_superinterface(left, right, model)
             .map_or(ResolvedType::Unknown, |bound| bound.with_nullable(nullable));
     }
-    if signatures.subtype(&right_base, &left_base, model) == Truth::Yes {
+    if signatures.relation(
+        &right_base,
+        crate::TypeRelation::SubtypeOf(&left_base),
+        model,
+    ) == Truth::Yes
+    {
         return left.with_nullable(nullable);
     }
-    if signatures.subtype(&left_base, &right_base, model) == Truth::Yes {
+    if signatures.relation(
+        &left_base,
+        crate::TypeRelation::SubtypeOf(&right_base),
+        model,
+    ) == Truth::Yes
+    {
         return right.with_nullable(nullable);
     }
     ResolvedType::Unknown
@@ -571,18 +592,19 @@ pub(super) fn contextual_join(
     // even when shape-sensitive UP produced the general Function interface.
     if join.interface("dart:core", "Function")
         && matches!(context, ResolvedType::Function { .. })
-        && types
-            .iter()
-            .all(|ty| signatures.subtype(ty, context, model) == Truth::Yes)
+        && types.iter().all(|ty| {
+            signatures.relation(ty, crate::TypeRelation::SubtypeOf(context), model) == Truth::Yes
+        })
     {
         return context.clone();
     }
-    match signatures.subtype(&join, context, model) {
+    match signatures.relation(&join, crate::TypeRelation::SubtypeOf(context), model) {
         Truth::Yes => join,
         Truth::No
-            if types
-                .iter()
-                .all(|ty| signatures.subtype(ty, context, model) == Truth::Yes) =>
+            if types.iter().all(|ty| {
+                signatures.relation(ty, crate::TypeRelation::SubtypeOf(context), model)
+                    == Truth::Yes
+            }) =>
         {
             context.clone()
         }

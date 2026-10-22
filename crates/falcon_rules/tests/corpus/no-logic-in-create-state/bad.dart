@@ -40,3 +40,19 @@ class _W2State extends State<W2> { void init() {} }
 class _W3State extends State<W3> {}
 class _W4State extends State<W4> { _W4State(Object value); }
 class _W5State extends State<W5> { int counter = 0; }
+
+// A fully known hierarchy proves that the constructed type is not a State.
+class W6 extends StatefulWidget {
+  @override
+  State<W6> createState() => _NotAState(); /* expect: no-logic-in-create-state */
+}
+
+class W7 extends StatefulWidget {
+  @override
+  State<W7> createState() {
+    return new _NotAState(); /* expect: no-logic-in-create-state */
+  }
+}
+
+class _NonStateBase {}
+class _NotAState extends _NonStateBase {}

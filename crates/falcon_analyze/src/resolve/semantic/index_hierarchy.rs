@@ -3,7 +3,7 @@ use super::*;
 use std::ops::ControlFlow;
 
 impl SignatureIndex {
-    pub fn unrelated(
+    pub(super) fn instantiated_unrelated(
         &self,
         left: &ResolvedType,
         right: &ResolvedType,
@@ -21,13 +21,13 @@ impl SignatureIndex {
         ) = (left, right)
         {
             if let Some(instantiated) = self.instantiated_identity(left, right_identity, model) {
-                return model.unrelated(&instantiated, right);
+                return model.structural_unrelated(&instantiated, right);
             }
             if let Some(instantiated) = self.instantiated_identity(right, left_identity, model) {
-                return model.unrelated(left, &instantiated);
+                return model.structural_unrelated(left, &instantiated);
             }
         }
-        model.unrelated(left, right)
+        model.structural_unrelated(left, right)
     }
 
     /// Whether the supertype graph of `identity` reaches a cycle.
@@ -114,6 +114,7 @@ impl SignatureIndex {
                     .map(|(_, supertypes)| supertypes.as_slice())
             },
             matches,
+            |identity, _| !matches!(identity, DeclarationIdentity::Package { .. }),
         )
     }
 
@@ -131,14 +132,16 @@ impl SignatureIndex {
                     .and_then(|facts| facts.member_supertypes.as_deref())
             },
             matches,
+            |identity, _| !matches!(identity, DeclarationIdentity::Package { .. }),
         )
     }
 
-    fn ancestor_matches<'s>(
+    pub(super) fn ancestor_matches<'s>(
         &'s self,
         identity: &'s DeclarationIdentity,
         edges: impl Fn(&DeclarationIdentity) -> Option<&'s [ResolvedType]>,
         matches: &impl Fn(&DeclarationIdentity) -> bool,
+        complete_edges: impl Fn(&DeclarationIdentity, &[ResolvedType]) -> bool,
     ) -> Truth {
         match hierarchy::walk(identity, |identity, stack| {
             if matches(identity) {
@@ -147,7 +150,7 @@ impl SignatureIndex {
             let mut complete = true;
             match edges(identity) {
                 Some(supertypes) => {
-                    complete &= !matches!(identity, DeclarationIdentity::Package { .. });
+                    complete &= complete_edges(identity, supertypes);
                     for supertype in supertypes {
                         match supertype {
                             ResolvedType::Interface { identity, .. } => stack.push(identity),

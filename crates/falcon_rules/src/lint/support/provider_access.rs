@@ -1,6 +1,8 @@
 //! Resolved Provider access and widget build contexts.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth, TypeRelation,
+};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -159,7 +161,11 @@ fn inside_build(expression: Expr<'_>, state: &SemanticState<'_>) -> Option<bool>
             return targets
                 .iter()
                 .any(|target| {
-                    state.signatures.is_subtype_of(owner, target, &state.model) == Truth::Yes
+                    state.signatures.relation(
+                        owner,
+                        TypeRelation::SubtypeOfDeclaration(target),
+                        &state.model,
+                    ) == Truth::Yes
                 })
                 .then_some(true);
         }
