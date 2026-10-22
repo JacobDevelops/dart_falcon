@@ -635,3 +635,42 @@ void main() { Holder()..callback()(); }
         1,
     );
 }
+
+#[test]
+fn existing_variable_checks_long_initializer_and_repeated_chains() {
+    let chain = format!("{}x", "x + ".repeat(15_999));
+    let source = format!(
+        "int sum() {{\n  final x = 1;\n  final cached = {chain};\n  \
+         return {chain}; /* expect: use-existing-variable */\n}}\n",
+    );
+    assert_lints("use-existing-variable", &source, 1);
+}
+
+#[test]
+fn existing_variable_summaries_preserve_mutation_promotion_and_const_checks() {
+    assert_lints(
+        "use-existing-variable",
+        r#"
+void writes() {
+  var x = 1;
+  final cached = x + 1;
+  print(x + (x = 2) + (x + 1));
+}
+void promoted(Object value) {
+  if (value is! String) return;
+  final cached = value.length;
+  value is! String || value.length == cached; /* expect: use-existing-variable */
+}
+int multipleDeclarators() {
+  final x = 1, cached = x + 1;
+  return x + 1; /* expect: use-existing-variable */
+}
+int constants() {
+  final cached = 2 + 3;
+  const value = (2 + 3) * 4;
+  return value;
+}
+"#,
+        2,
+    );
+}

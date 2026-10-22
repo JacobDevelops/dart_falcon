@@ -1798,3 +1798,88 @@ class Owner {
     );
     assert_eq!(observed.calls, 18);
 }
+
+#[test]
+fn binary_chains_carry_evaluated_receiver_types_across_local_writes() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let writes = 8_000;
+    let source = format!(
+        "class A {{ A operator +(Object other) => this; }} \
+         class B {{ B operator +(B other) => this; }} \
+         T rhs<T>() => throw 0; \
+         T fallback<T>() => throw 0; T tail<T>() => throw 0; \
+         void typedOptional(int x, int? y) {{ x + (y ?? fallback()) & tail(); }} \
+         void promoted(dynamic a) {{ if (a is A) {{ a + (a = B()) + rhs(); }} }} \
+         void parenthesized(dynamic a) {{ if (a is A) {{ (a + (a = B())) + rhs(); }} }} \
+         void long(int a, int? y) {{ {}a; }} \
+         void optional(int? a, int? y) {{ {}a; }} \
+         void nested(int a) {{ {}a{}; }}",
+        "a + (y = 1).hashCode + ".repeat(writes),
+        "a ?? (y = 1) ?? ".repeat(writes),
+        "a + (".repeat(16),
+        ")".repeat(16),
+    );
+    let result = parse(&source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    #[derive(Default)]
+    struct Observed {
+        writes: usize,
+        typed_optional: usize,
+        rhs: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::Assign(assignment) = node
+                && matches!(assignment.target(), Expr::Ident(name) if name.name() == "y")
+            {
+                self.writes += 1;
+            }
+            if let Expr::Call(call) = node
+                && matches!(call.callee(), Expr::Ident(name) if name.name() == "rhs")
+            {
+                // The evaluated A result supplies Object even after the RHS assigns B.
+                assert_eq!(
+                    state.expected(),
+                    Some(&state.model.core_type("Object", false)),
+                );
+                self.rhs += 1;
+            }
+            if let Expr::Call(call) = node
+                && matches!(call.callee(), Expr::Ident(name) if name.name() == "tail")
+            {
+                // Contextual num fallback makes the + result num, which has no & operator.
+                assert_eq!(state.expected(), Some(&ResolvedType::UNKNOWN));
+                self.typed_optional += 1;
+            }
+        }
+    }
+    let program = parsed.program();
+    let mut observed = Observed::default();
+    visit_program(
+        &mut observed,
+        program,
+        SemanticState::new(program, &context).unwrap(),
+    );
+    assert_eq!(observed.writes, writes * 2);
+    assert_eq!(observed.rhs, 2);
+    assert_eq!(observed.typed_optional, 1);
+}

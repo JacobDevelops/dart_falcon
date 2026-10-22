@@ -20,13 +20,13 @@ pub use library::{
     LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, is_generated_dart_file,
     lexical_normalize, library_unit,
 };
-pub(crate) use semantic::ResolvedTypeKind;
 pub use semantic::{
     ConstConstructorBody, DeclarationFacts, FunctionTypeShape, InferenceContext, MemberFacts,
     ParameterContract, ParameterDefault, ParameterOwner, ResolvedInvocation, ResolvedSignature,
     ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex, TypeEnvironment,
     TypeParameterId, TypeParameterScope, TypeRelation,
 };
+pub(crate) use semantic::{ResolvedTypeKind, binary_result, null_coalesce_result};
 pub use semantic::{
     expression_has_dot_shorthand_base, expression_segments, resolve_call_constructor,
     resolve_new_constructor,

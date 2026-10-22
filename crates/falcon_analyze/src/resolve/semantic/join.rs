@@ -679,7 +679,7 @@ pub(super) fn operator_parameter_type(
 /// The static type of the binary operator `op`: the special typing of the
 /// built-in numeric and `String +` operators, else the return type of the
 /// receiver's operator method.
-pub(super) fn binary_result(
+pub(crate) fn binary_result(
     op: BinaryOp,
     left: &ResolvedType,
     right: &ResolvedType,
@@ -693,6 +693,15 @@ pub(super) fn binary_result(
     op.operator_name().map_or(ResolvedType::UNKNOWN, |name| {
         operator_return_type(left, name, signatures, model)
     })
+}
+
+pub(crate) fn null_coalesce_result(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+) -> ResolvedType {
+    contextual_join(&[left.non_null(), right.clone()], None, signatures, model)
 }
 
 /// The static type of a conditional, `??` or switch expression with branch

@@ -1301,6 +1301,8 @@ pub fn visit_program<'a, V: SemanticRuleVisitor<'a> + ?Sized>(
         break_targets: Vec::new(),
         primary_environment: None,
         primary_body_environment: None,
+        chain_result: None,
+        chain_result_needed: false,
     };
     walker.visit_program(program);
     walker.visitor.visit_program_end(&walker.state);
@@ -1355,6 +1357,8 @@ struct ScopedWalker<'visitor, 'a, V: ?Sized> {
     primary_environment: Option<TypeEnvironment>,
     /// Body blocks bind only non-declaring, non-initializing primary formals.
     primary_body_environment: Option<TypeEnvironment>,
+    chain_result: Option<ResolvedType>,
+    chain_result_needed: bool,
 }
 
 /// A statement a `break` may leave, and the states reaching it by `break`.
@@ -1385,23 +1389,53 @@ enum CallableParams<'a> {
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     fn visit_binary_chain(&mut self, root: BinaryExpr<'a>) {
         enum Pending<'a> {
-            Left(BinaryExpr<'a>),
+            Left {
+                binary: BinaryExpr<'a>,
+                result_needed: bool,
+            },
             Right {
                 binary: BinaryExpr<'a>,
+                left: ResolvedType,
                 before: Option<TypeEnvironment>,
                 left_effects: bool,
+                result_needed: bool,
             },
         }
 
-        let finish = |walker: &mut Self, pending, right_effects| {
+        let finish = |walker: &mut Self, pending, right: Option<ResolvedType>, right_effects| {
             let Pending::Right {
                 binary,
+                left,
                 before,
                 left_effects,
+                result_needed,
             } = pending
             else {
                 unreachable!("binary right operand was not visited");
             };
+            let evaluated = result_needed.then(|| match binary.op() {
+                BinaryOp::NullCoalesce => crate::resolve::null_coalesce_result(
+                    &left,
+                    &right.expect("evaluated right operand"),
+                    &walker.state.signatures,
+                    &walker.state.model,
+                ),
+                BinaryOp::EqEq
+                | BinaryOp::NotEq
+                | BinaryOp::Lt
+                | BinaryOp::Gt
+                | BinaryOp::LtEq
+                | BinaryOp::GtEq
+                | BinaryOp::And
+                | BinaryOp::Or => walker.state.model.core_type("bool", false),
+                op => crate::resolve::binary_result(
+                    op,
+                    &left,
+                    &right.expect("evaluated right operand"),
+                    &walker.state.signatures,
+                    &walker.state.model,
+                ),
+            });
             walker.state.expected.pop();
             if let Some(before) = before {
                 walker.state.environment = before.join(&walker.state.environment);
@@ -1417,20 +1451,34 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 Expr::Binary(binary),
                 None,
             );
-            left_effects || right_effects || matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)
+            (
+                evaluated,
+                left_effects
+                    || right_effects
+                    || matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq),
+            )
         };
+        let root_needed = std::mem::take(&mut self.chain_result_needed);
         let mut pending = Vec::new();
         let mut effects = false;
+        let mut evaluated = None;
         walk_expr_chain(self, Expr::Binary(root), |walker, expression| {
             // Finish completed parents before preparing the next sibling's context.
             while matches!(pending.last(), Some(Pending::Right { .. })) {
-                effects = finish(walker, pending.pop().unwrap(), effects);
+                (evaluated, effects) =
+                    finish(walker, pending.pop().unwrap(), evaluated.take(), effects);
             }
-            if let Some(Pending::Left(binary)) = pending.last()
+            if let Some(Pending::Left {
+                binary,
+                result_needed,
+            }) = pending.last()
                 && binary.right().syntax().id() == expression.syntax().id()
             {
                 let binary = *binary;
+                let result_needed = *result_needed;
                 pending.pop();
+                // Dart evaluates the receiver before the RHS can write a local.
+                let left = evaluated.take().unwrap_or(ResolvedType::UNKNOWN);
                 walker.state.expected.pop();
                 let before = binary
                     .op()
@@ -1457,12 +1505,12 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                             )
                         })
                         .cloned()
-                        .unwrap_or_else(|| walker.state.infer(binary.left())),
+                        .unwrap_or_else(|| left.clone()),
                     _ => walker
                         .state
                         .signatures
                         .resolved_member(
-                            &walker.state.infer(binary.left()),
+                            &left,
                             binary.op().operator_name().expect("operator chain"),
                             &walker.state.model,
                         )
@@ -1477,13 +1525,48 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 walker.state.expected.push(Some(expected));
                 pending.push(Pending::Right {
                     binary,
+                    left,
                     before,
                     left_effects: effects,
+                    result_needed,
                 });
             }
+            let (result_needed, context) = match pending.last() {
+                Some(Pending::Left { binary, .. }) => {
+                    (!matches!(binary.op(), BinaryOp::And | BinaryOp::Or), None)
+                }
+                Some(Pending::Right {
+                    binary,
+                    result_needed,
+                    left,
+                    ..
+                }) => (
+                    *result_needed
+                        && !matches!(
+                            binary.op(),
+                            BinaryOp::And
+                                | BinaryOp::Or
+                                | BinaryOp::EqEq
+                                | BinaryOp::NotEq
+                                | BinaryOp::Lt
+                                | BinaryOp::Gt
+                                | BinaryOp::LtEq
+                                | BinaryOp::GtEq
+                        ),
+                    if binary.op() == BinaryOp::NullCoalesce {
+                        Some(left.non_null()).filter(|ty| *ty != ResolvedType::UNKNOWN)
+                    } else {
+                        walker.state.expected().cloned()
+                    },
+                ),
+                None => (root_needed, None),
+            };
             if let Expr::Binary(binary) = expression {
                 walker.visitor.visit_expr(expression, &walker.state);
-                pending.push(Pending::Left(binary));
+                pending.push(Pending::Left {
+                    binary,
+                    result_needed,
+                });
                 walker.state.expected.push(
                     binary
                         .op()
@@ -1493,7 +1576,37 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 );
                 true
             } else {
+                let parenthesized_chain = matches!(expression, Expr::Paren(_))
+                    && matches!(expression.unparenthesized(), Expr::Binary(_));
+                // Optional RHS typing depends on its outer context, unlike operator-chain results.
+                let contextual_optional = context.as_ref().is_some_and(|ty| {
+                    !matches!(
+                        ty.kind,
+                        ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
+                    )
+                }) && matches!(expression.unparenthesized(), Expr::Binary(binary)
+                        if binary.op() == BinaryOp::NullCoalesce);
+                evaluated =
+                    (result_needed && (!parenthesized_chain || contextual_optional)).then(|| {
+                        if let Some(context) = context.as_ref().filter(|ty| {
+                            !matches!(
+                                ty.kind,
+                                ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
+                            )
+                        }) {
+                            walker.state.infer_with_context(expression, Some(context))
+                        } else {
+                            walker.state.infer(expression)
+                        }
+                    });
+                if parenthesized_chain {
+                    walker.chain_result = None;
+                    walker.chain_result_needed = result_needed && !contextual_optional;
+                }
                 walker.visit_expr(expression);
+                if parenthesized_chain && !contextual_optional {
+                    evaluated = walker.chain_result.take();
+                }
                 effects = !matches!(
                     expression,
                     Expr::Ident(_)
@@ -1506,8 +1619,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             }
         });
         while let Some(parent) = pending.pop() {
-            effects = finish(self, parent, effects);
+            (evaluated, effects) = finish(self, parent, evaluated.take(), effects);
         }
+        self.chain_result = evaluated;
     }
 
     fn with_fresh_environment(&mut self, f: impl FnOnce(&mut Self)) {

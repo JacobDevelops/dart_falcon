@@ -84,6 +84,7 @@ mod join;
 pub use index::SignatureIndex;
 pub(super) use join::operator_result;
 use join::*;
+pub(crate) use join::{binary_result, null_coalesce_result};
 
 #[cfg(test)]
 mod fixpoint_bench;
