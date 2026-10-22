@@ -40,7 +40,7 @@ crate::declare_rules! {
     prefer_immediate_return::PreferImmediateReturn => ("prefer-immediate-return", file, None, false, RuleSource::DartCodeLinter("prefer-immediate-return"));
     prefer_moving_to_variable::PreferMovingToVariable => ("prefer-moving-to-variable", resolved, None, false, RuleSource::DartCodeLinter("prefer-moving-to-variable"), options = prefer_moving_to_variable::Options);
     prefer_iterable_any::PreferIterableAny => ("prefer-iterable-any", file, None, true, RuleSource::PyramidLint("prefer_iterable_any"));
-    prefer_iterable_every::PreferIterableEvery => ("prefer-iterable-every", file, None, true, RuleSource::PyramidLint("prefer_iterable_every"));
+    prefer_iterable_every::PreferIterableEvery => ("prefer-iterable-every", resolved, None, true, RuleSource::PyramidLint("prefer_iterable_every"));
     avoid_complex_conditions::AvoidComplexConditions => ("avoid-complex-conditions", file, None, false, RuleSource::Falcon, options = avoid_complex_conditions::Options);
     avoid_complex_loop_conditions::AvoidComplexLoopConditions => ("avoid-complex-loop-conditions", file, None, false, RuleSource::Falcon, options = avoid_complex_loop_conditions::Options);
     avoid_collapsible_if::AvoidCollapsibleIf => ("avoid-collapsible-if", file, None, false, RuleSource::Falcon);

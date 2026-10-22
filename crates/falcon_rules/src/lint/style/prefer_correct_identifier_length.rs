@@ -162,12 +162,12 @@ fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &Options) -> Di
     let len = name.strip_prefix('_').unwrap_or(name).chars().count();
     let message = if len > cfg.max_length {
         format!(
-            "The {name} identifier is {len} characters long. It's recommended to decrease it to {} chars long.",
+            "The `{name}` identifier is {len} characters long. It's recommended to decrease it to {} chars long.",
             cfg.max_length
         )
     } else {
         format!(
-            "The {name} identifier is {len} characters long. It's recommended to increase it up to {} chars long.",
+            "The `{name}` identifier is {len} characters long. It's recommended to increase it up to {} chars long.",
             cfg.min_length
         )
     };

@@ -444,6 +444,8 @@ prefer-equatable-mixin/good_unresolved.dart
 prefer-any-or-every/bad.dart
 prefer-any-or-every/good.dart
 prefer-any-or-every/good_negated.dart
+prefer-iterable-every/bad.dart
+prefer-iterable-every/good.dart
 prefer-correct-error-name/bad.dart
 prefer-correct-error-name/good.dart
 prefer-correct-handler-name/bad.dart

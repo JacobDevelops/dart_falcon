@@ -2698,12 +2698,8 @@ impl<'a> SemanticModel<'a> {
     pub fn is_deprecated_constant(&self, annotation: Annotation<'_>) -> bool {
         annotation.args().is_none()
             && annotation.constructor_name().is_none()
-            && annotation
-                .name()
-                .last()
-                .is_some_and(|name| name.name() == "deprecated")
             && QualifiedName::from_identifiers(annotation.name()).is_some_and(|name| {
-                self.resolve_sdk_member(name)
+                self.resolve_sdk_annotation_constant(name)
                     .is_some_and(|identity| identity.is_sdk("dart:core", "deprecated"))
             })
     }
@@ -2785,6 +2781,93 @@ impl<'a> SemanticModel<'a> {
     ) -> Option<DeclarationIdentity> {
         self.identities
             .resolve_sdk_member(self.library?, name.into())
+    }
+
+    /// Resolve an SDK annotation constant, including one const variable alias.
+    pub fn resolve_sdk_annotation_constant<'n>(
+        &self,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
+        let name = name.into();
+        if let Some(identity) = self.resolve_sdk_member(name) {
+            return Some(identity);
+        }
+        let (owner, member) = match self.resolve_value(name) {
+            Some(identity) => (identity, None),
+            None => (
+                self.unaliased(
+                    self.resolve_name(name.prefix?)
+                        .or_else(|| self.resolve_extension(name.prefix?))?,
+                ),
+                Some(name.name),
+            ),
+        };
+        let model = self.for_declaration(&owner)?;
+        let program = model.parsed?.program();
+        let initializer = program.declarations().find_map(|declaration| {
+            let mut declarators = match (declaration, member) {
+                (TopLevelDecl::Variable(variable), None)
+                    if variable.keyword() == VarKeyword::Const =>
+                {
+                    variable.declarators()
+                }
+                (declaration, Some(member)) => {
+                    let (declared_name, mut members) = match declaration {
+                        TopLevelDecl::Class(node) => (node.name(), node.members()),
+                        TopLevelDecl::Mixin(node) => (node.name(), node.members()),
+                        TopLevelDecl::MixinClass(node) => (node.name(), node.members()),
+                        TopLevelDecl::Enum(node) => (node.name(), node.members()),
+                        TopLevelDecl::ExtensionType(node) => (node.name(), node.members()),
+                        TopLevelDecl::Extension(node) => (node.name()?, node.members()),
+                        _ => return None,
+                    };
+                    if declared_name.name() != owner.name() {
+                        return None;
+                    }
+                    let initializer = members.clone().find_map(|member_node| {
+                        let ClassMember::Field(field) = member_node else {
+                            return None;
+                        };
+                        if !field.is_static() || field.keyword() != VarKeyword::Const {
+                            return None;
+                        }
+                        field.declarators().find_map(|declarator| {
+                            (declarator.name().name() == member)
+                                .then(|| declarator.initializer())
+                                .flatten()
+                        })
+                    })?;
+                    let name = initializer_value_name(initializer)?;
+                    let root = name.prefix.unwrap_or(name.name);
+                    if let TopLevelDecl::Enum(enumeration) = declaration
+                        && enumeration
+                            .variants()
+                            .any(|variant| variant.name().name() == root)
+                    {
+                        return None;
+                    }
+                    if members.any(|member| match member {
+                        ClassMember::Field(field) => field
+                            .declarators()
+                            .any(|declarator| declarator.name().name() == root),
+                        ClassMember::Method(method) => method.name().name() == root,
+                        ClassMember::Getter(getter) => getter.name().name() == root,
+                        ClassMember::Setter(setter) => setter.name().name() == root,
+                        _ => false,
+                    }) {
+                        return None;
+                    }
+                    return Some(initializer);
+                }
+                _ => return None,
+            };
+            declarators.find_map(|declarator| {
+                (declarator.name().name() == owner.name())
+                    .then(|| declarator.initializer())
+                    .flatten()
+            })
+        })?;
+        model.resolve_sdk_member(initializer_value_name(initializer)?)
     }
 
     pub fn resolve_imported_member<'n>(
@@ -6887,7 +6970,7 @@ impl SignatureIndex {
         );
         self.add_sdk_hierarchy();
         for (identity, name, arity) in super::identity::fallback_types() {
-            if arity > 0 && !self.supertypes.contains_key(&identity) {
+            if !self.supertypes.contains_key(&identity) {
                 self.fallback_type_parameters.insert(
                     identity,
                     (0..arity)
@@ -7427,15 +7510,10 @@ impl SignatureIndex {
     }
 
     /// The number of type parameters an indexed class, mixin, enum, or
-    /// extension type declares (project, loaded external, or curated fallback);
-    /// SDK/package identities default to zero; unindexed local types return `None`.
+    /// extension type declares (project, loaded external, or curated fallback).
     pub fn type_parameter_count(&self, identity: &DeclarationIdentity) -> Option<usize> {
         self.type_parameters(identity)
             .map(|parameters| parameters.len())
-            .or(match identity {
-                DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => Some(0),
-                DeclarationIdentity::Library { .. } => None,
-            })
     }
 
     /// The declaration kind (class, mixin, enum, ...) of the indexed type
@@ -14827,15 +14905,19 @@ mod tests {
             (DeclarationIdentity::sdk("dart:js_interop", "JSPromise"), 1),
             (DeclarationIdentity::package("flutter", "State"), 1),
             (DeclarationIdentity::package("flutter", "BuildContext"), 0),
-            (DeclarationIdentity::package("flutter", "ValueNotifier"), 0),
-            (DeclarationIdentity::package("provider", "Provider"), 0),
+            (DeclarationIdentity::sdk("dart:core", "Object"), 0),
+            (DeclarationIdentity::sdk("dart:math", "Random"), 0),
         ] {
             assert_eq!(signatures.type_parameter_count(&identity), Some(arity));
         }
-        assert_eq!(
-            signatures.type_parameter_count(&DeclarationIdentity::package("unknown", "Box")),
-            Some(0),
-        );
+        for identity in [
+            DeclarationIdentity::package("flutter", "ValueNotifier"),
+            DeclarationIdentity::package("provider", "Provider"),
+            DeclarationIdentity::package("unknown", "Box"),
+            DeclarationIdentity::sdk("dart:unknown", "Box"),
+        ] {
+            assert_eq!(signatures.type_parameter_count(&identity), None);
+        }
     }
 
     #[test]
@@ -16628,6 +16710,64 @@ class SetterChild extends SetterApplication {
         let types = TypeIndex::from_program(program);
         let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
         test(program, &model);
+    }
+
+    #[test]
+    fn sdk_annotation_constants_follow_const_aliases_only() {
+        with_model(
+            "import 'dart:core' as core; import 'dart:core' hide deprecated, override; \
+             const deprecated = core.deprecated; const override = core.override; \
+             class Marks { static const old = core.deprecated; static const replacement = core.override; } \
+             class Shadowed { static const deprecated = 0; static const old = deprecated; } \
+             final mutable = core.deprecated; const fake = 0; \
+             @deprecated void old() {} @Marks.old void older() {}",
+            |program, model| {
+                for (name, sdk_name) in [
+                    ("deprecated".into(), "deprecated"),
+                    ("override".into(), "override"),
+                    (QualifiedName::prefixed("Marks", "old"), "deprecated"),
+                    (QualifiedName::prefixed("Marks", "replacement"), "override"),
+                ] {
+                    assert_eq!(
+                        model.resolve_sdk_annotation_constant(name),
+                        Some(DeclarationIdentity::sdk("dart:core", sdk_name)),
+                    );
+                }
+                for name in ["mutable", "fake"] {
+                    assert_eq!(model.resolve_sdk_annotation_constant(name), None);
+                }
+                assert_eq!(
+                    model.resolve_sdk_annotation_constant(QualifiedName::prefixed(
+                        "Shadowed", "old"
+                    )),
+                    None,
+                );
+                for declaration in program.declarations() {
+                    if let TopLevelDecl::Function(function) = declaration {
+                        assert!(
+                            model.is_deprecated_constant(function.annotations().next().unwrap())
+                        );
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn sdk_annotation_constant_aliases_respect_static_scope() {
+        with_model(
+            "class Marks { static const deprecated = 0; static const old = deprecated; } \
+             enum E { deprecated; static const old = deprecated; }",
+            |_, model| {
+                for owner in ["Marks", "E"] {
+                    assert_eq!(
+                        model
+                            .resolve_sdk_annotation_constant(QualifiedName::prefixed(owner, "old")),
+                        None,
+                    );
+                }
+            },
+        );
     }
 
     #[test]

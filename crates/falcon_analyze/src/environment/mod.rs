@@ -122,22 +122,27 @@ impl AnalysisEnvironment {
     /// known directories and contexts are kept, so context indices stay valid.
     pub fn extend<'a>(&mut self, paths: impl IntoIterator<Item = &'a Path>) {
         for path in paths {
+            let normalized = crate::canonical_or_lexical(&package_config::absolute(path));
+            let package = self.package_metadata(&normalized);
+            let package_directory = normalized.parent().unwrap_or(Path::new(""));
+            if !self.directory_packages.contains_key(package_directory) {
+                self.directory_packages
+                    .insert(package_directory.to_path_buf(), package.clone());
+            }
             let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
             if self.directories.contains_key(&directory) {
                 continue;
             }
-            let package = self.package_metadata(path);
             if let Some(package) = &package {
                 self.root_candidates
                     .insert(package.manifest.parent().unwrap().join("lib"));
             }
             if let Some(alias) = package
                 .as_ref()
-                .and_then(|package| package.directory_alias(&directory))
+                .and_then(|package| package.directory_alias(package_directory))
             {
                 self.directory_packages.insert(alias, package.clone());
             }
-            self.directory_packages.insert(directory.clone(), package);
             for ancestor in directory.ancestors() {
                 self.config_candidates
                     .insert(ancestor.join(".dart_tool/package_config.json"));
@@ -294,19 +299,21 @@ impl AnalysisEnvironment {
 
     /// Package metadata captured during discovery, without rule-time manifest I/O.
     pub fn package(&self, path: &Path) -> Option<&PackageMetadata> {
-        let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
-        self.directory_packages.get(&directory)?.as_deref()
+        let path = crate::canonical_or_lexical(&package_config::absolute(path));
+        let directory = path.parent().unwrap_or(Path::new(""));
+        self.directory_packages.get(directory)?.as_deref()
     }
 
     /// Bind cached package metadata to one file's normalized location.
     /// External directories are discovered lazily and shared across file contexts.
     pub fn file_package(&self, path: &Path) -> FilePackage {
-        FilePackage::new(path, self.package_metadata(path))
+        let path = crate::canonical_or_lexical(&package_config::absolute(path));
+        FilePackage::new(&path, self.package_metadata(&path))
     }
 
     fn package_metadata(&self, path: &Path) -> Option<Arc<PackageMetadata>> {
-        let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
-        if let Some(package) = self.directory_packages.get(&directory) {
+        let directory = path.parent().unwrap_or(Path::new(""));
+        if let Some(package) = self.directory_packages.get(directory) {
             return package.clone();
         }
         if let Some(package) = self
@@ -314,11 +321,11 @@ impl AnalysisEnvironment {
             .lock()
             .unwrap()
             .directories
-            .get(&directory)
+            .get(directory)
         {
             return package.clone();
         }
-        let package = packages::enclosing_pubspec(path).map(|manifest| {
+        let package = packages::enclosing_pubspec_normalized(path).map(|manifest| {
             let cached = self
                 .package_discovery
                 .lock()
@@ -335,7 +342,7 @@ impl AnalysisEnvironment {
         });
         discovery
             .directories
-            .entry(directory)
+            .entry(directory.to_path_buf())
             .or_insert(package)
             .clone()
     }

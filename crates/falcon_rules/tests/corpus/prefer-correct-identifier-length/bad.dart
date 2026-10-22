@@ -1,7 +1,7 @@
 // Bad: too-short variable declarations, accessor names and enum constants.
 
 void example() {
-  var a = compute(); /* expect: prefer-correct-identifier-length */
+  var a = compute(); /* expect: prefer-correct-identifier-length, msg: "The `a` identifier is 1 characters long. It's recommended to increase it up to 3 chars long." */
   final xy = a; /* expect: prefer-correct-identifier-length */
   print(xy);
 }

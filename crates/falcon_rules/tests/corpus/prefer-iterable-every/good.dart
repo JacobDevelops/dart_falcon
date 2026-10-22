@@ -47,3 +47,35 @@ void existentialChecks(List<int> items) {
   final empty = <int>[].every((x) => !(x > 0));
   print([hasPositive, parenthesized, nested, allNonPositive, empty]);
 }
+
+class FakeString {
+  String where(bool Function(int) predicate) => '';
+}
+
+class FakeMap {
+  Map<int, int> where(bool Function(int) predicate) => {};
+}
+
+void unrelatedReceivers(
+  List<int> xs,
+  List<int> ys,
+  List<int> Function() source,
+  FakeString text,
+  FakeMap map,
+) {
+  final textEmpty = text.where((x) => x > 0).isEmpty;
+  final mapEmpty = map.where((x) => x > 0).isEmpty;
+  final textLength = text.where((x) => x > 0).length == xs.length;
+  final mapLength = map.where((x) => x > 0).length == xs.length;
+  final unrelated = xs.where((x) => x > 0).length == ys.length;
+  final repeatedCall = source().where((x) => x > 0).length == source().length;
+}
+
+void nullableChains(List<int>? items, List<int> values) {
+  final nullableFilter = items?.where((x) => x > 0).isEmpty;
+  final nullableEmpty = values.where((x) => x > 0)?.isEmpty;
+  final nullableLength =
+      values.where((x) => x > 0)?.length == values.length;
+  final nullableOriginal =
+      values.where((x) => x > 0).length == values?.length;
+}

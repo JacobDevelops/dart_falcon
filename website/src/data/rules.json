@@ -1838,7 +1838,7 @@
       "upstreamUrl": null
     },
     "description": "Flags an `async` function whose body is a single `return await ...;`.",
-    "docs": "Flags an `async` function whose body is a single `return await ...;`.\n\nWhen a function does nothing with the awaited value but return it, the\n`async`/`await` round-trip is redundant: returning the `Future` directly is\nequivalent and skips an extra microtask hop and stack frame. The rule fires\non a top-level function or method marked `async` whose block body is exactly\none statement of the form `return await <expr>;`. Local functions and\nanonymous closures are not checked.",
+    "docs": "Flags an `async` function whose body is a single `return await ...;`.\n\nReturning the `Future` directly can simplify these wrappers, but synchronous\nthrows then escape instead of completing the returned future with an error.\nOnly top-level functions and methods with a single `return await` statement\nare checked, not local functions or anonymous closures.",
     "examples": {
       "bad": "// Bad: async with only one await and no error handling\nFuture<String> getName() async {\n  return await db.getName();\n}\n\nFuture<int> getValue() async {\n  return await compute();\n}\n\nclass Service {\n  Future<User> getUser(String id) async {\n    return await repository.fetchUser(id);\n  }\n\n  Future<List<String>> getNames() async {\n    return await api.names();\n  }\n}\n\nFuture<dynamic> fetch(String url) async {\n  return await http.get(url);\n}\n\nFuture<String> transform(String input) async {\n  return await processString(input);\n}",
       "good": "// Good: removing unnecessary async/await\nFuture<String> getName() => db.getName();\n\nFuture<int> getValue() => compute();\n\nclass Service {\n  Future<User> getUser(String id) => repository.fetchUser(id);\n\n  Future<List<String>> getNames() => api.names();\n}\n\nFuture<dynamic> fetch(String url) => http.get(url);\n\nFuture<String> transform(String input) => processString(input);\n\n// OK: async with error handling\nFuture<String> safeGetName() async {\n  try {\n    return await db.getName();\n  } catch (e) {\n    return 'Default';\n  }\n}\n\n// OK: async with multiple awaits\nFuture<User> buildUser(String id) async {\n  final userData = await repository.fetchUser(id);\n  final preferences = await repository.fetchPreferences(id);\n  return User(userData, preferences);\n}\n\n// OK: async with additional logic\nFuture<String> processName() async {\n  final name = await db.getName();\n  print('Loaded: $name');\n  return name.toUpperCase();\n}",
@@ -3502,10 +3502,10 @@
       "upstreamUrl": "https://pub.dev/packages/pyramid_lint"
     },
     "description": "Flags `iterable.where(predicate).isEmpty` and filtered-length comparisons.",
-    "docs": "Flags `iterable.where(predicate).isEmpty` and filtered-length comparisons.\n\nAn empty filtered iterable means every element fails the predicate. Prefer\n`iterable.every((element) => !predicate(element))` to express that condition\ndirectly. When a filtered length equals the original iterable's length, use\n`iterable.every(predicate)` instead. Both forms can stop at the first failure.",
+    "docs": "Flags `iterable.where(predicate).isEmpty` and filtered-length comparisons.\n\nAn empty filtered iterable means every element fails the predicate. Prefer\n`iterable.every((element) => !predicate(element))` to express that condition\ndirectly. When a filtered length equals the original iterable's length, use\n`iterable.every(predicate)` instead. Both forms can stop at the first failure.\nOnly resolved SDK `Iterable.where` calls are checked. Length comparisons\nrequire the same simple receiver or explicit `this` field on both sides.",
     "examples": {
-      "bad": "// Bad: filtered emptiness means every item fails the predicate.\nvoid validateItems(List<int> items) {\n  if (items.where((x) => x > 0).isEmpty) {\n    print('No items are positive');\n  }\n}\n\n// Bad: .where().length == list.length pattern\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.where((v) => v.isNotEmpty).length == values.length;\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Bad: the predicate must be negated when replacing filtered emptiness.\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allOdd = data.where((n) => n % 2 == 0).isEmpty;\n}\n\n// Bad: nested where with length comparison\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.where((row) => row.isNotEmpty).length == matrix.length) {\n    print('All rows are non-empty');\n  }\n}\n\n// Bad: where with complex predicate and length check\nvoid checkAllPositive(List<int> numbers) {\n  final allPositive = numbers.where((n) => n > 0 && n < 100).length == numbers.length;\n}\n\n// Bad: filtered emptiness in a variable declaration.\nvoid verifyList(List<String> items) {\n  bool allEmpty = items.where((i) => i.isNotEmpty).isEmpty;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, List<int> items) {\n  final (ra, _) = (items.where((x) => x > 1).isEmpty, 0);\n  lbl: {\n    final rb = items.where((x) => x > 1).isEmpty;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => items.where((x) => x > 1).isEmpty,\n    _ => null,\n  };\n  final rd = switch (items.where((x) => x > 1).isEmpty) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) items.where((x) => x > 1).isEmpty];\n  final rf = [...[items.where((x) => x > 1).isEmpty]];\n  final rg = (p: items.where((x) => x > 1).isEmpty, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}\n\nbool parenthesized(List<int> items) =>\n    (items.where((x) => x > 0).isEmpty);\n\nvoid universalComparisons(List<int> items) {\n  final equalsTrue = items.where((x) => x > 0).isEmpty == true;\n  final differsFalse = items.where((x) => x > 0).isEmpty != false;\n  final reversedTrue = true == items.where((x) => x > 0).isEmpty;\n  final reversedFalse = false != (items.where((x) => x > 0).isEmpty);\n  final negatedComparison = !(items.where((x) => x > 0).isEmpty == false);\n  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) == false;\n  final doubleNegation = !(!items.where((x) => x > 0).isEmpty);\n}",
-      "good": "// Good: using .every() for a universal predicate.\nvoid validateItems(List<int> items) {\n  if (items.every((x) => x > 0)) {\n    print('All items are positive');\n  }\n}\n\n// Good: .every() pattern for checking all elements\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.every((v) => v.isNotEmpty);\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Good: assignment with .every()\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allEven = data.every((n) => n % 2 == 0);\n}\n\n// Good: nested every() instead of where().length\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.every((row) => row.isNotEmpty)) {\n    print('All rows are non-empty');\n  }\n}\n\n// Good: other iterable methods are fine\nvoid useOtherMethods(List<int> numbers) {\n  final filtered = numbers.where((n) => n > 0).toList();\n  final hasAny = numbers.any((n) => n > 10);\n}\n\n// Negated filtered emptiness is any(predicate), not every(predicate).\nvoid existentialChecks(List<int> items) {\n  final hasPositive = !items.where((x) => x > 0).isEmpty;\n  final parenthesized = !(items.where((x) => x > 0).isEmpty);\n  final nested = !((items.where((x) => x > 0).isEmpty));\n  final comparedFalse = items.where((x) => x > 0).isEmpty == false;\n  final comparedTrue = items.where((x) => x > 0).isEmpty != true;\n  final reversedFalse = false == (items.where((x) => x > 0).isEmpty);\n  final reversedTrue = true != ((items.where((x) => x > 0).isEmpty));\n  final negatedComparison = !(items.where((x) => x > 0).isEmpty == true);\n  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) != false;\n  final allNonPositive = items.every((x) => !(x > 0));\n  final empty = <int>[].every((x) => !(x > 0));\n  print([hasPositive, parenthesized, nested, allNonPositive, empty]);\n}",
+      "bad": "// Bad: filtered emptiness means every item fails the predicate.\nvoid validateItems(List<int> items) {\n  if (items.where((x) => x > 0).isEmpty) {\n    print('No items are positive');\n  }\n}\n\n// Bad: .where().length == list.length pattern\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.where((v) => v.isNotEmpty).length == values.length;\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Bad: the predicate must be negated when replacing filtered emptiness.\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allOdd = data.where((n) => n % 2 == 0).isEmpty;\n}\n\n// Bad: nested where with length comparison\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.where((row) => row.isNotEmpty).length == matrix.length) {\n    print('All rows are non-empty');\n  }\n}\n\n// Bad: where with complex predicate and length check\nvoid checkAllPositive(List<int> numbers) {\n  final allPositive = numbers.where((n) => n > 0 && n < 100).length == numbers.length;\n}\n\n// Bad: filtered emptiness in a variable declaration.\nvoid verifyList(List<String> items) {\n  bool allEmpty = items.where((i) => i.isNotEmpty).isEmpty;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, List<int> items) {\n  final (ra, _) = (items.where((x) => x > 1).isEmpty, 0);\n  lbl: {\n    final rb = items.where((x) => x > 1).isEmpty;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => items.where((x) => x > 1).isEmpty,\n    _ => null,\n  };\n  final rd = switch (items.where((x) => x > 1).isEmpty) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) items.where((x) => x > 1).isEmpty];\n  final rf = [...[items.where((x) => x > 1).isEmpty]];\n  final rg = (p: items.where((x) => x > 1).isEmpty, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}\n\nbool parenthesized(List<int> items) =>\n    (items.where((x) => x > 0).isEmpty);\n\nvoid universalComparisons(List<int> items) {\n  final equalsTrue = items.where((x) => x > 0).isEmpty == true;\n  final differsFalse = items.where((x) => x > 0).isEmpty != false;\n  final reversedTrue = true == items.where((x) => x > 0).isEmpty;\n  final reversedFalse = false != (items.where((x) => x > 0).isEmpty);\n  final negatedComparison = !(items.where((x) => x > 0).isEmpty == false);\n  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) == false;\n  final doubleNegation = !(!items.where((x) => x > 0).isEmpty);\n}\n\nclass CollectionOwner {\n  final List<int> items = [];\n  final List<int> others = [];\n\n  bool allPositive() =>\n      this.items.where((x) => x > 0).length == this.items.length;\n\n  bool unrelated() =>\n      this.items.where((x) => x > 0).length == this.others.length;\n}",
+      "good": "// Good: using .every() for a universal predicate.\nvoid validateItems(List<int> items) {\n  if (items.every((x) => x > 0)) {\n    print('All items are positive');\n  }\n}\n\n// Good: .every() pattern for checking all elements\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.every((v) => v.isNotEmpty);\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Good: assignment with .every()\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allEven = data.every((n) => n % 2 == 0);\n}\n\n// Good: nested every() instead of where().length\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.every((row) => row.isNotEmpty)) {\n    print('All rows are non-empty');\n  }\n}\n\n// Good: other iterable methods are fine\nvoid useOtherMethods(List<int> numbers) {\n  final filtered = numbers.where((n) => n > 0).toList();\n  final hasAny = numbers.any((n) => n > 10);\n}\n\n// Negated filtered emptiness is any(predicate), not every(predicate).\nvoid existentialChecks(List<int> items) {\n  final hasPositive = !items.where((x) => x > 0).isEmpty;\n  final parenthesized = !(items.where((x) => x > 0).isEmpty);\n  final nested = !((items.where((x) => x > 0).isEmpty));\n  final comparedFalse = items.where((x) => x > 0).isEmpty == false;\n  final comparedTrue = items.where((x) => x > 0).isEmpty != true;\n  final reversedFalse = false == (items.where((x) => x > 0).isEmpty);\n  final reversedTrue = true != ((items.where((x) => x > 0).isEmpty));\n  final negatedComparison = !(items.where((x) => x > 0).isEmpty == true);\n  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) != false;\n  final allNonPositive = items.every((x) => !(x > 0));\n  final empty = <int>[].every((x) => !(x > 0));\n  print([hasPositive, parenthesized, nested, allNonPositive, empty]);\n}\n\nclass FakeString {\n  String where(bool Function(int) predicate) => '';\n}\n\nclass FakeMap {\n  Map<int, int> where(bool Function(int) predicate) => {};\n}\n\nvoid unrelatedReceivers(\n  List<int> xs,\n  List<int> ys,\n  List<int> Function() source,\n  FakeString text,\n  FakeMap map,\n) {\n  final textEmpty = text.where((x) => x > 0).isEmpty;\n  final mapEmpty = map.where((x) => x > 0).isEmpty;\n  final textLength = text.where((x) => x > 0).length == xs.length;\n  final mapLength = map.where((x) => x > 0).length == xs.length;\n  final unrelated = xs.where((x) => x > 0).length == ys.length;\n  final repeatedCall = source().where((x) => x > 0).length == source().length;\n}\n\nvoid nullableChains(List<int>? items, List<int> values) {\n  final nullableFilter = items?.where((x) => x > 0).isEmpty;\n  final nullableEmpty = values.where((x) => x > 0)?.isEmpty;\n  final nullableLength =\n      values.where((x) => x > 0)?.length == values.length;\n  final nullableOriginal =\n      values.where((x) => x > 0).length == values?.length;\n}",
       "crossFile": null
     },
     "diagnostics": [
@@ -3633,6 +3633,12 @@
         "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
         "line": 71,
         "column": 29,
+        "file": null
+      },
+      {
+        "message": "Use `every(predicate)` instead of comparing the filtered and original iterable lengths.",
+        "line": 79,
+        "column": 7,
         "file": null
       }
     ]
@@ -28961,145 +28967,145 @@
     },
     "diagnostics": [
       {
-        "message": "The a identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `a` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 4,
         "column": 7,
         "file": null
       },
       {
-        "message": "The xy identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `xy` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 5,
         "column": 9,
         "file": null
       },
       {
-        "message": "The m identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `m` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 10,
         "column": 7,
         "file": null
       },
       {
-        "message": "The n identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `n` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 12,
         "column": 14,
         "file": null
       },
       {
-        "message": "The v identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `v` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 14,
         "column": 7,
         "file": null
       },
       {
-        "message": "The i identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `i` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 19,
         "column": 12,
         "file": null
       },
       {
-        "message": "The s identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `s` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 24,
         "column": 13,
         "file": null
       },
       {
-        "message": "The m identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `m` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 24,
         "column": 16,
         "file": null
       },
       {
-        "message": "The l identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `l` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 24,
         "column": 19,
         "file": null
       },
       {
-        "message": "The a identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `a` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 29,
         "column": 10,
         "file": null
       },
       {
-        "message": "The b identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `b` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 29,
         "column": 13,
         "file": null
       },
       {
-        "message": "The c identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `c` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 30,
         "column": 10,
         "file": null
       },
       {
-        "message": "The d identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `d` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 30,
         "column": 13,
         "file": null
       },
       {
-        "message": "The e identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `e` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 31,
         "column": 10,
         "file": null
       },
       {
-        "message": "The f identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `f` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 31,
         "column": 14,
         "file": null
       },
       {
-        "message": "The gg identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `gg` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 38,
         "column": 11,
         "file": null
       },
       {
-        "message": "The hh identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `hh` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 42,
         "column": 11,
         "file": null
       },
       {
-        "message": "The aa identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `aa` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 49,
         "column": 9,
         "file": null
       },
       {
-        "message": "The bb identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `bb` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 55,
         "column": 11,
         "file": null
       },
       {
-        "message": "The cc identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `cc` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 60,
         "column": 11,
         "file": null
       },
       {
-        "message": "The dd identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `dd` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 65,
         "column": 11,
         "file": null
       },
       {
-        "message": "The ee identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `ee` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 74,
         "column": 11,
         "file": null
       },
       {
-        "message": "The ff identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `ff` identifier is 2 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 82,
         "column": 11,
         "file": null
       },
       {
-        "message": "The w identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
+        "message": "The `w` identifier is 1 characters long. It's recommended to increase it up to 3 chars long.",
         "line": 88,
         "column": 12,
         "file": null

@@ -70,3 +70,14 @@ void universalComparisons(List<int> items) {
   final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) == false; /* expect: prefer-iterable-every */
   final doubleNegation = !(!items.where((x) => x > 0).isEmpty); /* expect: prefer-iterable-every */
 }
+
+class CollectionOwner {
+  final List<int> items = [];
+  final List<int> others = [];
+
+  bool allPositive() =>
+      this.items.where((x) => x > 0).length == this.items.length; /* expect: prefer-iterable-every */
+
+  bool unrelated() =>
+      this.items.where((x) => x > 0).length == this.others.length;
+}

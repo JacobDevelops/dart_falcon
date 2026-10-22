@@ -1,11 +1,9 @@
 //! Flags an `async` function whose body is a single `return await ...;`.
 //!
-//! When a function does nothing with the awaited value but return it, the
-//! `async`/`await` round-trip is redundant: returning the `Future` directly is
-//! equivalent and skips an extra microtask hop and stack frame. The rule fires
-//! on a top-level function or method marked `async` whose block body is exactly
-//! one statement of the form `return await <expr>;`. Local functions and
-//! anonymous closures are not checked.
+//! Returning the `Future` directly can simplify these wrappers, but synchronous
+//! throws then escape instead of completing the returned future with an error.
+//! Only top-level functions and methods with a single `return await` statement
+//! are checked, not local functions or anonymous closures.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,

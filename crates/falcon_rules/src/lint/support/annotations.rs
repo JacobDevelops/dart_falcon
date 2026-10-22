@@ -10,17 +10,9 @@ pub(crate) fn is_override(annotation: Annotation<'_>, model: SemanticModel<'_>) 
     let Some(name) = QualifiedName::from_identifiers(annotation.name()) else {
         return false;
     };
-    let identity = model
-        .resolve_value(name)
-        .or_else(|| model.resolve_name(name))
-        .or_else(|| model.resolve_imported_member(name));
-    identity
-        .as_ref()
+    model
+        .resolve_sdk_annotation_constant(name)
         .is_some_and(|identity| identity.is_sdk("dart:core", "override"))
-        || (identity.is_none()
-            && model
-                .resolve_sdk_member(name)
-                .is_some_and(|identity| identity.is_sdk("dart:core", "override")))
 }
 
 pub(crate) fn has_override<'a>(

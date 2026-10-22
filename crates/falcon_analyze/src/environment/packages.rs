@@ -56,7 +56,14 @@ impl PackageMetadata {
     /// Preserve canonical directory lookups for saved and virtual symlink aliases.
     pub(super) fn directory_alias(&self, directory: &Path) -> Option<PathBuf> {
         let canonical = canonical_or_lexical(directory);
-        (canonical != directory && canonical.starts_with(&self.root)).then_some(canonical)
+        (canonical != directory
+            && canonical.starts_with(&self.root)
+            && canonical
+                .ancestors()
+                .map(|directory| directory.join("pubspec.yaml"))
+                .find(|manifest| manifest.is_file())
+                .is_some_and(|manifest| manifest.parent() == Some(self.root.as_path())))
+        .then_some(canonical)
     }
 
     pub fn checks_flutter_web_imports(&self) -> bool {
@@ -77,9 +84,10 @@ pub struct FilePackage {
 
 impl FilePackage {
     pub fn discover(path: &Path) -> Self {
-        let package =
-            enclosing_pubspec(path).map(|manifest| Arc::new(PackageMetadata::load(&manifest)));
-        Self::new(path, package)
+        let path = canonical_or_lexical(&super::package_config::absolute(path));
+        let package = enclosing_pubspec_normalized(&path)
+            .map(|manifest| Arc::new(PackageMetadata::load(&manifest)));
+        Self::new(&path, package)
     }
 
     pub(super) fn new(path: &Path, package: Option<Arc<PackageMetadata>>) -> Self {
@@ -90,7 +98,7 @@ impl FilePackage {
                 directory: None,
             };
         }
-        let lexical = canonical_or_lexical(&super::package_config::absolute(path));
+        let lexical = path.to_path_buf();
         let directory = package.as_ref().and_then(|package| {
             lexical
                 .strip_prefix(package.manifest.parent()?)
@@ -150,8 +158,12 @@ impl FilePackage {
 /// Find the nearest manifest without resolving symlinks inside virtual sources.
 pub fn enclosing_pubspec(path: &Path) -> Option<PathBuf> {
     let path = canonical_or_lexical(path);
+    enclosing_pubspec_normalized(&path)
+}
+
+pub(super) fn enclosing_pubspec_normalized(path: &Path) -> Option<PathBuf> {
     if path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml") && path.is_file() {
-        return Some(path);
+        return Some(path.to_path_buf());
     }
     path.parent()?
         .ancestors()
@@ -346,6 +358,80 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn symlinked_files_do_not_poison_neighboring_package_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let host = root.path().join("host");
+        let target = root.path().join("target");
+        for (directory, name) in [(&host, "host"), (&target, "target")] {
+            std::fs::create_dir_all(directory.join("lib")).unwrap();
+            std::fs::write(directory.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
+        }
+        let ordinary = host.join("lib/ordinary.dart");
+        let linked = host.join("lib/linked.dart");
+        let original = target.join("lib/original.dart");
+        std::fs::write(&ordinary, "").unwrap();
+        std::fs::write(&original, "").unwrap();
+        std::os::unix::fs::symlink(&original, &linked).unwrap();
+        for paths in [
+            [linked.as_path(), ordinary.as_path()],
+            [ordinary.as_path(), linked.as_path()],
+        ] {
+            let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, |_| None);
+            for (path, expected) in [(&ordinary, "host"), (&linked, "target")] {
+                assert_eq!(environment.package(path).unwrap().identity.name, expected);
+                assert_eq!(
+                    environment.file_package(path).identity().unwrap().name,
+                    expected
+                );
+                assert_eq!(
+                    FilePackage::discover(path).identity().unwrap().name,
+                    expected
+                );
+            }
+            let lazy = AnalysisEnvironment::default();
+            for path in paths {
+                let expected = if path == linked { "target" } else { "host" };
+                assert_eq!(lazy.file_package(path).identity().unwrap().name, expected);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn virtual_directory_aliases_do_not_override_nested_package_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("vendor/nested");
+        std::fs::create_dir_all(root.path().join("lib")).unwrap();
+        std::fs::create_dir_all(nested.join("lib")).unwrap();
+        std::fs::write(root.path().join("pubspec.yaml"), "name: outer\n").unwrap();
+        std::fs::write(nested.join("pubspec.yaml"), "name: nested\n").unwrap();
+        let link = root.path().join("lib/link");
+        std::os::unix::fs::symlink(nested.join("lib"), &link).unwrap();
+        let virtual_source = link.join("unsaved.dart");
+        let source = nested.join("lib/source.dart");
+        std::fs::write(&source, "").unwrap();
+        for paths in [
+            [virtual_source.as_path(), source.as_path()],
+            [source.as_path(), virtual_source.as_path()],
+        ] {
+            let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, |_| None);
+            assert_eq!(
+                environment.file_package(&source).identity().unwrap().name,
+                "nested"
+            );
+            assert_eq!(
+                environment
+                    .file_package(&virtual_source)
+                    .identity()
+                    .unwrap()
+                    .name,
+                "outer"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn lib_symlink_retargeting_invalidates_environment_package_roots() {
         let root = tempfile::tempdir().unwrap();
         let package = root.path().join("package");
@@ -368,13 +454,13 @@ mod tests {
         assert_ne!(stamps, environment.config_stamps());
         assert_eq!(
             environment.package(&source).unwrap().identity.lib_root,
-            first
+            std::fs::canonicalize(&first).unwrap()
         );
         environment.reset();
         environment.extend([source.as_path()]);
         assert_eq!(
             environment.package(&source).unwrap().identity.lib_root,
-            second
+            std::fs::canonicalize(&second).unwrap()
         );
     }
 

@@ -3078,9 +3078,17 @@ pub(super) fn fallback_types() -> impl Iterator<Item = (DeclarationIdentity, &'s
             })
         })
         .chain(PACKAGE_TYPES.iter().flat_map(|(package, names)| {
-            names.iter().map(move |name| {
+            names.iter().filter_map(move |name| {
+                if matches!(
+                    (*package, *name),
+                    ("flutter", "ValueNotifier" | "ValueListenable" | "Animation")
+                        | ("provider", "Provider")
+                        | ("nested", "SingleChildState")
+                ) {
+                    return None;
+                }
                 let arity = usize::from(*package == "flutter" && *name == "State");
-                (DeclarationIdentity::package(package, name), *name, arity)
+                Some((DeclarationIdentity::package(package, name), *name, arity))
             })
         }))
 }

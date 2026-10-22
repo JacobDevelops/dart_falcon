@@ -43,3 +43,17 @@ void localCompleter(Completer completer) {
     completer.completeError(error);
   }
 }
+
+class Logger {
+  void error(Object error) {}
+}
+
+final logger = Logger();
+
+void swallowedByLogger() {
+  try {
+    throw 1;
+  } catch (error) { /* expect: avoid-catches-without-on-clauses */
+    logger.error(error);
+  }
+}

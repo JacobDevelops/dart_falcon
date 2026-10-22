@@ -17,7 +17,10 @@
 //!
 //! Adopted from the official `avoid_catches_without_on_clauses` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, expression_segments};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    expression_segments,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr, walk_stmt};
@@ -135,18 +138,18 @@ impl<'s, 'a> ValidUse<'s, 'a> {
                     .model
                     .resolve_dotted(&segments)
                     .map(|identity| self.state.model.unaliased(identity));
-                // Missing imports or parts cannot prove that this is a
-                // lookalike rather than the error-forwarding declaration.
+                // Missing imports or parts leave the class unresolved; fall back to its spelling.
+                let is = |class: &str, matches: &dyn Fn(&DeclarationIdentity) -> bool| {
+                    identity.as_ref().map_or(segments == [class], matches)
+                };
                 let forwards = match field.field().name() {
-                    "error" => identity
-                        .as_ref()
-                        .is_none_or(|identity| identity.is_sdk("dart:async", "Future")),
-                    "reportError" => identity
-                        .as_ref()
-                        .is_none_or(|identity| identity.is_package("flutter", "FlutterError")),
-                    "throwWithStackTrace" => identity
-                        .as_ref()
-                        .is_none_or(|identity| identity.is_sdk("dart:core", "Error")),
+                    "error" => is("Future", &|identity| identity.is_sdk("dart:async", "Future")),
+                    "reportError" => is("FlutterError", &|identity| {
+                        identity.is_package("flutter", "FlutterError")
+                    }),
+                    "throwWithStackTrace" => {
+                        is("Error", &|identity| identity.is_sdk("dart:core", "Error"))
+                    }
                     _ => false,
                 };
                 if forwards {
