@@ -134,8 +134,7 @@ fn external_source_read_and_parse_failures_warn_once() {
         let (root, app) = workspace();
         let dependency = root.path().join("cache/dep/lib/dep.dart");
         if unreadable {
-            fs::remove_file(&dependency).unwrap();
-            fs::create_dir(&dependency).unwrap();
+            fs::write(&dependency, [0xff]).unwrap();
         } else {
             fs::write(&dependency, "class Broken {").unwrap();
         }
@@ -151,7 +150,9 @@ fn external_source_read_and_parse_failures_warn_once() {
         let warnings = environment.take_warnings();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains("dep.dart"), "{warnings:?}");
-        if !unreadable {
+        if unreadable {
+            assert!(!warnings[0].contains("failed to parse"), "{warnings:?}");
+        } else {
             assert!(warnings[0].contains("failed to parse external source"));
         }
         external.extend(
@@ -237,6 +238,122 @@ fn missing_external_imports_parts_and_harmless_body_errors_are_silent() {
         |path| path == app,
     );
     assert!(!external.libraries().is_empty());
+    assert!(environment.take_warnings().is_empty());
+}
+
+#[test]
+fn empty_uri_self_imports_resolve_project_and_external_declarations_without_warnings() {
+    use falcon_analyze::QualifiedName;
+
+    let (root, app) = workspace();
+    let source = "import '' as self; import 'package:dep/dep.dart'; \
+                  class App {} self.App? app;";
+    fs::write(&app, source).unwrap();
+    let dependency = write(
+        root.path(),
+        "cache/dep/lib/dep.dart",
+        "import '' as self; class Generated {} self.Generated? binding;",
+    );
+    let parsed_result = parse(source);
+    assert!(parsed_result.errors.is_empty());
+    let parsed = Arc::new(ParsedFile {
+        source: source.into(),
+        tree: parsed_result.tree,
+    });
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
+    let mut external =
+        ExternalLibraries::load(&environment, &[(&app, parsed.program(), source)], |path| {
+            path == app
+        });
+    let identities = IdentityIndex::build(
+        &[IdentitySource {
+            path: &app,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[source],
+        &[],
+        Some(ExternalSources {
+            libraries: &external,
+            environment: &environment,
+        }),
+    );
+    let model = SemanticModel::new(&app, &parsed, &identities, None);
+    let app_identity = model.resolve_name("App").unwrap();
+    assert_eq!(
+        model.resolve_name(QualifiedName::prefixed("self", "App")),
+        Some(app_identity),
+    );
+    let dependency = canonical_or_lexical(&dependency);
+    let generated = external
+        .libraries()
+        .iter()
+        .flat_map(|library| library.files.iter())
+        .find(|file| file.path == dependency)
+        .unwrap();
+    let model = SemanticModel::new(&dependency, &generated.parsed, &identities, None);
+    let generated_identity = model.resolve_name("Generated").unwrap();
+    assert_eq!(
+        model.resolve_name(QualifiedName::prefixed("self", "Generated")),
+        Some(generated_identity),
+    );
+    assert!(environment.take_warnings().is_empty());
+    external.extend(&environment, &[(&app, parsed.program(), source)], |path| {
+        path == app
+    });
+    assert!(environment.take_warnings().is_empty());
+}
+
+#[test]
+fn directory_and_not_directory_external_imports_and_companions_are_silent() {
+    let (root, app) = workspace();
+    let directives = "import 'directory'; import 'file/child.dart'; \
+                      part 'directory'; part 'file/child.dart';";
+    let source = format!("import 'package:dep/dep.dart'; {directives}");
+    fs::write(&app, &source).unwrap();
+    write(root.path(), "cache/dep/lib/dep.dart", directives);
+    for parent in ["app/lib", "cache/dep/lib"] {
+        fs::create_dir(root.path().join(parent).join("directory")).unwrap();
+        write(root.path(), &format!("{parent}/file"), "");
+    }
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
+    let parsed = parse(&source);
+    let mut external = ExternalLibraries::load(
+        &environment,
+        &[(&app, parsed.tree.program(&source), &source)],
+        |path| path == app,
+    );
+    assert!(environment.take_warnings().is_empty());
+    external.extend(
+        &environment,
+        &[(&app, parsed.tree.program(&source), &source)],
+        |path| path == app,
+    );
+    assert!(environment.take_warnings().is_empty());
+}
+
+#[test]
+fn unreadable_project_companion_still_warns_once() {
+    let (root, app) = workspace();
+    let source = "part 'generated.dart'; class App {}";
+    fs::write(&app, source).unwrap();
+    fs::write(root.path().join("app/lib/generated.dart"), [0xff]).unwrap();
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
+    let parsed = parse(source);
+    let mut external = ExternalLibraries::load(
+        &environment,
+        &[(&app, parsed.tree.program(source), source)],
+        |path| path == app,
+    );
+    let warnings = environment.take_warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("generated.dart"), "{warnings:?}");
+    assert!(!warnings[0].contains("failed to parse"), "{warnings:?}");
+    external.extend(
+        &environment,
+        &[(&app, parsed.tree.program(source), source)],
+        |path| path == app,
+    );
     assert!(environment.take_warnings().is_empty());
 }
 

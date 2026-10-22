@@ -270,7 +270,12 @@ impl ExternalLibraries {
         let source = match crate::source::read_source(path) {
             Ok(source) => source,
             Err(error) => {
-                if error.kind() != std::io::ErrorKind::NotFound {
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::IsADirectory
+                        | std::io::ErrorKind::NotADirectory
+                ) {
                     environment.warn(path, error);
                 }
                 self.companion_dependencies.remove(path);
@@ -934,7 +939,9 @@ fn resolve(
     from: &Path,
     uri: &str,
 ) -> Option<PathBuf> {
-    let target = if uri.starts_with("dart:") {
+    let target = if uri.is_empty() {
+        from.to_path_buf()
+    } else if uri.starts_with("dart:") {
         environment.sdk_in(context)?.library(uri)?.to_path_buf()
     } else if uri.starts_with("package:") {
         environment.config_in(context)?.resolve_package_uri(uri)?
@@ -1183,7 +1190,12 @@ fn read(
     let source = match crate::source::read_source(path) {
         Ok(source) => source,
         Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
+            if !matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound
+                    | std::io::ErrorKind::IsADirectory
+                    | std::io::ErrorKind::NotADirectory
+            ) {
                 environment.warn(path, error);
             }
             return Ok(None);

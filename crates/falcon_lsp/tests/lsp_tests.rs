@@ -347,6 +347,25 @@ fn config_warnings_are_batched_and_unchanged_reload_is_quiet() {
     client.shutdown();
 }
 
+#[test]
+fn generated_empty_uri_self_import_does_not_show_configuration_warning() {
+    let mut client = TestClient::start(Duration::ZERO, None);
+    let path = client
+        .config_path()
+        .parent()
+        .unwrap()
+        .join("generated.dart");
+    let source = "import '' as self;\nclass Generated {}\nself.Generated? binding;\n";
+    fs::write(&path, source).unwrap();
+    let uri = format!("file://{}", path.display());
+    client.open(&uri, source, 1);
+    let params = client.recv_publish();
+    assert_eq!(params.uri.as_str(), uri);
+    assert_eq!(params.version, Some(1));
+    client.assert_quiet(Duration::from_millis(50));
+    client.shutdown();
+}
+
 /// didOpen publishes diagnostics for a violating file.
 #[test]
 fn did_open_publishes_diagnostics() {
