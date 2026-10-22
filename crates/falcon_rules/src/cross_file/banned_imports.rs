@@ -70,6 +70,7 @@ struct Boundary {
 impl CrossFileRule for BannedImports {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,

@@ -19,6 +19,7 @@ pub struct UnnecessaryNullable;
 impl CrossFileRule for UnnecessaryNullable {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
@@ -699,7 +700,13 @@ mod tests {
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         UnnecessaryNullable
-            .analyze_project("unnecessary-nullable", &files, &config, indexes.as_ref())
+            .analyze_project(
+                "unnecessary-nullable",
+                &falcon_analyze::AnalysisEnvironment::default(),
+                &files,
+                &config,
+                indexes.as_ref(),
+            )
             .len()
     }
 
@@ -784,7 +791,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "unnecessary-nullable requires semantic indexes")]
     fn semantic_indexes_are_required_even_for_empty_projects() {
-        UnnecessaryNullable.analyze_project("unnecessary-nullable", &[], &FalconConfig::default(), None);
+        UnnecessaryNullable.analyze_project(
+            "unnecessary-nullable",
+            &falcon_analyze::AnalysisEnvironment::default(),
+            &[],
+            &FalconConfig::default(),
+            None,
+        );
     }
 
     #[test]
@@ -963,7 +976,14 @@ mod tests {
                 }),
                 has_parse_errors: false,
             });
-            let diagnostics = registry.run_all(&files, &config, indexes.as_ref()).unwrap();
+            let diagnostics = registry
+                .run_all(
+                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &files,
+                    &config,
+                    indexes.as_ref(),
+                )
+                .unwrap();
             assert_eq!(
                 diagnostics.len(),
                 expected,

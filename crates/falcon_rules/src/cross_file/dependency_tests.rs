@@ -40,12 +40,19 @@ fn undeclared_rule_owns_overlap_but_not_executable_dev_dependencies() {
     .unwrap();
     assert_eq!(
         UndeclaredDependencies
-            .analyze_project("undeclared-dependencies", &files, &config, None)
+            .analyze_project(
+                "undeclared-dependencies",
+                &falcon_analyze::AnalysisEnvironment::default(),
+                &files,
+                &config,
+                None,
+            )
             .len(),
         2
     );
     let legacy = DependOnReferencedPackages.analyze_project(
         "depend-on-referenced-packages",
+        &falcon_analyze::AnalysisEnvironment::default(),
         &files,
         &config,
         None,
@@ -60,7 +67,13 @@ fn undeclared_rule_owns_overlap_but_not_executable_dev_dependencies() {
     .unwrap();
     assert_eq!(
         DependOnReferencedPackages
-            .analyze_project("depend-on-referenced-packages", &files, &standalone, None)
+            .analyze_project(
+                "depend-on-referenced-packages",
+                &falcon_analyze::AnalysisEnvironment::default(),
+                &files,
+                &standalone,
+                None,
+            )
             .len(),
         3
     );

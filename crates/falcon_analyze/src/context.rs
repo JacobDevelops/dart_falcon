@@ -183,8 +183,7 @@ impl<'a> AnalyzeContext<'a> {
         if path == self.file_path {
             return true;
         }
-        let mut packages = self.cache.same_package.lock().unwrap();
-        if let Some(&same_package) = packages.get(path) {
+        if let Some(&same_package) = self.cache.same_package.lock().unwrap().get(path) {
             return same_package;
         }
         let same_package = if let Some(environment) = self.environment {
@@ -197,7 +196,11 @@ impl<'a> AnalyzeContext<'a> {
                 .identity()
                 .is_some_and(|package| package.lib_root == own.lib_root)
         };
-        packages.insert(path.to_path_buf(), same_package);
+        self.cache
+            .same_package
+            .lock()
+            .unwrap()
+            .insert(path.to_path_buf(), same_package);
         same_package
     }
 

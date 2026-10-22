@@ -81,3 +81,15 @@ class Typed<T> {
   Pair<T> make() => Pair(1 as T);
   void send(void Function(Pair<T>) sink) => sink(Pair(null as T));
 }
+
+void constantPatterns(Object v) {
+  switch (v) {
+    case const (Point(1, 2)):
+      break;
+    default:
+      break;
+  }
+  if (v case const (Point.origin())) {
+    print(v);
+  }
+}

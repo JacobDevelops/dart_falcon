@@ -29,6 +29,7 @@ pub struct UnusedDependencies;
 impl CrossFileRule for UnusedDependencies {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -202,7 +203,13 @@ mod tests {
         }];
         assert!(
             UnusedDependencies
-                .analyze_project("unused-dependencies", &files, &FalconConfig::default(), None)
+                .analyze_project(
+                    "unused-dependencies",
+                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &files,
+                    &FalconConfig::default(),
+                    None,
+                )
                 .is_empty()
         );
         std::fs::write(
@@ -213,7 +220,13 @@ mod tests {
         assert!(!has_flutter_resources(&package.root));
         assert_eq!(
             UnusedDependencies
-                .analyze_project("unused-dependencies", &files, &FalconConfig::default(), None)
+                .analyze_project(
+                    "unused-dependencies",
+                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &files,
+                    &FalconConfig::default(),
+                    None,
+                )
                 .len(),
             1
         );

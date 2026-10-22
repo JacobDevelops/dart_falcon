@@ -16,6 +16,7 @@ pub struct PackageNames;
 impl CrossFileRule for PackageNames {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,

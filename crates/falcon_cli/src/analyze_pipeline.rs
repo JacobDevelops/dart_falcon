@@ -250,6 +250,7 @@ pub fn collect_check_with_sdk_locator(
 
     if collect_programs {
         match run_cross_file(
+            &environment,
             &cross_file_registry,
             &project_files,
             &config,

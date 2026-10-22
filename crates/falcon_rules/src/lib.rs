@@ -466,12 +466,13 @@ pub fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry
 ///
 /// Returns the spawn error when the rules thread cannot start.
 pub fn run_cross_file(
+    environment: &falcon_analyze::AnalysisEnvironment,
     registry: &CrossFileRuleRegistry,
     files: &[ProjectFile],
     config: &FalconConfig,
     indexes: Option<&SemanticIndexes>,
 ) -> std::io::Result<Vec<Diagnostic>> {
-    let mut diagnostics = registry.run_all(files, config, indexes)?;
+    let mut diagnostics = registry.run_all(environment, files, config, indexes)?;
     let files_by_path: HashMap<_, _> = files
         .iter()
         .map(|file| (file.path.to_string_lossy(), file))

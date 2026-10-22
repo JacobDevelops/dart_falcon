@@ -452,8 +452,14 @@ fn every_options_type_is_declared_and_loaded_options_execute() {
             .all(|diagnostic| diagnostic.rule != "config")
     );
     let registry = falcon_rules::build_cross_file_registry(&loaded.config);
-    let diagnostics =
-        falcon_rules::run_cross_file(&registry, &files, &loaded.config, indexes.as_ref()).unwrap();
+    let diagnostics = falcon_rules::run_cross_file(
+        &falcon_analyze::AnalysisEnvironment::default(),
+        &registry,
+        &files,
+        &loaded.config,
+        indexes.as_ref(),
+    )
+    .unwrap();
     assert!(
         diagnostics
             .iter()
@@ -605,7 +611,14 @@ fn cross_file_lazy_option_errors_report_base_and_override_origins() {
         }
         let config = serde_json::from_value(value).unwrap();
         let registry = falcon_rules::build_cross_file_registry(&config);
-        let diagnostics = falcon_rules::run_cross_file(&registry, &files, &config, None).unwrap();
+        let diagnostics = falcon_rules::run_cross_file(
+            &falcon_analyze::AnalysisEnvironment::default(),
+            &registry,
+            &files,
+            &config,
+            None,
+        )
+        .unwrap();
         assert_eq!(diagnostics.len(), 1, "{in_override}: {diagnostics:?}");
         let diagnostic = &diagnostics[0];
         assert_eq!(diagnostic.rule, "config");

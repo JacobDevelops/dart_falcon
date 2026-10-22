@@ -135,6 +135,7 @@ fn cross_file_registry_overwrites_incoming_diagnostic_identity() {
     impl falcon_analyze::CrossFileRule for WrongIdentityRule {
         fn prepare_project(
             &self,
+            _environment: &falcon_analyze::AnalysisEnvironment,
             _files: &[falcon_analyze::ProjectFile],
             _config: &FalconConfig,
             _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -154,7 +155,12 @@ fn cross_file_registry_overwrites_incoming_diagnostic_identity() {
     assert_eq!(registry.rules().len(), 1);
     assert_eq!(registry.rules()[0].0, "registered-project-name");
     let diagnostics = registry
-        .run_all(&[], &FalconConfig::default(), None)
+        .run_all(
+            &falcon_analyze::AnalysisEnvironment::default(),
+            &[],
+            &FalconConfig::default(),
+            None,
+        )
         .expect("cross-file rules thread starts");
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].rule, "registered-project-name");
@@ -162,6 +168,7 @@ fn cross_file_registry_overwrites_incoming_diagnostic_identity() {
 
     let direct = WrongIdentityRule.analyze_project(
         "registered-project-name",
+        &falcon_analyze::AnalysisEnvironment::default(),
         &[],
         &FalconConfig::default(),
         None,

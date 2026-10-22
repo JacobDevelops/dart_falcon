@@ -32,6 +32,7 @@ pub struct UnusedFiles;
 impl CrossFileRule for UnusedFiles {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -159,7 +160,13 @@ mod tests {
     fn flagged(files: &[ProjectFile]) -> Vec<String> {
         let cfg = FalconConfig::default();
         let mut v: Vec<String> = UnusedFiles
-            .analyze_project("unused-files", files, &cfg, None)
+            .analyze_project(
+                "unused-files",
+                &falcon_analyze::AnalysisEnvironment::default(),
+                files,
+                &cfg,
+                None,
+            )
             .into_iter()
             .map(|d| d.file_path)
             .collect();

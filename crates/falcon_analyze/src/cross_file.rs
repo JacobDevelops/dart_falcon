@@ -87,9 +87,11 @@ impl ProjectFile {
 
 pub trait CrossFileRule: Send + Sync {
     /// Provided indexes must describe the same Dart files and source revisions.
+    /// The environment must be the same package snapshot used for file analysis.
     /// Returns collector output; use a registry or [`CrossFileRuleAnalysis`] to assign ids.
     fn prepare_project(
         &self,
+        environment: &crate::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
@@ -101,6 +103,7 @@ pub trait CrossFileRuleAnalysis: CrossFileRule {
     fn analyze_project(
         &self,
         name: &'static str,
+        environment: &crate::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
@@ -111,11 +114,12 @@ impl<T: CrossFileRule + ?Sized> CrossFileRuleAnalysis for T {
     fn analyze_project(
         &self,
         name: &'static str,
+        environment: &crate::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let mut diagnostics = self.prepare_project(files, config, indexes);
+        let mut diagnostics = self.prepare_project(environment, files, config, indexes);
         for diagnostic in &mut diagnostics {
             if diagnostic.rule != CONFIG_DIAGNOSTIC_ID {
                 diagnostic.rule = name;
@@ -155,6 +159,7 @@ impl CrossFileRuleRegistry {
     /// choose which files report it with [`crate::rules_thread_diagnostic`].
     pub fn run_all(
         &self,
+        environment: &crate::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
@@ -162,7 +167,9 @@ impl CrossFileRuleRegistry {
         crate::registry::with_rules_stack(|| {
             self.rules
                 .iter()
-                .flat_map(|(name, rule)| rule.analyze_project(name, files, config, indexes))
+                .flat_map(|(name, rule)| {
+                    rule.analyze_project(name, environment, files, config, indexes)
+                })
                 .collect()
         })
     }

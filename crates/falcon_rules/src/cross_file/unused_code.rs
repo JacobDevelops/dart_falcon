@@ -39,6 +39,7 @@ struct Candidate<'a> {
 impl CrossFileRule for UnusedCode {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -252,6 +253,7 @@ mod tests {
 
         let diagnostics = super::UnusedCode.analyze_project(
             "unused-code",
+            &falcon_analyze::AnalysisEnvironment::default(),
             &files,
             &falcon_config::FalconConfig::default(),
             None,

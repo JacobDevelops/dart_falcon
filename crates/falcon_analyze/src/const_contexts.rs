@@ -5,6 +5,7 @@ use falcon_syntax::cst::visit::{
     walk_program, walk_switch_case,
 };
 use falcon_syntax::cst::*;
+use falcon_syntax::token::TokenKind;
 
 #[derive(Default)]
 struct Ranges {
@@ -158,6 +159,7 @@ impl<'a> Visitor<'a> for ConstContexts {
             Expr::Map(node) => node.is_const(),
             Expr::Set(node) => node.is_const(),
             Expr::Record(node) => node.is_const(),
+            Expr::Paren(node) => node.syntax().child_token(TokenKind::Const).is_some(),
             Expr::DotShorthand(node) => node.is_const(),
             Expr::Call(call) => {
                 matches!(call.callee().unparenthesized(), Expr::DotShorthand(shorthand) if shorthand.is_const())
@@ -195,6 +197,20 @@ mod tests {
         assert!(contexts.contains_including_explicit(&explicit));
         let start = source.rfind("Object()").unwrap();
         assert!(contexts.contains(&Span::new(start, start + "Object()".len())));
+    }
+
+    #[test]
+    fn constant_patterns_include_inner_constructors_but_not_explicit_roots() {
+        let source = "class C { const C(this.value); final int value; } void f(Object v) { switch (v) { case const (C(1)): break; } if (v case const (C(2))) {} }";
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let contexts = ConstContexts::new(parsed.tree.program(source));
+        for (pattern, constructor) in [("const (C(1))", "C(1)"), ("const (C(2))", "C(2)")] {
+            let explicit = span(source, pattern);
+            assert!(!contexts.contains(&explicit));
+            assert!(contexts.contains_including_explicit(&explicit));
+            assert!(contexts.contains(&span(source, constructor)));
+        }
     }
 
     #[test]

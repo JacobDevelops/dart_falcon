@@ -951,6 +951,7 @@ fn test_default_output_matches_ordered_sequential_diagnostics() {
     falcon_rules::apply_severities(&mut sequential, &config);
     sequential.extend(
         falcon_rules::run_cross_file(
+            &environment,
             &cross_file_registry,
             &project_files,
             &config,

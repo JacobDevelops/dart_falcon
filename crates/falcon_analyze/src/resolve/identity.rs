@@ -665,6 +665,13 @@ impl IdentityIndex {
         base: Option<Arc<Self>>,
         grouping: Option<&super::LibraryGrouping>,
     ) -> Self {
+        let packages: Vec<_> = packages
+            .iter()
+            .map(|package| PackageIdentity {
+                name: package.name.clone(),
+                lib_root: canonical_or_lexical(&package.lib_root),
+            })
+            .collect();
         let owned_grouping = grouping.is_none().then(|| {
             let files: Vec<_> = files
                 .iter()
@@ -803,7 +810,6 @@ impl IdentityIndex {
             if primary {
                 by_path.insert(canonical.clone(), FileId(index));
             }
-            paths.push(Some(canonical));
             let library_id = library;
             let library = &mut libraries[library.0];
             library.incomplete |= has_parse_errors;
@@ -819,8 +825,9 @@ impl IdentityIndex {
                 .library_directive()
                 .is_some_and(|directive| directive.name().next().is_some());
             if library.origin.is_none() && program.part_of_directive().is_none() {
-                library.uri = package_uri(path, packages);
+                library.uri = package_uri(&canonical, &packages);
             }
+            paths.push(Some(canonical));
             for declaration in program.declarations() {
                 if let TopLevelDecl::Extension(extension) = declaration
                     && let Some(name) = extension.name()
@@ -859,7 +866,7 @@ impl IdentityIndex {
         let resolver = LibraryResolver {
             by_path: &by_path,
             file_library: &file_library,
-            packages,
+            packages: &packages,
             external,
             base: base.as_deref(),
             external_file_offsets: &external_file_offsets,
@@ -967,13 +974,7 @@ impl IdentityIndex {
             ),
             memos: LookupMemos::default(),
             external: base,
-            packages: packages
-                .iter()
-                .map(|package| PackageIdentity {
-                    name: package.name.clone(),
-                    lib_root: canonical_or_lexical(&package.lib_root),
-                })
-                .collect(),
+            packages,
         };
         for (ordinal, library) in index.libraries.iter().enumerate() {
             if library.origin.is_none() {
@@ -2808,12 +2809,10 @@ pub fn import_path(from: &Path, uri: &str, packages: &[PackageIdentity]) -> Opti
 
 /// The `package:` URI naming `path` through the unique package whose `lib`
 /// directory contains it, percent-encoding each UTF-8 path segment.
+/// `path` and the package library roots must already be canonicalized.
 fn package_uri(path: &Path, packages: &[PackageIdentity]) -> Option<String> {
-    let path = canonical_or_lexical(path);
     let mut matches = packages.iter().filter_map(|package| {
-        let relative = path
-            .strip_prefix(canonical_or_lexical(&package.lib_root))
-            .ok()?;
+        let relative = path.strip_prefix(&package.lib_root).ok()?;
         let mut uri = format!("package:{}", package.name);
         for component in relative.components() {
             uri.push('/');
@@ -3498,6 +3497,24 @@ mod tests {
             name: name.to_string(),
             lib_root: PathBuf::from(lib_root),
         }
+    }
+
+    #[test]
+    fn project_library_uri_normalizes_file_and_package_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let lib_root = directory.path().join("lib");
+        std::fs::create_dir(&lib_root).unwrap();
+        std::fs::write(lib_root.join("main.dart"), "class Main {}").unwrap();
+        let file = lib_root.join("./main.dart");
+        let packages = [PackageIdentity {
+            name: "app".into(),
+            lib_root: lib_root.join("../lib"),
+        }];
+        let index = index(&[(file.to_str().unwrap(), "class Main {}")], &packages);
+        assert_eq!(
+            index.library_uri(library(&index, file.to_str().unwrap())),
+            Some("package:app/main.dart"),
+        );
     }
 
     #[test]

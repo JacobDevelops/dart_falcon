@@ -854,6 +854,10 @@ fn cross_file_corpus_matches_expectations() {
             let packages = falcon_analyze::package_identities(
                 fixture_sources.iter().map(|(path, _)| path.as_path()),
             );
+            let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+                fixture_sources.iter().map(|(path, _)| path.as_path()),
+                |_| None,
+            );
             let (_, mut files, indexes) = falcon_analyze::analyze_sequential_collecting_resolving(
                 &falcon_analyze::RuleRegistry::new(),
                 &dart_sources,
@@ -862,7 +866,7 @@ fn cross_file_corpus_matches_expectations() {
                 rule_requires_resolution(rule_name),
                 falcon_analyze::Workspace {
                     packages: &packages,
-                    environment: None,
+                    environment: Some(&environment),
                 },
             );
             files.extend(
@@ -882,7 +886,7 @@ fn cross_file_corpus_matches_expectations() {
             );
 
             let diagnostics = registry
-                .run_all(&files, &config, indexes.as_ref())
+                .run_all(&environment, &files, &config, indexes.as_ref())
                 .expect("cross-file rules thread starts");
             for (path, source) in &fixture_sources {
                 let expectations: Vec<_> = parse_expectations(source)

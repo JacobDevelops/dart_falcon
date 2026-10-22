@@ -26,6 +26,7 @@ pub struct NoImportCycles;
 impl CrossFileRule for NoImportCycles {
     fn prepare_project(
         &self,
+        environment: &AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -41,7 +42,6 @@ impl CrossFileRule for NoImportCycles {
         }
         let (paths, representatives): (Vec<PathBuf>, Vec<usize>) =
             representatives.into_iter().unzip();
-        let environment = AnalysisEnvironment::default();
         let packages: Vec<_> = paths.iter().map(|path| environment.file_package(path)).collect();
         let by_path: HashMap<&Path, usize> = paths
             .iter()
@@ -261,7 +261,57 @@ mod tests {
     }
 
     fn diagnostics(files: &[ProjectFile]) -> Vec<Diagnostic> {
-        NoImportCycles.analyze_project("no-import-cycles", files, &FalconConfig::default(), None)
+        NoImportCycles.analyze_project(
+            "no-import-cycles",
+            &AnalysisEnvironment::default(),
+            files,
+            &FalconConfig::default(),
+            None,
+        )
+    }
+
+    #[test]
+    fn project_run_uses_the_file_analysis_package_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("lib")).unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        std::fs::write(&manifest, "name: cycle\n").unwrap();
+        let files = [
+            file(
+                root.path().join("lib/a.dart").to_str().unwrap(),
+                "import 'package:cycle/b.dart';",
+            ),
+            file(
+                root.path().join("lib/b.dart").to_str().unwrap(),
+                "import 'a.dart';",
+            ),
+        ];
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(|file| file.path.as_path()),
+            |_| None,
+        );
+        std::fs::remove_file(&manifest).unwrap();
+        let mut registry = falcon_analyze::CrossFileRuleRegistry::new();
+        registry.register("no-import-cycles", Box::new(NoImportCycles));
+        let config: FalconConfig = serde_json::from_value(serde_json::json!({
+            "cross-file": { "rules": { "correctness": { "no-import-cycles": "warn" } } }
+        }))
+        .unwrap();
+        let diagnostics = crate::run_cross_file(
+            &environment,
+            &registry,
+            &files,
+            &config,
+            None,
+        )
+        .unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "no-import-cycles");
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("`lib/a.dart` -> `lib/b.dart` -> `lib/a.dart`")
+        );
     }
 
     #[test]

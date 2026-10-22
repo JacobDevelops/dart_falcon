@@ -29,6 +29,7 @@ use crate::lint::support::package_manifests::{
 impl CrossFileRule for DependOnReferencedPackages {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -192,7 +193,13 @@ mod tests {
             .collect();
         assert_eq!(
             DependOnReferencedPackages
-                .analyze_project("depend-on-referenced-packages", &files, &FalconConfig::default(), None)
+                .analyze_project(
+                    "depend-on-referenced-packages",
+                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &files,
+                    &FalconConfig::default(),
+                    None,
+                )
                 .len(),
             2
         );

@@ -937,7 +937,13 @@ impl LspState {
                 .as_ref()
                 .map(|cache| &cache.indexes)
         };
-        let diags = match run_cross_file(&self.cross_file_rules, &files, &self.config, indexes) {
+        let diags = match run_cross_file(
+            &self.environment,
+            &self.cross_file_rules,
+            &files,
+            &self.config,
+            indexes,
+        ) {
             Ok(diags) => diags,
             Err(error) => {
                 // Editors only show open buffers, so every open document carries the failure.

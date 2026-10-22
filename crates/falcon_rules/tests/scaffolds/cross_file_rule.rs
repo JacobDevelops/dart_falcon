@@ -8,6 +8,7 @@ pub struct ScaffoldRule;
 impl CrossFileRule for ScaffoldRule {
     fn prepare_project(
         &self,
+        _environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         indexes: Option<&SemanticIndexes>,
