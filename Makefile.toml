@@ -85,14 +85,15 @@ command = "${CARGO_CMD}"
 args    = [ "xtask", "validate-rules", "${@}" ]
 
 # Single dev build with bench dev-deps unified; `build` then `bench_check` compiles every library twice.
+# The zed build runs last: its mbx gc can evict the workspace target under CI's size budget.
 [tasks.ci_validate]
 script = '''
 set -eu
 target_dir="${CARGO_TARGET_DIR:-${ROOT}/target}"
 "${CARGO_CMD}" build --locked --workspace --bins --bench '*'
-"${CARGO_CMD}" build --locked --manifest-path extensions/falcon-zed/Cargo.toml --target wasm32-wasip2
 "${target_dir}/debug/xtask" validate-rules --falcon-bin "${target_dir}/debug/falcon"
 "${target_dir}/debug/xtask" docgen --check --falcon-bin "${target_dir}/debug/falcon"
+"${CARGO_CMD}" build --locked --manifest-path extensions/falcon-zed/Cargo.toml --target wasm32-wasip2
 '''
 
 [tasks.docgen]
