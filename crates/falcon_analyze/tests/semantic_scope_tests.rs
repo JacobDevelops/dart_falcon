@@ -1375,3 +1375,88 @@ fn binary_chain_visits_on_the_normal_stack() {
     assert_eq!(count.binaries, operands + 1);
     assert_eq!(count.changed, 1, "the fixture must observe a flow change");
 }
+
+#[test]
+fn flow_joins_preserve_reachable_paths_and_nested_scope_depth() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let source = r#"
+void precise(bool flag) {
+  int? value;
+  if (flag) { value = 1; } else { throw 0; }
+  expectInt(value);
+  while (true) { { int inner = 2; value = inner; break; } }
+  expectInt(value);
+  try { value = null; } finally { value = 3; }
+  expectInt(value);
+  switch (flag) {
+    case true: { int inner = 4; value = inner; break; }
+    case false: { int inner = 5; value = inner; break; }
+  }
+  expectInt(value);
+}
+void optional(bool flag) {
+  int? value;
+  while (flag) { int inner = 1; value = inner; break; }
+  expectNullable(value);
+  switch (flag) { case true: { int inner = 2; value = inner; break; } }
+  expectNullable(value);
+  try { value = 3; } catch (_) { value = null; }
+  expectNullable(value);
+}
+"#;
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    #[derive(Default)]
+    struct Observed(usize);
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let Expr::Call(call) = node else {
+                return;
+            };
+            let Expr::Ident(name) = call.callee() else {
+                return;
+            };
+            let nullable = match name.name() {
+                "expectInt" => false,
+                "expectNullable" => true,
+                _ => return,
+            };
+            let argument = call.args().positional().next().unwrap();
+            assert_eq!(
+                state.infer(argument),
+                state.model.core_type("int", nullable),
+                "{} at {:?}",
+                name.name(),
+                node.span(),
+            );
+            self.0 += 1;
+        }
+    }
+    let program = parsed.program();
+    let mut observed = Observed::default();
+    visit_program(
+        &mut observed,
+        program,
+        SemanticState::new(program, &context).unwrap(),
+    );
+    assert_eq!(observed.0, 7);
+}

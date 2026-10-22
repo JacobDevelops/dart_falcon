@@ -1,4 +1,6 @@
 //! Flow transfers used by the shared syntax visitor; no independent syntax-tree walk.
+use std::borrow::Cow;
+
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
 use falcon_syntax::cst::{
     AstChildren, BinaryOp, DartType, Expr, ForInit, ListPatternElement, LiteralPatternValue,
@@ -7,8 +9,8 @@ use falcon_syntax::cst::{
 
 use super::semantic::operator_result;
 use super::{
-    DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex, TypeEnvironment,
-    TypeParameterScope,
+    DeclarationIdentity, QualifiedName, ResolvedType, SemanticModel, SignatureIndex, Truth,
+    TypeEnvironment, TypeParameterScope,
 };
 
 pub struct FlowContext<'a, 'model> {
@@ -19,6 +21,154 @@ pub struct FlowContext<'a, 'model> {
 }
 
 impl FlowContext<'_, '_> {
+    /// Proves only spaces represented by the semantic index, never a guessed
+    /// closed subtype set. Guards cannot contribute unconditional coverage.
+    pub fn switch_is_exhaustive(
+        &self,
+        statement: falcon_syntax::cst::SwitchStmt<'_>,
+        matched: &ResolvedType,
+    ) -> bool {
+        use falcon_syntax::cst::{ConstPatternValue, LiteralPatternValue, Pattern, SwitchCaseKind};
+        let patterns = || {
+            statement
+                .cases()
+                .flat_map(|case| case.cases())
+                .filter_map(|case| match case {
+                    SwitchCaseKind::Pattern(label) if label.guard().is_none() => {
+                        Some(label.pattern())
+                    }
+                    _ => None,
+                })
+        };
+        let covers_type = |matched: &ResolvedType| {
+            patterns().any(|pattern| {
+                let target = match pattern {
+                    Pattern::Wildcard(wildcard) => {
+                        let Some(type_) = wildcard.type_() else {
+                            return true;
+                        };
+                        self.model.resolve_type_in(type_, self.type_parameters)
+                    }
+                    Pattern::Variable(variable) => {
+                        let Some(type_) = variable.type_() else {
+                            return true;
+                        };
+                        self.model.resolve_type_in(type_, self.type_parameters)
+                    }
+                    Pattern::Object(object) if object.fields().is_empty() => {
+                        self.object_pattern_type(object.type_(), matched)
+                    }
+                    _ => return false,
+                };
+                if matches!(target, ResolvedType::Unknown) {
+                    return false;
+                }
+                matched == &target
+                    || self.signatures.subtype(matched, &target, self.model) == Truth::Yes
+            })
+        };
+        if covers_type(matched) {
+            return true;
+        }
+        let covers_null = patterns().any(|pattern| {
+            matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Null))
+        });
+        if *matched == ResolvedType::Null {
+            return covers_null;
+        }
+        if matched.nullable() && !covers_null {
+            return false;
+        }
+        if matched.nullable() && covers_type(&matched.with_nullable(false)) {
+            return true;
+        }
+        let ResolvedType::Interface { identity, .. } = matched else {
+            return false;
+        };
+        if identity.is_sdk("dart:core", "bool") {
+            return [false, true].into_iter().all(|value| {
+                patterns().any(|pattern| {
+                    matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Bool(actual) if actual == value))
+                })
+            });
+        }
+        let Some(values) = self.signatures.enum_value_names(identity) else {
+            return false;
+        };
+        !values.is_empty()
+            && values.iter().all(|value| {
+                patterns().any(|pattern| {
+                    let Pattern::Const(constant) = pattern else {
+                        return false;
+                    };
+                    let ConstPatternValue::Name(names) = constant.value() else {
+                        return false;
+                    };
+                    let Some(name) = names.clone().last() else {
+                        return false;
+                    };
+                    let owner = names.clone().take(names.len() - 1);
+                    name.name() == *value
+                        && QualifiedName::from_identifiers(owner)
+                            .and_then(|owner| self.model.resolve_name(owner))
+                            .as_ref()
+                            == Some(identity)
+                })
+            })
+    }
+
+    /// Replacement paths drop deeper scopes; later joins project onto the accumulator.
+    pub(crate) fn join_paths<'a>(
+        environment: &mut TypeEnvironment,
+        paths: impl IntoIterator<Item = (Cow<'a, TypeEnvironment>, bool)>,
+        depth: usize,
+        reachable: bool,
+    ) {
+        let mut joined: Option<Cow<'_, TypeEnvironment>> =
+            reachable.then(|| Cow::Owned(std::mem::take(environment)));
+        for (mut path, completes) in paths {
+            if !completes {
+                continue;
+            }
+            joined = Some(match joined {
+                Some(previous) => Cow::Owned(previous.join(&path)),
+                None => {
+                    if path.depth() > depth {
+                        let path = path.to_mut();
+                        while path.depth() > depth {
+                            path.pop_scope();
+                        }
+                    }
+                    path
+                }
+            });
+        }
+        if let Some(joined) = joined {
+            *environment = joined.into_owned();
+        }
+    }
+
+    /// Selects completing branch ends; when both exit, retain the then state.
+    pub(crate) fn join_branches(
+        environment: &mut TypeEnvironment,
+        then_environment: TypeEnvironment,
+        then_exits: bool,
+        else_exits: bool,
+    ) {
+        if else_exits {
+            *environment = then_environment;
+        } else if !then_exits {
+            let depth = then_environment.depth();
+            let else_environment = std::mem::replace(environment, then_environment);
+            Self::join_paths(
+                environment,
+                [(Cow::Owned(else_environment), true)],
+                depth,
+                true,
+            );
+        }
+    }
+
     fn infer(&self, environment: &TypeEnvironment, expression: Expr<'_>) -> ResolvedType {
         if let Expr::Ident(name) = expression
             && !environment.is_bound(name.name())

@@ -1,3 +1,5 @@
+use super::flow::FlowContext;
+
 use super::*;
 
 impl TypeEnvironment {
@@ -304,104 +306,6 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
     }
 }
 
-impl super::flow::FlowContext<'_, '_> {
-    /// Proves only spaces represented by the semantic index, never a guessed
-    /// closed subtype set. Guards cannot contribute unconditional coverage.
-    pub fn switch_is_exhaustive(
-        &self,
-        statement: falcon_syntax::cst::SwitchStmt<'_>,
-        matched: &ResolvedType,
-    ) -> bool {
-        use falcon_syntax::cst::{ConstPatternValue, LiteralPatternValue, Pattern, SwitchCaseKind};
-        let patterns = || {
-            statement
-                .cases()
-                .flat_map(|case| case.cases())
-                .filter_map(|case| match case {
-                    SwitchCaseKind::Pattern(label) if label.guard().is_none() => {
-                        Some(label.pattern())
-                    }
-                    _ => None,
-                })
-        };
-        let covers_type = |matched: &ResolvedType| {
-            patterns().any(|pattern| {
-                let target = match pattern {
-                    Pattern::Wildcard(wildcard) => {
-                        let Some(type_) = wildcard.type_() else {
-                            return true;
-                        };
-                        self.model.resolve_type_in(type_, self.type_parameters)
-                    }
-                    Pattern::Variable(variable) => {
-                        let Some(type_) = variable.type_() else {
-                            return true;
-                        };
-                        self.model.resolve_type_in(type_, self.type_parameters)
-                    }
-                    Pattern::Object(object) if object.fields().is_empty() => {
-                        self.object_pattern_type(object.type_(), matched)
-                    }
-                    _ => return false,
-                };
-                if matches!(target, ResolvedType::Unknown) {
-                    return false;
-                }
-                matched == &target
-                    || self.signatures.subtype(matched, &target, self.model) == Truth::Yes
-            })
-        };
-        if covers_type(matched) {
-            return true;
-        }
-        let covers_null = patterns().any(|pattern| {
-            matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Null))
-        });
-        if *matched == ResolvedType::Null {
-            return covers_null;
-        }
-        if matched.nullable() && !covers_null {
-            return false;
-        }
-        if matched.nullable() && covers_type(&matched.with_nullable(false)) {
-            return true;
-        }
-        let ResolvedType::Interface { identity, .. } = matched else {
-            return false;
-        };
-        if identity.is_sdk("dart:core", "bool") {
-            return [false, true].into_iter().all(|value| {
-                patterns().any(|pattern| {
-                    matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Bool(actual) if actual == value))
-                })
-            });
-        }
-        let Some(values) = self.signatures.enum_values.get(identity) else {
-            return false;
-        };
-        !values.is_empty()
-            && values.iter().all(|value| {
-                patterns().any(|pattern| {
-                    let Pattern::Const(constant) = pattern else {
-                        return false;
-                    };
-                    let ConstPatternValue::Name(names) = constant.value() else {
-                        return false;
-                    };
-                    let Some(name) = names.clone().last() else {
-                        return false;
-                    };
-                    let owner = names.clone().take(names.len() - 1);
-                    name.name() == *value
-                        && QualifiedName::from_identifiers(owner)
-                            .and_then(|owner| self.model.resolve_name(owner))
-                            .as_ref()
-                            == Some(identity)
-                })
-            })
-    }
-}
-
 impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureReturns<'_, '_, L> {
     fn visit_stmt(&mut self, statement: falcon_syntax::cst::Stmt<'tree>) {
         use falcon_syntax::cst::{ForInit, IfCondition, Stmt, SwitchCaseKind};
@@ -483,8 +387,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                         .assume_condition(&mut self.environment, condition, true);
                     self.scoped(|returns| returns.visit_stmt(statement.then_branch()));
                     let then_exits = self.statement_exits(statement.then_branch());
-                    let then_environment = self.environment.clone();
-                    self.environment = before;
+                    let then_environment = std::mem::replace(&mut self.environment, before);
                     self.flow
                         .assume_condition(&mut self.environment, condition, false);
                     let else_exits = if let Some(branch) = statement.else_branch() {
@@ -493,15 +396,18 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                     } else {
                         false
                     };
-                    if !then_exits {
-                        self.environment = if else_exits {
-                            then_environment
-                        } else {
-                            then_environment.join(&self.environment)
-                        };
+                    // Unlike the scoped walker, closure inference keeps the else
+                    // snapshot when neither branch can complete.
+                    if !then_exits || !else_exits {
+                        FlowContext::join_branches(
+                            &mut self.environment,
+                            then_environment,
+                            then_exits,
+                            else_exits,
+                        );
                     }
                     if let Some(entry) = optional_entry {
-                        self.environment = entry.join(&self.environment);
+                        FlowContext::join_branches(&mut self.environment, entry, false, false);
                     }
                     self.conservative_writes = conservative_before;
                     return;
@@ -521,7 +427,12 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                     if let Some(branch) = statement.else_branch() {
                         self.visit_stmt(branch);
                     }
-                    self.environment = then_environment.join(&self.environment);
+                    FlowContext::join_branches(
+                        &mut self.environment,
+                        then_environment,
+                        false,
+                        false,
+                    );
                 }
             },
             Stmt::For(statement) => self.scoped(|returns| {
@@ -622,7 +533,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
             _ => walk_stmt(self, statement),
         }
         if let Some(entry) = optional_entry {
-            self.environment = entry.join(&self.environment);
+            FlowContext::join_branches(&mut self.environment, entry, false, false);
         }
         self.conservative_writes = conservative_before;
     }
@@ -649,12 +560,11 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 self.flow
                     .assume_condition(&mut self.environment, condition, true);
                 self.visit_expr(then_expr);
-                let then_environment = self.environment.clone();
-                self.environment = before;
+                let then_environment = std::mem::replace(&mut self.environment, before);
                 self.flow
                     .assume_condition(&mut self.environment, condition, false);
                 self.visit_expr(else_expr);
-                self.environment = then_environment.join(&self.environment);
+                FlowContext::join_branches(&mut self.environment, then_environment, false, false);
             }
             Expr::Binary(binary)
                 if matches!(

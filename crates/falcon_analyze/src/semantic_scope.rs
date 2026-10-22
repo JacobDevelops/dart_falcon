@@ -1467,11 +1467,12 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         let then_environment = std::mem::replace(&mut self.state.environment, before);
         self.assume_condition(condition, false);
         self.with_scope(else_branch);
-        if else_exits {
-            self.state.environment = then_environment;
-        } else if !then_exits {
-            self.state.environment = then_environment.join(&self.state.environment);
-        }
+        FlowContext::join_branches(
+            &mut self.state.environment,
+            then_environment,
+            then_exits,
+            else_exits,
+        );
     }
 
     /// Where control may re-enter `region` (a loop's back edge, a `catch`, a
@@ -1530,23 +1531,12 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             _ => true,
         };
         let completes = condition_exit && !self.statement_exits(statement);
-        self.join_states(states, depth, completes);
-    }
-
-    /// Joins `states` (possibly from scopes deeper than `depth`) into the
-    /// current state at `depth`; when the current state is unreachable
-    /// (`reachable` false), they replace it.
-    fn join_states(&mut self, states: Vec<TypeEnvironment>, depth: usize, reachable: bool) {
-        let mut states = states.into_iter();
-        if !reachable && let Some(mut first) = states.next() {
-            while first.depth() > depth {
-                first.pop_scope();
-            }
-            self.state.environment = first;
-        }
-        for state in states {
-            self.state.environment = self.state.environment.join(&state);
-        }
+        FlowContext::join_paths(
+            &mut self.state.environment,
+            states.into_iter().map(|state| (Cow::Owned(state), true)),
+            depth,
+            completes,
+        );
     }
 
     fn record_break(&mut self, label: Option<Identifier<'a>>) {
@@ -2495,11 +2485,12 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 unmatched.pop_scope();
                 let then_environment = std::mem::replace(&mut self.state.environment, unmatched);
                 self.with_scope(else_branch);
-                if else_exits {
-                    self.state.environment = then_environment;
-                } else if !then_exits {
-                    self.state.environment = then_environment.join(&self.state.environment);
-                }
+                FlowContext::join_branches(
+                    &mut self.state.environment,
+                    then_environment,
+                    then_exits,
+                    else_exits,
+                );
             }
         }
     }
@@ -3362,15 +3353,22 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 if !exhaustive {
                     ends.push(unmatched);
                 }
-                self.join_states(ends, depth, false);
+                FlowContext::join_paths(
+                    &mut self.state.environment,
+                    ends.into_iter().map(|end| (Cow::Owned(end), true)),
+                    depth,
+                    false,
+                );
             }
             Stmt::TryCatch(statement) => {
                 let before = self.state.environment.clone();
                 self.with_scope(|walker| walker.visit_block(statement.body()));
                 let mut ends = Vec::with_capacity(statement.catches().len() + 1);
-                if !self.block_exits(statement.body().stmts()) {
-                    ends.push(std::mem::take(&mut self.state.environment));
-                }
+                let completes = !self.block_exits(statement.body().stmts());
+                ends.push((
+                    Cow::Owned(std::mem::take(&mut self.state.environment)),
+                    completes,
+                ));
                 // `finally` may also start anywhere in the `try` or its catches.
                 let before_finally = statement.finally().map(|_| before.clone());
                 // A catch may start anywhere in the `try` body: only promotions
@@ -3407,14 +3405,15 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                         }
                         walker.visit_block(catch.body());
                     });
-                    if !self.block_exits(catch.body().stmts()) {
-                        ends.push(std::mem::take(&mut self.state.environment));
-                    }
+                    let completes = !self.block_exits(catch.body().stmts());
+                    ends.push((
+                        Cow::Owned(std::mem::take(&mut self.state.environment)),
+                        completes,
+                    ));
                 }
-                self.state.environment = ends
-                    .into_iter()
-                    .reduce(|joined, end| joined.join(&end))
-                    .unwrap_or(caught);
+                self.state.environment = caught;
+                let depth = self.state.environment.depth();
+                FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
                 if let (Some(finally), Some(before)) = (statement.finally(), before_finally) {
                     // `finally` runs after the body and catches complete, or
                     // after any of their writes when they leave early.
@@ -4075,14 +4074,15 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                         completes = walker.state.infer(arm.body()) != ResolvedType::Never;
                     });
                     unmatched.pop_scope();
-                    if completes {
-                        ends.push(std::mem::take(&mut self.state.environment));
-                    }
+                    ends.push((
+                        Cow::Owned(std::mem::take(&mut self.state.environment)),
+                        completes,
+                    ));
                 }
                 // A switch expression is exhaustive; with no completing arm,
                 // control never reaches its end.
                 self.state.environment = before;
-                self.join_states(ends, depth, false);
+                FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
             }
             Expr::NullAssert(n) => {
                 let operand = n.operand();

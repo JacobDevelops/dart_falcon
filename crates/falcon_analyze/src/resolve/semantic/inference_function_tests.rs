@@ -210,3 +210,39 @@ fn recorded_never_branch_preserves_surviving_assignment_promotion() {
         },
     );
 }
+
+#[test]
+fn closure_flow_joins_keep_nested_optional_writes_nullable() {
+    with_model(
+        "int? Function(bool) loop() => (bool flag) { int? value; \
+         while (flag) { int inner = 1; if (flag) value = inner; break; } return value; }; \
+         int? Function(bool) caught() => (bool flag) { int? value; \
+         try { if (flag) { int inner = 1; value = inner; } else { throw 0; } } \
+         catch (_) { int inner = 2; value = inner; } finally { int inner = 3; } return value; }; \
+         int? Function(bool) switched() => (bool flag) { int? value; \
+         switch (flag) { case true: { int inner = 1; value = inner; break; } \
+         case false: break; } return value; };",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            for declaration in program.declarations() {
+                let TopLevelDecl::Function(function) = declaration else {
+                    panic!("expected function");
+                };
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
+                    panic!("expected arrow body");
+                };
+                assert_eq!(
+                    TypeEnvironment::new().infer_with_signatures(
+                        body.expr(),
+                        model,
+                        &signatures,
+                        &TypeParameterScope::default(),
+                    ),
+                    model.resolve_type(function.return_type().unwrap()),
+                    "{}",
+                    function.name().name(),
+                );
+            }
+        },
+    );
+}
