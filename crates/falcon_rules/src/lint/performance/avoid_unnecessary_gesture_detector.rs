@@ -2,7 +2,7 @@
 //! enabled Flutter buttons. Explicit hit-test behavior is retained. The button
 //! case requires an inline onPressed callback, so nullable handlers stay unflagged.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

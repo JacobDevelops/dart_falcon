@@ -13,10 +13,10 @@ use lsp_types::{MessageType, ShowMessageParams, Uri};
 
 use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalOrigin,
-    ExternalSources, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
+    ExternalSources, ExternalTarget, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
     PackageIdentity, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex,
-    TypeIndex, canonical_or_lexical, environment::ExternalTarget, group_libraries, import_path,
-    library_unit, package_identities, syntax_error_diagnostics,
+    TypeIndex, canonical_or_lexical, group_libraries, import_path, library_unit,
+    package_identities, syntax_error_diagnostics,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::{lex_tree, try_parse_for_package};
@@ -273,7 +273,7 @@ pub struct LspState {
     environment: AnalysisEnvironment,
     /// Resolution inputs captured on discovery or watched configuration events,
     /// never polled on ordinary project edits.
-    environment_stamps: Option<falcon_analyze::environment::EnvironmentCacheKey>,
+    environment_stamps: Option<falcon_analyze::EnvironmentCacheKey>,
     /// Versioned hosted/SDK facts are immutable; mutable roots use client events.
     external_libraries: ExternalLibraries,
     /// Instrumentation for incremental tests: number of external-library resets.
@@ -298,9 +298,7 @@ impl LspState {
     /// Create state with explicit SDK discovery, allowing hermetic fixtures.
     pub fn new_with_sdk_locator(
         config_path: Option<PathBuf>,
-        locator: fn(
-            Option<&falcon_analyze::environment::PackageConfig>,
-        ) -> Option<falcon_analyze::environment::DartSdk>,
+        locator: fn(Option<&falcon_analyze::PackageConfig>) -> Option<falcon_analyze::DartSdk>,
     ) -> Self {
         let start_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::new_from(config_path, locator, start_dir)
@@ -308,9 +306,7 @@ impl LspState {
 
     fn new_from(
         config_path: Option<PathBuf>,
-        locator: fn(
-            Option<&falcon_analyze::environment::PackageConfig>,
-        ) -> Option<falcon_analyze::environment::DartSdk>,
+        locator: fn(Option<&falcon_analyze::PackageConfig>) -> Option<falcon_analyze::DartSdk>,
         config_start_dir: PathBuf,
     ) -> Self {
         Self::new_from_environment(
@@ -1131,9 +1127,7 @@ impl LspState {
                 if let Some(uri) = program.part_of_directive().and_then(|part| part.uri()) {
                     uris.push(uri.value().into_owned());
                 }
-                uris.extend(
-                    falcon_analyze::resolve::doc_imports(program, file.source()).map(str::to_owned),
-                );
+                uris.extend(falcon_analyze::doc_imports(program, file.source()).map(str::to_owned));
                 (file.path.clone(), uris)
             })
             .collect();
@@ -1399,7 +1393,7 @@ impl LspState {
             if !seen.insert(path.to_path_buf()) {
                 continue;
             }
-            match falcon_analyze::source::read_source(path) {
+            match falcon_analyze::read_source(path) {
                 Ok(source) => {
                     let result = try_parse_for_package(
                         &source,
@@ -1604,7 +1598,7 @@ impl LspState {
                     has_parse_errors: doc.has_parse_errors,
                 });
             } else {
-                match falcon_analyze::source::read_source(path) {
+                match falcon_analyze::read_source(path) {
                     Ok(source) => {
                         let (tree, has_parse_errors) = if is_dart {
                             let package_version = self.environment.package_language_version(path);
@@ -1640,7 +1634,7 @@ impl LspState {
                     }
                     Err(e) => {
                         warn!("failed to read {}: {}", path.display(), e);
-                        if falcon_analyze::source::is_source_too_large(&e) {
+                        if falcon_analyze::is_source_too_large(&e) {
                             complete = false;
                         }
                     }
@@ -1668,7 +1662,7 @@ impl LspState {
 /// Drop rejected editor text before any parsing, language-version scanning, or
 /// semantic retention. A subsequent valid full-sync change recovers normally.
 fn reject_oversized_buffer(path: &Path, text: &mut String) -> Option<Diagnostic> {
-    let diagnostic = falcon_analyze::parallel::source_size_diagnostic(path, text.len() as u64)?;
+    let diagnostic = falcon_analyze::source_size_diagnostic(path, text.len() as u64)?;
     *text = String::new();
     Some(diagnostic)
 }
@@ -1863,8 +1857,7 @@ mod source_size_tests {
         doc.source_rejected = true;
         doc.has_parse_errors = true;
         doc.syntax_diagnostics = vec![
-            falcon_analyze::parallel::source_size_diagnostic(&doc.path, u64::from(u32::MAX) + 1)
-                .unwrap(),
+            falcon_analyze::source_size_diagnostic(&doc.path, u64::from(u32::MAX) + 1).unwrap(),
         ];
         let parse_count = doc.parse_count;
         let diagnostics = state.analyze(&uri);
@@ -2142,7 +2135,7 @@ fn document_path(uri: &str, workspace_root: &Path) -> (PathBuf, bool) {
     match std::fs::canonicalize(&path) {
         Ok(path) => (path, false),
         Err(_) => {
-            let path = falcon_analyze::resolve::lexical_normalize(&path);
+            let path = falcon_analyze::lexical_normalize(&path);
             for ancestor in path.ancestors() {
                 if canonical_or_lexical(ancestor) == workspace_root {
                     let suffix = path.strip_prefix(ancestor).expect("path ancestor");
@@ -2905,7 +2898,7 @@ mod dependency_tests {
             };
             std::fs::write(&other, other_source).unwrap();
             let mut state = LspState::new_with_sdk_locator(Some(config), |config| {
-                falcon_analyze::environment::DartSdk::load(
+                falcon_analyze::DartSdk::load(
                     &config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"),
                 )
             });

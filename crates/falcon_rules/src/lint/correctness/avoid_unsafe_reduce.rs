@@ -6,10 +6,10 @@
 //! and no intervening expression that can mutate it. Custom reduce members and
 //! unresolved receivers are excluded.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, MemberKind, QualifiedName, ResolvedType, Rule, RulePreparation,
-    evaluate_constant_with_local_values,
+    ConstantContext, evaluate_constant,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -66,13 +66,7 @@ fn nonempty(receiver: Expr<'_>, state: &SemanticState<'_>) -> bool {
         }
         _ => {}
     }
-    match evaluate_constant_with_local_values(
-        receiver,
-        state.constant_owner.as_ref(),
-        &state.visible_local_constants(),
-        &state.model,
-        &state.signatures,
-    ) {
+    match evaluate_constant(receiver, ConstantContext { owner: state.constant_owner.as_ref(), locals: Some(&state.visible_local_constants()), ..ConstantContext::new(&state.model, &state.signatures) }) {
         Some(ConstantValue::List(_, values) | ConstantValue::Set(_, values)) => !values.is_empty(),
         _ => false,
     }

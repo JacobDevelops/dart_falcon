@@ -17,7 +17,7 @@
 //!
 //! Adopted from the official `prefer_mixin` lint.
 
-use falcon_analyze::resolve::TypeKind;
+use falcon_analyze::TypeKind;
 use falcon_analyze::{
     AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
     StructuralRuleVisitor, StructuralTraversal,

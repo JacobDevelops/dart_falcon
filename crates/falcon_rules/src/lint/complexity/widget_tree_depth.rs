@@ -10,7 +10,7 @@
 //! `max-nesting` (integer, default: 8) is the maximum permitted widget depth;
 //! the root is level one. This follows the widgets-nesting-level metric's default.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };

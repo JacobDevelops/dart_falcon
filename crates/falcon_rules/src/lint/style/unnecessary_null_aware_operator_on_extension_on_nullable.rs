@@ -30,7 +30,7 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UnnecessaryNullAwareOperatorOnExtensionOnNullable;

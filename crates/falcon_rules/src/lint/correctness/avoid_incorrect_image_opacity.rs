@@ -1,7 +1,7 @@
 //! Flags Opacity directly wrapping a Flutter Image, including named constructors.
 //! Prefer Image.opacity (or image color blending) to compositing the whole widget.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

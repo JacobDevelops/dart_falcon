@@ -7,7 +7,7 @@
 //! inferred, static and annotated fields. Classes with supertypes are skipped
 //! to preserve inherited field/getter contracts.
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 use falcon_analyze::{
     AnalyzeContext, ResolvedType, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };

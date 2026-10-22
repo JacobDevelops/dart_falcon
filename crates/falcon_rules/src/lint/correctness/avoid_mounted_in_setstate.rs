@@ -2,7 +2,7 @@
 //! A check inside the callback cannot prevent setState's unmounted-State assertion.
 //! Deferred nested closures and local functions have independent mounted checks.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

@@ -2,7 +2,7 @@
 //! Only resolved flutter_hooks calls with a zero-argument, single-expression
 //! builder are checked; asynchronous and side-effectful builders are preserved.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

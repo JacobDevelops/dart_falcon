@@ -4,7 +4,7 @@
 //! Diagnostics underline the `print` identifier, not the invocation or its arguments.
 
 use crate::lint::declarations::members_of;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};

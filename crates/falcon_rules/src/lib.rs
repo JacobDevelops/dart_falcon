@@ -654,10 +654,7 @@ mod tests {
             "name: \"app\"\nversion: 1\nversion: 2\n",
         ] {
             std::fs::write(&manifest, source).unwrap();
-            assert_eq!(
-                falcon_analyze::environment::packages::package_identity(&manifest).name,
-                "app",
-            );
+            assert_eq!(falcon_analyze::package_identity(&manifest).name, "app",);
         }
     }
 

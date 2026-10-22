@@ -32,7 +32,7 @@ use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{documented_node_span, operator_span};
 use crate::lint::support::parameter_spans::setter_parameter_span;
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 const MESSAGE: &str = "Missing type annotation on a public API.";
 

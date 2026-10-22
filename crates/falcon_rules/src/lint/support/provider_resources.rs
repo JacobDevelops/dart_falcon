@@ -1,5 +1,5 @@
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;

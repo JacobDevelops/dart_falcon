@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{AnalyzeContext, CrossFileRule, ProjectFile, SemanticIndexes};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
@@ -475,7 +475,7 @@ impl<'a> SemanticRuleVisitor<'a> for ArgumentNullability {
             self.record(expr, state);
         }
         if let Some(&(target, is_await)) = self.loops.get(&(span.start, span.end)) {
-            let element = falcon_analyze::resolve::flow::FlowContext {
+            let element = falcon_analyze::FlowContext {
                 model: &state.model,
                 signatures: &state.signatures,
                 type_parameters: &state.type_parameters,

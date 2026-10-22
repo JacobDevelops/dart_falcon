@@ -2039,13 +2039,17 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         .environment
                         .declared_type(declarator.name().name())
                 });
-                let value = crate::constant_value::evaluate_constant_with_local_values_in_context(
+                let value = crate::constant_value::evaluate_constant(
                     initializer,
-                    self.state.constant_owner.as_ref(),
-                    &self.state.visible_local_constants(),
-                    &self.state.model,
-                    &self.state.signatures,
-                    expected.as_ref(),
+                    crate::constant_value::ConstantContext {
+                        owner: self.state.constant_owner.as_ref(),
+                        locals: Some(&self.state.visible_local_constants()),
+                        expected: expected.as_ref(),
+                        ..crate::constant_value::ConstantContext::new(
+                            &self.state.model,
+                            &self.state.signatures,
+                        )
+                    },
                 );
                 self.state.local_constants.push(LocalConstant {
                     depth: self.state.environment.depth() - 1,

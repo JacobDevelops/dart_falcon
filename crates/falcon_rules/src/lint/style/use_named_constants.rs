@@ -19,13 +19,13 @@ use std::collections::HashMap;
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, evaluate_constant,
-    evaluate_construction,
+    ConstantContext, evaluate_construction,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use falcon_analyze::ConstContexts;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UseNamedConstants;
@@ -127,7 +127,6 @@ impl<'a> Collector<'a> {
         if facts.static_consts.is_empty() {
             return None;
         }
-        let empty = HashMap::new();
         let value = if let Expr::Call(call) = node.unparenthesized()
             && let Expr::DotShorthand(dot) = call.callee().unparenthesized()
             && let Some(ResolvedType::Interface {
@@ -135,15 +134,7 @@ impl<'a> Collector<'a> {
                 ..
             }) = state.expected()
         {
-            evaluate_construction(
-                identity,
-                dot.name().name(),
-                type_args,
-                call.args(),
-                &empty,
-                &state.model,
-                &state.signatures,
-            )
+            evaluate_construction(identity, dot.name().name(), type_args, call.args(), ConstantContext::new(&state.model, &state.signatures))
             .value
         } else {
             let (_, constructor, args) =
@@ -153,15 +144,7 @@ impl<'a> Collector<'a> {
             // Single<Object>(true) with the distinct Single<bool>(true).
             let inferred = state.infer_with_context(node, state.expected());
             let arguments: Vec<_> = inferred.type_arguments().collect();
-            evaluate_construction(
-                identity,
-                constructor,
-                &arguments,
-                args,
-                &empty,
-                &state.model,
-                &state.signatures,
-            )
+            evaluate_construction(identity, constructor, &arguments, args, ConstantContext::new(&state.model, &state.signatures))
             .value
         }?;
         let fields: HashMap<&str, Expr<'_>> = facts
@@ -178,13 +161,7 @@ impl<'a> Collector<'a> {
             .iter()
             .filter(|field| declared_here || !field.name.starts_with('_'))
             .find(|field| {
-                evaluate_constant(
-                    field.initializer.expr(),
-                    Some(identity),
-                    &fields,
-                    &state.model,
-                    &state.signatures,
-                )
+                evaluate_constant(field.initializer.expr(), ConstantContext { owner: Some(identity), fields: Some(&fields), ..ConstantContext::new(&state.model, &state.signatures) })
                 .as_ref()
                     == Some(&value)
             })

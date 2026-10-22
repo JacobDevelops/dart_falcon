@@ -1016,7 +1016,7 @@ fn resolver_dependent_per_file_project_corpus() {
             paths.iter().map(PathBuf::as_path),
             |config| {
                 let root = config?.flutter_root.as_ref()?;
-                falcon_analyze::environment::DartSdk::load(&root.join("bin/cache/dart-sdk"))
+                falcon_analyze::DartSdk::load(&root.join("bin/cache/dart-sdk"))
             },
         );
         let external_inputs: Vec<_> = paths

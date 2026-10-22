@@ -12,7 +12,7 @@
 //! Unknown assignments, compound writes, and reused loop variables invalidate
 //! local ownership. Null assertions do not change a receiver's identity.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };

@@ -19,12 +19,8 @@ fn write(root: &Path, relative: &str, text: &str) -> PathBuf {
     path
 }
 
-fn fixture_sdk(
-    config: Option<&falcon_analyze::environment::PackageConfig>,
-) -> Option<falcon_analyze::environment::DartSdk> {
-    falcon_analyze::environment::DartSdk::load(
-        &config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"),
-    )
+fn fixture_sdk(config: Option<&falcon_analyze::PackageConfig>) -> Option<falcon_analyze::DartSdk> {
+    falcon_analyze::DartSdk::load(&config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"))
 }
 
 /// A fake Flutter checkout (`flutterRoot`) with its Dart SDK, a dependency
@@ -428,7 +424,7 @@ fn indexes_sdk_and_dependency_declarations() {
     assert_eq!(
         callback,
         ResolvedType::Function {
-            shape: Some(falcon_analyze::resolve::FunctionTypeShape::empty()),
+            shape: Some(falcon_analyze::FunctionTypeShape::empty()),
             alias: Default::default(),
             optional_positional: 0,
             return_type: Box::new(ResolvedType::Void).into(),
@@ -1104,7 +1100,7 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
 
 #[test]
 fn compact_external_const_constructors_preserve_instance_values() {
-    use falcon_analyze::{ConstantValue, evaluate_constant};
+    use falcon_analyze::{ConstantContext, ConstantValue, evaluate_constant};
     use falcon_syntax::cst::TopLevelDecl;
     use std::collections::HashMap;
 
@@ -1186,10 +1182,7 @@ fn compact_external_const_constructors_preserve_instance_values() {
                 declarator.name().name(),
                 evaluate_constant(
                     declarator.initializer()?,
-                    None,
-                    &HashMap::new(),
-                    &model,
-                    &signatures,
+                    ConstantContext::new(&model, &signatures),
                 ),
             ))
         })
@@ -1272,7 +1265,7 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
 
 #[test]
 fn imported_static_and_enum_constants_use_external_lexical_context() {
-    use falcon_analyze::{ConstantValue, evaluate_constant};
+    use falcon_analyze::{ConstantContext, ConstantValue, evaluate_constant};
     use falcon_syntax::cst::TopLevelDecl;
     use std::collections::HashMap;
 
@@ -1359,10 +1352,7 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
                 declarator.name().name(),
                 evaluate_constant(
                     declarator.initializer()?,
-                    None,
-                    &HashMap::new(),
-                    &model,
-                    &signatures,
+                    ConstantContext::new(&model, &signatures),
                 ),
             ))
         })
@@ -1386,10 +1376,7 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
                 .unwrap()
                 .initializer()
                 .unwrap(),
-            None,
-            &HashMap::new(),
-            &model,
-            &signatures
+            ConstantContext::new(&model, &signatures)
         ),
     );
     assert!(matches!(
@@ -2549,13 +2536,38 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
         let roots = paths.map(|path| (path, program, source));
         let is_project = |path: &Path| apps.iter().any(|app| app == path);
         for incremental in [false, true] {
-            let externals = if incremental {
+            let mut externals = if incremental {
                 let mut externals = ExternalLibraries::load(&environment, &roots[..1], is_project);
-                externals.extend(&environment, &roots[1..], is_project);
+                // Each regroup sorts library indices before the next context arrives.
+                for root in &roots[1..] {
+                    externals.extend(&environment, std::slice::from_ref(root), is_project);
+                }
                 externals
             } else {
                 ExternalLibraries::load(&environment, &roots, is_project)
             };
+            let topology: Vec<_> = externals
+                .libraries()
+                .iter()
+                .map(|library| {
+                    (
+                        library.files[0].path.clone(),
+                        library.context,
+                        library.copy_context,
+                        Arc::clone(&library.files),
+                    )
+                })
+                .collect();
+            externals.extend(&environment, &roots, is_project);
+            assert_eq!(externals.libraries().len(), topology.len());
+            for (library, (path, context, copy_context, files)) in
+                externals.libraries().iter().zip(&topology)
+            {
+                assert_eq!(&library.files[0].path, path);
+                assert_eq!(library.context, *context);
+                assert_eq!(library.copy_context, *copy_context);
+                assert!(Arc::ptr_eq(&library.files, files));
+            }
             let bar_instances: Vec<_> = externals
                 .libraries()
                 .iter()
@@ -2937,10 +2949,10 @@ fn extending_external_libraries_observes_changed_symlink_targets() {
         .resolve_target(&environment, &main, None, "dependency.dart")
         .unwrap()
     {
-        falcon_analyze::environment::ExternalTarget::Instance(index) => {
+        falcon_analyze::ExternalTarget::Instance(index) => {
             libraries.libraries()[index].files[0].path.clone()
         }
-        falcon_analyze::environment::ExternalTarget::Path(path) => path,
+        falcon_analyze::ExternalTarget::Path(path) => path,
     };
     assert_eq!(target_path(&libraries), canonical_or_lexical(&first));
     fs::remove_file(&link).unwrap();

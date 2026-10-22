@@ -7,7 +7,7 @@
 
 use crate::lint::flutter::scoped_constructor_invocation;
 use crate::lint::riverpod::is_identity;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };

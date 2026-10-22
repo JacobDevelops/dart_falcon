@@ -2,7 +2,7 @@
 //! query parameter values that are neither null, strings nor iterables of strings.
 //! Only resolved dart:core Uri constructors are checked; unknown values are skipped.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

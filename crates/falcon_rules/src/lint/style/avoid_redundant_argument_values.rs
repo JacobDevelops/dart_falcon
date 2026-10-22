@@ -27,12 +27,10 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
-use falcon_analyze::constant_value::{
-    contextual_number, evaluate_constant_with_local_values_in_context,
-};
+use falcon_analyze::contextual_number;
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, LibraryId, ParameterDefault, QualifiedName,
-    ResolvedSignature, ResolvedType, Rule, RulePreparation, evaluate_constant_in_library,
+    ConstantContext, ResolvedSignature, ResolvedType, Rule, RulePreparation, evaluate_constant,
     expression_segments, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
@@ -41,7 +39,7 @@ use falcon_syntax::cst::{self, AstChildren, Span};
 
 use falcon_analyze::ConstContexts;
 use crate::lint::const_eval::mentions_type_parameter;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, explicit_call_receiver};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState, explicit_call_receiver};
 
 #[derive(Default)]
 pub struct AvoidRedundantArgumentValues;
@@ -242,15 +240,8 @@ impl Targets<'_> {
             .filter_map(|(name, default)| {
                 let value = match default {
                     ParameterDefault::Declared(expression) => {
-                        evaluate_constant_with_local_values_in_context(
-                            expression.expr(),
-                            owner.as_ref(),
-                            &locals,
-                            &state.model,
-                            &state.signatures,
-                            parameter_type(&signature, name)
-                                .filter(|ty| !mentions_type_parameter(ty)),
-                        )
+                        evaluate_constant(expression.expr(), ConstantContext { owner: owner.as_ref(), locals: Some(&locals), expected: parameter_type(&signature, name)
+                            .filter(|ty| !mentions_type_parameter(ty)), ..ConstantContext::new(&state.model, &state.signatures) })
                     }
                     ParameterDefault::Null => Some(ConstantValue::Null),
                     ParameterDefault::Inherited { .. } => None,
@@ -511,15 +502,7 @@ impl Targets<'_> {
             Some(default) => {
                 let value = match &target.defaults {
                     Some(defaults) => defaults.get(name).cloned(),
-                    None => evaluate_constant_in_library(
-                        default,
-                        default_owner,
-                        target.library,
-                        &HashMap::new(),
-                        context,
-                        &state.model,
-                        &state.signatures,
-                    ),
+                    None => evaluate_constant(default, ConstantContext { owner: default_owner, library: target.library, expected: context, ..ConstantContext::new(&state.model, &state.signatures) }),
                 };
                 let Some(value) = value else {
                     return;
@@ -532,14 +515,7 @@ impl Targets<'_> {
             Some(ResolvedType::Interface { identity, .. }) => Some(identity),
             _ => None,
         };
-        let Some(value) = evaluate_constant_with_local_values_in_context(
-            argument,
-            caller_owner,
-            &state.visible_local_constants(),
-            &state.model,
-            &state.signatures,
-            context,
-        ) else {
+        let Some(value) = evaluate_constant(argument, ConstantContext { owner: caller_owner, locals: Some(&state.visible_local_constants()), expected: context, ..ConstantContext::new(&state.model, &state.signatures) }) else {
             return;
         };
         if contextual_number(value, argument, double_context) != default_value {

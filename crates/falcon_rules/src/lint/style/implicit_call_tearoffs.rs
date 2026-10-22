@@ -12,7 +12,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::Program;
 use falcon_syntax::cst::{BinaryOp, Expr, Span};
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct ImplicitCallTearoffs;

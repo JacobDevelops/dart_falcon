@@ -3,7 +3,7 @@
 //! are accepted. Explicit true or dynamic excludeFromSemantics values are exempt;
 //! only an absent flag or literal false proves an image needs a label.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

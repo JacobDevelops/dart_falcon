@@ -6,7 +6,7 @@
 //! calls; spelling alone is insufficient. Nested callbacks belong to
 //! avoid-hooks-outside-build instead.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

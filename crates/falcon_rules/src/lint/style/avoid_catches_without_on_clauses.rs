@@ -26,7 +26,7 @@ use falcon_syntax::TokenKind;
 use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr, walk_stmt};
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use crate::lint::flutter::value_name_is_shadowed;
 
 #[derive(Default)]

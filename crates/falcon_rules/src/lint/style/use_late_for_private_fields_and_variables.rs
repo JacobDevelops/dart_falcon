@@ -43,7 +43,7 @@ use falcon_syntax::cst::*;
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_type_operations::nullability;
-use falcon_analyze::semantic_scope::{
+use falcon_analyze::{
     CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
 };
 

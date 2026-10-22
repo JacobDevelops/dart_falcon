@@ -1,9 +1,9 @@
 //! Shared package identity and build-body queries for Riverpod rules.
 
 use crate::lint::flutter::scoped_constructor_invocation;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
 use falcon_analyze::{BodyOwner, FunctionBodies};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{CascadeOp, ClassMember, Expr, Program, Span, TopLevelDecl};
 

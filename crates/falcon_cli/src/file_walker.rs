@@ -163,9 +163,9 @@ fn collect_file(
 }
 
 fn read_source(path: &Path) -> Result<Option<String>, String> {
-    match falcon_analyze::source::read_source(path) {
+    match falcon_analyze::read_source(path) {
         Ok(source) => Ok(Some(source)),
-        Err(error) if falcon_analyze::source::is_source_too_large(&error) => {
+        Err(error) if falcon_analyze::is_source_too_large(&error) => {
             Err(format!("failed to read file {}: {error}", path.display()))
         }
         Err(error) => {

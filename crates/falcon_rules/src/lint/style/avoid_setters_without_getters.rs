@@ -26,7 +26,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 /// Concrete getters every type inherits from `Object`.
 const OBJECT_GETTERS: [&str; 2] = ["hashCode", "runtimeType"];

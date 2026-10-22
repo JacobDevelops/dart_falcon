@@ -1,4 +1,4 @@
-use falcon_analyze::environment::packages::canonical_package_path;
+use falcon_analyze::canonical_package_path;
 use serde_yaml::{Mapping, Value};
 use std::collections::HashSet;
 use std::path::Path;

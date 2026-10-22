@@ -8,12 +8,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
-    RulePreparation, SemanticModel, SignatureIndex, evaluate_constant,
-    evaluate_constant_in_member_context, evaluate_constant_name_with_local_values,
-    evaluate_constant_with_local_values,
+    ConstantContext, RulePreparation, SemanticModel, SignatureIndex, evaluate_constant,
+    evaluate_constant_name,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_pattern};
@@ -48,7 +47,7 @@ impl Collector<'_> {
         let ResolvedType::Interface { identity, .. } = state.infer(node.subject()) else {
             return;
         };
-        if state.signatures.type_kind(&identity) == Some(falcon_analyze::resolve::TypeKind::Enum) {
+        if state.signatures.type_kind(&identity) == Some(falcon_analyze::TypeKind::Enum) {
             return;
         }
         let Some(facts) = state.signatures.declaration(&identity) else {
@@ -71,20 +70,8 @@ impl Collector<'_> {
             for case in group.cases() {
                 let mut cover = |constant: CaseConstant<'_>| {
                     let value = match constant {
-                        CaseConstant::Expr(expr) => evaluate_constant_with_local_values(
-                            expr,
-                            enclosing,
-                            &locals,
-                            &state.model,
-                            &state.signatures,
-                        ),
-                        CaseConstant::Name(names) => evaluate_constant_name_with_local_values(
-                            names,
-                            enclosing,
-                            &locals,
-                            &state.model,
-                            &state.signatures,
-                        ),
+                        CaseConstant::Expr(expr) => evaluate_constant(expr, ConstantContext { owner: enclosing, locals: Some(&locals), ..ConstantContext::new(&state.model, &state.signatures) }),
+                        CaseConstant::Name(names) => evaluate_constant_name(names, ConstantContext { owner: enclosing, locals: Some(&locals), ..ConstantContext::new(&state.model, &state.signatures) }),
                         // `.name` reads a static member of the switched type.
                         CaseConstant::Shorthand(name) => {
                             values.get(name.name()).cloned().or_else(|| {
@@ -93,12 +80,7 @@ impl Collector<'_> {
                                     .iter()
                                     .find(|constant| constant.name == name.name())
                                     .and_then(|constant| {
-                                        evaluate_constant_in_member_context(
-                                            constant.initializer.expr(),
-                                            &identity,
-                                            &state.model,
-                                            &state.signatures,
-                                        )
+                                        evaluate_constant(constant.initializer.expr(), ConstantContext { owner: Some(&identity), ..ConstantContext::new(&state.model, &state.signatures) })
                                     })
                             })
                         }
@@ -197,13 +179,7 @@ fn constant_values(
         .iter()
         .filter(|constant| exact_identity(&constant.ty, identity))
         .filter_map(|constant| {
-            evaluate_constant(
-                constant.initializer.expr(),
-                Some(identity),
-                &fields,
-                model,
-                signatures,
-            )
+            evaluate_constant(constant.initializer.expr(), ConstantContext { owner: Some(identity), fields: Some(&fields), ..ConstantContext::new(model, signatures) })
             .map(|value| (constant.name.clone(), value))
         })
         .collect()

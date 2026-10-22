@@ -2,7 +2,7 @@
 //! `Border.fromBorderSide(const BorderSide(...))` when the side is constant.
 //! Only invocations whose arguments can all be constant qualify.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

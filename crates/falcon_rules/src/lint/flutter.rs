@@ -150,7 +150,7 @@ pub(crate) fn constructor_invocation<'a>(
 /// Constructor resolution through type aliases in its lexical value scope.
 pub(crate) fn scoped_constructor_invocation<'a>(
     expression: Expr<'a>,
-    state: &falcon_analyze::semantic_scope::SemanticState<'_>,
+    state: &falcon_analyze::SemanticState<'_>,
 ) -> Option<(DeclarationIdentity, &'a str, ArgList<'a>)> {
     if let Expr::Call(node) = expression.unparenthesized() {
         let mut callee = node.callee().unparenthesized();
@@ -174,7 +174,7 @@ pub(crate) fn scoped_constructor_invocation<'a>(
 /// Value lookup prefers lexical bindings and members declared by the enclosing type.
 pub(crate) fn value_name_is_shadowed(
     name: &str,
-    state: &falcon_analyze::semantic_scope::SemanticState<'_>,
+    state: &falcon_analyze::SemanticState<'_>,
 ) -> bool {
     state.environment.is_bound(name)
         || state.type_parameters.contains(name)

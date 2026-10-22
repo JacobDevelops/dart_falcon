@@ -23,7 +23,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::support::collection_checks::lacks_collection_member;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferIterableWhereType;

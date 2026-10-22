@@ -14,7 +14,7 @@
 //! `prefer-is-empty` and `prefer-contains`, respectively. No arbitrary `sync*`
 //! function is classified as slow merely because it is a generator.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

@@ -144,10 +144,7 @@ pub fn sdk_project() -> tempfile::TempDir {
     )
     .unwrap();
     let mut flutter_root = String::from("file://");
-    falcon_analyze::environment::percent_encode(
-        root.join("flutter").to_str().unwrap(),
-        &mut flutter_root,
-    );
+    falcon_analyze::percent_encode(root.join("flutter").to_str().unwrap(), &mut flutter_root);
     fs::write(
         root.join("app/.dart_tool/package_config.json"),
         serde_json::json!({
@@ -209,7 +206,7 @@ pub fn stage_project(source: &Path) -> tempfile::TempDir {
 fn file_uri(path: &Path) -> String {
     let path = falcon_analyze::canonical_or_lexical(path);
     let mut uri = String::from("file://");
-    falcon_analyze::environment::percent_encode(path.to_str().unwrap(), &mut uri);
+    falcon_analyze::percent_encode(path.to_str().unwrap(), &mut uri);
     uri.push('/');
     uri
 }

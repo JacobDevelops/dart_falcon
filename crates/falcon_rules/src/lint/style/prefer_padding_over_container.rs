@@ -8,7 +8,7 @@
 //! are ignored. The dedicated widget makes the layout intent explicit.
 //! Contexts explicitly requiring `Container` are excluded.
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 

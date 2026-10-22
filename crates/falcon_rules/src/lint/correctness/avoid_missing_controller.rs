@@ -4,7 +4,7 @@
 //! controller or a value callback supported by that API. Explicit readOnly:true
 //! and enabled:false fields are display-only and skipped. Dynamic expressions
 //! are accepted; unrelated classes and shadowed constructors are ignored.
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

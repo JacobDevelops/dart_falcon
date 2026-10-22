@@ -13,9 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use packages::{FilePackage, PackageMetadata};
 
-pub use external::{
-    ExternalFile, ExternalLibraries, ExternalLibrary, ExternalOrigin, ExternalTarget,
-};
+pub use external::{ExternalLibraries, ExternalOrigin, ExternalTarget};
 pub use falcon_syntax::language_version::{Feature, LanguageVersion};
 pub use package_config::{ConfiguredPackage, PackageConfig, percent_decode, percent_encode};
 pub use sdk::{DartSdk, Embedder};

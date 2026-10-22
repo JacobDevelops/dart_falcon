@@ -1,6 +1,6 @@
 //! Detect explicit secret-bearing URL query keys, not arbitrary occurrences of
 //! words such as `token` in paths, fragments, map values, or prose.
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

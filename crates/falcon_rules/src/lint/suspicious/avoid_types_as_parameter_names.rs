@@ -78,8 +78,8 @@ impl<'a> Collector<'a> {
                 .is_some_and(|kind| {
                     matches!(
                         kind,
-                        falcon_analyze::resolve::TypeKind::Enum
-                            | falcon_analyze::resolve::TypeKind::Mixin
+                        falcon_analyze::TypeKind::Enum
+                            | falcon_analyze::TypeKind::Mixin
                     )
                 })
     }

@@ -3,7 +3,7 @@
 use crate::lint::flutter_hooks::{
     hook_name, hook_widget_context, is_hook_builder_context, non_hook_widget, non_widget_context,
 };
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 use falcon_analyze::{AnalyzeContext, FunctionBodies};
 use falcon_syntax::cst::visit::{Visitor, walk_local_func_decl};
 use falcon_syntax::cst::*;

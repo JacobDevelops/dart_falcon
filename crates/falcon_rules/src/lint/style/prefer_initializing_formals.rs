@@ -12,12 +12,12 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::resolve::MemberKind;
+use falcon_analyze::MemberKind;
 use falcon_analyze::{AnalyzeContext, Feature, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferInitializingFormals;

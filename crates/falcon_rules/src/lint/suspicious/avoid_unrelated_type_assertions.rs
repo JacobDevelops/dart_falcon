@@ -4,7 +4,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, Truth};
 use falcon_syntax::cst::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperation, TypeOperationKind, TypeOperations};
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 #[derive(Default)]
 pub struct AvoidUnrelatedTypeAssertions;

@@ -19,7 +19,7 @@ use falcon_syntax::Feature;
 use falcon_syntax::cst::*;
 
 use crate::lint::flutter::scoped_constructor_invocation;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct InvalidCasePatterns;

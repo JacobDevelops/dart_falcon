@@ -6,7 +6,7 @@
 //! remain allowed, including an absent child. Other arguments, null or unknown
 //! alignments, and shadowed constructors or alignment names are ignored.
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, expression_segments};
 use falcon_syntax::cst::*;
 

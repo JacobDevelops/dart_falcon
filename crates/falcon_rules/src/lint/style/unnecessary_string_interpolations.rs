@@ -16,7 +16,7 @@
 //! Nullable or unknown values and null-aware accesses are left alone.
 
 use crate::lint::string_lit::{interpolated_literals, multiline_lead_len};
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -84,7 +84,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::semantic_scope::visit_program;
+    use falcon_analyze::visit_program;
 
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

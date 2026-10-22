@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, evaluate_constant,
-    evaluate_pattern_constant,
+    ConstantContext, evaluate_pattern_constant,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -136,13 +136,7 @@ impl<'a> Collector<'a> {
         }
         let mut seen = HashSet::new();
         for expression in expressions {
-            if let Some(value) = evaluate_constant(
-                expression,
-                self.owner.as_ref(),
-                &self.fields,
-                &self.model,
-                self.signatures,
-            ) && !seen.insert(value)
+            if let Some(value) = evaluate_constant(expression, ConstantContext { owner: self.owner.as_ref(), fields: Some(&self.fields), ..ConstantContext::new(&self.model, self.signatures) }) && !seen.insert(value)
             {
                 self.diags.push(self.ctx.diagnostic("Remove or change this duplicate case value in the switch statement.", expression.span()));
             }
@@ -176,7 +170,7 @@ fn pattern_constants(
 ) -> Vec<(ConstantValue, Span)> {
     match pattern {
         Pattern::Literal(_) | Pattern::Const(_) => {
-            evaluate_pattern_constant(pattern, owner, fields, model, signatures)
+            evaluate_pattern_constant(pattern, ConstantContext { owner, fields: Some(fields), ..ConstantContext::new(model, signatures) })
                 .map(|value| vec![(value, pattern.span())])
                 .unwrap_or_default()
         }

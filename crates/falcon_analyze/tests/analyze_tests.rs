@@ -8,6 +8,22 @@ use falcon_syntax::cst::Program;
 use std::path::Path;
 use std::sync::Arc;
 
+fn analyze_parallel(
+    registry: &RuleRegistry,
+    files: &[(std::path::PathBuf, String)],
+    config: &FalconConfig,
+) -> Vec<Diagnostic> {
+    falcon_analyze::analyze_parallel_collecting_resolving(
+        registry,
+        files,
+        config,
+        false,
+        false,
+        falcon_analyze::Workspace::default(),
+    )
+    .0
+}
+
 // Mock rules for testing
 
 struct NoOpRule;
@@ -230,8 +246,6 @@ fn test_registry_rules_accessor() {
 
 #[test]
 fn test_analyze_parallel_empty_files() {
-    use falcon_analyze::analyze_parallel;
-
     let registry = RuleRegistry::new();
     let config = FalconConfig::default();
     let files: Vec<(std::path::PathBuf, String)> = vec![];
@@ -242,8 +256,6 @@ fn test_analyze_parallel_empty_files() {
 
 #[test]
 fn test_analyze_parallel_single_file() {
-    use falcon_analyze::analyze_parallel;
-
     let mut registry = RuleRegistry::new();
     registry.register("count_functions", Box::new(CountFunctionDeclsRule(1)));
 
@@ -260,7 +272,6 @@ fn test_analyze_parallel_single_file() {
 
 #[test]
 fn test_analyze_parallel_ten_files() {
-    use falcon_analyze::analyze_parallel;
     use std::path::PathBuf;
 
     let mut registry = RuleRegistry::new();
@@ -283,7 +294,6 @@ fn test_analyze_parallel_ten_files() {
 
 #[test]
 fn test_analyze_parallel_result_correctness_multi_file() {
-    use falcon_analyze::analyze_parallel;
     use std::path::PathBuf;
 
     let mut registry = RuleRegistry::new();
@@ -383,8 +393,8 @@ fn context_reuses_per_file_analysis_facts() {
     let program = parsed.program();
     let config = FalconConfig::default();
     let path = Path::new("test.dart");
-    let identities = falcon_analyze::resolve::IdentityIndex::from_project_files(
-        &[falcon_analyze::resolve::IdentitySource {
+    let identities = falcon_analyze::IdentityIndex::from_project_files(
+        &[falcon_analyze::IdentitySource {
             path,
             parsed: &parsed,
             has_parse_errors: false,
@@ -539,7 +549,7 @@ fn panicking_rules_report_worker_errors_and_leave_the_pool_usable() {
             assert_eq!(retained.len(), files.len());
         }
     }
-    assert!(falcon_analyze::analyze_parallel(&RuleRegistry::new(), &files, &config).is_empty());
+    assert!(analyze_parallel(&RuleRegistry::new(), &files, &config).is_empty());
 }
 
 #[test]

@@ -20,7 +20,9 @@ use std::path::PathBuf;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-use falcon_analyze::{analyze_parallel, analyze_sequential};
+use falcon_analyze::{
+    Workspace, analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
+};
 use falcon_cli::{format_text, walk_project};
 use falcon_config::{FalconConfig, PathFilter};
 use falcon_dart_parser::parse;
@@ -80,10 +82,28 @@ fn bench_parse_analyze(c: &mut Criterion) {
     group.sample_size(10);
     group.throughput(Throughput::Elements(files.len() as u64));
     group.bench_function("parse_analyze/sequential", |b| {
-        b.iter(|| analyze_sequential(&registry, &files, &config));
+        b.iter(|| {
+            analyze_sequential_collecting_resolving(
+                &registry,
+                &files,
+                &config,
+                false,
+                false,
+                Workspace::default(),
+            )
+        });
     });
     group.bench_function("parse_analyze/parallel", |b| {
-        b.iter(|| analyze_parallel(&registry, &files, &config));
+        b.iter(|| {
+            analyze_parallel_collecting_resolving(
+                &registry,
+                &files,
+                &config,
+                false,
+                false,
+                Workspace::default(),
+            )
+        });
     });
     group.finish();
 }
@@ -100,14 +120,28 @@ fn bench_full_pipeline(c: &mut Criterion) {
     group.throughput(Throughput::Elements(files.len() as u64));
     group.bench_function("full_pipeline/sequential", |b| {
         b.iter(|| {
-            let mut diagnostics = analyze_sequential(&registry, &files, &config);
+            let (mut diagnostics, _, _) = analyze_sequential_collecting_resolving(
+                &registry,
+                &files,
+                &config,
+                false,
+                false,
+                Workspace::default(),
+            );
             sort_diagnostics(&mut diagnostics);
             format_text(&diagnostics)
         });
     });
     group.bench_function("full_pipeline/parallel", |b| {
         b.iter(|| {
-            let mut diagnostics = analyze_parallel(&registry, &files, &config);
+            let (mut diagnostics, _, _) = analyze_parallel_collecting_resolving(
+                &registry,
+                &files,
+                &config,
+                false,
+                false,
+                Workspace::default(),
+            );
             sort_diagnostics(&mut diagnostics);
             format_text(&diagnostics)
         });

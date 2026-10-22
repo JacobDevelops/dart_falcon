@@ -22,7 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::resolve::TypeKind;
+use falcon_analyze::TypeKind;
 use falcon_analyze::{
     DeclarationIdentity, DocName, MemberFacts, MemberKind, MemberSelector, MemberSelectorKind,
     NameIdentity, ResolvedType, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope,

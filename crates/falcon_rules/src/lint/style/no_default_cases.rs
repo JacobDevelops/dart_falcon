@@ -17,14 +17,14 @@
 //!
 //! Adopted from the official `no_default_cases` lint.
 
-use falcon_analyze::resolve::TypeKind;
+use falcon_analyze::TypeKind;
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::*;
 
 use crate::lint::support::enum_like::is_enum_like;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct NoDefaultCases;

@@ -477,9 +477,7 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     let config_path = app.join("falcon.json");
     fs::write(&config_path, config).unwrap();
     let mut state = LspState::new_with_sdk_locator(Some(config_path), |config| {
-        falcon_analyze::environment::DartSdk::load(
-            &config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"),
-        )
+        falcon_analyze::DartSdk::load(&config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"))
     });
     let path = app.join("lib/main.dart");
     let source = "import 'package:dep/dep.dart';\nvoid check() { calculate(); }\n";

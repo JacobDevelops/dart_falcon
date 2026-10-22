@@ -16,7 +16,7 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::ConstContexts;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UseIsEvenRatherThanModulo;

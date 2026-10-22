@@ -4,7 +4,7 @@
 //! transition. Set a unique tag or explicitly pass null to disable the transition.
 //! Includes unnamed, small, large, and extended constructors; package identities
 //! exclude local lookalikes and shadowed names. Matches the DCM rule of this id.
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

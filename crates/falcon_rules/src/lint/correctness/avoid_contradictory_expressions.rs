@@ -7,7 +7,7 @@
 //! user-defined operators are excluded. Integer bounds use exact arithmetic;
 //! floating-point bounds are excluded because NaN invalidates total ordering.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

@@ -1,8 +1,8 @@
 //! Shared unused-Future detection and annotation exemptions.
 
 use falcon_analyze::FunctionBodies;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Truth};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 use std::collections::HashSet;

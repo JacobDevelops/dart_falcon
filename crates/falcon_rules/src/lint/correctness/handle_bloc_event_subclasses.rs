@@ -9,7 +9,7 @@
 //! Calls to instance helpers on `this`, including inherited helpers, count as
 //! unresolved coverage.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };

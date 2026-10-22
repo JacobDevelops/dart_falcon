@@ -1,7 +1,7 @@
 //! Shared lexical boundaries and resolved Flutter API checks for State rules.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 

@@ -60,7 +60,7 @@ use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{declaration_initializers, members_of};
 use crate::lint::lexical_usage::collection_for_inits;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UnnecessaryLambdas;

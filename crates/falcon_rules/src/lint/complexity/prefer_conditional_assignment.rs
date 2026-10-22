@@ -14,7 +14,7 @@ use falcon_syntax::cst::*;
 
 use crate::lint::support::element_identity::same_element;
 use crate::lint::expressions::null_check;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferConditionalAssignment;

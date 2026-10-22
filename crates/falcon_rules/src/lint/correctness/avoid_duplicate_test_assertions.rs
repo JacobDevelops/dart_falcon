@@ -8,7 +8,7 @@
 //! Intervening non-assertion statements, branches, effectful arguments, awaited
 //! calls, and chained calls end the comparison run.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

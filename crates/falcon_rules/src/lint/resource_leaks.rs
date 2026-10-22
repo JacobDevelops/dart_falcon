@@ -24,7 +24,7 @@ use falcon_syntax::cst::visit::{
 use falcon_syntax::cst::*;
 
 use falcon_analyze::FunctionBodies;
-use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 /// A resource type and the method that releases it.
 pub(crate) struct Release {

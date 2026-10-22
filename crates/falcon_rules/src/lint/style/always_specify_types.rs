@@ -30,7 +30,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
+use falcon_analyze::locally_bound_identifiers;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedType, Rule,
     RulePreparation, StructuralRuleVisitor, StructuralTraversal, resolve_call_constructor,
@@ -41,7 +41,7 @@ use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{documented_node_span, member_names, members_of};
 use crate::lint::tokens::significant_tokens_in;
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 const MESSAGE: &str = "Missing type annotation.";
 

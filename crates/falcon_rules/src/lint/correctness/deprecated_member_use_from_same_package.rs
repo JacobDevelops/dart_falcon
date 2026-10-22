@@ -33,12 +33,12 @@
 //! Adopted from the official `deprecated_member_use_from_same_package` lint.
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, MemberSelector,
     MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant,
+    ConstantContext, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant,
     resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
@@ -50,7 +50,7 @@ use falcon_syntax::cst::visit::{
 use falcon_syntax::cst::*;
 
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
-use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 
 #[derive(Default)]
@@ -262,7 +262,7 @@ fn deprecation<'a>(
                 message.value()
             } else {
                 let Some(ConstantValue::String(message)) = signatures.and_then(|signatures| {
-                    evaluate_constant(expression, None, &HashMap::new(), &model, signatures)
+                    evaluate_constant(expression, ConstantContext::new(&model, signatures))
                 }) else {
                     continue;
                 };
@@ -894,7 +894,7 @@ fn file_uri(path: &std::path::Path) -> String {
     let path = path.to_string_lossy();
     let mut uri = String::with_capacity(7 + path.len());
     uri.push_str("file://");
-    falcon_analyze::environment::percent_encode(&path, &mut uri);
+    falcon_analyze::percent_encode(&path, &mut uri);
     uri
 }
 

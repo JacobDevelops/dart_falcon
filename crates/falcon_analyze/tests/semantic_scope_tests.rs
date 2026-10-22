@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use falcon_analyze::semantic_scope::*;
-use falcon_analyze::{AnalyzeContext, ResolvedType, RuleAnalysis, RulePreparation, SignatureIndex};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, RuleAnalysis, RulePreparation, SemanticRuleVisitor,
+    SemanticState, SignatureIndex, returned_expressions, visit_program,
+};
 use falcon_dart_parser::parse;
 use falcon_syntax::cst::*;
 

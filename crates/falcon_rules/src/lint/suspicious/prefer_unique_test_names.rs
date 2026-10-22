@@ -3,7 +3,7 @@
 //! `include-methods` (array of strings, default: []) adds custom test registration helpers.
 
 use crate::lint::support::test_assertions;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -69,13 +69,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if (configured || canonical.is_some_and(|(name, _)| matches!(name, "test" | "testWidgets")))
             && let Some(description) = call.args().positional().next()
             && let Some(falcon_analyze::ConstantValue::String(value)) =
-                falcon_analyze::evaluate_constant_with_local_values(
-                    description,
-                    state.constant_owner.as_ref(),
-                    &state.visible_local_constants(),
-                    &state.model,
-                    &state.signatures,
-                )
+                falcon_analyze::evaluate_constant(description, falcon_analyze::ConstantContext { owner: state.constant_owner.as_ref(), locals: Some(&state.visible_local_constants()), ..falcon_analyze::ConstantContext::new(&state.model, &state.signatures) })
         {
             let function = call
                 .syntax()

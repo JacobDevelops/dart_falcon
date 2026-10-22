@@ -30,7 +30,7 @@ use falcon_analyze::{
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
+use falcon_analyze::{SemanticState, resolved_super_param_type};
 use crate::lint::support::annotations::has_override;
 
 const MESSAGE: &str = "`bool` parameters should be named parameters.";

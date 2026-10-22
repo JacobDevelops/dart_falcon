@@ -19,7 +19,7 @@ use falcon_syntax::cst::Program;
 use falcon_syntax::cst::{BinaryOp, Expr};
 
 use crate::lint::expressions::is_parenthesized;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct NoLiteralBoolComparisons;

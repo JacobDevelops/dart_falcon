@@ -138,16 +138,65 @@ pub fn constant_operands_all<'a>(
     operands.accepted
 }
 
-/// Evaluates in the owner's declaring library, including loaded external sources;
-/// uses `model` when no source context is indexed.
+/// Immutable options for one constant query. An owner selects its declaring
+/// library before resolving members; `library` supplies the fallback scope.
+/// Captured unknown locals still shadow globals. Stable queries reject values
+/// whose build-dependency provenance is unknown.
+#[derive(Clone, Copy)]
+pub struct ConstantContext<'a, 'model> {
+    pub model: SemanticModel<'model>,
+    pub signatures: &'a SignatureIndex,
+    pub owner: Option<&'a DeclarationIdentity>,
+    pub library: Option<crate::LibraryId>,
+    pub fields: Option<&'a HashMap<&'a str, Expr<'a>>>,
+    pub locals: Option<&'a LocalConstants<'a>>,
+    pub expected: Option<&'a ResolvedType>,
+    /// Declaration cache for ordinary queries; stable queries cannot reuse
+    /// results whose build-dependency provenance was discarded.
+    pub cache: Option<&'a ConstantCache>,
+    pub stable: bool,
+}
+
+impl<'a, 'model> ConstantContext<'a, 'model> {
+    pub fn new(model: &SemanticModel<'model>, signatures: &'a SignatureIndex) -> Self {
+        Self {
+            model: *model,
+            signatures,
+            owner: None,
+            library: None,
+            fields: None,
+            locals: None,
+            expected: None,
+            cache: None,
+            stable: false,
+        }
+    }
+
+    fn evaluator(self, empty_fields: &'a HashMap<&'a str, Expr<'a>>) -> ConstEvaluator<'a, 'model> {
+        let model = self
+            .library
+            .map_or(self.model, |library| self.model.for_library(library));
+        let mut evaluator = ConstEvaluator::new(
+            self.owner,
+            self.fields.unwrap_or(empty_fields),
+            &model,
+            self.signatures,
+        );
+        evaluator.local_constants = self.locals;
+        evaluator.shared_cache = self.cache.filter(|_| !self.stable);
+        evaluator.stable_evaluation = self.stable;
+        evaluator
+    }
+}
+
+/// Evaluates an expression, including its optional declared type context.
 pub fn evaluate_constant(
     expression: Expr<'_>,
-    owner: Option<&DeclarationIdentity>,
-    fields: &HashMap<&str, Expr<'_>>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
+    context: ConstantContext<'_, '_>,
 ) -> Option<ConstantValue> {
-    ConstEvaluator::new(owner, fields, model, signatures).evaluate(expression)
+    context
+        .evaluator(&HashMap::new())
+        .evaluate_with_context(expression, context.expected)
 }
 
 /// Reuses declaration values across constant queries for one analysis file.
@@ -203,31 +252,18 @@ struct CachedConstant {
     failed: bool,
 }
 
-/// Evaluates a constant while sharing declaration results across file queries.
-pub fn evaluate_constant_cached(
-    expression: Expr<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    cache: &ConstantCache,
-) -> Option<ConstantValue> {
-    let fields = HashMap::new();
-    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
-    evaluator.shared_cache = Some(cache);
-    evaluator.evaluate(expression)
-}
-
 /// Evaluates literal and constant patterns without synthesizing expression nodes.
 pub fn evaluate_pattern_constant(
     pattern: Pattern<'_>,
-    owner: Option<&DeclarationIdentity>,
-    fields: &HashMap<&str, Expr<'_>>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
+    context: ConstantContext<'_, '_>,
 ) -> Option<ConstantValue> {
-    let mut evaluator = ConstEvaluator::new(owner, fields, model, signatures);
+    let fields = HashMap::new();
+    let mut evaluator = context.evaluator(&fields);
     match pattern {
         Pattern::Const(pattern) => match pattern.value() {
-            ConstPatternValue::Expr(expression) => evaluator.evaluate(expression),
+            ConstPatternValue::Expr(expression) => {
+                evaluator.evaluate_with_context(expression, context.expected)
+            }
             ConstPatternValue::Name(names) => {
                 let names: Vec<_> = names.map(|name| name.name()).collect();
                 evaluator.resolve_name(&names)
@@ -264,100 +300,17 @@ pub fn evaluate_pattern_constant(
     }
 }
 
-/// Evaluates a default in its declaring library, including anonymous extensions,
-/// under the parameter's type context. A named owner additionally supplies the
-/// member namespace.
-pub fn evaluate_constant_in_library(
-    expression: Expr<'_>,
-    owner: Option<&DeclarationIdentity>,
-    library: Option<crate::LibraryId>,
-    locals: &HashMap<&str, Expr<'_>>,
-    expected: Option<&ResolvedType>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> Option<ConstantValue> {
-    let model = library.map_or(*model, |library| model.for_library(library));
-    ConstEvaluator::new(owner, locals, &model, signatures)
-        .evaluate_with_context(expression, expected)
-}
-
 /// Captured lexical constant values and their static expression types.
 /// Each entry describes one visible, shadowing binding.
 pub type LocalConstants<'a> = HashMap<&'a str, (&'a Option<ConstantValue>, ResolvedType)>;
 
-/// Evaluates with already captured lexical local constants. Unknown local
-/// values remain shadowing bindings rather than falling through to globals.
-pub fn evaluate_constant_with_local_values(
-    expression: Expr<'_>,
-    owner: Option<&DeclarationIdentity>,
-    locals: &LocalConstants<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> Option<ConstantValue> {
-    evaluate_constant_with_local_values_in_context(
-        expression, owner, locals, model, signatures, None,
-    )
-}
-
-/// Evaluates a lexical constant initializer in its declared type context.
-pub fn evaluate_constant_with_local_values_in_context(
-    expression: Expr<'_>,
-    owner: Option<&DeclarationIdentity>,
-    locals: &LocalConstants<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    expected: Option<&ResolvedType>,
-) -> Option<ConstantValue> {
-    let fields = HashMap::new();
-    let mut evaluator = ConstEvaluator::new(owner, &fields, model, signatures);
-    evaluator.local_constants = Some(locals);
-    evaluator.evaluate_with_context(expression, expected)
-}
-
-/// Evaluates only build-independent values, including across constant references.
-/// Conditional import/export paths and captured locals with unknown dependency
-/// provenance remain unknown; local bindings still shadow library declarations.
-pub fn evaluate_stable_constant_with_local_values(
-    expression: Expr<'_>,
-    owner: Option<&DeclarationIdentity>,
-    locals: &LocalConstants<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> Option<ConstantValue> {
-    evaluate_stable_constant_with_local_values_in_context(
-        expression, owner, locals, model, signatures, None,
-    )
-}
-
-/// Evaluates build-independent lexical constants in their declared type context.
-pub fn evaluate_stable_constant_with_local_values_in_context(
-    expression: Expr<'_>,
-    owner: Option<&DeclarationIdentity>,
-    locals: &LocalConstants<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    expected: Option<&ResolvedType>,
-) -> Option<ConstantValue> {
-    let fields = HashMap::new();
-    let mut evaluator = ConstEvaluator::new(owner, &fields, model, signatures);
-    evaluator.local_constants = Some(locals);
-    evaluator.stable_evaluation = true;
-    evaluator.evaluate_with_context(expression, expected)
-}
-
 /// Evaluates a constant name without manufacturing an expression node.
-pub fn evaluate_constant_name_with_local_values<'syntax>(
+pub fn evaluate_constant_name<'syntax>(
     names: impl Iterator<Item = Identifier<'syntax>>,
-    owner: Option<&DeclarationIdentity>,
-    locals: &LocalConstants<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
+    context: ConstantContext<'_, '_>,
 ) -> Option<ConstantValue> {
     let names: Vec<_> = names.map(|name| name.name()).collect();
-    let fields = HashMap::new();
-    let mut evaluator = ConstEvaluator::new(owner, &fields, model, signatures);
-    evaluator.local_constants = Some(locals);
-    evaluator.resolve_name(&names)
+    context.evaluator(&HashMap::new()).resolve_name(&names)
 }
 
 /// Whether a known constant value provably passes or fails a runtime cast.
@@ -381,40 +334,17 @@ pub struct Construction {
     pub fails: bool,
 }
 
-/// Runs `identity`'s constructor `constructor` as a constant invocation with
-/// `args` evaluated in `model`'s library; unqualified names first resolve
-/// through `locals` (e.g. `const` local variables).
+/// Runs a constant constructor. Arguments use the query's lexical scope;
+/// constructor bodies use their own declaring scope.
 pub fn evaluate_construction(
     identity: &DeclarationIdentity,
     constructor: &str,
     type_args: &[ResolvedType],
     args: ArgList<'_>,
-    locals: &HashMap<&str, Expr<'_>>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> Construction {
-    let mut evaluator = ConstEvaluator::new(None, locals, model, signatures);
-    let value = evaluator.invoke(identity.clone(), constructor, type_args.to_vec(), args);
-    Construction {
-        fails: evaluator.failed,
-        value: value.filter(|_| !evaluator.failed),
-    }
-}
-
-/// Runs a constant constructor with captured lexical constant values.
-/// Unknown locals still shadow globals; constructor bodies use their own scope.
-pub fn evaluate_construction_with_local_values(
-    identity: &DeclarationIdentity,
-    constructor: &str,
-    type_args: &[ResolvedType],
-    args: ArgList<'_>,
-    locals: &LocalConstants<'_>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
+    context: ConstantContext<'_, '_>,
 ) -> Construction {
     let fields = HashMap::new();
-    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
-    evaluator.local_constants = Some(locals);
+    let mut evaluator = context.evaluator(&fields);
     let value = evaluator.invoke(identity.clone(), constructor, type_args.to_vec(), args);
     Construction {
         fails: evaluator.failed,
@@ -441,17 +371,6 @@ pub fn invocation_type_args<'e>(
     } else {
         type_args
     }
-}
-
-/// Evaluates in `owner`'s static namespace and declaring library, as for a
-/// parameter default or initializer. Callers must rule out local shadowing.
-pub fn evaluate_constant_in_member_context(
-    expression: Expr<'_>,
-    owner: &DeclarationIdentity,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> Option<ConstantValue> {
-    evaluate_constant(expression, Some(owner), &HashMap::new(), model, signatures)
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -2932,10 +2851,10 @@ const futureOrCast = null as FutureOr<int?>;
         let owner = model.resolve_value(name)?;
         evaluate_constant(
             initializer,
-            Some(&owner),
-            &HashMap::new(),
-            model,
-            signatures,
+            ConstantContext {
+                owner: Some(&owner),
+                ..ConstantContext::new(model, signatures)
+            },
         )
     }
 
@@ -3086,6 +3005,48 @@ const futureOrCast = null as FutureOr<int?>;
             second.shared_cache = Some(&cache);
             assert!(second.resolve_name_shared(&["value"]).is_some());
         });
+    }
+
+    #[test]
+    fn stable_queries_and_shared_cache_are_order_independent() {
+        with_source(
+            "const dependency = int.fromEnvironment('FALCON_TEST', defaultValue: 7); \
+             const value = dependency;",
+            |program, model, signatures| {
+                let expression = program
+                    .declarations()
+                    .find_map(|declaration| {
+                        let TopLevelDecl::Variable(variable) = declaration else {
+                            return None;
+                        };
+                        variable
+                            .declarators()
+                            .find(|declarator| declarator.name().name() == "value")
+                            .and_then(|declarator| declarator.initializer())
+                    })
+                    .unwrap();
+                for modes in [[false, true, false, true], [true, false, true, false]] {
+                    let cache = ConstantCache::default();
+                    for stable in modes {
+                        assert_eq!(
+                            evaluate_constant(
+                                expression,
+                                ConstantContext {
+                                    cache: Some(&cache),
+                                    stable,
+                                    ..ConstantContext::new(model, signatures)
+                                },
+                            ),
+                            if stable {
+                                None
+                            } else {
+                                Some(ConstantValue::Number(Number::Int(7)))
+                            },
+                        );
+                    }
+                }
+            },
+        );
     }
 
     #[test]
@@ -3490,11 +3451,17 @@ const futureOrCast = null as FutureOr<int?>;
                 .initializer()
                 .unwrap();
             assert_eq!(
-                evaluate_constant(expression, None, &HashMap::new(), model, signatures),
+                evaluate_constant(expression, ConstantContext::new(model, signatures)),
                 Some(ConstantValue::Number(Number::Int(2)))
             );
             assert_eq!(
-                evaluate_constant_in_member_context(expression, &owner, model, signatures),
+                evaluate_constant(
+                    expression,
+                    ConstantContext {
+                        owner: Some(&owner),
+                        ..ConstantContext::new(model, signatures)
+                    }
+                ),
                 Some(ConstantValue::Number(Number::Int(1)))
             );
         });
@@ -3607,12 +3574,26 @@ const futureOrCast = null as FutureOr<int?>;
             .collect();
         for name in ["a", "c"] {
             assert_eq!(
-                evaluate_constant(fields[name], Some(&owner), &fields, &model, &signatures),
+                evaluate_constant(
+                    fields[name],
+                    ConstantContext {
+                        owner: Some(&owner),
+                        fields: Some(&fields),
+                        ..ConstantContext::new(&model, &signatures)
+                    }
+                ),
                 Some(ConstantValue::Number(Number::Int(2)))
             );
         }
         assert!(matches!(
-            evaluate_constant(fields["boxed"], Some(&owner), &fields, &model, &signatures),
+            evaluate_constant(
+                fields["boxed"],
+                ConstantContext {
+                    owner: Some(&owner),
+                    fields: Some(&fields),
+                    ..ConstantContext::new(&model, &signatures)
+                }
+            ),
             Some(ConstantValue::Instance(..))
         ));
     }
@@ -3768,26 +3749,37 @@ const futureOrCast = null as FutureOr<int?>;
             let local = Some(ConstantValue::String("local".to_owned()));
             let locals = HashMap::from([("a", (&local, model.core_type("String", false)))]);
             assert_eq!(
-                evaluate_constant_with_local_values(
+                evaluate_constant(
                     expression("capturedList"),
-                    None,
-                    &locals,
-                    model,
-                    signatures,
+                    ConstantContext {
+                        locals: Some(&locals),
+                        ..ConstantContext::new(model, signatures)
+                    },
                 ),
                 Some(ConstantValue::List(
                     vec![constant_type(&model.core_type("String", false)).unwrap()],
                     vec![ConstantValue::String("local".to_owned())],
                 )),
             );
+            assert_eq!(
+                evaluate_constant(
+                    expression("capturedList"),
+                    ConstantContext {
+                        locals: Some(&locals),
+                        stable: true,
+                        ..ConstantContext::new(model, signatures)
+                    },
+                ),
+                None,
+            );
             let unknown = None;
             assert_eq!(
-                evaluate_constant_with_local_values(
+                evaluate_constant(
                     expression("capturedList"),
-                    None,
-                    &HashMap::from([("a", (&unknown, ResolvedType::Unknown))]),
-                    model,
-                    signatures,
+                    ConstantContext {
+                        locals: Some(&HashMap::from([("a", (&unknown, ResolvedType::Unknown))])),
+                        ..ConstantContext::new(model, signatures)
+                    },
                 ),
                 None,
             );
@@ -3868,8 +3860,12 @@ const futureOrCast = null as FutureOr<int?>;
                 })
                 .unwrap();
             assert_eq!(
-                evaluate_constant_with_local_values_in_context(
-                    expression, None, &locals, model, signatures, None,
+                evaluate_constant(
+                    expression,
+                    ConstantContext {
+                        locals: Some(&locals),
+                        ..ConstantContext::new(model, signatures)
+                    }
                 ),
                 num_values
             );
@@ -3903,18 +3899,17 @@ const futureOrCast = null as FutureOr<int?>;
             let identity = model.resolve_value("declaredUnit").unwrap();
             let expected = signatures.value_type(&identity).unwrap();
             assert_eq!(
-                evaluate_constant_with_local_values_in_context(
+                evaluate_constant(
                     variable
                         .declarators()
                         .next()
                         .unwrap()
                         .initializer()
                         .unwrap(),
-                    None,
-                    &HashMap::new(),
-                    model,
-                    signatures,
-                    Some(expected),
+                    ConstantContext {
+                        expected: Some(expected),
+                        ..ConstantContext::new(model, signatures)
+                    },
                 ),
                 evaluator.resolve_name(&["declaredUnit"]),
             );

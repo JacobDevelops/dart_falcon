@@ -28,10 +28,8 @@ crate::declare_rules! {
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::environment::packages::{
-    canonical_package_path, enclosing_pubspec, package_identity,
-};
 use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
+use falcon_analyze::{canonical_package_path, enclosing_pubspec, package_identity};
 use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::cst::Program;
 use marked_yaml::{Node as MarkedNode, parse_yaml};

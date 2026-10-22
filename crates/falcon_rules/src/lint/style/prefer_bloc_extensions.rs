@@ -1,5 +1,5 @@
 //! Prefer context.read/watch over package:flutter_bloc's provider lookups.
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation, expression_segments};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

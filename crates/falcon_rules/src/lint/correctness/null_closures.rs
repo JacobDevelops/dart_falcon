@@ -13,7 +13,7 @@
 //! positional indexes count named arguments too, matching analyzer source order.
 //! Static callback APIs match the receiver's class name, even outside the SDK.
 
-use falcon_analyze::resolve::TypeKind;
+use falcon_analyze::TypeKind;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
     resolve_new_constructor,
@@ -22,7 +22,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct NullClosures;

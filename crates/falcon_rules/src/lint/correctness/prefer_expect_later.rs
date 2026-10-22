@@ -1,7 +1,7 @@
 //! Requires expectLater when a canonical expect call receives an unawaited Future.
 
 use crate::lint::support::test_assertions;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

@@ -13,15 +13,15 @@
 //! too. A constant on the right is preferred: when the right operand is an
 //! integer constant the left operand is not considered.
 
-use falcon_analyze::constant_value::Number;
+use falcon_analyze::Number;
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, ResolvedType, Rule, RulePreparation, Truth,
-    evaluate_constant_with_local_values, parse_int,
+    ConstantContext, evaluate_constant, parse_int,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 
 #[derive(Default)]
@@ -179,13 +179,7 @@ fn unsigned_int_value<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Op
             {
                 return None;
             }
-            match evaluate_constant_with_local_values(
-                expression,
-                None,
-                &constants,
-                &state.model,
-                &state.signatures,
-            )? {
+            match evaluate_constant(expression, ConstantContext { locals: Some(&constants), ..ConstantContext::new(&state.model, &state.signatures) })? {
                 ConstantValue::Number(Number::Int(value)) => Some(value),
                 _ => None,
             }

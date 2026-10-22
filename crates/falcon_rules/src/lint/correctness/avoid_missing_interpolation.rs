@@ -16,7 +16,7 @@
 //! in each segment, rather than an entire multiline literal.
 
 use crate::lint::string_lit::{interpolated_literals, is_ident_body, is_simple_identifier};
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;

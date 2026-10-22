@@ -5,7 +5,7 @@
 //! exempt, as are unrelated types (covered by unrelated-type-equality-checks),
 //! null comparisons, and custom collection classes that may override equality.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

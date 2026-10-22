@@ -1,4 +1,4 @@
-use falcon_analyze::{DeclarationIdentity, semantic_scope::SemanticState};
+use falcon_analyze::{DeclarationIdentity, SemanticState};
 use falcon_syntax::cst::*;
 
 /// Mirrors the SDK's canonical identifier comparison. Accessors canonicalize

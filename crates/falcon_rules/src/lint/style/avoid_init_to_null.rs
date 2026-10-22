@@ -14,7 +14,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 #[derive(Default)]
 pub struct AvoidInitToNull;

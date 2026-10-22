@@ -1,8 +1,8 @@
-use falcon_analyze::resolve::TypeKind;
+use falcon_analyze::TypeKind;
 use falcon_analyze::{DeclarationIdentity, ResolvedType, SignatureIndex, Truth, TypeIndex};
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 
 pub(crate) enum TypeOperationKind {

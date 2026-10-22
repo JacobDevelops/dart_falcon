@@ -12,13 +12,13 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, ConstantCache, ConstantValue, DeclarationIdentity, ResolvedType, Truth,
-    evaluate_constant_cached, expression_segments, resolve_call_constructor,
+    AnalyzeContext, ConstantCache, ConstantContext, ConstantValue, DeclarationIdentity,
+    ResolvedType, Truth, evaluate_constant, expression_segments, resolve_call_constructor,
 };
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub(crate) struct Semantics {
@@ -108,7 +108,7 @@ fn collect<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Semantics {
     let Some(state) = SemanticState::new(program, ctx) else {
         return Semantics::default();
     };
-    falcon_analyze::semantic_scope::visit_program(&mut collector, program, state);
+    falcon_analyze::visit_program(&mut collector, program, state);
     collector.semantics
 }
 
@@ -338,7 +338,13 @@ pub(crate) fn constant_bool<'a>(
     if names.found {
         return None;
     }
-    match evaluate_constant_cached(expression, &state.model, &state.signatures, cache) {
+    match evaluate_constant(
+        expression,
+        ConstantContext {
+            cache: Some(cache),
+            ..ConstantContext::new(&state.model, &state.signatures)
+        },
+    ) {
         Some(ConstantValue::Bool(value)) => Some(value),
         _ => None,
     }

@@ -32,7 +32,7 @@ use falcon_syntax::token::TokenKind;
 use falcon_analyze::ConstContexts;
 use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
 use crate::lint::tokens::significant_tokens_in;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferConstDeclarations;

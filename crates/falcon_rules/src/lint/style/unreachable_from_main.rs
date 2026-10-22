@@ -57,8 +57,8 @@ use falcon_syntax::cst::*;
 
 use crate::lint::declarations::operator_token_span;
 use crate::lint::string_lit::is_ident_body;
-use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::locally_bound_identifiers;
+use falcon_analyze::{SemanticRuleVisitor, SemanticState, visit_program};
 
 /// Members every class inherits from `Object`; declaring one is an override.
 const OBJECT_MEMBERS: &[&str] = &["==", "hashCode", "toString", "noSuchMethod", "runtimeType"];

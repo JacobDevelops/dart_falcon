@@ -40,7 +40,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 const MESSAGE: &str = "Unnecessary statement.";
 

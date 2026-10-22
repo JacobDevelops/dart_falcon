@@ -36,8 +36,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 #[cfg(test)]
-use falcon_analyze::semantic_scope::visit_program;
-use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::visit_program;
+use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 /// Members that exist on every object, even one typed `Object?`.
 const ALLOWED_MEMBERS: [&str; 4] = ["hashCode", "noSuchMethod", "runtimeType", "toString"];

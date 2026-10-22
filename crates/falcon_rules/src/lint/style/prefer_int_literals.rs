@@ -30,7 +30,7 @@ use falcon_syntax::cst::visit::{
 use falcon_syntax::cst::*;
 use std::collections::HashMap;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 
 #[derive(Default)]

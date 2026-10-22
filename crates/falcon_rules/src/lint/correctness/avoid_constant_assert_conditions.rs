@@ -2,7 +2,7 @@
 //! Remove an always-passing assertion or fix an always-failing condition.
 
 use crate::lint::support::constants::constant_value;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ConstantValue, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

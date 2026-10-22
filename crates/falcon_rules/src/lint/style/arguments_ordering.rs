@@ -2,7 +2,7 @@
 //! Unknown signatures are skipped. `order: ascending` or `order: descending`
 //! explicitly selects alphabetical ordering; `alphabetize: true` selects ascending.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };

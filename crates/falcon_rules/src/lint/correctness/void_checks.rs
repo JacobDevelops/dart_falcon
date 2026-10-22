@@ -34,8 +34,8 @@ use falcon_syntax::cst::*;
 use crate::lint::expressions::is_parenthesized;
 use falcon_analyze::{BodyOwner, FunctionBodies};
 #[cfg(test)]
-use falcon_analyze::semantic_scope::visit_program;
-use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::visit_program;
+use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct VoidChecks;
@@ -655,7 +655,7 @@ void use() {
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
                 let root = config?.flutter_root.as_ref()?;
-                falcon_analyze::environment::DartSdk::load(&root.join("bin/cache/dart-sdk"))
+                falcon_analyze::DartSdk::load(&root.join("bin/cache/dart-sdk"))
             });
         let external = ExternalLibraries::load(
             &environment,

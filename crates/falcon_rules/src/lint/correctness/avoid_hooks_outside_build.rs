@@ -5,7 +5,7 @@
 //! build or custom-hook permission. Confirmed non-hook widget builds are left
 //! to avoid-misused-hooks; unresolved calls, unresolved build ancestry, and shadowed names are ignored.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

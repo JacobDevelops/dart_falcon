@@ -1,9 +1,9 @@
 //! Stable constants without runtime allocations or implicit extension receivers.
 
 use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
-use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values;
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 use falcon_analyze::{AnalyzeContext, ConstantValue};
+use falcon_analyze::{ConstantContext, evaluate_constant};
 use falcon_syntax::cst::*;
 pub(crate) fn constant_value(
     expression: Expr<'_>,
@@ -60,12 +60,14 @@ pub(crate) fn constant_value(
     ) {
         return None;
     }
-    evaluate_stable_constant_with_local_values(
+    evaluate_constant(
         expression,
-        state.constant_owner.as_ref(),
-        &state.visible_local_constants(),
-        &state.model,
-        &state.signatures,
+        ConstantContext {
+            owner: state.constant_owner.as_ref(),
+            locals: Some(&state.visible_local_constants()),
+            stable: true,
+            ..ConstantContext::new(&state.model, &state.signatures)
+        },
     )
 }
 

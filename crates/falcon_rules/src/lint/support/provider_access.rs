@@ -1,7 +1,7 @@
 //! Resolved Provider access and widget build contexts.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 pub(crate) enum Check {

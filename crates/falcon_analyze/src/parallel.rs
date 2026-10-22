@@ -33,22 +33,15 @@ fn analyze_file(
 ) -> (Vec<Diagnostic>, Option<ProjectFile>) {
     let span = info_span!("analyze_file", file = %path.display());
     let _enter = span.enter();
-    if let Some(diagnostic) = source_size_diagnostic(path, source.len() as u64) {
-        return (vec![diagnostic], None);
-    }
     let package_version = workspace.package_language_version(path);
-    let parsed_result = match try_parse_for_package(source, package_version) {
+    let Parsed {
+        parsed,
+        parse_errors,
+        ..
+    } = match parse_one(path, source, package_version) {
         Ok(parsed) => parsed,
-        Err(error) => return (vec![crate::rules_thread_diagnostic(path, &error)], None),
+        Err(diagnostic) => return (vec![*diagnostic], None),
     };
-    let falcon_dart_parser::ParseResult {
-        errors: parse_errors,
-        tree,
-    } = parsed_result;
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
     let ctx = AnalyzeContext::new(path, config, &parsed)
         .with_package_environment(workspace.environment, package_version);
     let mut diagnostics = syntax_error_diagnostics(path, &parse_errors);
@@ -104,15 +97,21 @@ struct Parsed<'src> {
     parse_errors: Vec<ParseError>,
 }
 
+/// Reject oversized inputs once, before source ownership or parser work, for
+/// both execution modes and both analysis paths.
 fn parse_one<'src>(
     path: &'src Path,
-    source: Box<str>,
-    workspace: Workspace<'_>,
+    source: impl AsRef<str> + Into<Box<str>>,
+    package_version: Option<LanguageVersion>,
 ) -> Result<Parsed<'src>, Box<Diagnostic>> {
+    if let Some(diagnostic) = source_size_diagnostic(path, source.as_ref().len() as u64) {
+        return Err(Box::new(diagnostic));
+    }
+    let source = source.into();
     let falcon_dart_parser::ParseResult {
         errors: parse_errors,
         tree,
-    } = try_parse_for_package(&source, workspace.package_language_version(path))
+    } = try_parse_for_package(&source, package_version)
         .map_err(|error| Box::new(crate::rules_thread_diagnostic(path, &error)))?;
     Ok(Parsed {
         path,
@@ -189,15 +188,19 @@ fn analyze_indexed(
     let mut companion_diagnostics = Vec::new();
     let companions: Vec<Parsed<'_>> = companion_sources
         .iter_mut()
-        .filter_map(
-            |(path, source)| match parse_one(path, std::mem::take(source), workspace) {
+        .filter_map(|(path, source)| {
+            match parse_one(
+                path,
+                std::mem::take(source),
+                workspace.package_language_version(path),
+            ) {
                 Ok(parsed) => Some(parsed),
                 Err(diagnostic) => {
                     companion_diagnostics.push(*diagnostic);
                     None
                 }
-            },
-        )
+            }
+        })
         .collect();
     let semantic_parsed: Vec<&Parsed<'_>> = parsed.iter().chain(&companions).collect();
     let project_files: Vec<(PathBuf, Program<'_>)> = semantic_parsed
@@ -297,68 +300,6 @@ fn analyze_indexed(
     )
 }
 
-/// Analyze multiple Dart files in parallel using Rayon work-stealing.
-pub fn analyze_parallel(
-    registry: &RuleRegistry,
-    files: &[(PathBuf, String)],
-    config: &FalconConfig,
-) -> Vec<Diagnostic> {
-    analyze_parallel_collecting(registry, files, config, false).0
-}
-
-/// Analyze multiple Dart files sequentially (deterministic, useful for debugging).
-pub fn analyze_sequential(
-    registry: &RuleRegistry,
-    files: &[(PathBuf, String)],
-    config: &FalconConfig,
-) -> Vec<Diagnostic> {
-    files
-        .iter()
-        .flat_map(|(path, source)| {
-            analyze_file(registry, path, source, config, false, Workspace::default()).0
-        })
-        .collect()
-}
-
-/// Analyze in parallel, additionally retaining each parsed [`ProjectFile`] when
-/// `collect_programs` is set so the caller can run the cross-file pass over them.
-/// With `collect_programs = false` this behaves exactly like [`analyze_parallel`]
-/// (programs are dropped after per-file analysis).
-pub fn analyze_parallel_collecting(
-    registry: &RuleRegistry,
-    files: &[(PathBuf, String)],
-    config: &FalconConfig,
-    collect_programs: bool,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    let (diagnostics, files, _) = analyze_parallel_collecting_resolving(
-        registry,
-        files,
-        config,
-        collect_programs,
-        false,
-        Workspace::default(),
-    );
-    (diagnostics, files)
-}
-
-/// Sequential counterpart of [`analyze_parallel_collecting`].
-pub fn analyze_sequential_collecting(
-    registry: &RuleRegistry,
-    files: &[(PathBuf, String)],
-    config: &FalconConfig,
-    collect_programs: bool,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    let (diagnostics, files, _) = analyze_sequential_collecting_resolving(
-        registry,
-        files,
-        config,
-        collect_programs,
-        false,
-        Workspace::default(),
-    );
-    (diagnostics, files)
-}
-
 /// What a resolving run knows about the analyzed project beyond its files.
 #[derive(Clone, Copy, Default)]
 pub struct Workspace<'a> {
@@ -377,9 +318,9 @@ impl Workspace<'_> {
     }
 }
 
-/// Like [`analyze_parallel_collecting`], but optionally builds shared semantic
-/// indexes before the per-file pass. Without resolution, uses the per-file fast path.
-/// Returns the built indexes for reuse by the cross-file pass when resolution is enabled.
+/// Analyze files in parallel, optionally retaining parsed programs for cross-file
+/// analysis and building shared semantic indexes before per-file rules run.
+/// Without resolution, each file is parsed and analyzed in one step.
 pub fn analyze_parallel_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -432,39 +373,33 @@ fn analyze_parallel_inner(
         );
     }
     let mut diagnostics = Vec::new();
-    let parsed: Vec<Result<Parsed<'_>, Box<Diagnostic>>> = if files
-        .iter()
-        .all(|(_, source)| source.len() as u64 <= u64::from(u32::MAX))
-    {
-        // Preserve the indexed parallel collection and its exact allocation for
-        // the normal case; no intermediate list of accepted files is needed.
-        files
-            .par_iter()
-            .map(|(path, source)| parse_one(path, source.as_str().into(), workspace))
-            .collect()
-    } else {
-        files
-            .iter()
-            .filter_map(|(path, source)| {
-                if let Some(diagnostic) = source_size_diagnostic(path, source.len() as u64) {
-                    diagnostics.push(diagnostic);
-                    None
-                } else {
-                    Some(parse_one(path, source.as_str().into(), workspace))
-                }
-            })
-            .collect()
-    };
+    let parsed: Vec<Result<Parsed<'_>, Box<Diagnostic>>> = files
+        .par_iter()
+        .map(|(path, source)| {
+            parse_one(
+                path,
+                source.as_str(),
+                workspace.package_language_version(path),
+            )
+        })
+        .collect();
+    // Preserve size errors before worker failures without a supported-input allocation.
+    let mut parse_diagnostics = Vec::new();
     let parsed: Vec<_> = parsed
         .into_iter()
         .filter_map(|result| match result {
             Ok(parsed) => Some(parsed),
             Err(diagnostic) => {
-                diagnostics.push(*diagnostic);
+                if diagnostic.rule == SYNTAX_ERROR_DIAGNOSTIC_ID {
+                    diagnostics.push(*diagnostic);
+                } else {
+                    parse_diagnostics.push(*diagnostic);
+                }
                 None
             }
         })
         .collect();
+    diagnostics.extend(parse_diagnostics);
     let (file_diagnostics, indexes) = analyze_indexed(registry, &parsed, config, true, workspace);
     if diagnostics.is_empty() {
         diagnostics = file_diagnostics;
@@ -528,16 +463,15 @@ fn analyze_sequential_inner(
     let parsed: Vec<Parsed<'_>> = files
         .iter()
         .filter_map(|(path, source)| {
-            if let Some(diagnostic) = source_size_diagnostic(path, source.len() as u64) {
-                diagnostics.push(diagnostic);
-                None
-            } else {
-                match parse_one(path, source.as_str().into(), workspace) {
-                    Ok(parsed) => Some(parsed),
-                    Err(diagnostic) => {
-                        diagnostics.push(*diagnostic);
-                        None
-                    }
+            match parse_one(
+                path,
+                source.as_str(),
+                workspace.package_language_version(path),
+            ) {
+                Ok(parsed) => Some(parsed),
+                Err(diagnostic) => {
+                    diagnostics.push(*diagnostic);
+                    None
                 }
             }
         })

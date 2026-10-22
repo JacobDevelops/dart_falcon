@@ -5,7 +5,7 @@
 //! lazy iterables, unknown types and custom collection APIs are not assumed pure.
 //! A forEach callback must be a closure, not an expression evaluated for effects.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

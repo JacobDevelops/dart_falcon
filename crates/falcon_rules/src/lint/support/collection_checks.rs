@@ -2,7 +2,7 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberResult, Resolved
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 pub(crate) fn lacks_collection_member(
     ctx: &AnalyzeContext<'_>,

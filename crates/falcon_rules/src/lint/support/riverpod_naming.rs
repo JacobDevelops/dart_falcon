@@ -1,6 +1,6 @@
 use crate::lint::riverpod::is_type;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -17,7 +17,7 @@ pub(crate) fn prepare<'a>(
     ctx: &'a AnalyzeContext<'a>,
     naming: Naming,
 ) -> RulePreparation<'a> {
-    if falcon_analyze::resolve::is_generated_dart_file(ctx.file_path()) {
+    if falcon_analyze::is_generated_dart_file(ctx.file_path()) {
         return RulePreparation::Diagnostics(Vec::new());
     }
     RulePreparation::Semantic(Box::new(Collector {

@@ -21,7 +21,7 @@
 //! final configure = (bool verbose) {}; // Prefer `({required bool verbose})`.
 //! ```
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
     StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,

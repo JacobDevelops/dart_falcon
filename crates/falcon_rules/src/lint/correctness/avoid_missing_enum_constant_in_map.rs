@@ -7,8 +7,8 @@
 use crate::lint::support::constants::constant_value;
 use std::collections::HashSet;
 
-use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values_in_context;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{ConstantContext, evaluate_constant};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
 };
@@ -55,14 +55,7 @@ fn constant(
     } else {
         expression
     };
-    evaluate_stable_constant_with_local_values_in_context(
-        expression,
-        state.constant_owner.as_ref(),
-        &state.visible_local_constants(),
-        &state.model,
-        &state.signatures,
-        expected,
-    )
+    evaluate_constant(expression, ConstantContext { owner: state.constant_owner.as_ref(), locals: Some(&state.visible_local_constants()), expected, stable: true, ..ConstantContext::new(&state.model, &state.signatures) })
 }
 
 fn cover_key(

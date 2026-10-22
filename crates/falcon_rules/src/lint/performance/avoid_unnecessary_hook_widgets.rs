@@ -11,7 +11,7 @@
 //! in other libraries are not visible and must be checked before conversion.
 //! Indirect hooks through overloaded operators or setters are not tracked.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
     SemanticModel, Truth,

@@ -6,7 +6,7 @@
 //! result, because replacing it changes List<T> to T. Future.any is excluded when
 //! its result is discarded, to preserve its error listener.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, expression_segments};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

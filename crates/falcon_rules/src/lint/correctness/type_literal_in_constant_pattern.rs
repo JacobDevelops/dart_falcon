@@ -7,7 +7,7 @@
 //! Qualified constants report the complete constant expression, including their
 //! import or class prefix but excluding an enclosing null-check pattern's `?`.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
 };

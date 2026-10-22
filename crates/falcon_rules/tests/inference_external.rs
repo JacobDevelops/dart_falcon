@@ -271,7 +271,7 @@ void shadowed() {
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;
-        falcon_analyze::environment::DartSdk::load(&root.join("bin/cache/dart-sdk"))
+        falcon_analyze::DartSdk::load(&root.join("bin/cache/dart-sdk"))
     });
     let external = ExternalLibraries::load(
         &environment,

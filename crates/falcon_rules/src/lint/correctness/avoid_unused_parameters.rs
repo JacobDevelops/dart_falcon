@@ -10,7 +10,7 @@ mod dcl {
     use falcon_diagnostics::Diagnostic;
     use falcon_syntax::cst::*;
 
-    use falcon_analyze::resolve::lexical_usage::{used_constructor_parameters, used_parameters};
+    use falcon_analyze::{used_constructor_parameters, used_parameters};
 
     #[derive(Default)]
     pub struct AvoidUnusedParameters;

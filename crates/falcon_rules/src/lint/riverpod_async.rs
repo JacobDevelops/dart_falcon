@@ -1,7 +1,7 @@
 //! Riverpod ownership classification and the shared mounted/async-gap analysis.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 

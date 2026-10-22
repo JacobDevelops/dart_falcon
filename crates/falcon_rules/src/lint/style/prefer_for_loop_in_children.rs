@@ -8,7 +8,7 @@
 //! bodies, null-aware calls, and custom collection APIs are left unchanged. The
 //! suggestion retains eager evaluation and element order; no automatic fix is made.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

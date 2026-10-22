@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 use clap::{Args, ValueEnum};
-use falcon_analyze::environment::{DartSdk, PackageConfig, SdkLocator};
 use falcon_analyze::package_identities;
 use falcon_analyze::{
     AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
 };
+use falcon_analyze::{DartSdk, PackageConfig, SdkLocator};
 use falcon_dart_parser::lex_tree;
 use falcon_diagnostics::{
     Diagnostic, LineIndex, RULES_THREAD_ERROR_DIAGNOSTIC_ID, SYNTAX_ERROR_DIAGNOSTIC_ID, Severity,

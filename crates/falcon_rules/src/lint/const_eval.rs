@@ -1,16 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::constant_value::{class_has_primitive_equality, constant_operands_all};
 use falcon_analyze::{
-    ConstantValue, DeclarationIdentity, MemberKind, NameIdentity, QualifiedName, ResolvedType,
-    SemanticModel, SignatureIndex, evaluate_constant, evaluate_constant_with_local_values,
-    evaluate_construction_with_local_values, expression_segments, invocation_type_args,
-    resolve_call_constructor,
+    ConstantContext, ConstantValue, DeclarationIdentity, MemberKind, NameIdentity, QualifiedName,
+    ResolvedType, SemanticModel, SignatureIndex, evaluate_constant, evaluate_construction,
+    expression_segments, invocation_type_args, resolve_call_constructor,
 };
+use falcon_analyze::{class_has_primitive_equality, constant_operands_all};
 use falcon_syntax::cst::visit::{Visitor, walk_arg_list, walk_expr};
 use falcon_syntax::cst::*;
 
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 pub(crate) fn arguments_potentially_constant<'a>(
     args: ArgList<'a>,
@@ -122,10 +121,11 @@ impl<'tree> Visitor<'tree> for PotentiallyConstant<'_, '_, 'tree> {
             && !(self.initializer && has_non_const_collection(node))
             && evaluate_constant(
                 node,
-                Some(self.owner),
-                self.fields,
-                self.model,
-                self.signatures,
+                ConstantContext {
+                    owner: Some(self.owner),
+                    fields: Some(self.fields),
+                    ..ConstantContext::new(self.model, self.signatures)
+                },
             )
             .is_some()
         {
@@ -145,10 +145,11 @@ impl<'tree> Visitor<'tree> for PotentiallyConstant<'_, '_, 'tree> {
                 self.valid = self.allowed.contains(identifier.name())
                     || evaluate_constant(
                         node,
-                        Some(self.owner),
-                        self.fields,
-                        self.model,
-                        self.signatures,
+                        ConstantContext {
+                            owner: Some(self.owner),
+                            fields: Some(self.fields),
+                            ..ConstantContext::new(self.model, self.signatures)
+                        },
                     )
                     .is_some();
             }
@@ -409,7 +410,7 @@ impl ConstantExpressions<'_, '_> {
                             .state
                             .model
                             .resolve_type_in(cast.dart_type(), &self.state.type_parameters);
-                        falcon_analyze::constant_value::constant_cast_validity(
+                        falcon_analyze::constant_cast_validity(
                             &value,
                             &target,
                             &self.state.model,
@@ -518,12 +519,13 @@ impl ConstantExpressions<'_, '_> {
         if !allowed {
             return None;
         }
-        evaluate_constant_with_local_values(
+        evaluate_constant(
             expression,
-            self.state.constant_owner.as_ref(),
-            &self.state.visible_local_constants(),
-            &self.state.model,
-            &self.state.signatures,
+            ConstantContext {
+                owner: self.state.constant_owner.as_ref(),
+                locals: Some(&self.state.visible_local_constants()),
+                ..ConstantContext::new(&self.state.model, &self.state.signatures)
+            },
         )
     }
 
@@ -645,14 +647,15 @@ impl ConstantExpressions<'_, '_> {
             .into_iter()
             .map(|ty| state.model.resolve_type_in(ty, &state.type_parameters))
             .collect();
-        !evaluate_construction_with_local_values(
+        !evaluate_construction(
             identity,
             constructor,
             &type_args,
             args,
-            &state.visible_local_constants(),
-            &state.model,
-            &state.signatures,
+            ConstantContext {
+                locals: Some(&state.visible_local_constants()),
+                ..ConstantContext::new(&state.model, &state.signatures)
+            },
         )
         .fails
     }

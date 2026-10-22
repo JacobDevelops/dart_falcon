@@ -1,7 +1,7 @@
 //! Flags instance methods writing resolved static fields, including compound
 //! assignments and increments. Static methods, top-level functions, declarations,
 //! instance fields, setters, and shadowed names are excluded.
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

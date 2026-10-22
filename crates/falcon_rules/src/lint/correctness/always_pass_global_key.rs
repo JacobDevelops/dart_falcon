@@ -9,7 +9,7 @@
 //! helpers may attach it to a widget. Shadowed locals and currentState/currentContext
 //! receiver reads do not count as passing the key.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel, Truth,
 };

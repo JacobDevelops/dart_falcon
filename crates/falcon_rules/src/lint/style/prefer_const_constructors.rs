@@ -33,7 +33,7 @@ use falcon_syntax::cst::*;
 use falcon_analyze::ConstContexts;
 use crate::lint::const_eval::{constant_invocation, deferred_prefixes};
 use falcon_analyze::invocation_type_args;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferConstConstructors;

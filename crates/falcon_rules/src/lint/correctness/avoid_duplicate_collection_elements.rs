@@ -5,7 +5,7 @@
 //! comparison region, since they can change values or contribute unknown items.
 //! Map keys are covered separately by `avoid-duplicate-map-keys`.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

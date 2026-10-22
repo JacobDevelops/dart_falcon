@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
+use falcon_analyze::TypeKind;
 use falcon_analyze::{DeclarationIdentity, QualifiedName, ResolvedType};
 use falcon_syntax::cst::*;
 

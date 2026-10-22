@@ -7,7 +7,7 @@
 //! Only resolved SDK `Iterable.where` calls are checked. Length comparisons
 //! require the same simple receiver or explicit `this` field on both sides.
 
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

@@ -1,7 +1,7 @@
 use crate::lint::support::annotations::has_override;
 use crate::lint::support::constants::constant_value;
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ConstantValue, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 use std::collections::HashMap;

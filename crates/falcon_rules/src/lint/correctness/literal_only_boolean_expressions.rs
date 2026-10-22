@@ -19,7 +19,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
-use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 const MESSAGE: &str = "The Boolean expression has a constant value.";
 

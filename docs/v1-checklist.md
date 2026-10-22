@@ -37,7 +37,6 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 
 Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports. Any time after batch 15.
 
-- [ ] **Narrow analyze entry points.** 11 `evaluate_*` variants, 6 `parallel` entry points (4 test-only), triplicated oversize filtering, every module `pub` plus ~80 re-exports.
 - [ ] **Analysis cleanups.** Typed receiver slot instead of `"this"`; `dyn` lookup closures; Fx hashing for substitution maps; per-alias cache without a mutex; stable keys in `group_instances`; bounded external caches; suppressions reuse `LineIndex`.
 
 ### Stage 6: editor and CI workflows

@@ -7,7 +7,7 @@
 //! that use a WidgetRef parameter.
 
 use crate::lint::riverpod::is_exact_type;
-use falcon_analyze::resolve::lexical_usage::used_parameters;
+use falcon_analyze::used_parameters;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
     StructuralRuleVisitor, StructuralTraversal,

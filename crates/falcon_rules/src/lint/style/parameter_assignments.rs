@@ -33,7 +33,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use falcon_analyze::resolve::lexical_usage::{LocalWrite, LocalWriteKind};
+use falcon_analyze::{LocalWrite, LocalWriteKind};
 
 
 #[derive(Default)]

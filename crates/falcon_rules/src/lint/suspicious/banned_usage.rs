@@ -4,7 +4,7 @@
 //! Unnamed constructors consistently use `Class.new`, including aliases and prefixes.
 //! Dynamic and unresolved targets are skipped.
 
-use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;

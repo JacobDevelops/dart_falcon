@@ -21,7 +21,7 @@ use falcon_syntax::cst::*;
 use crate::lint::doc_comments::{
     DocLookup, DocResolver, DocScopes, keyword_references, references,
 };
-use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::SemanticState;
 
 
 #[derive(Default)]
